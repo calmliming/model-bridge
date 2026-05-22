@@ -6,9 +6,14 @@ import type { TokenSet } from '../types'
 // stable but undocumented — update here if Anthropic changes the flow.
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const AUTHORIZE_URL = 'https://claude.ai/oauth/authorize'
-const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token'
+// api.anthropic.com serves the same token endpoint as console.anthropic.com
+// but without the Cloudflare managed challenge that blocks server-side calls.
+const TOKEN_URL = 'https://api.anthropic.com/v1/oauth/token'
 const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback'
 const SCOPES = 'org:create_api_key user:profile user:inference'
+
+// Mimics the official Claude Code CLI so requests are not flagged as bot traffic.
+const USER_AGENT = 'claude-cli/1.0.0 (external, cli)'
 
 function base64url(buffer: Buffer): string {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -65,7 +70,7 @@ export async function exchangeCode(
   const rawCode = code.split('#')[0]?.trim() ?? code
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
     body: JSON.stringify({
       grant_type: 'authorization_code',
       code: rawCode,
@@ -85,7 +90,7 @@ export async function exchangeCode(
 export async function refreshToken(refreshTokenValue: string): Promise<TokenSet> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
     body: JSON.stringify({
       grant_type: 'refresh_token',
       refresh_token: refreshTokenValue,

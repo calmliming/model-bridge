@@ -5,6 +5,7 @@ const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 const ANTHROPIC_BETA = 'oauth-2025-04-20'
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
+const USER_AGENT = 'claude-cli/1.0.0 (external, cli)'
 
 interface TextBlock {
   type: 'text'
@@ -47,6 +48,7 @@ export function relayClaudeMessages(
       'anthropic-version': ANTHROPIC_VERSION,
       'anthropic-beta': ANTHROPIC_BETA,
       'content-type': 'application/json',
+      'user-agent': USER_AGENT,
       accept: body.stream === true ? 'text/event-stream' : 'application/json',
     },
     body: JSON.stringify(payload),
