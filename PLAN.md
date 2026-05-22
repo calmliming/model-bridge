@@ -63,8 +63,8 @@ request → Claude backend) is explicitly **out of scope for v1**.
 - **Backend:** Node.js 20+ / TypeScript, **Fastify** (`@fastify/static`, `@fastify/jwt`),
   **undici** for upstream streaming calls.
 - **Storage:** **SQLite** via **Drizzle ORM** + `better-sqlite3` (`drizzle-kit` migrations).
-- **Frontend:** **Vue 3** + Vite + TypeScript + TailwindCSS + Pinia + Vue Router; charts via
-  ECharts. Built to static assets, served by Fastify.
+- **Frontend:** **Vue 3** + Vite + TypeScript + **Naive UI** (component library) + Pinia +
+  Vue Router; charts via ECharts. Built to static assets, served by Fastify.
 - **Crypto/auth:** Node `crypto` AES-256-GCM for token-at-rest; `bcrypt` for admin password;
   JWT for admin sessions. Background token refresh via `node-cron`. Config via `dotenv` + `zod`.
 
@@ -91,7 +91,7 @@ model-bridge/
 │   ├── usage/{recorder.ts,stats.ts,pricing.ts}
 │   ├── routes/{relay.ts,admin.ts}
 │   └── jobs/tokenRefresh.ts
-├── web/  (Vue 3 SPA: views Login/Accounts/ApiKeys/Stats/Settings)
+├── web/  (Vue 3 + Naive UI SPA: Login/Overview/Accounts/ApiKeys/Stats/Settings)
 └── data/ (SQLite file — gitignored, Docker volume)
 ```
 

@@ -62,8 +62,8 @@ Responses/Chat、Gemini generateContent）。跨格式转换（例如 OpenAI 格
 - **后端：** Node.js 20+ / TypeScript，**Fastify**（`@fastify/static`、`@fastify/jwt`），
   上游流式调用使用 **undici**。
 - **存储：** **SQLite**，经 **Drizzle ORM** + `better-sqlite3`（`drizzle-kit` 负责迁移）。
-- **前端：** **Vue 3** + Vite + TypeScript + TailwindCSS + Pinia + Vue Router；图表使用
-  ECharts。构建为静态资源，由 Fastify 托管。
+- **前端：** **Vue 3** + Vite + TypeScript + **Naive UI**（组件库）+ Pinia + Vue Router；
+  图表使用 ECharts。构建为静态资源，由 Fastify 托管。
 - **加密/鉴权：** Node `crypto` 的 AES-256-GCM 用于令牌静态加密；`bcrypt` 用于管理员密码；
   JWT 用于管理员会话。令牌刷新后台任务用 `node-cron`。配置经 `dotenv` + `zod` 校验。
 
@@ -90,7 +90,7 @@ model-bridge/
 │   ├── usage/{recorder.ts,stats.ts,pricing.ts}
 │   ├── routes/{relay.ts,admin.ts}
 │   └── jobs/tokenRefresh.ts
-├── web/  (Vue 3 SPA：页面 Login/Accounts/ApiKeys/Stats/Settings)
+├── web/  (Vue 3 + Naive UI SPA：Login/Overview/Accounts/ApiKeys/Stats/Settings)
 └── data/ (SQLite 文件——已 gitignore，作为 Docker 卷挂载)
 ```
 
