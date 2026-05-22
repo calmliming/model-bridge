@@ -10,9 +10,9 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ## Status
 
-🚧 **Phase A — platform skeleton.** Admin dashboard, authentication and
-API-key management are working. The upstream provider relay (Claude / OpenAI /
-Gemini OAuth) lands in Phases B–D.
+🚧 **Phase B — Claude relay.** Admin dashboard, API keys, Claude account
+onboarding (OAuth), multi-account rotation, the `/api/claude/v1/messages`
+relay and usage logging are working. OpenAI and Gemini land in Phases C–D.
 
 ## Tech stack
 
@@ -46,6 +46,17 @@ npm start
 ```
 
 The backend then serves the built dashboard directly at <http://localhost:3000>.
+
+## Connecting Claude Code
+
+Create an API key on the **API Keys** page, add a Claude account on the
+**Upstream Accounts** page (via the OAuth flow), then point Claude Code at the relay:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:3000/api/claude
+export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx   # an API key from the dashboard
+claude
+```
 
 ## Configuration
 

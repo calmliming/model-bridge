@@ -1,10 +1,13 @@
+import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { count } from 'drizzle-orm'
+import { count, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/index'
-import { accounts, apiKeys, usageLogs } from '../db/schema'
+import { accounts, apiKeys, oauthSessions, usageLogs } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, listApiKeys, setApiKeyEnabled } from '../keys/manager'
+import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
+import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 
 const loginSchema = z.object({
@@ -27,6 +30,17 @@ const createKeySchema = z.object({
 })
 
 const updateKeySchema = z.object({ enabled: z.boolean() })
+
+const oauthStartSchema = z.object({ provider: z.enum(['claude', 'openai', 'gemini']) })
+
+const oauthFinishSchema = z.object({
+  provider: z.enum(['claude', 'openai', 'gemini']),
+  name: z.string().min(1),
+  state: z.string().min(1),
+  code: z.string().min(1),
+})
+
+const accountUpdateSchema = z.object({ status: z.enum(['active', 'disabled']) })
 
 /** Registers all `/api/admin/*` endpoints used by the dashboard. */
 export function registerAdminRoutes(app: FastifyInstance): void {
@@ -93,10 +107,77 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
-  // ── Upstream accounts (read-only stub — managed from Phase B) ─
+  // ── Upstream accounts ────────────────────────────────────
   app.get('/api/admin/accounts', { preHandler: requireAdmin }, async () => {
-    return { accounts: db.select().from(accounts).all() }
+    return { accounts: listAccounts() }
   })
+
+  // Step 1 of onboarding: generate a provider authorization URL (PKCE).
+  app.post('/api/admin/accounts/oauth/start', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = oauthStartSchema.safeParse(request.body)
+    if (!body.success || !isSupportedProvider(body.data.provider)) {
+      return reply.code(400).send({ error: 'unsupported provider' })
+    }
+    const oauth = getProvider(body.data.provider)!
+    const { verifier, challenge } = oauth.generatePkce()
+    const state = randomBytes(16).toString('hex')
+    db.insert(oauthSessions)
+      .values({ state, provider: body.data.provider, codeVerifier: verifier })
+      .run()
+    return { state, authorizeUrl: oauth.buildAuthorizeUrl(state, challenge) }
+  })
+
+  // Step 2: exchange the pasted authorization code for tokens, create the account.
+  app.post('/api/admin/accounts/oauth/finish', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = oauthFinishSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    const { provider, name, state, code } = body.data
+    const session = db
+      .select()
+      .from(oauthSessions)
+      .where(eq(oauthSessions.state, state))
+      .get()
+    if (!session || session.provider !== provider) {
+      return reply.code(400).send({ error: 'OAuth session expired — please restart authorization' })
+    }
+    const oauth = getProvider(provider)
+    if (!oauth) {
+      return reply.code(400).send({ error: 'unsupported provider' })
+    }
+    let tokens
+    try {
+      tokens = await oauth.exchangeCode(code, session.codeVerifier, state)
+    } catch (err) {
+      return reply.code(400).send({ error: `authorization failed: ${(err as Error).message}` })
+    }
+    db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
+    const created = createAccount({ provider, name, tokens })
+    return reply.code(201).send({ id: created.id })
+  })
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = accountUpdateSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      setAccountStatus(request.params.id, body.data.status)
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id',
+    { preHandler: requireAdmin },
+    async (request) => {
+      deleteAccount(request.params.id)
+      return { ok: true }
+    },
+  )
 
   // ── Dashboard overview ───────────────────────────────────
   app.get('/api/admin/overview', { preHandler: requireAdmin }, async () => {

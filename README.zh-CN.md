@@ -10,8 +10,9 @@
 
 ## 当前状态
 
-🚧 **阶段 A —— 平台骨架。** 管理后台、登录鉴权、API Key 管理已可用。上游服务商
-中转（Claude / OpenAI / Gemini 的 OAuth 接入）将在阶段 B–D 实现。
+🚧 **阶段 B —— Claude 中转。** 管理后台、API Key、Claude 账户接入（OAuth）、
+多账户轮换、`/api/claude/v1/messages` 中转与用量记录均已可用。OpenAI 与
+Gemini 将在阶段 C–D 实现。
 
 ## 技术栈
 
@@ -45,6 +46,17 @@ npm start
 ```
 
 之后后端会直接在 <http://localhost:3000> 托管构建好的管理后台。
+
+## 接入 Claude Code
+
+在 **API Keys** 页面创建一个密钥，在 **上游账户** 页面通过 OAuth 添加一个
+Claude 账户，然后让 Claude Code 指向本中转服务：
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:3000/api/claude
+export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx   # 后台里的 API Key
+claude
+```
 
 ## 配置
 

@@ -7,6 +7,8 @@ import { config } from './config'
 import { initDb } from './db/init'
 import { ensureAdmin } from './auth/admin'
 import { registerAdminRoutes } from './routes/admin'
+import { registerRelayRoutes } from './routes/relay'
+import { startTokenRefreshJob } from './jobs/tokenRefresh'
 
 async function main(): Promise<void> {
   initDb()
@@ -22,7 +24,7 @@ async function main(): Promise<void> {
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 
   registerAdminRoutes(app)
-  // Relay routes (/api/claude, /api/openai, /api/gemini) are added in Phase B+.
+  registerRelayRoutes(app)
 
   // Serve the built admin dashboard (web/dist) if it has been built.
   const webDist = join(process.cwd(), 'web', 'dist')
@@ -39,6 +41,7 @@ async function main(): Promise<void> {
   }
 
   await app.listen({ port: config.PORT, host: config.HOST })
+  startTokenRefreshJob()
 }
 
 main().catch((err) => {
