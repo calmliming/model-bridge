@@ -166,11 +166,22 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     } catch (err) {
       return reply.code(400).send({ error: `authorization failed: ${(err as Error).message}` })
     }
+    let metadata: Record<string, unknown> | null = null
+    if (oauth.fetchAccountMetadata) {
+      try {
+        metadata = await oauth.fetchAccountMetadata(tokens.accessToken)
+      } catch (err) {
+        return reply
+          .code(400)
+          .send({ error: `account setup failed: ${(err as Error).message}` })
+      }
+    }
     db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
     const created = createAccount({
       provider: session.provider,
       name: session.accountName ?? `${session.provider} account`,
       tokens,
+      metadata,
     })
     return reply.code(201).send({ id: created.id })
   })

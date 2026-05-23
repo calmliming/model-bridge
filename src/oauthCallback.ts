@@ -37,7 +37,9 @@ export function startOauthCallbackServer(): void {
       return
     }
     const url = new URL(req.url, `http://${HOST}:${PORT}`)
-    if (url.pathname !== '/auth/callback') {
+    // OpenAI registered /auth/callback; Google's installed-app flow uses
+    // /oauth2callback. Accept both — both deliver `code` and `state`.
+    if (url.pathname !== '/auth/callback' && url.pathname !== '/oauth2callback') {
       res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found')
       return
     }
@@ -65,10 +67,15 @@ export function startOauthCallbackServer(): void {
     }
     try {
       const tokens = await provider.exchangeCode(code, session.codeVerifier, state)
+      let metadata: Record<string, unknown> | null = null
+      if (provider.fetchAccountMetadata) {
+        metadata = await provider.fetchAccountMetadata(tokens.accessToken)
+      }
       createAccount({
         provider: session.provider,
         name: session.accountName ?? `${session.provider} account`,
         tokens,
+        metadata,
       })
       db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
       writeResult(200, true, '您可以关闭此页面，回到 model-bridge 后台。')

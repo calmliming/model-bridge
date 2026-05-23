@@ -13,6 +13,8 @@ export interface CreateAccountInput {
   provider: string
   name: string
   tokens: TokenSet
+  /** Provider-specific data needed at relay time (e.g. Gemini's project id). */
+  metadata?: Record<string, unknown> | null
 }
 
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
@@ -27,6 +29,7 @@ export function createAccount(input: CreateAccountInput): { id: string } {
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
+      metadata: input.metadata ?? null,
     })
     .run()
   return { id }

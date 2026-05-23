@@ -139,7 +139,7 @@ interface Provider {
 - ✅ Phase A — Skeleton & platform core (`832ab86`)
 - ✅ Phase B — Claude relay end-to-end (`afc2ad4`, +`3443a2c` Cloudflare fix)
 - ✅ Phase C — OpenAI / Codex
-- ⬜ Phase D — Gemini
+- ✅ Phase D — Gemini
 - ⬜ Phase E — Stats & management polish
 - ⬜ Phase F — Deployment & docs
 

@@ -1,3 +1,4 @@
+import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken } from '../accounts/manager'
@@ -6,35 +7,88 @@ import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
 import { relayOpenaiResponses } from '../providers/openai/relay'
 import * as openaiUsage from '../providers/openai/usage'
+import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
+import * as geminiUsage from '../providers/gemini/usage'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
 
+interface ParsedRoute {
+  model: string
+  /** Logical action — `messages` / `responses` / `generateContent` / `streamGenerateContent`. */
+  action: string
+}
+
+interface UpstreamContext {
+  model: string
+  action: string
+  account: { id: string; metadata: unknown }
+}
+
 interface ProviderHandler {
   id: string
-  /** Always treat the upstream response as SSE (some providers force `stream:true`). */
+  /** Always stream the response regardless of the client's stream flag (Codex backend). */
   forceStream: boolean
-  callUpstream(token: string, body: Record<string, unknown>): Promise<Response>
+  parseRoute(request: FastifyRequest, body: Record<string, unknown>): ParsedRoute
+  callUpstream(
+    token: string,
+    body: Record<string, unknown>,
+    ctx: UpstreamContext,
+  ): Promise<Response>
   createStreamParser(): { feed(event: unknown): void; result(): UsageData }
   parseJsonUsage(body: unknown): UsageData
+  /** Optional payload transform applied to each SSE event / buffered JSON body. */
+  transformEventData?: (data: unknown) => unknown
 }
 
 const PROVIDERS: Record<string, ProviderHandler> = {
   claude: {
     id: 'claude',
     forceStream: false,
-    callUpstream: relayClaudeMessages,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayClaudeMessages(token, body),
     createStreamParser: claudeUsage.createStreamParser,
     parseJsonUsage: claudeUsage.parseJsonUsage,
   },
   openai: {
     id: 'openai',
-    forceStream: true, // the Codex backend itself rejects non-streaming.
-    callUpstream: relayOpenaiResponses,
+    forceStream: true, // Codex backend itself rejects non-streaming.
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayOpenaiResponses(token, body),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
+  },
+  gemini: {
+    id: 'gemini',
+    forceStream: false,
+    parseRoute: (req, _body) => {
+      // URL form: /api/gemini/v1beta/models/{model}:{action}
+      const wild = (req.params as { '*'?: string } | undefined)?.['*'] ?? ''
+      const colon = wild.lastIndexOf(':')
+      return colon >= 0
+        ? { model: wild.slice(0, colon), action: wild.slice(colon + 1) }
+        : { model: wild, action: 'generateContent' }
+    },
+    callUpstream: (token, body, ctx) => {
+      const project = (ctx.account.metadata as { project?: string } | null)?.project
+      if (!project) {
+        throw new Error(
+          'Gemini account has no project metadata — please re-add the account so the relay can call loadCodeAssist',
+        )
+      }
+      return relayGemini(token, body, { model: ctx.model, action: ctx.action, project })
+    },
+    createStreamParser: geminiUsage.createStreamParser,
+    parseJsonUsage: geminiUsage.parseJsonUsage,
+    transformEventData: unwrapResponseEnvelope,
   },
 }
 
@@ -48,13 +102,16 @@ interface RelayMeta {
 
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
-  // Claude Code → Anthropic Messages API
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, (request, reply) =>
     executeRelay(request, reply, PROVIDERS.claude!),
   )
-  // Codex CLI → Codex backend Responses API
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, (request, reply) =>
     executeRelay(request, reply, PROVIDERS.openai!),
+  )
+  // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
+  // captures `{model}:{action}` in a single segment.
+  app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, (request, reply) =>
+    executeRelay(request, reply, PROVIDERS.gemini!),
   )
 }
 
@@ -71,8 +128,9 @@ async function executeRelay(
   }
 
   const body = (request.body ?? {}) as Record<string, unknown>
-  const wantStream = provider.forceStream || body.stream === true
-  const model = typeof body.model === 'string' ? body.model : ''
+  const parsed = provider.parseRoute(request, body)
+  const wantStream =
+    provider.forceStream || body.stream === true || parsed.action === 'streamGenerateContent'
   const tried: string[] = []
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -99,7 +157,11 @@ async function executeRelay(
     const startedAt = Date.now()
     let upstream: Response
     try {
-      upstream = await provider.callUpstream(token, body)
+      upstream = await provider.callUpstream(token, body, {
+        model: parsed.model,
+        action: parsed.action,
+        account: { id: account.id, metadata: account.metadata },
+      })
     } catch (err) {
       request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
       penalizeAccount(account.id, 'error')
@@ -126,7 +188,7 @@ async function executeRelay(
       apiKeyId: apiKey.id,
       accountId: account.id,
       provider: provider.id,
-      model,
+      model: parsed.model,
       startedAt,
     }
     if (wantStream) {
@@ -140,7 +202,11 @@ async function executeRelay(
   await reply.code(503).send({ error: `all ${provider.id} accounts failed` })
 }
 
-/** Streams an SSE response straight through while teeing token usage. */
+/**
+ * Streams an SSE response back. Without `transformEventData` it's a raw
+ * byte passthrough with a side-channel parse for usage. With a transform
+ * (Gemini) it parses each event, rewrites the payload, and re-emits.
+ */
 async function sendStreaming(
   reply: FastifyReply,
   upstream: Response,
@@ -156,6 +222,7 @@ async function sendStreaming(
   })
 
   const parser = provider.createStreamParser()
+  const transform = provider.transformEventData
   let buffer = ''
 
   if (upstream.body) {
@@ -165,12 +232,22 @@ async function sendStreaming(
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
-        raw.write(Buffer.from(value))
         buffer += decoder.decode(value, { stream: true })
-        let sep: number
-        while ((sep = buffer.indexOf('\n\n')) !== -1) {
-          feedSseBlock(buffer.slice(0, sep), parser)
-          buffer = buffer.slice(sep + 2)
+        if (transform) {
+          // Event-buffered: only emit complete events, rewriting payloads.
+          let sep: number
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser)
+            buffer = buffer.slice(sep + 2)
+          }
+        } else {
+          // Raw passthrough; side-channel parse for usage.
+          raw.write(Buffer.from(value))
+          let sep: number
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            feedSseBlock(buffer.slice(0, sep), parser)
+            buffer = buffer.slice(sep + 2)
+          }
         }
       }
     } catch {
@@ -190,19 +267,24 @@ async function sendStreaming(
   })
 }
 
-/** Buffers a non-streaming response, forwards it, and records usage. */
+/** Buffers a non-streaming response, optionally rewriting the JSON body, and records usage. */
 async function sendBuffered(
   reply: FastifyReply,
   upstream: Response,
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
-  const text = await upstream.text()
+  let text = await upstream.text()
   let usage: UsageData = emptyUsage()
   try {
-    usage = provider.parseJsonUsage(JSON.parse(text))
+    let json = JSON.parse(text) as unknown
+    if (provider.transformEventData) {
+      json = provider.transformEventData(json)
+      text = JSON.stringify(json)
+    }
+    usage = provider.parseJsonUsage(json)
   } catch {
-    // Error responses are not valid usage JSON — leave usage empty.
+    // Error responses aren't valid JSON — leave usage empty.
   }
   recordUsage({
     apiKeyId: meta.apiKeyId,
@@ -219,7 +301,7 @@ async function sendBuffered(
     .send(text)
 }
 
-/** Parses the `data:` JSON from one SSE event block and feeds the usage parser. */
+/** Passthrough mode: parses each event for usage without rewriting. */
 function feedSseBlock(block: string, parser: { feed(event: unknown): void }): void {
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -232,4 +314,35 @@ function feedSseBlock(block: string, parser: { feed(event: unknown): void }): vo
       // Ignore non-JSON data lines.
     }
   }
+}
+
+/** Transform mode: parses each event, applies transform, re-emits SSE. */
+function rewriteAndEmit(
+  raw: ServerResponse,
+  block: string,
+  transform: (data: unknown) => unknown,
+  parser: { feed(event: unknown): void },
+): void {
+  const out: string[] = []
+  for (const line of block.split('\n')) {
+    const trimmed = line.trimStart()
+    if (!trimmed.startsWith('data:')) {
+      out.push(line) // event:, id:, retry:, … unchanged
+      continue
+    }
+    const payload = trimmed.slice(5).trim()
+    if (!payload || payload === '[DONE]') {
+      out.push(line)
+      continue
+    }
+    try {
+      const parsed = JSON.parse(payload)
+      const transformed = transform(parsed)
+      parser.feed(transformed)
+      out.push(`data: ${JSON.stringify(transformed)}`)
+    } catch {
+      out.push(line) // keep the original if we can't parse
+    }
+  }
+  raw.write(out.join('\n') + '\n\n')
 }

@@ -35,6 +35,17 @@ function openaiTier(model: string): keyof typeof OPENAI_TIERS {
   return model.toLowerCase().includes('mini') ? 'mini' : 'gpt'
 }
 
+// Gemini list prices (approximate, per 1M tokens). Relay traffic via Code
+// Assist uses the user's Google AI / Workspace quota — no per-token charge.
+const GEMINI_TIERS: Record<'pro' | 'flash', TierPrice> = {
+  pro: { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.31 },
+  flash: { input: 0.075, output: 0.3, cacheWrite: 0, cacheRead: 0.019 },
+}
+
+function geminiTier(model: string): keyof typeof GEMINI_TIERS {
+  return model.toLowerCase().includes('flash') ? 'flash' : 'pro'
+}
+
 /** Estimates the USD cost of one request from its token usage. */
 export function estimateCost(provider: string, model: string, usage: UsageData): number {
   let p: TierPrice
@@ -42,8 +53,10 @@ export function estimateCost(provider: string, model: string, usage: UsageData):
     p = CLAUDE_TIERS[claudeTier(model)]
   } else if (provider === 'openai') {
     p = OPENAI_TIERS[openaiTier(model)]
+  } else if (provider === 'gemini') {
+    p = GEMINI_TIERS[geminiTier(model)]
   } else {
-    return 0 // Gemini pricing lands in Phase D
+    return 0
   }
   const cost =
     (usage.inputTokens * p.input +

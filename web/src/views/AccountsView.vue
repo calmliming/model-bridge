@@ -16,7 +16,7 @@ interface Account {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai'
+type Provider = 'claude' | 'openai' | 'gemini'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -34,10 +34,15 @@ const oauthMode = ref<'paste' | 'callback'>('paste')
 const pasteCode = ref('')
 const busy = ref(false)
 
-const providerLabel: Record<Provider, string> = { claude: 'Claude', openai: 'OpenAI' }
+const providerLabel: Record<Provider, string> = {
+  claude: 'Claude',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+}
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
   openai: 'auth.openai.com',
+  gemini: 'accounts.google.com',
 }
 
 const statusMeta: Record<string, { label: string; type: 'success' | 'warning' | 'error' | 'default' }> = {
@@ -227,6 +232,7 @@ onMounted(load)
             <n-radio-group v-model:value="form.provider">
               <n-radio-button value="claude">Claude</n-radio-button>
               <n-radio-button value="openai">OpenAI</n-radio-button>
+              <n-radio-button value="gemini">Gemini</n-radio-button>
             </n-radio-group>
           </n-form-item>
           <n-form-item label="账户名称">

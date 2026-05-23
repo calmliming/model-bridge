@@ -140,7 +140,7 @@ interface Provider {
 - ✅ 阶段 A —— 平台骨架（`832ab86`）
 - ✅ 阶段 B —— Claude 全链路中转（`afc2ad4`，+`3443a2c` Cloudflare 修复）
 - ✅ 阶段 C —— OpenAI / Codex 接入
-- ⬜ 阶段 D —— Gemini 接入
+- ✅ 阶段 D —— Gemini 接入
 - ⬜ 阶段 E —— 统计与管理完善
 - ⬜ 阶段 F —— 部署与文档
 
