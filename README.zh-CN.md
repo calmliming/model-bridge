@@ -12,8 +12,8 @@
 
 ✅ **v1 已交付。** 管理后台、带成本配额的 API Key、Claude（粘贴 code）/
 OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）账户接入、多账户
-轮换、三个中转入口（`/api/claude/v1/messages`、`/api/openai/v1/responses`、
-`/api/gemini/v1beta/models/*`），按日 / 服务商 / 模型 / Key 的用量统计，
+轮换、三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
+`/v1/responses`、`/v1beta/models/*`），按日 / 服务商 / 模型 / Key 的用量统计，
 以及一键 Docker 部署。
 
 ## 技术栈
@@ -88,39 +88,44 @@ npm start
 ### Claude Code
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:3000/api/claude
+export ANTHROPIC_BASE_URL=http://localhost:3000
 export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
 ### Codex CLI
 
-较新的 Codex CLI 通过 `~/.codex/config.toml` 或环境变量读取 OpenAI base URL：
+较新的 Codex CLI 使用 `model_providers` 配置自定义 Responses API：
 
 ```toml
 # ~/.codex/config.toml
-[backend]
-base_url = "http://localhost:3000/api/openai"
-api_key  = "mb-xxxxxxxx"
+[profiles.model-bridge]
+model_provider = "model-bridge"
+model = "gpt-5.4"
+
+[model_providers.model-bridge]
+name = "model-bridge"
+base_url = "http://localhost:3000/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
 ```
 
 ```bash
-# 或使用环境变量（具体 env 名取决于你的 Codex CLI 版本）
-export OPENAI_BASE_URL=http://localhost:3000/api/openai
-export OPENAI_API_KEY=mb-xxxxxxxx
-codex
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge
 ```
 
-中转目前只暴露 OpenAI 的 **Responses** API（`/v1/responses`），因为 Codex CLI
-用的就是它。给 Cherry Studio / 通用 OpenAI 客户端用的 Chat-Completions 入口
+中转目前暴露 OpenAI 的 **Responses** API（`/v1/responses`），因为 Codex CLI
+用的就是它。给 Cherry Studio / 通用 OpenAI 客户端用的 Chat Completions 入口
 **尚未实现**。
 
 ### Cherry Studio
 
 为每个服务商各加一个自定义 provider：
 
-- **Anthropic** —— base URL `http://localhost:3000/api/claude`，API key `mb-xxxx`
-- **Gemini** —— base URL `http://localhost:3000/api/gemini`，API key `mb-xxxx`
+- **Anthropic** —— base URL `http://localhost:3000`，API key `mb-xxxx`
+- **Gemini** —— base URL `http://localhost:3000`，API key `mb-xxxx`
 - **OpenAI** —— 暂未实现（见上面 Codex CLI 一节）
 
 ### Gemini CLI

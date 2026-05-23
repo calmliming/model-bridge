@@ -13,10 +13,11 @@ function link(to: string, label: string) {
 }
 
 const menuOptions: MenuOption[] = [
-  { label: link('/overview', '概览'), key: 'overview' },
+  { label: link('/overview', '仪表盘'), key: 'overview' },
   { label: link('/accounts', '上游账户'), key: 'accounts' },
   { label: link('/keys', 'API Keys'), key: 'keys' },
   { label: link('/stats', '用量统计'), key: 'stats' },
+  { label: link('/docs', '使用文档'), key: 'docs' },
   { label: link('/settings', '设置'), key: 'settings' },
 ]
 
@@ -25,10 +26,11 @@ const pageTitle = computed(() => {
   const current = menuOptions.find((item) => item.key === activeKey.value)
   return typeof current?.key === 'string'
     ? {
-        overview: '运行概览',
+        overview: '仪表盘',
         accounts: '上游账户',
         keys: 'API Keys',
         stats: '用量统计',
+        docs: '使用文档',
         settings: '系统设置',
       }[current.key] ?? '控制台'
     : '控制台'
@@ -69,10 +71,7 @@ function logout() {
     </n-layout-sider>
     <n-layout class="main-layout">
       <n-layout-header class="header">
-        <div>
-          <div class="header-title">{{ pageTitle }}</div>
-          <div class="header-subtitle">统一管理上游账户、访问密钥和中转运行状态</div>
-        </div>
+        <div class="header-title">{{ pageTitle }}</div>
         <n-space align="center" :size="12">
           <span class="header-user">{{ auth.username }}</span>
           <n-button secondary size="small" @click="logout">退出登录</n-button>
@@ -218,12 +217,6 @@ function logout() {
   color: #0f172a;
   font-size: 18px;
   font-weight: 800;
-}
-
-.header-subtitle {
-  margin-top: 4px;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 12px;
 }
 
 .header-user {

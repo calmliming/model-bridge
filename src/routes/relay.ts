@@ -14,6 +14,18 @@ import { emptyUsage, type UsageData } from '../providers/types'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
+const RATE_LIMIT_MARKERS = [
+  'rate_limit',
+  'rate limit',
+  'rate-limit',
+  'too many requests',
+  'quota',
+  'exceeded',
+  'insufficient_quota',
+  'resource_exhausted',
+  'usage limit',
+  'billing_hard_limit',
+]
 
 interface ParsedRoute {
   model: string
@@ -100,19 +112,221 @@ interface RelayMeta {
   startedAt: number
 }
 
+interface UpstreamFailure {
+  penalty: 'rate_limited' | 'error' | null
+  retryable: boolean
+  resetAt?: number | null
+}
+
+function textLooksRateLimited(text: string): boolean {
+  const lower = text.toLowerCase()
+  return RATE_LIMIT_MARKERS.some((marker) => lower.includes(marker))
+}
+
+async function readErrorText(response: Response): Promise<string> {
+  try {
+    return (await response.clone().text()).slice(0, 4_000)
+  } catch {
+    return ''
+  }
+}
+
+function parseEpochMs(raw: string | null): number | null {
+  if (!raw) return null
+  const n = Number(raw.trim())
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n > 10_000_000_000 ? Math.trunc(n) : Math.trunc(n * 1000)
+}
+
+function parseResetHeader(raw: string | null): number | null {
+  if (!raw) return null
+  const trimmed = raw.trim()
+  const epoch = parseEpochMs(trimmed)
+  if (epoch) return epoch
+  const parsed = Date.parse(trimmed)
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function parseRetryAfter(raw: string | null): number | null {
+  if (!raw) return null
+  const seconds = Number(raw.trim())
+  if (Number.isFinite(seconds) && seconds >= 0) return Date.now() + seconds * 1000
+  return parseResetHeader(raw)
+}
+
+function headerNumber(headers: Headers, name: string): number | null {
+  const value = headers.get(name)
+  if (!value) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function headerResetAfter(headers: Headers, name: string): number | null {
+  const seconds = headerNumber(headers, name)
+  return seconds == null || seconds < 0 ? null : Date.now() + seconds * 1000
+}
+
+function isAnthropicWindowExceeded(headers: Headers, window: '5h' | '7d'): boolean {
+  const prefix = `anthropic-ratelimit-unified-${window}-`
+  if (headers.get(`${prefix}surpassed-threshold`)?.toLowerCase() === 'true') return true
+  const utilization = headerNumber(headers, `${prefix}utilization`)
+  return utilization != null && utilization >= 1
+}
+
+function pickSooner(values: Array<number | null>): number | null {
+  const valid = values.filter((v): v is number => !!v && v > Date.now())
+  if (!valid.length) return null
+  return Math.min(...valid)
+}
+
+function pickLater(values: Array<number | null>): number | null {
+  const valid = values.filter((v): v is number => !!v && v > Date.now())
+  if (!valid.length) return null
+  return Math.max(...valid)
+}
+
+function parseAnthropicReset(headers: Headers): number | null {
+  const reset5h = parseEpochMs(headers.get('anthropic-ratelimit-unified-5h-reset'))
+  const reset7d = parseEpochMs(headers.get('anthropic-ratelimit-unified-7d-reset'))
+  const fiveHourExceeded = isAnthropicWindowExceeded(headers, '5h')
+  const sevenDayExceeded = isAnthropicWindowExceeded(headers, '7d')
+
+  if (fiveHourExceeded && sevenDayExceeded) return pickLater([reset5h, reset7d])
+  if (fiveHourExceeded) return reset5h
+  if (sevenDayExceeded) return reset7d
+  return pickSooner([
+    reset5h,
+    reset7d,
+    parseEpochMs(headers.get('anthropic-ratelimit-unified-reset')),
+  ])
+}
+
+function parseCodexReset(headers: Headers): number | null {
+  const primaryUsed = headerNumber(headers, 'x-codex-primary-used-percent')
+  const secondaryUsed = headerNumber(headers, 'x-codex-secondary-used-percent')
+  const primaryReset = headerResetAfter(headers, 'x-codex-primary-reset-after-seconds')
+  const secondaryReset = headerResetAfter(headers, 'x-codex-secondary-reset-after-seconds')
+
+  const primaryExceeded = primaryUsed != null && primaryUsed >= 100
+  const secondaryExceeded = secondaryUsed != null && secondaryUsed >= 100
+  if (primaryExceeded && secondaryExceeded) return pickLater([primaryReset, secondaryReset])
+  if (primaryExceeded) return primaryReset
+  if (secondaryExceeded) return secondaryReset
+  return pickLater([primaryReset, secondaryReset])
+}
+
+function parseDurationMs(raw: string): number | null {
+  const match = raw.trim().match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/i)
+  if (!match) return null
+  const value = Number(match[1])
+  const unit = match[2]?.toLowerCase()
+  if (!Number.isFinite(value)) return null
+  if (unit === 'ms') return value
+  if (unit === 's') return value * 1000
+  if (unit === 'm') return value * 60_000
+  if (unit === 'h') return value * 3_600_000
+  return null
+}
+
+function nextLocalMidnightMs(): number {
+  const next = new Date()
+  next.setDate(next.getDate() + 1)
+  next.setHours(0, 0, 0, 0)
+  return next.getTime()
+}
+
+function parseBodyReset(text: string, provider: string): number | null {
+  if (!text) return null
+  try {
+    const body = JSON.parse(text) as {
+      error?: {
+        message?: string
+        resets_at?: number | string
+        resets_in_seconds?: number | string
+        details?: Array<{ metadata?: { quotaResetDelay?: string } }>
+      }
+    }
+    const error = body.error
+    const resetsAt = error?.resets_at
+    if (typeof resetsAt === 'number') return parseEpochMs(String(resetsAt))
+    if (typeof resetsAt === 'string') return parseEpochMs(resetsAt)
+
+    const resetsInSeconds = Number(error?.resets_in_seconds)
+    if (Number.isFinite(resetsInSeconds) && resetsInSeconds > 0) {
+      return Date.now() + resetsInSeconds * 1000
+    }
+
+    for (const detail of error?.details ?? []) {
+      const delay = detail.metadata?.quotaResetDelay
+      if (!delay) continue
+      const duration = parseDurationMs(delay)
+      if (duration != null) return Date.now() + Math.ceil(duration)
+    }
+
+    const message = error?.message?.toLowerCase() ?? ''
+    if (provider === 'gemini' && message.includes('per day')) return nextLocalMidnightMs()
+  } catch {
+    // Fall back to regex parsing below.
+  }
+
+  const retryIn = text.match(/retry in (\d+(?:\.\d+)?)s/i)
+  if (retryIn?.[1]) return Date.now() + Number(retryIn[1]) * 1000
+  return null
+}
+
+function parseRateLimitReset(provider: string, response: Response, text: string): number | null {
+  return (
+    parseCodexReset(response.headers) ??
+    parseAnthropicReset(response.headers) ??
+    parseRetryAfter(response.headers.get('retry-after')) ??
+    parseResetHeader(response.headers.get('x-ratelimit-reset-requests')) ??
+    parseResetHeader(response.headers.get('x-ratelimit-reset-tokens')) ??
+    parseBodyReset(text, provider)
+  )
+}
+
+async function classifyUpstreamFailure(
+  provider: string,
+  response: Response,
+): Promise<UpstreamFailure> {
+  if (response.status === 429) {
+    const text = await readErrorText(response)
+    return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
+  }
+  if (response.status === 401 || response.status >= 500) {
+    return { penalty: 'error', retryable: true }
+  }
+  if (response.status === 400 || response.status === 403) {
+    const text = await readErrorText(response)
+    if (textLooksRateLimited(text)) {
+      return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
+    }
+  }
+  return { penalty: null, retryable: false }
+}
+
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
-  app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, (request, reply) =>
-    executeRelay(request, reply, PROVIDERS.claude!),
-  )
-  app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, (request, reply) =>
-    executeRelay(request, reply, PROVIDERS.openai!),
-  )
+  const claudeHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.claude!)
+  const openaiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.openai!)
+  const geminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.gemini!)
+
+  app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
+  app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
-  app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, (request, reply) =>
-    executeRelay(request, reply, PROVIDERS.gemini!),
-  )
+  app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+
+  // Clean provider-native aliases for custom domains:
+  // - OpenAI/Codex: base_url = https://api.example.com/v1
+  // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com
+  // - Gemini:       base URL = https://api.example.com
+  app.post('/v1/messages', { preHandler: requireApiKey }, claudeHandler)
+  app.post('/v1/responses', { preHandler: requireApiKey }, openaiHandler)
+  app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
 }
 
 /** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
@@ -168,19 +382,18 @@ async function executeRelay(
       continue
     }
 
-    const retryable =
-      upstream.status === 429 || upstream.status === 401 || upstream.status >= 500
+    const failure = await classifyUpstreamFailure(provider.id, upstream)
     const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
-    if (retryable && !lastAttempt) {
-      penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
+    if (failure.retryable && !lastAttempt) {
+      if (failure.penalty) penalizeAccount(account.id, failure.penalty, failure.resetAt)
       await upstream.body?.cancel().catch(() => {})
       continue
     }
 
-    if (retryable) {
-      penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
-    } else {
+    if (failure.penalty) {
+      penalizeAccount(account.id, failure.penalty, failure.resetAt)
+    } else if (upstream.ok) {
       markAccountUsed(account.id)
     }
 

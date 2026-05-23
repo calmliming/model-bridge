@@ -32,7 +32,12 @@ async function main(): Promise<void> {
   if (existsSync(webDist)) {
     await app.register(fastifyStatic, { root: webDist })
     app.setNotFoundHandler((request, reply) => {
-      if (request.url.startsWith('/api') || request.url.startsWith('/health')) {
+      if (
+        request.url.startsWith('/api') ||
+        request.url.startsWith('/v1') ||
+        request.url.startsWith('/v1beta') ||
+        request.url.startsWith('/health')
+      ) {
         return reply.code(404).send({ error: 'not found' })
       }
       return reply.sendFile('index.html') // SPA history fallback

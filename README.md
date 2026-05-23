@@ -12,10 +12,10 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ✅ **v1 shipped.** Admin dashboard, API keys with per-key cost quotas, Claude
 (paste-code OAuth) / OpenAI (browser callback) / Gemini (Google OAuth +
-Code Assist) account onboarding, multi-account rotation, three relay surfaces
-(`/api/claude/v1/messages`, `/api/openai/v1/responses`,
-`/api/gemini/v1beta/models/*`), usage logging with daily / provider / model
-/ key breakdowns, and a one-command Docker deploy.
+Code Assist) account onboarding, multi-account rotation, relay surfaces with
+legacy `/api/*` paths plus clean provider-native aliases (`/v1/messages`,
+`/v1/responses`, `/v1beta/models/*`), usage logging with daily / provider /
+model / key breakdowns, and a one-command Docker deploy.
 
 ## Tech stack
 
@@ -92,28 +92,32 @@ browser callback for OpenAI/Gemini).
 ### Claude Code
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:3000/api/claude
+export ANTHROPIC_BASE_URL=http://localhost:3000
 export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
 ### Codex CLI
 
-Recent Codex CLI reads the OpenAI base URL from `~/.codex/config.toml` or
-environment variables:
+Recent Codex CLI uses `model_providers` for a custom Responses API:
 
 ```toml
 # ~/.codex/config.toml
-[backend]
-base_url = "http://localhost:3000/api/openai"
-api_key  = "mb-xxxxxxxx"
+[profiles.model-bridge]
+model_provider = "model-bridge"
+model = "gpt-5.4"
+
+[model_providers.model-bridge]
+name = "model-bridge"
+base_url = "http://localhost:3000/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
 ```
 
 ```bash
-# or via env (depending on your Codex CLI version)
-export OPENAI_BASE_URL=http://localhost:3000/api/openai
-export OPENAI_API_KEY=mb-xxxxxxxx
-codex
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge
 ```
 
 The relay only exposes the OpenAI **Responses** API (`/v1/responses`) since
@@ -124,8 +128,8 @@ generic OpenAI clients is not implemented.
 
 Add a custom provider per service:
 
-- **Anthropic** — base URL `http://localhost:3000/api/claude`, API key `mb-xxxx`
-- **Gemini** — base URL `http://localhost:3000/api/gemini`, API key `mb-xxxx`
+- **Anthropic** — base URL `http://localhost:3000`, API key `mb-xxxx`
+- **Gemini** — base URL `http://localhost:3000`, API key `mb-xxxx`
 - **OpenAI** — not yet (see the Codex CLI note above)
 
 ### Gemini CLI

@@ -32,6 +32,9 @@ const form = ref({ name: '', ownerLabel: '', allowedProviders: [] as string[] })
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
 const newKey = ref<string | null>(null)
+const showUse = ref(false)
+const useKeyName = ref('')
+const useKeySecret = ref('')
 
 // Edit-limits modal state.
 const showEdit = ref(false)
@@ -184,6 +187,48 @@ function copyAndClose() {
   newKey.value = null
 }
 
+function openUse(row: ApiKey) {
+  useKeyName.value = row.name
+  useKeySecret.value = `${row.keyPrefix}...`
+  showUse.value = true
+}
+
+function openUseNewKey() {
+  if (!newKey.value) return
+  useKeyName.value = '新建 API Key'
+  useKeySecret.value = newKey.value
+  showUse.value = true
+}
+
+const baseOrigin = computed(() => {
+  if (typeof window === 'undefined') return 'http://localhost:3000'
+  return window.location.origin
+})
+
+const snippets = computed(() => {
+  const key = useKeySecret.value || 'mb-xxxxxxxx'
+  return {
+    claude: `export ANTHROPIC_BASE_URL=${baseOrigin.value}
+export ANTHROPIC_AUTH_TOKEN=${key}
+claude`,
+    codex: `[profiles.model-bridge]
+model_provider = "model-bridge"
+model = "gpt-5.4"
+
+[model_providers.model-bridge]
+name = "model-bridge"
+base_url = "${baseOrigin.value}/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=${key}
+codex --profile model-bridge`,
+    gemini: `Base URL: ${baseOrigin.value}
+API Key:  ${key}`,
+  }
+})
+
 function formatQuota(row: ApiKey): string {
   if (row.quotaLimit == null) return `$${row.quotaUsed.toFixed(4)} / 不限`
   return `$${row.quotaUsed.toFixed(4)} / $${row.quotaLimit.toFixed(2)}`
@@ -239,6 +284,11 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
           default: () => [
             h(
               NButton,
+              { size: 'small', quaternary: true, onClick: () => openUse(row) },
+              { default: () => '使用' },
+            ),
+            h(
+              NButton,
               { size: 'small', quaternary: true, onClick: () => openEdit(row) },
               { default: () => '编辑' },
             ),
@@ -259,10 +309,6 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <div>
-        <h2 class="page-title">API Keys</h2>
-        <div class="page-subtitle">签发、停用和限制调用方可访问的上游服务商。</div>
-      </div>
       <n-button type="primary" @click="showCreate = true">新建 Key</n-button>
     </div>
 
@@ -315,9 +361,30 @@ onMounted(load)
       <n-input :value="newKey ?? ''" readonly />
       <template #footer>
         <n-space justify="end">
+          <n-button secondary @click="openUseNewKey">查看接入方式</n-button>
           <n-button type="primary" @click="copyAndClose">复制并关闭</n-button>
         </n-space>
       </template>
+    </n-modal>
+
+    <n-modal v-model:show="showUse" preset="card" :title="`使用 ${useKeyName}`" style="width: 680px">
+      <n-tabs type="line" animated>
+        <n-tab-pane name="claude" tab="Claude Code">
+          <pre><code>{{ snippets.claude }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.claude)">复制</n-button>
+        </n-tab-pane>
+        <n-tab-pane name="codex" tab="Codex CLI">
+          <pre><code>{{ snippets.codex }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.codex)">复制</n-button>
+        </n-tab-pane>
+        <n-tab-pane name="gemini" tab="Gemini / 自定义客户端">
+          <pre><code>{{ snippets.gemini }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.gemini)">复制</n-button>
+        </n-tab-pane>
+      </n-tabs>
+      <n-alert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
+        已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。
+      </n-alert>
     </n-modal>
 
     <!-- edit limits -->
@@ -371,3 +438,21 @@ onMounted(load)
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+pre {
+  margin: 0 0 12px;
+  overflow-x: auto;
+  padding: 16px;
+  border-radius: 14px;
+  background: #0f172a;
+}
+
+pre code {
+  padding: 0;
+  color: #e2e8f0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.65;
+}
+</style>

@@ -61,6 +61,11 @@ export function deleteAccount(id: string): void {
   db.delete(accounts).where(eq(accounts.id, id)).run()
 }
 
+/** Updates provider-specific metadata cached on an account. */
+export function updateAccountMetadata(id: string, metadata: Record<string, unknown>): void {
+  db.update(accounts).set({ metadata }).where(eq(accounts.id, id)).run()
+}
+
 /** Enables or disables an account. */
 export function setAccountStatus(id: string, status: 'active' | 'disabled'): void {
   db.update(accounts)

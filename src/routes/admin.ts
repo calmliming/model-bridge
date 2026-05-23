@@ -1,13 +1,14 @@
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { count, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/index'
-import { accounts, apiKeys, oauthSessions, usageLogs } from '../db/schema'
+import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from '../keys/manager'
-import { statsSummary } from '../usage/stats'
+import { dashboardOverview, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
+import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 
@@ -210,6 +211,26 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/test',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        return await testAccountConnectivity(request.params.id)
+      } catch (err) {
+        if (err instanceof AccountTestError && err.statusCode === 404) {
+          return reply.code(404).send({ success: false, error: err.message })
+        }
+        return {
+          success: false,
+          message: err instanceof Error ? err.message : 'account connectivity test failed',
+          latencyMs: 0,
+          checkedAt: Date.now(),
+        }
+      }
+    },
+  )
+
   app.delete<{ Params: { id: string } }>(
     '/api/admin/accounts/:id',
     { preHandler: requireAdmin },
@@ -221,11 +242,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   // ── Dashboard overview ───────────────────────────────────
   app.get('/api/admin/overview', { preHandler: requireAdmin }, async () => {
-    return {
-      keyCount: db.select({ n: count() }).from(apiKeys).get()?.n ?? 0,
-      accountCount: db.select({ n: count() }).from(accounts).get()?.n ?? 0,
-      requestCount: db.select({ n: count() }).from(usageLogs).get()?.n ?? 0,
-    }
+    return dashboardOverview()
   })
 
   // ── Usage statistics ─────────────────────────────────────

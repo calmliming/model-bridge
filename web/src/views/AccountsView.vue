@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -23,6 +23,7 @@ const dialog = useDialog()
 
 const accounts = ref<Account[]>([])
 const loading = ref(true)
+const testingId = ref<string | null>(null)
 
 // Add-account modal state.
 const showAdd = ref(false)
@@ -50,6 +51,19 @@ const statusMeta: Record<string, { label: string; type: 'success' | 'warning' | 
   rate_limited: { label: '限流冷却', type: 'warning' },
   error: { label: '异常', type: 'error' },
   disabled: { label: '已禁用', type: 'default' },
+}
+
+function isCoolingDown(row: Account) {
+  return !!row.cooldownUntil && row.cooldownUntil > Date.now()
+}
+
+function effectiveStatus(row: Account) {
+  if (isCoolingDown(row)) return row.status === 'error' ? 'error' : 'rate_limited'
+  return row.status
+}
+
+function formatQuotaRefresh(row: Account) {
+  return isCoolingDown(row) ? formatTime(row.cooldownUntil) : '—'
 }
 
 async function load() {
@@ -151,6 +165,24 @@ async function toggle(row: Account) {
   }
 }
 
+async function testConnectivity(row: Account) {
+  testingId.value = row.id
+  try {
+    const { data } = await api.post(`/admin/accounts/${row.id}/test`)
+    if (data.success) {
+      const suffix = data.latencyMs != null ? `（${data.latencyMs}ms）` : ''
+      message.success(`${row.name} 连通正常${suffix}`)
+      await load()
+      return
+    }
+    message.error(data.message || '连通性测试失败')
+  } catch (e) {
+    message.error(errMsg(e, '连通性测试失败'))
+  } finally {
+    testingId.value = null
+  }
+}
+
 function confirmDelete(row: Account) {
   dialog.warning({
     title: '删除账户',
@@ -180,11 +212,13 @@ const columns = computed<DataTableColumns<Account>>(() => [
     title: '状态',
     key: 'status',
     render: (row) => {
-      const meta = statusMeta[row.status] ?? { label: row.status, type: 'default' as const }
+      const status = effectiveStatus(row)
+      const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
       return h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
     },
   },
   { title: '令牌到期', key: 'tokenExpiresAt', render: (row) => formatTime(row.tokenExpiresAt) },
+  { title: '配额更新', key: 'cooldownUntil', render: formatQuotaRefresh },
   { title: '最后使用', key: 'lastUsedAt', render: (row) => formatTime(row.lastUsedAt) },
   {
     title: '启用',
@@ -201,9 +235,27 @@ const columns = computed<DataTableColumns<Account>>(() => [
     key: 'actions',
     render: (row) =>
       h(
-        NButton,
-        { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
-        { default: () => '删除' },
+        NSpace,
+        { size: 4 },
+        {
+          default: () => [
+            h(
+              NButton,
+              {
+                size: 'small',
+                quaternary: true,
+                loading: testingId.value === row.id,
+                onClick: () => testConnectivity(row),
+              },
+              { default: () => '测试' },
+            ),
+            h(
+              NButton,
+              { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
+              { default: () => '删除' },
+            ),
+          ],
+        },
       ),
   },
 ])
@@ -214,10 +266,6 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <div>
-        <h2 class="page-title">上游账户</h2>
-        <div class="page-subtitle">管理参与中转的模型服务账户、状态和授权信息。</div>
-      </div>
       <n-button type="primary" @click="openAdd">添加账户</n-button>
     </div>
 

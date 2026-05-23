@@ -40,9 +40,15 @@ export function markAccountUsed(id: string): void {
 }
 
 /** Puts an account into cooldown after a 429 (rate_limited) or other failure (error). */
-export function penalizeAccount(id: string, kind: 'rate_limited' | 'error'): void {
+export function penalizeAccount(
+  id: string,
+  kind: 'rate_limited' | 'error',
+  cooldownUntil?: number | null,
+): void {
+  const fallbackUntil = Date.now() + COOLDOWN_MS[kind]
+  const until = cooldownUntil && cooldownUntil > Date.now() ? cooldownUntil : fallbackUntil
   db.update(accounts)
-    .set({ status: kind, cooldownUntil: Date.now() + COOLDOWN_MS[kind] })
+    .set({ status: kind, cooldownUntil: until })
     .where(eq(accounts.id, id))
     .run()
 }

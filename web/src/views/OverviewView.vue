@@ -1,167 +1,472 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useMessage } from 'naive-ui'
+import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
+import { formatTime } from '../utils'
+
+interface DailyStat {
+  day: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  cost: number
+}
+
+interface ProviderStat {
+  provider: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
+interface DashboardAccount {
+  id: string
+  provider: string
+  name: string
+  status: string
+  cooldownUntil: number | null
+  tokenExpiresAt: number | null
+  lastUsedAt: number | null
+  createdAt: number
+}
+
+interface DashboardKey {
+  id: string
+  name: string
+  ownerLabel: string | null
+  keyPrefix: string
+  enabled: boolean
+  quotaLimit: number | null
+  quotaUsed: number
+  lastUsedAt: number | null
+  requests: number
+  tokens: number
+  cost: number
+}
+
+interface DashboardRecentLog {
+  id: string
+  ts: number
+  provider: string
+  model: string | null
+  status: string
+  latencyMs: number | null
+  cost: number
+  apiKeyName: string | null
+  accountName: string | null
+}
+
+interface DashboardOverview {
+  totals: {
+    keyCount: number
+    enabledKeyCount: number
+    accountCount: number
+    activeAccountCount: number
+    coolingAccountCount: number
+    disabledAccountCount: number
+    errorAccountCount: number
+    requestCount: number
+    requests24h: number
+    tokens30d: number
+    cost30d: number
+  }
+  daily: DailyStat[]
+  byProvider: ProviderStat[]
+  accounts: DashboardAccount[]
+  keys: DashboardKey[]
+  recentLogs: DashboardRecentLog[]
+}
 
 const message = useMessage()
 const loading = ref(true)
-const stats = ref({ keyCount: 0, accountCount: 0, requestCount: 0 })
+const dashboard = ref<DashboardOverview | null>(null)
+
+const emptyTotals: DashboardOverview['totals'] = {
+  keyCount: 0,
+  enabledKeyCount: 0,
+  accountCount: 0,
+  activeAccountCount: 0,
+  coolingAccountCount: 0,
+  disabledAccountCount: 0,
+  errorAccountCount: 0,
+  requestCount: 0,
+  requests24h: 0,
+  tokens30d: 0,
+  cost30d: 0,
+}
+
+const providerLabels: Record<string, string> = {
+  claude: 'Claude',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+}
+
+const providerColors: Record<string, string> = {
+  claude: '#d97757',
+  openai: '#10a37f',
+  gemini: '#4285f4',
+}
+
+const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
+const accounts = computed(() => dashboard.value?.accounts ?? [])
+const keys = computed(() => dashboard.value?.keys ?? [])
+const recentLogs = computed(() => dashboard.value?.recentLogs ?? [])
+const providerRows = computed(() => dashboard.value?.byProvider ?? [])
 
 const cards = computed(() => [
-  { label: 'API Keys', value: stats.value.keyCount, hint: '已签发的访问密钥', tone: 'blue' },
-  { label: '上游账户', value: stats.value.accountCount, hint: 'Claude / OpenAI / Gemini', tone: 'teal' },
-  { label: '中转请求', value: stats.value.requestCount, hint: '累计请求数', tone: 'violet' },
+  {
+    label: '可用账户',
+    value: `${totals.value.activeAccountCount}/${totals.value.accountCount}`,
+    hint: `${totals.value.coolingAccountCount} 个冷却 · ${totals.value.disabledAccountCount} 个禁用`,
+    tone: 'green',
+  },
+  {
+    label: 'API Keys',
+    value: `${totals.value.enabledKeyCount}/${totals.value.keyCount}`,
+    hint: '启用 / 全部',
+    tone: 'blue',
+  },
+  {
+    label: '24h 请求',
+    value: formatNumber(totals.value.requests24h),
+    hint: `累计 ${formatNumber(totals.value.requestCount)} 次`,
+    tone: 'violet',
+  },
+  {
+    label: '30天成本',
+    value: formatCost(totals.value.cost30d),
+    hint: `${formatNumber(totals.value.tokens30d)} tokens`,
+    tone: 'amber',
+  },
 ])
 
-onMounted(async () => {
+const dailyOption = computed(() => {
+  const series = dashboard.value?.daily ?? []
+  return {
+    grid: { left: 42, right: 48, top: 34, bottom: 34 },
+    tooltip: { trigger: 'axis' },
+    legend: { right: 0, top: 0, textStyle: { color: '#64748b' } },
+    xAxis: {
+      type: 'category',
+      data: series.map((d) => d.day.slice(5)),
+      axisLine: { lineStyle: { color: '#cbd5e1' } },
+      axisLabel: { color: '#64748b', fontSize: 11 },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        axisLabel: { color: '#64748b', fontSize: 11 },
+        splitLine: { lineStyle: { color: '#e2e8f0' } },
+      },
+      {
+        type: 'value',
+        axisLabel: { color: '#64748b', fontSize: 11 },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '请求',
+        type: 'bar',
+        data: series.map((d) => d.requests),
+        barWidth: 14,
+        itemStyle: { color: '#2563eb', borderRadius: [4, 4, 0, 0] },
+      },
+      {
+        name: 'Tokens',
+        type: 'line',
+        smooth: true,
+        symbol: 'none',
+        yAxisIndex: 1,
+        data: series.map((d) => d.inputTokens + d.outputTokens),
+        lineStyle: { color: '#14b8a6', width: 2 },
+        areaStyle: { color: '#14b8a6', opacity: 0.1 },
+      },
+    ],
+  }
+})
+
+const providerOption = computed(() => {
+  const rows = providerRows.value
+  const data = rows.map((row) => ({
+    name: providerLabel(row.provider),
+    value: row.tokens || row.requests,
+    itemStyle: { color: providerColors[row.provider] ?? '#6366f1' },
+  }))
+  return {
+    tooltip: { trigger: 'item' },
+    legend: {
+      orient: 'vertical',
+      right: 0,
+      top: 'center',
+      textStyle: { color: '#475569' },
+    },
+    series: [
+      {
+        type: 'pie',
+        radius: ['58%', '78%'],
+        center: ['34%', '52%'],
+        avoidLabelOverlap: true,
+        label: { show: false },
+        data,
+      },
+    ],
+  }
+})
+
+onMounted(load)
+
+async function load() {
+  loading.value = true
   try {
     const { data } = await api.get('/admin/overview')
-    stats.value = data
+    dashboard.value = data
   } catch (e) {
     message.error(errMsg(e))
   } finally {
     loading.value = false
   }
-})
+}
+
+function formatNumber(n: number): string {
+  return Math.round(n).toLocaleString('en-US')
+}
+
+function formatCost(c: number): string {
+  return `$${c.toFixed(c < 1 ? 4 : 2)}`
+}
+
+function providerLabel(provider: string): string {
+  return providerLabels[provider] ?? provider
+}
+
+function providerStyle(provider: string) {
+  return { '--provider-color': providerColors[provider] ?? '#6366f1' }
+}
+
+function isCoolingDown(row: DashboardAccount): boolean {
+  return !!row.cooldownUntil && row.cooldownUntil > Date.now()
+}
+
+function accountStatus(row: DashboardAccount): string {
+  if (row.status === 'disabled') return 'disabled'
+  if (row.status === 'error') return 'error'
+  if (isCoolingDown(row)) return 'rate_limited'
+  return 'active'
+}
+
+function accountStatusLabel(row: DashboardAccount): string {
+  const status = accountStatus(row)
+  return (
+    {
+      active: '正常',
+      rate_limited: '限流冷却',
+      error: '异常',
+      disabled: '已禁用',
+    }[status] ?? status
+  )
+}
+
+function accountStatusType(row: DashboardAccount) {
+  const status = accountStatus(row)
+  if (status === 'active') return 'success'
+  if (status === 'rate_limited') return 'warning'
+  if (status === 'error') return 'error'
+  return 'default'
+}
+
+function logStatusType(status: string) {
+  if (status === 'success') return 'success'
+  if (status === 'rate_limited') return 'warning'
+  if (status === 'error' || status === 'failed') return 'error'
+  return 'default'
+}
+
+function quotaPercent(row: DashboardKey): number {
+  if (!row.quotaLimit || row.quotaLimit <= 0) return 0
+  return Math.min(100, Math.round((row.quotaUsed / row.quotaLimit) * 100))
+}
+
+function quotaStatus(row: DashboardKey) {
+  const percent = quotaPercent(row)
+  if (percent >= 90) return 'error'
+  if (percent >= 70) return 'warning'
+  return 'success'
+}
+
+function quotaLabel(row: DashboardKey): string {
+  if (row.quotaLimit == null) return `${formatCost(row.quotaUsed)} / 不限`
+  return `${formatCost(row.quotaUsed)} / ${formatCost(row.quotaLimit)}`
+}
+
+function latencyLabel(ms: number | null): string {
+  return ms == null ? '—' : `${ms}ms`
+}
 </script>
 
 <template>
-  <div class="overview-page">
-
-    <n-grid :cols="3" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <n-gi v-for="c in cards" :key="c.label" span="3 m:1">
-        <n-card class="stat-card surface-card" :class="`is-${c.tone}`" :bordered="false">
-          <div class="stat-label">{{ c.label }}</div>
-          <div class="stat-value">{{ loading ? '—' : c.value }}</div>
-          <div class="stat-hint">{{ c.hint }}</div>
+  <div class="dashboard-page">
+    <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+      <n-gi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
+        <n-card class="stat-card surface-card" :class="`is-${card.tone}`" :bordered="false">
+          <div class="stat-label">{{ card.label }}</div>
+          <div class="stat-value">{{ loading ? '—' : card.value }}</div>
+          <div class="stat-hint">{{ card.hint }}</div>
         </n-card>
       </n-gi>
     </n-grid>
 
-    <n-grid class="overview-grid" :cols="12" :x-gap="16" :y-gap="16" responsive="screen">
-      <n-gi span="12 l:7">
-        <n-card class="surface-card" :bordered="false">
-          <div class="section-head">
+    <n-grid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+      <n-gi span="12 l:8">
+        <n-card class="surface-card panel-card" :bordered="false">
+          <div class="panel-head">
             <div>
-              <h3>当前阶段</h3>
-              <p>管理员登录、API Key 管理已可用。</p>
+              <h3>流量趋势</h3>
+              <span>近 14 天请求与 Token 走势</span>
             </div>
-            <n-tag type="info" :bordered="false">Phase A</n-tag>
+            <n-button size="small" quaternary @click="load">刷新</n-button>
           </div>
-          <div class="timeline">
-            <div class="timeline-item is-done">
-              <span />
-              <div>
-                <strong>控制台基础能力</strong>
-                <p>登录、设置、访问密钥和账户列表。</p>
-              </div>
+          <EChart :option="dailyOption" height="282px" />
+        </n-card>
+      </n-gi>
+
+      <n-gi span="12 l:4">
+        <n-card class="surface-card panel-card" :bordered="false">
+          <div class="panel-head">
+            <div>
+              <h3>服务商占比</h3>
+              <span>按近 30 天 Tokens 统计</span>
             </div>
-            <div class="timeline-item">
-              <span />
-              <div>
-                <strong>中转与用量采集</strong>
-                <p>接入请求记录、Token 消耗和成本分析。</p>
-              </div>
-            </div>
-            <div class="timeline-item">
-              <span />
-              <div>
-                <strong>多维度统计</strong>
-                <p>按 API Key、账户、日期和模型聚合展示。</p>
-              </div>
+          </div>
+          <EChart v-if="providerRows.length" :option="providerOption" height="218px" />
+          <div v-else class="empty-state">暂无用量数据</div>
+          <div class="provider-list">
+            <div
+              v-for="row in providerRows"
+              :key="row.provider"
+              class="provider-row"
+              :style="providerStyle(row.provider)"
+            >
+              <span>{{ providerLabel(row.provider) }}</span>
+              <strong>{{ formatNumber(row.tokens) }}</strong>
             </div>
           </div>
         </n-card>
       </n-gi>
+    </n-grid>
+
+    <n-grid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi span="12 l:5">
-        <n-card class="surface-card quick-card" :bordered="false">
-          <div class="section-head">
+        <n-card class="surface-card panel-card" :bordered="false">
+          <div class="panel-head">
             <div>
-              <h3>快捷入口</h3>
-              <p>常用管理动作</p>
+              <h3>账号健康</h3>
+              <span>限流、异常和配额更新时间</span>
+            </div>
+            <router-link class="panel-link" to="/accounts">管理</router-link>
+          </div>
+
+          <div v-if="accounts.length" class="account-list">
+            <div v-for="row in accounts" :key="row.id" class="account-row">
+              <div class="account-main">
+                <span class="provider-chip" :style="providerStyle(row.provider)">
+                  {{ providerLabel(row.provider) }}
+                </span>
+                <strong>{{ row.name }}</strong>
+                <small>最后使用 {{ formatTime(row.lastUsedAt) }}</small>
+                <small v-if="isCoolingDown(row)">配额更新 {{ formatTime(row.cooldownUntil) }}</small>
+              </div>
+              <n-tag size="small" :type="accountStatusType(row)" :bordered="false">
+                {{ accountStatusLabel(row) }}
+              </n-tag>
             </div>
           </div>
-          <router-link class="quick-link" to="/accounts">
-            <span>上游账户</span>
-            <strong>管理 Claude / OpenAI / Gemini</strong>
-          </router-link>
-          <router-link class="quick-link" to="/keys">
-            <span>API Keys</span>
-            <strong>签发和停用访问密钥</strong>
-          </router-link>
-          <router-link class="quick-link" to="/settings">
-            <span>系统设置</span>
-            <strong>更新管理员密码</strong>
-          </router-link>
+          <div v-else class="empty-state">还没有接入上游账户</div>
+        </n-card>
+      </n-gi>
+
+      <n-gi span="12 l:7">
+        <n-card class="surface-card panel-card" :bordered="false">
+          <div class="panel-head">
+            <div>
+              <h3>Key 配额</h3>
+              <span>额度消耗和近 30 天调用</span>
+            </div>
+            <router-link class="panel-link" to="/keys">管理</router-link>
+          </div>
+
+          <div v-if="keys.length" class="key-list">
+            <div v-for="row in keys" :key="row.id" class="key-row">
+              <div class="key-head">
+                <div>
+                  <strong>{{ row.name }}</strong>
+                  <span>{{ row.ownerLabel || row.keyPrefix + '…' }}</span>
+                </div>
+                <n-tag size="small" :type="row.enabled ? 'success' : 'default'" :bordered="false">
+                  {{ row.enabled ? '启用' : '停用' }}
+                </n-tag>
+              </div>
+              <n-progress
+                type="line"
+                :percentage="quotaPercent(row)"
+                :status="quotaStatus(row)"
+                :show-indicator="false"
+                :height="8"
+                border-radius="4px"
+              />
+              <div class="key-foot">
+                <span>{{ quotaLabel(row) }}</span>
+                <span>{{ formatNumber(row.requests) }} 次 · {{ formatCost(row.cost) }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-state">还没有创建 API Key</div>
         </n-card>
       </n-gi>
     </n-grid>
+
+    <n-card class="surface-card panel-card" :bordered="false">
+      <div class="panel-head">
+        <div>
+          <h3>最近调用</h3>
+          <span>快速查看入口、模型、耗时和状态</span>
+        </div>
+        <router-link class="panel-link" to="/stats">详细统计</router-link>
+      </div>
+
+      <div v-if="recentLogs.length" class="log-list">
+        <div v-for="row in recentLogs" :key="row.id" class="log-row">
+          <div class="log-main">
+            <n-tag size="small" :type="logStatusType(row.status)" :bordered="false">
+              {{ row.status }}
+            </n-tag>
+            <div>
+              <strong>{{ row.model || '(unknown model)' }}</strong>
+              <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
+            </div>
+          </div>
+          <div class="log-meta">
+            <span>{{ latencyLabel(row.latencyMs) }}</span>
+            <span>{{ formatCost(row.cost) }}</span>
+            <span>{{ formatTime(row.ts) }}</span>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-state">暂无请求记录</div>
+    </n-card>
   </div>
 </template>
 
 <style scoped>
-.overview-page {
+.dashboard-page {
   display: grid;
   gap: 16px;
 }
 
-.overview-hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 30px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 24px;
-  background:
-    linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(20, 184, 166, 0.08)),
-    rgba(255, 255, 255, 0.82);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.07);
-}
-
-.hero-eyebrow {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.overview-hero h2 {
-  margin: 10px 0 0;
-  color: #0f172a;
-  font-size: 34px;
-  line-height: 1.16;
-}
-
-.overview-hero p {
-  max-width: 560px;
-  margin: 12px 0 0;
-  color: rgba(15, 23, 42, 0.58);
-  font-size: 14px;
-  line-height: 1.8;
-}
-
-.hero-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(20, 184, 166, 0.18);
-  border-radius: 999px;
-  color: #0f766e;
-  background: rgba(240, 253, 250, 0.9);
-  font-size: 13px;
-}
-
-.hero-status span {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #14b8a6;
-}
-
 .stat-card {
   position: relative;
+  min-height: 132px;
   overflow: hidden;
 }
 
@@ -176,138 +481,240 @@ onMounted(async () => {
   opacity: 0.15;
 }
 
-.stat-card.is-blue::after {
-  background: #2563eb;
+.stat-card.is-green::after {
+  background: #14b8a6;
 }
 
-.stat-card.is-teal::after {
-  background: #14b8a6;
+.stat-card.is-blue::after {
+  background: #2563eb;
 }
 
 .stat-card.is-violet::after {
   background: #8b5cf6;
 }
 
+.stat-card.is-amber::after {
+  background: #f59e0b;
+}
+
 .stat-label {
-  font-size: 13px;
   color: rgba(15, 23, 42, 0.58);
+  font-size: 13px;
 }
 
 .stat-value {
+  margin: 8px 0 2px;
   color: #0f172a;
   font-size: 34px;
   font-weight: 820;
-  margin: 8px 0 2px;
 }
 
 .stat-hint {
-  font-size: 12px;
   color: rgba(15, 23, 42, 0.42);
+  font-size: 12px;
 }
 
-.overview-grid {
-  margin-top: 0;
+.panel-card {
+  height: 100%;
 }
 
-.section-head {
+.panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
-.section-head h3 {
+.panel-head h3 {
   margin: 0;
   color: #0f172a;
-  font-size: 17px;
+  font-size: 16px;
+  font-weight: 820;
 }
 
-.section-head p {
-  margin: 5px 0 0;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 13px;
-}
-
-.timeline {
-  display: grid;
-  gap: 14px;
-}
-
-.timeline-item {
-  display: flex;
-  gap: 12px;
-}
-
-.timeline-item > span {
-  flex: 0 0 auto;
-  width: 11px;
-  height: 11px;
-  margin-top: 5px;
-  border-radius: 999px;
-  background: #cbd5e1;
-  box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.12);
-}
-
-.timeline-item.is-done > span {
-  background: #14b8a6;
-  box-shadow: 0 0 0 5px rgba(20, 184, 166, 0.12);
-}
-
-.timeline-item strong {
-  color: #0f172a;
-  font-size: 14px;
-}
-
-.timeline-item p {
-  margin: 4px 0 0;
-  color: rgba(15, 23, 42, 0.5);
-  font-size: 13px;
-}
-
-.quick-card {
-  height: 100%;
-}
-
-.quick-link {
+.panel-head span {
   display: block;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 14px;
-  color: inherit;
+  margin-top: 4px;
+  color: rgba(15, 23, 42, 0.46);
+  font-size: 12px;
+}
+
+.panel-link {
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
   text-decoration: none;
+}
+
+.provider-list,
+.account-list,
+.key-list,
+.log-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-list {
+  margin-top: 4px;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 12px;
   background: #f8fafc;
 }
 
-.quick-link + .quick-link {
-  margin-top: 10px;
+.provider-row span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(15, 23, 42, 0.68);
+  font-size: 13px;
 }
 
-.quick-link span,
-.quick-link strong {
-  display: block;
+.provider-row span::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--provider-color);
 }
 
-.quick-link span {
-  color: #2563eb;
+.provider-row strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.account-row,
+.key-row,
+.log-row {
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.account-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+
+.account-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.account-main strong,
+.key-head strong,
+.log-main strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-main small,
+.key-head span,
+.key-foot,
+.log-main span,
+.log-meta {
+  color: rgba(15, 23, 42, 0.48);
   font-size: 12px;
+}
+
+.provider-chip {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--provider-color);
+  background: color-mix(in srgb, var(--provider-color) 10%, white);
+  font-size: 11px;
   font-weight: 800;
 }
 
-.quick-link strong {
-  margin-top: 5px;
-  color: rgba(15, 23, 42, 0.72);
+.key-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.key-head,
+.key-foot,
+.log-row,
+.log-main,
+.log-meta {
+  display: flex;
+  align-items: center;
+}
+
+.key-head,
+.key-foot,
+.log-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.key-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.log-row {
+  padding: 12px;
+}
+
+.log-main {
+  gap: 10px;
+  min-width: 0;
+}
+
+.log-main > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.log-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  text-align: right;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  border: 1px dashed rgba(15, 23, 42, 0.13);
+  border-radius: 14px;
+  color: rgba(15, 23, 42, 0.42);
+  background: #f8fafc;
   font-size: 13px;
 }
 
 @media (max-width: 720px) {
-  .overview-hero {
+  .log-row,
+  .key-head,
+  .key-foot {
+    align-items: flex-start;
     flex-direction: column;
-    padding: 24px;
   }
 
-  .overview-hero h2 {
-    font-size: 28px;
+  .log-meta {
+    justify-content: flex-start;
+    text-align: left;
   }
 }
 </style>

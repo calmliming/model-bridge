@@ -16,6 +16,9 @@ const FORBIDDEN_FIELDS = ['max_output_tokens', 'parallel_tool_calls'] as const
 function normalizeBody(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
+  if (typeof out.input === 'string') {
+    out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]
+  }
   out.stream = true
   out.store = false
   if (out.instructions == null || out.instructions === '') {

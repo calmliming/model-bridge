@@ -230,10 +230,6 @@ const rangeLabel = (d: number) => `近 ${d} 天`
 <template>
   <div class="stats-page">
     <div class="page-head">
-      <div>
-        <h2 class="page-title">用量统计</h2>
-        <div class="page-subtitle">Token 消耗、成本与中转请求趋势。</div>
-      </div>
       <n-radio-group v-model:value="range" size="small">
         <n-radio-button :value="7">{{ rangeLabel(7) }}</n-radio-button>
         <n-radio-button :value="30">{{ rangeLabel(30) }}</n-radio-button>
