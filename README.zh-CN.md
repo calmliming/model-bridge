@@ -10,11 +10,10 @@
 
 ## 当前状态
 
-🚧 **阶段 D —— Claude + OpenAI + Gemini 中转。** 管理后台、API Key、Claude
-（粘贴 code）与 OpenAI/ChatGPT 和 Google/Gemini（`localhost:1455` 浏览器回调）
-的账户接入、多账户轮换、`/api/claude/v1/messages` / `/api/openai/v1/responses`
-/ `/api/gemini/v1beta/models/*` 中转，以及用量记录均已可用。剩余：阶段 E
-（统计图表）与阶段 F（部署）。
+🚧 **阶段 E —— 统计与配额限制。** 在之前能力之上新增：完整的用量统计页
+（每日趋势 + 按服务商/模型/Key 分解）、按 Key 的成本配额（在中转入口处强制
+执行），以及 Key 的限额就地编辑（配额、速率、有效期、允许的服务商）。剩余：
+阶段 F（部署）。
 
 ## 技术栈
 

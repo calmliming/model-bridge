@@ -57,6 +57,10 @@ export async function requireApiKey(
     reply.code(401).send({ error: 'API key expired' })
     return
   }
+  if (record.quotaLimit != null && record.quotaUsed >= record.quotaLimit) {
+    reply.code(429).send({ error: 'API key quota exceeded' })
+    return
+  }
   db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, record.id)).run()
   request.apiKey = {
     id: record.id,

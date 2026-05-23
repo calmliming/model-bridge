@@ -1,8 +1,12 @@
 import { randomBytes } from 'node:crypto'
-import { db } from '../db/index'
+import { db, sqlite } from '../db/index'
 import { usageLogs } from '../db/schema'
 import { estimateCost } from './pricing'
 import type { UsageData } from '../providers/types'
+
+const incrementKeyQuota = sqlite.prepare(
+  'UPDATE api_keys SET quota_used = quota_used + ?, last_used_at = ? WHERE id = ?',
+)
 
 export interface UsageRecord {
   apiKeyId: string
@@ -14,8 +18,9 @@ export interface UsageRecord {
   latencyMs: number
 }
 
-/** Writes one usage-log row, computing cost from the token counts. */
+/** Writes one usage-log row and bumps the API key's quota_used. */
 export function recordUsage(record: UsageRecord): void {
+  const cost = estimateCost(record.provider, record.model, record.usage)
   try {
     db.insert(usageLogs)
       .values({
@@ -28,11 +33,14 @@ export function recordUsage(record: UsageRecord): void {
         outputTokens: record.usage.outputTokens,
         cacheCreateTokens: record.usage.cacheCreateTokens,
         cacheReadTokens: record.usage.cacheReadTokens,
-        cost: estimateCost(record.provider, record.model, record.usage),
+        cost,
         status: record.status,
         latencyMs: record.latencyMs,
       })
       .run()
+    if (record.apiKeyId && cost > 0) {
+      incrementKeyQuota.run(cost, Date.now(), record.apiKeyId)
+    }
   } catch (err) {
     // Usage logging must never break the relay response.
     console.error('[usage] failed to record usage:', (err as Error).message)

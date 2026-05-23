@@ -5,7 +5,8 @@ import { z } from 'zod'
 import { db } from '../db/index'
 import { accounts, apiKeys, oauthSessions, usageLogs } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
-import { createApiKey, deleteApiKey, listApiKeys, setApiKeyEnabled } from '../keys/manager'
+import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from '../keys/manager'
+import { statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -29,7 +30,17 @@ const createKeySchema = z.object({
   expiresAt: z.number().int().optional(),
 })
 
-const updateKeySchema = z.object({ enabled: z.boolean() })
+const updateKeySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    name: z.string().min(1).optional(),
+    ownerLabel: z.string().nullable().optional(),
+    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini'])).nullable().optional(),
+    rateLimit: z.number().int().positive().nullable().optional(),
+    quotaLimit: z.number().positive().nullable().optional(),
+    expiresAt: z.number().int().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
 const oauthStartSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini']),
@@ -94,7 +105,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      setApiKeyEnabled(request.params.id, body.data.enabled)
+      updateApiKey(request.params.id, body.data)
       return { ok: true }
     },
   )
@@ -216,4 +227,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       requestCount: db.select({ n: count() }).from(usageLogs).get()?.n ?? 0,
     }
   })
+
+  // ── Usage statistics ─────────────────────────────────────
+  app.get<{ Querystring: { days?: string } }>(
+    '/api/admin/stats/summary',
+    { preHandler: requireAdmin },
+    async (request) => {
+      const days = request.query.days ? Number(request.query.days) : 30
+      return statsSummary(days)
+    },
+  )
 }

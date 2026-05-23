@@ -12,6 +12,10 @@ interface ApiKey {
   keyPrefix: string
   enabled: boolean
   allowedProviders: string[] | null
+  rateLimit: number | null
+  quotaLimit: number | null
+  quotaUsed: number
+  expiresAt: number | null
   lastUsedAt: number | null
   createdAt: number
 }
@@ -28,6 +32,28 @@ const form = ref({ name: '', ownerLabel: '', allowedProviders: [] as string[] })
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
 const newKey = ref<string | null>(null)
+
+// Edit-limits modal state.
+const showEdit = ref(false)
+const editing = ref(false)
+const editId = ref<string | null>(null)
+const editForm = ref<{
+  name: string
+  ownerLabel: string
+  enabled: boolean
+  allowedProviders: string[]
+  rateLimit: number | null
+  quotaLimit: number | null
+  expiresAt: number | null
+}>({
+  name: '',
+  ownerLabel: '',
+  enabled: true,
+  allowedProviders: [],
+  rateLimit: null,
+  quotaLimit: null,
+  expiresAt: null,
+})
 
 const providerOptions = [
   { label: 'Claude', value: 'claude' },
@@ -81,6 +107,49 @@ async function toggle(row: ApiKey) {
   }
 }
 
+function openEdit(row: ApiKey) {
+  editId.value = row.id
+  editForm.value = {
+    name: row.name,
+    ownerLabel: row.ownerLabel ?? '',
+    enabled: row.enabled,
+    allowedProviders: row.allowedProviders ?? [],
+    rateLimit: row.rateLimit,
+    quotaLimit: row.quotaLimit,
+    expiresAt: row.expiresAt,
+  }
+  showEdit.value = true
+}
+
+async function saveEdit() {
+  if (!editId.value) return
+  if (!editForm.value.name.trim()) {
+    message.warning('名称不能为空')
+    return
+  }
+  editing.value = true
+  try {
+    await api.patch(`/admin/keys/${editId.value}`, {
+      name: editForm.value.name.trim(),
+      ownerLabel: editForm.value.ownerLabel.trim() || null,
+      enabled: editForm.value.enabled,
+      allowedProviders: editForm.value.allowedProviders.length
+        ? editForm.value.allowedProviders
+        : null,
+      rateLimit: editForm.value.rateLimit,
+      quotaLimit: editForm.value.quotaLimit,
+      expiresAt: editForm.value.expiresAt,
+    })
+    message.success('已保存')
+    showEdit.value = false
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '保存失败'))
+  } finally {
+    editing.value = false
+  }
+}
+
 function confirmDelete(row: ApiKey) {
   dialog.warning({
     title: '删除 API Key',
@@ -115,6 +184,11 @@ function copyAndClose() {
   newKey.value = null
 }
 
+function formatQuota(row: ApiKey): string {
+  if (row.quotaLimit == null) return `$${row.quotaUsed.toFixed(4)} / 不限`
+  return `$${row.quotaUsed.toFixed(4)} / $${row.quotaLimit.toFixed(2)}`
+}
+
 const columns = computed<DataTableColumns<ApiKey>>(() => [
   { title: '名称', key: 'name', minWidth: 120 },
   {
@@ -143,6 +217,11 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     },
   },
   {
+    title: '配额（已用 / 上限）',
+    key: 'quota',
+    render: (row) => formatQuota(row),
+  },
+  {
     title: '状态',
     key: 'enabled',
     render: (row) => h(NSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
@@ -154,9 +233,22 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     key: 'actions',
     render: (row) =>
       h(
-        NButton,
-        { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
-        { default: () => '删除' },
+        NSpace,
+        { size: 4 },
+        {
+          default: () => [
+            h(
+              NButton,
+              { size: 'small', quaternary: true, onClick: () => openEdit(row) },
+              { default: () => '编辑' },
+            ),
+            h(
+              NButton,
+              { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
+              { default: () => '删除' },
+            ),
+          ],
+        },
       ),
   },
 ])
@@ -178,6 +270,7 @@ onMounted(load)
       <n-data-table :columns="columns" :data="keys" :loading="loading" :bordered="false" />
     </n-card>
 
+    <!-- create -->
     <n-modal
       v-model:show="showCreate"
       preset="card"
@@ -208,6 +301,7 @@ onMounted(load)
       </template>
     </n-modal>
 
+    <!-- new-key reveal -->
     <n-modal
       :show="!!newKey"
       preset="card"
@@ -222,6 +316,56 @@ onMounted(load)
       <template #footer>
         <n-space justify="end">
           <n-button type="primary" @click="copyAndClose">复制并关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- edit limits -->
+    <n-modal v-model:show="showEdit" preset="card" title="编辑 API Key" style="width: 480px">
+      <n-form label-placement="top">
+        <n-form-item label="名称">
+          <n-input v-model:value="editForm.name" />
+        </n-form-item>
+        <n-form-item label="持有者">
+          <n-input v-model:value="editForm.ownerLabel" placeholder="可留空" />
+        </n-form-item>
+        <n-form-item label="允许的服务商（留空 = 不限）">
+          <n-select
+            v-model:value="editForm.allowedProviders"
+            multiple
+            :options="providerOptions"
+            placeholder="不限"
+          />
+        </n-form-item>
+        <n-form-item label="成本上限（USD，留空 = 不限）">
+          <n-input-number
+            v-model:value="editForm.quotaLimit"
+            :min="0"
+            :step="1"
+            placeholder="例如：10"
+            style="width: 100%"
+          />
+        </n-form-item>
+        <n-form-item label="速率上限（次/分钟，留空 = 不限）">
+          <n-input-number
+            v-model:value="editForm.rateLimit"
+            :min="1"
+            :step="10"
+            placeholder="例如：60"
+            style="width: 100%"
+          />
+        </n-form-item>
+        <n-form-item label="过期时间（留空 = 永久）">
+          <n-date-picker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
+        </n-form-item>
+        <n-form-item label="启用">
+          <n-switch v-model:value="editForm.enabled" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showEdit = false">取消</n-button>
+          <n-button type="primary" :loading="editing" @click="saveEdit">保存</n-button>
         </n-space>
       </template>
     </n-modal>

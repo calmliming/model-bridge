@@ -10,12 +10,11 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ## Status
 
-🚧 **Phase D — Claude + OpenAI + Gemini relay.** Admin dashboard, API keys,
-account onboarding for Claude (paste-code), OpenAI/ChatGPT and Google/Gemini
-(browser callback on `localhost:1455`), multi-account rotation, the
-`/api/claude/v1/messages`, `/api/openai/v1/responses` and
-`/api/gemini/v1beta/models/*` relays, and usage logging are all working.
-Remaining: Phase E (stats dashboard) and Phase F (deployment).
+🚧 **Phase E — stats dashboard & key limits.** Everything above plus a
+real stats page (daily trend + breakdowns by provider, model and key),
+per-key cost quotas enforced at the relay edge, and an in-place editor
+for each key's limits (quota, rate, expiry, allowed providers).
+Remaining: Phase F (deployment).
 
 ## Tech stack
 

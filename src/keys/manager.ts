@@ -83,6 +83,22 @@ export function setApiKeyEnabled(id: string, enabled: boolean): void {
   db.update(apiKeys).set({ enabled }).where(eq(apiKeys.id, id)).run()
 }
 
+export interface UpdateApiKeyPatch {
+  enabled?: boolean
+  name?: string
+  ownerLabel?: string | null
+  allowedProviders?: string[] | null
+  rateLimit?: number | null
+  quotaLimit?: number | null
+  expiresAt?: number | null
+}
+
+/** Updates an API key's metadata and limits. Only provided fields change. */
+export function updateApiKey(id: string, patch: UpdateApiKeyPatch): void {
+  if (Object.keys(patch).length === 0) return
+  db.update(apiKeys).set(patch).where(eq(apiKeys.id, id)).run()
+}
+
 export function deleteApiKey(id: string): void {
   db.delete(apiKeys).where(eq(apiKeys.id, id)).run()
 }
