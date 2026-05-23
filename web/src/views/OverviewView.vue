@@ -27,17 +27,6 @@ onMounted(async () => {
 
 <template>
   <div class="overview-page">
-    <section class="overview-hero">
-      <div>
-        <div class="hero-eyebrow">Control Center</div>
-        <h2>模型中转运行概览</h2>
-        <p>集中查看账户、密钥和请求规模，后续统计能力接入后会在这里呈现实时趋势。</p>
-      </div>
-      <div class="hero-status">
-        <span />
-        <strong>Gateway Ready</strong>
-      </div>
-    </section>
 
     <n-grid :cols="3" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <n-gi v-for="c in cards" :key="c.label" span="3 m:1">

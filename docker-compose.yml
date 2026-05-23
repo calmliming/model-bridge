@@ -1,0 +1,24 @@
+services:
+  model-bridge:
+    build: .
+    image: model-bridge:latest
+    container_name: model-bridge
+    restart: unless-stopped
+    ports:
+      # Dashboard + relay API.
+      - "3000:3000"
+      # OAuth callback for OpenAI (/auth/callback) and Google (/oauth2callback).
+      # The browser doing the auth flow must reach this port; keep it on
+      # localhost if the host is remote and you SSH-tunnel from your laptop.
+      - "1455:1455"
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      DATABASE_PATH: /app/data/model-bridge.db
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+    volumes:
+      # SQLite database — back this up to preserve accounts & API keys.
+      - ./data:/app/data

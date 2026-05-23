@@ -141,7 +141,7 @@ interface Provider {
 - ✅ Phase C — OpenAI / Codex
 - ✅ Phase D — Gemini
 - ✅ Phase E — Stats & management polish
-- ⬜ Phase F — Deployment & docs
+- ✅ Phase F — Deployment & docs
 
 ## Implementation phases
 

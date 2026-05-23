@@ -1,0 +1,22 @@
+# Build artefacts and runtime state — never copy into the build context.
+node_modules
+web/node_modules
+web/dist
+dist
+data
+
+# Local secrets / environment
+.env
+.env.*
+!.env.example
+
+# Git / editor / logs
+.git
+.gitignore
+*.log
+.DS_Store
+.idea
+.vscode
+
+# Memory / plan files / scratch
+.claude
