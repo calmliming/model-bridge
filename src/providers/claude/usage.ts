@@ -17,7 +17,7 @@ function mapUsage(u: ClaudeUsage | undefined): UsageData {
 }
 
 /** Extracts usage from a non-streaming /v1/messages JSON response. */
-export function parseUsageFromJson(body: unknown): UsageData {
+export function parseJsonUsage(body: unknown): UsageData {
   const usage = (body as { usage?: ClaudeUsage } | null | undefined)?.usage
   return mapUsage(usage)
 }
@@ -33,7 +33,7 @@ interface ClaudeStreamEvent {
  * input/cache counts in `message_start` and the running output count in
  * each `message_delta` (the last one is final).
  */
-export function createStreamUsageParser() {
+export function createStreamParser() {
   const usage = emptyUsage()
   return {
     /** Feed one parsed SSE `data:` JSON object. */

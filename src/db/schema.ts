@@ -76,6 +76,9 @@ export const oauthSessions = sqliteTable('oauth_sessions', {
   state: text('state').primaryKey(),
   provider: text('provider').notNull(),
   codeVerifier: text('code_verifier').notNull(),
+  // Account name supplied at /oauth/start; the callback / finish step reads it
+  // back to label the new account (OpenAI uses a browser redirect, not paste).
+  accountName: text('account_name'),
   createdAt: createdAt(),
 })
 

@@ -134,6 +134,16 @@ interface Provider {
 | **OpenAI** | `auth.openai.com/oauth/token` | `chatgpt.com/backend-api/codex/responses` | `POST /api/openai/v1/responses`（+ `/v1/chat/completions`） | 必须带 `stream:true`、`store:false`、`instructions`；剔除 `max_output_tokens`/`parallel_tool_calls` |
 | **Gemini** | Google OAuth | `cloudcode-pa.googleapis.com`（Code Assist） | `POST /api/gemini/v1beta/models/{model}:streamGenerateContent` | 免费额度约 1000 次/天、60 次/分钟 |
 
+## 进度
+
+- ✅ 阶段 0 —— 计划文档（`201af14`）
+- ✅ 阶段 A —— 平台骨架（`832ab86`）
+- ✅ 阶段 B —— Claude 全链路中转（`afc2ad4`，+`3443a2c` Cloudflare 修复）
+- ✅ 阶段 C —— OpenAI / Codex 接入
+- ⬜ 阶段 D —— Gemini 接入
+- ⬜ 阶段 E —— 统计与管理完善
+- ⬜ 阶段 F —— 部署与文档
+
 ## 实施阶段
 
 所有阶段都在 v1 内交付。执行顺序为 **Claude 优先**——先用 Claude 跑通并验证整体架构，

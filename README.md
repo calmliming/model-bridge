@@ -10,9 +10,11 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ## Status
 
-🚧 **Phase B — Claude relay.** Admin dashboard, API keys, Claude account
-onboarding (OAuth), multi-account rotation, the `/api/claude/v1/messages`
-relay and usage logging are working. OpenAI and Gemini land in Phases C–D.
+🚧 **Phase C — Claude + OpenAI relay.** Admin dashboard, API keys, account
+onboarding for Claude (paste-code OAuth) and OpenAI/ChatGPT (browser callback
+on `localhost:1455`), multi-account rotation, `/api/claude/v1/messages` and
+`/api/openai/v1/responses` relays, and usage logging are working. Gemini lands
+in Phase D.
 
 ## Tech stack
 

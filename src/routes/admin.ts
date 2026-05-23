@@ -31,11 +31,12 @@ const createKeySchema = z.object({
 
 const updateKeySchema = z.object({ enabled: z.boolean() })
 
-const oauthStartSchema = z.object({ provider: z.enum(['claude', 'openai', 'gemini']) })
-
-const oauthFinishSchema = z.object({
+const oauthStartSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini']),
   name: z.string().min(1),
+})
+
+const oauthFinishSchema = z.object({
   state: z.string().min(1),
   code: z.string().min(1),
 })
@@ -112,37 +113,50 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     return { accounts: listAccounts() }
   })
 
-  // Step 1 of onboarding: generate a provider authorization URL (PKCE).
+  // Step 1: store the chosen name + PKCE verifier, return the authorize URL.
+  // `mode` tells the dashboard how to finish:
+  //   'paste'    — Claude: user pastes the code back into the modal.
+  //   'callback' — OpenAI: localhost:1455 callback completes the flow.
   app.post('/api/admin/accounts/oauth/start', { preHandler: requireAdmin }, async (request, reply) => {
     const body = oauthStartSchema.safeParse(request.body)
     if (!body.success || !isSupportedProvider(body.data.provider)) {
-      return reply.code(400).send({ error: 'unsupported provider' })
+      return reply.code(400).send({ error: 'unsupported provider or missing name' })
     }
     const oauth = getProvider(body.data.provider)!
     const { verifier, challenge } = oauth.generatePkce()
     const state = randomBytes(16).toString('hex')
     db.insert(oauthSessions)
-      .values({ state, provider: body.data.provider, codeVerifier: verifier })
+      .values({
+        state,
+        provider: body.data.provider,
+        codeVerifier: verifier,
+        accountName: body.data.name,
+      })
       .run()
-    return { state, authorizeUrl: oauth.buildAuthorizeUrl(state, challenge) }
+    return {
+      state,
+      authorizeUrl: oauth.buildAuthorizeUrl(state, challenge),
+      mode: oauth.mode,
+    }
   })
 
-  // Step 2: exchange the pasted authorization code for tokens, create the account.
+  // Step 2 (paste-mode providers only): exchange the pasted code for tokens.
+  // For callback-mode providers, the dedicated :1455 listener does this instead.
   app.post('/api/admin/accounts/oauth/finish', { preHandler: requireAdmin }, async (request, reply) => {
     const body = oauthFinishSchema.safeParse(request.body)
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
-    const { provider, name, state, code } = body.data
+    const { state, code } = body.data
     const session = db
       .select()
       .from(oauthSessions)
       .where(eq(oauthSessions.state, state))
       .get()
-    if (!session || session.provider !== provider) {
+    if (!session) {
       return reply.code(400).send({ error: 'OAuth session expired — please restart authorization' })
     }
-    const oauth = getProvider(provider)
+    const oauth = getProvider(session.provider)
     if (!oauth) {
       return reply.code(400).send({ error: 'unsupported provider' })
     }
@@ -153,7 +167,11 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: `authorization failed: ${(err as Error).message}` })
     }
     db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
-    const created = createAccount({ provider, name, tokens })
+    const created = createAccount({
+      provider: session.provider,
+      name: session.accountName ?? `${session.provider} account`,
+      tokens,
+    })
     return reply.code(201).send({ id: created.id })
   })
 

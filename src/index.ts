@@ -9,6 +9,7 @@ import { ensureAdmin } from './auth/admin'
 import { registerAdminRoutes } from './routes/admin'
 import { registerRelayRoutes } from './routes/relay'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
+import { startOauthCallbackServer } from './oauthCallback'
 
 async function main(): Promise<void> {
   initDb()
@@ -42,6 +43,9 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.PORT, host: config.HOST })
   startTokenRefreshJob()
+  // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
+  // as a redirect URI, so we run a small dedicated listener on 1455.
+  startOauthCallbackServer()
 }
 
 main().catch((err) => {

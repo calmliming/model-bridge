@@ -10,9 +10,10 @@
 
 ## 当前状态
 
-🚧 **阶段 B —— Claude 中转。** 管理后台、API Key、Claude 账户接入（OAuth）、
-多账户轮换、`/api/claude/v1/messages` 中转与用量记录均已可用。OpenAI 与
-Gemini 将在阶段 C–D 实现。
+🚧 **阶段 C —— Claude + OpenAI 中转。** 管理后台、API Key、Claude（粘贴 code
+方式 OAuth）与 OpenAI/ChatGPT（`localhost:1455` 浏览器回调）的账户接入、多账户
+轮换、`/api/claude/v1/messages` 与 `/api/openai/v1/responses` 中转，以及用量
+记录均已可用。Gemini 将在阶段 D 实现。
 
 ## 技术栈
 

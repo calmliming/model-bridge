@@ -1,14 +1,42 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken } from '../accounts/manager'
 import { markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { relayClaudeMessages } from '../providers/claude/relay'
-import { createStreamUsageParser, parseUsageFromJson } from '../providers/claude/usage'
+import * as claudeUsage from '../providers/claude/usage'
+import { relayOpenaiResponses } from '../providers/openai/relay'
+import * as openaiUsage from '../providers/openai/usage'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
+
+interface ProviderHandler {
+  id: string
+  /** Always treat the upstream response as SSE (some providers force `stream:true`). */
+  forceStream: boolean
+  callUpstream(token: string, body: Record<string, unknown>): Promise<Response>
+  createStreamParser(): { feed(event: unknown): void; result(): UsageData }
+  parseJsonUsage(body: unknown): UsageData
+}
+
+const PROVIDERS: Record<string, ProviderHandler> = {
+  claude: {
+    id: 'claude',
+    forceStream: false,
+    callUpstream: relayClaudeMessages,
+    createStreamParser: claudeUsage.createStreamParser,
+    parseJsonUsage: claudeUsage.parseJsonUsage,
+  },
+  openai: {
+    id: 'openai',
+    forceStream: true, // the Codex backend itself rejects non-streaming.
+    callUpstream: relayOpenaiResponses,
+    createStreamParser: openaiUsage.createStreamParser,
+    parseJsonUsage: openaiUsage.parseJsonUsage,
+  },
+}
 
 interface RelayMeta {
   apiKeyId: string
@@ -18,76 +46,98 @@ interface RelayMeta {
   startedAt: number
 }
 
-/** Registers the provider relay endpoints. Claude only for now. */
+/** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
-  app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, async (request, reply) => {
-    const apiKey = request.apiKey!
-    if (apiKey.allowedProviders && !apiKey.allowedProviders.includes('claude')) {
-      return reply.code(403).send({ error: 'this API key may not use Claude' })
+  // Claude Code → Anthropic Messages API
+  app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, (request, reply) =>
+    executeRelay(request, reply, PROVIDERS.claude!),
+  )
+  // Codex CLI → Codex backend Responses API
+  app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, (request, reply) =>
+    executeRelay(request, reply, PROVIDERS.openai!),
+  )
+}
+
+/** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
+async function executeRelay(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  provider: ProviderHandler,
+): Promise<void> {
+  const apiKey = request.apiKey!
+  if (apiKey.allowedProviders && !apiKey.allowedProviders.includes(provider.id)) {
+    await reply.code(403).send({ error: `this API key may not use ${provider.id}` })
+    return
+  }
+
+  const body = (request.body ?? {}) as Record<string, unknown>
+  const wantStream = provider.forceStream || body.stream === true
+  const model = typeof body.model === 'string' ? body.model : ''
+  const tried: string[] = []
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const account = pickAccount(provider.id, tried)
+    if (!account) {
+      await reply.code(503).send({
+        error: tried.length
+          ? `all ${provider.id} accounts are unavailable`
+          : `no ${provider.id} account configured`,
+      })
+      return
+    }
+    tried.push(account.id)
+
+    let token: string
+    try {
+      token = await ensureFreshToken(account)
+    } catch (err) {
+      request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
+      penalizeAccount(account.id, 'error')
+      continue
     }
 
-    const body = (request.body ?? {}) as Record<string, unknown>
-    const wantStream = body.stream === true
-    const model = typeof body.model === 'string' ? body.model : ''
-    const tried: string[] = []
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const account = pickAccount('claude', tried)
-      if (!account) {
-        return reply
-          .code(503)
-          .send({ error: tried.length ? 'all Claude accounts are unavailable' : 'no Claude account configured' })
-      }
-      tried.push(account.id)
-
-      let token: string
-      try {
-        token = await ensureFreshToken(account)
-      } catch (err) {
-        request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
-        penalizeAccount(account.id, 'error')
-        continue
-      }
-
-      const startedAt = Date.now()
-      let upstream: Response
-      try {
-        upstream = await relayClaudeMessages(token, body)
-      } catch (err) {
-        request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
-        penalizeAccount(account.id, 'error')
-        continue
-      }
-
-      const retryable =
-        upstream.status === 429 || upstream.status === 401 || upstream.status >= 500
-      const lastAttempt = attempt === MAX_ATTEMPTS - 1
-
-      if (retryable && !lastAttempt) {
-        penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
-        await upstream.body?.cancel().catch(() => {})
-        continue
-      }
-
-      if (retryable) {
-        // Retries exhausted — penalize but still forward the error to the client.
-        penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
-      } else {
-        markAccountUsed(account.id)
-      }
-
-      const meta: RelayMeta = {
-        apiKeyId: apiKey.id,
-        accountId: account.id,
-        provider: 'claude',
-        model,
-        startedAt,
-      }
-      return wantStream ? sendStreaming(reply, upstream, meta) : sendBuffered(reply, upstream, meta)
+    const startedAt = Date.now()
+    let upstream: Response
+    try {
+      upstream = await provider.callUpstream(token, body)
+    } catch (err) {
+      request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
+      penalizeAccount(account.id, 'error')
+      continue
     }
 
-    return reply.code(503).send({ error: 'all Claude accounts failed' })
-  })
+    const retryable =
+      upstream.status === 429 || upstream.status === 401 || upstream.status >= 500
+    const lastAttempt = attempt === MAX_ATTEMPTS - 1
+
+    if (retryable && !lastAttempt) {
+      penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
+      await upstream.body?.cancel().catch(() => {})
+      continue
+    }
+
+    if (retryable) {
+      penalizeAccount(account.id, upstream.status === 429 ? 'rate_limited' : 'error')
+    } else {
+      markAccountUsed(account.id)
+    }
+
+    const meta: RelayMeta = {
+      apiKeyId: apiKey.id,
+      accountId: account.id,
+      provider: provider.id,
+      model,
+      startedAt,
+    }
+    if (wantStream) {
+      await sendStreaming(reply, upstream, meta, provider)
+    } else {
+      await sendBuffered(reply, upstream, meta, provider)
+    }
+    return
+  }
+
+  await reply.code(503).send({ error: `all ${provider.id} accounts failed` })
 }
 
 /** Streams an SSE response straight through while teeing token usage. */
@@ -95,6 +145,7 @@ async function sendStreaming(
   reply: FastifyReply,
   upstream: Response,
   meta: RelayMeta,
+  provider: ProviderHandler,
 ): Promise<void> {
   reply.hijack()
   const raw = reply.raw
@@ -104,7 +155,7 @@ async function sendStreaming(
     connection: 'keep-alive',
   })
 
-  const parser = createStreamUsageParser()
+  const parser = provider.createStreamParser()
   let buffer = ''
 
   if (upstream.body) {
@@ -144,11 +195,12 @@ async function sendBuffered(
   reply: FastifyReply,
   upstream: Response,
   meta: RelayMeta,
+  provider: ProviderHandler,
 ): Promise<void> {
   const text = await upstream.text()
   let usage: UsageData = emptyUsage()
   try {
-    usage = parseUsageFromJson(JSON.parse(text))
+    usage = provider.parseJsonUsage(JSON.parse(text))
   } catch {
     // Error responses are not valid usage JSON — leave usage empty.
   }
@@ -161,14 +213,14 @@ async function sendBuffered(
     status: upstream.ok ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
   })
-  reply
+  await reply
     .code(upstream.status)
     .header('content-type', upstream.headers.get('content-type') ?? 'application/json')
     .send(text)
 }
 
 /** Parses the `data:` JSON from one SSE event block and feeds the usage parser. */
-function feedSseBlock(block: string, parser: ReturnType<typeof createStreamUsageParser>): void {
+function feedSseBlock(block: string, parser: { feed(event: unknown): void }): void {
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue

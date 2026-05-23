@@ -1,9 +1,17 @@
 import { sqlite } from './index'
 
+/** Adds a column to an existing table if it isn't there yet. */
+function ensureColumn(table: string, column: string, ddl: string): void {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (!cols.find((c) => c.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+  }
+}
+
 /**
- * Creates every table if it does not already exist. Runs on each boot
- * so the app starts with no separate migration step. Once the schema
- * stabilises, switch to Drizzle Kit migrations (`npm run db:generate`).
+ * Creates every table if it does not already exist, then applies any
+ * forward-compatible column additions. Runs on each boot so the app
+ * starts with no separate migration step.
  */
 export function initDb(): void {
   sqlite.exec(`
@@ -72,6 +80,7 @@ export function initDb(): void {
       state TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
       code_verifier TEXT NOT NULL,
+      account_name TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );
 
@@ -80,4 +89,7 @@ export function initDb(): void {
       value TEXT NOT NULL
     );
   `)
+
+  // Forward-compatible column additions for existing databases.
+  ensureColumn('oauth_sessions', 'account_name', 'TEXT')
 }

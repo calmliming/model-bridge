@@ -23,10 +23,28 @@ function claudeTier(model: string): keyof typeof CLAUDE_TIERS {
   return 'sonnet'
 }
 
+// OpenAI list prices (approximate, per 1M tokens). Used so the stats page can
+// show "subscription savings" even though the relay itself uses ChatGPT
+// subscription quota — no per-token charge to the user.
+const OPENAI_TIERS: Record<'gpt' | 'mini', TierPrice> = {
+  gpt: { input: 2.5, output: 10, cacheWrite: 0, cacheRead: 0.3 },
+  mini: { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.075 },
+}
+
+function openaiTier(model: string): keyof typeof OPENAI_TIERS {
+  return model.toLowerCase().includes('mini') ? 'mini' : 'gpt'
+}
+
 /** Estimates the USD cost of one request from its token usage. */
 export function estimateCost(provider: string, model: string, usage: UsageData): number {
-  if (provider !== 'claude') return 0 // OpenAI / Gemini pricing lands in Phase C/D
-  const p = CLAUDE_TIERS[claudeTier(model)]
+  let p: TierPrice
+  if (provider === 'claude') {
+    p = CLAUDE_TIERS[claudeTier(model)]
+  } else if (provider === 'openai') {
+    p = OPENAI_TIERS[openaiTier(model)]
+  } else {
+    return 0 // Gemini pricing lands in Phase D
+  }
   const cost =
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +

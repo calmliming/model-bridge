@@ -133,6 +133,16 @@ interface Provider {
 | **OpenAI** | `auth.openai.com/oauth/token` | `chatgpt.com/backend-api/codex/responses` | `POST /api/openai/v1/responses` (+ `/v1/chat/completions`) | must send `stream:true`, `store:false`, `instructions`; strip `max_output_tokens`/`parallel_tool_calls` |
 | **Gemini** | Google OAuth | `cloudcode-pa.googleapis.com` (Code Assist) | `POST /api/gemini/v1beta/models/{model}:streamGenerateContent` | free quota ~1000/day, 60/min |
 
+## Progress
+
+- ✅ Phase 0 — Plan documents (`201af14`)
+- ✅ Phase A — Skeleton & platform core (`832ab86`)
+- ✅ Phase B — Claude relay end-to-end (`afc2ad4`, +`3443a2c` Cloudflare fix)
+- ✅ Phase C — OpenAI / Codex
+- ⬜ Phase D — Gemini
+- ⬜ Phase E — Stats & management polish
+- ⬜ Phase F — Deployment & docs
+
 ## Implementation phases
 
 All phases ship in v1. Order is **Claude-first** to validate the architecture, then OpenAI &
