@@ -167,11 +167,14 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <h2 class="page-title">API Keys</h2>
-      <n-button type="primary" @click="showCreate = true">+ 新建 Key</n-button>
+      <div>
+        <h2 class="page-title">API Keys</h2>
+        <div class="page-subtitle">签发、停用和限制调用方可访问的上游服务商。</div>
+      </div>
+      <n-button type="primary" @click="showCreate = true">新建 Key</n-button>
     </div>
 
-    <n-card>
+    <n-card class="table-card" :bordered="false">
       <n-data-table :columns="columns" :data="keys" :loading="loading" :bordered="false" />
     </n-card>
 

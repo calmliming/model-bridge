@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { darkTheme } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#5b8cff',
-    primaryColorHover: '#7aa2ff',
-    primaryColorPressed: '#4670d8',
-    primaryColorSuppl: '#7aa2ff',
-    borderRadius: '8px',
+    primaryColor: '#2563eb',
+    primaryColorHover: '#3b82f6',
+    primaryColorPressed: '#1d4ed8',
+    primaryColorSuppl: '#14b8a6',
+    borderRadius: '12px',
+    bodyColor: '#f5f7fb',
+    cardColor: '#ffffff',
+    modalColor: '#ffffff',
+    tableColor: '#ffffff',
+    textColorBase: '#0f172a',
   },
 }
 </script>
 
 <template>
-  <n-config-provider :theme="darkTheme" :theme-overrides="themeOverrides">
+  <n-config-provider :theme-overrides="themeOverrides">
     <n-loading-bar-provider>
       <n-message-provider>
         <n-dialog-provider>

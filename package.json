@@ -6,6 +6,7 @@
   "description": "Self-hosted AI API relay platform — Claude / OpenAI / Gemini subscriptions as standard APIs",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:all": "node scripts/dev-all.mjs",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -24,6 +24,15 @@ Gemini 将在阶段 C–D 实现。
 需要 Node.js 20+。
 
 ```bash
+# 同时启动前后端，并用 API / WEB 标签区分格式化日志。
+npm install
+cd web && npm install && cd ..
+npm run dev:all
+```
+
+也可以分别启动：
+
+```bash
 # 后端 —— 端口 3000。会安装依赖；密钥在首次运行时自动生成到 .env。
 npm install
 npm run dev

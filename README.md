@@ -24,6 +24,15 @@ relay and usage logging are working. OpenAI and Gemini land in Phases C–D.
 Requires Node.js 20+.
 
 ```bash
+# Start backend and frontend together with formatted API / WEB log prefixes.
+npm install
+cd web && npm install && cd ..
+npm run dev:all
+```
+
+Or start them separately:
+
+```bash
 # Backend — port 3000. Installs deps; secrets are auto-generated into .env.
 npm install
 npm run dev

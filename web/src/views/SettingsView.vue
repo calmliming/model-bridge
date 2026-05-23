@@ -45,8 +45,14 @@ async function changePassword() {
 
 <template>
   <div>
-    <h2 class="page-title">设置</h2>
-    <n-card title="管理员账户" style="max-width: 460px">
+    <div class="page-head">
+      <div>
+        <h2 class="page-title">设置</h2>
+        <div class="page-subtitle">维护管理员账户和控制台访问安全。</div>
+      </div>
+    </div>
+
+    <n-card class="settings-card surface-card" title="管理员账户" :bordered="false">
       <n-form label-placement="top">
         <n-form-item label="当前用户">
           <n-input :value="auth.username ?? ''" readonly />
@@ -70,3 +76,9 @@ async function changePassword() {
     </n-card>
   </div>
 </template>
+
+<style scoped>
+.settings-card {
+  max-width: 520px;
+}
+</style>
