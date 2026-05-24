@@ -48,6 +48,10 @@ const authorizeUrl = ref('')
 const oauthState = ref('')
 const oauthMode = ref<'paste' | 'callback'>('paste')
 const pasteCode = ref('')
+const pasteCallbackUrl = ref('')
+const showImportToken = ref(false)
+const importAccessToken = ref('')
+const importRefreshToken = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
 
@@ -157,6 +161,10 @@ function openAdd() {
   oauthState.value = ''
   oauthMode.value = 'paste'
   pasteCode.value = ''
+  pasteCallbackUrl.value = ''
+  showImportToken.value = false
+  importAccessToken.value = ''
+  importRefreshToken.value = ''
   showAdd.value = true
 }
 
@@ -218,6 +226,56 @@ async function finishCallback() {
     }
     message.success(`${providerLabel[form.value.provider]} 账户已添加`)
     showAdd.value = false
+  } finally {
+    busy.value = false
+  }
+}
+
+async function finishPasteCallback() {
+  if (!pasteCallbackUrl.value.trim()) {
+    message.warning('请粘贴浏览器地址栏中的完整回调 URL')
+    return
+  }
+  busy.value = true
+  try {
+    await api.post('/admin/accounts/oauth/finish', {
+      callbackUrl: pasteCallbackUrl.value.trim(),
+    })
+    message.success(`${providerLabel[form.value.provider]} 账户已添加`)
+    showAdd.value = false
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '授权失败'))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function finishImportToken() {
+  if (!importAccessToken.value.trim()) {
+    message.warning('请填写 Access Token')
+    return
+  }
+  if (!form.value.name.trim()) {
+    message.warning('请填写账户名称')
+    return
+  }
+  busy.value = true
+  try {
+    const payload: Record<string, unknown> = {
+      provider: form.value.provider,
+      name: form.value.name.trim(),
+      accessToken: importAccessToken.value.trim(),
+    }
+    if (importRefreshToken.value.trim()) {
+      payload.refreshToken = importRefreshToken.value.trim()
+    }
+    await api.post('/admin/accounts/import/token', payload)
+    message.success(`${providerLabel[form.value.provider]} 账户已添加`)
+    showAdd.value = false
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '导入失败'))
   } finally {
     busy.value = false
   }
@@ -407,11 +465,74 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <n-text depth="3">
-            　完成授权后浏览器会显示"授权完成"页面，回到这里点击下方按钮刷新即可。
+            　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 1455 端口（如本地部署），授权会自动完成。
           </n-text>
           <n-text depth="3" style="display: block; margin-top: 6px; font-size: 12px">
             （回调由本机 1455 端口处理；浏览器必须能访问运行 model-bridge 那台机器的 localhost:1455）
           </n-text>
+          <n-divider style="margin: 18px 0">远程部署 / 手动完成</n-divider>
+
+          <n-text depth="3" style="font-size: 13px">
+            如果服务器不在本地，浏览器跳转到 localhost 后页面会打不开。<strong>复制浏览器地址栏中的完整 URL</strong>，粘贴到下面：
+          </n-text>
+          <n-input
+            v-model:value="pasteCallbackUrl"
+            placeholder="http://localhost:1455/auth/callback?code=...&state=..."
+            style="margin-top: 8px"
+          />
+          <n-text depth="3" style="display: block; margin-top: 4px; font-size: 12px">
+            支持粘贴完整 URL，系统会自动提取 code 和 state
+          </n-text>
+          <n-button
+            type="primary"
+            size="small"
+            :loading="busy"
+            :disabled="!pasteCallbackUrl.trim()"
+            style="margin-top: 10px; width: 100%"
+            @click="finishPasteCallback"
+          >
+            粘贴 URL 完成授权
+          </n-button>
+
+          <n-divider style="margin: 18px 0">直接导入 Token</n-divider>
+
+          <n-button
+            size="small"
+            quaternary
+            @click="showImportToken = !showImportToken"
+            style="margin-bottom: 8px"
+          >
+            {{ showImportToken ? '收起' : '展开' }} Token 手动导入
+          </n-button>
+          <template v-if="showImportToken">
+            <n-text depth="3" style="font-size: 12px">
+              适合已有 Access Token / Refresh Token 的场景，跳过 OAuth 授权流程。
+            </n-text>
+            <n-input
+              v-model:value="importAccessToken"
+              placeholder="Access Token（必填）"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 4 }"
+              style="margin-top: 8px"
+            />
+            <n-input
+              v-model:value="importRefreshToken"
+              placeholder="Refresh Token（可选）"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 3 }"
+              style="margin-top: 8px"
+            />
+            <n-button
+              type="primary"
+              size="small"
+              :loading="busy"
+              :disabled="!importAccessToken.trim()"
+              style="margin-top: 10px; width: 100%"
+              @click="finishImportToken"
+            >
+              导入 Token
+            </n-button>
+          </template>
         </template>
       </div>
 

@@ -48,12 +48,25 @@ const oauthStartSchema = z.object({
   name: z.string().min(1),
 })
 
-const oauthFinishSchema = z.object({
-  state: z.string().min(1),
-  code: z.string().min(1),
-})
+const oauthFinishSchema = z
+  .object({
+    state: z.string().optional(),
+    code: z.string().optional(),
+    callbackUrl: z.string().optional(),
+  })
+  .refine((v) => !!(v.state && v.code) || !!v.callbackUrl, {
+    message: 'need (state+code) or callbackUrl',
+  })
 
 const accountUpdateSchema = z.object({ status: z.enum(['active', 'disabled']) })
+
+const importTokenSchema = z.object({
+  provider: z.enum(['claude', 'openai', 'gemini']),
+  name: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().optional(),
+  expiresAt: z.number().int().positive().optional(),
+})
 
 /** Registers all `/api/admin/*` endpoints used by the dashboard. */
 export function registerAdminRoutes(app: FastifyInstance): void {
@@ -152,14 +165,38 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     }
   })
 
-  // Step 2 (paste-mode providers only): exchange the pasted code for tokens.
-  // For callback-mode providers, the dedicated :1455 listener does this instead.
+  // Step 2 (paste & callback-mode): exchange the pasted code for tokens.
+  // For callback-mode providers, users can paste the full redirect URL from the
+  // browser address bar when localhost:1455 isn't reachable (e.g. remote server).
   app.post('/api/admin/accounts/oauth/finish', { preHandler: requireAdmin }, async (request, reply) => {
     const body = oauthFinishSchema.safeParse(request.body)
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
-    const { state, code } = body.data
+    let { state, code } = body.data
+    // Parse callback URL if pasted: http://localhost:1455/auth/callback?code=...&state=...
+    if (body.data.callbackUrl) {
+      try {
+        const url = new URL(body.data.callbackUrl)
+        code = url.searchParams.get('code') ?? undefined
+        state = url.searchParams.get('state') ?? undefined
+        if (!code || !state) {
+          return reply.code(400).send({ error: 'URL 中缺少 code 或 state 参数' })
+        }
+      } catch {
+        // If URL parsing fails, try regex extraction
+        const codeMatch = body.data.callbackUrl.match(/[?&]code=([^&]+)/)
+        const stateMatch = body.data.callbackUrl.match(/[?&]state=([^&]+)/)
+        code = codeMatch?.[1]
+        state = stateMatch?.[1]
+        if (!code || !state) {
+          return reply.code(400).send({ error: '无法从 URL 中提取 code/state 参数' })
+        }
+      }
+    }
+    if (!code || !state) {
+      return reply.code(400).send({ error: 'missing code or state' })
+    }
     const session = db
       .select()
       .from(oauthSessions)
@@ -197,6 +234,32 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     })
     return reply.code(201).send({ id: created.id })
   })
+
+  // Direct token import: skip OAuth and create an account from a manually-
+  // supplied access token (and optionally a refresh token). Useful for remote
+  // servers where the OAuth callback to localhost:1455 can't work.
+  app.post(
+    '/api/admin/accounts/import/token',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = importTokenSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      const { provider, name, accessToken, refreshToken, expiresAt } = body.data
+      const created = createAccount({
+        provider,
+        name,
+        tokens: {
+          accessToken,
+          refreshToken: refreshToken ?? '',
+          expiresAt: expiresAt ?? 0,
+        },
+        metadata: null,
+      })
+      return reply.code(201).send({ id: created.id, name, provider })
+    },
+  )
 
   app.patch<{ Params: { id: string } }>(
     '/api/admin/accounts/:id',
