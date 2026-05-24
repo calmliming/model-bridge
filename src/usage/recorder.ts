@@ -4,9 +4,15 @@ import { usageLogs } from '../db/schema'
 import { estimateCost } from './pricing'
 import type { UsageData } from '../providers/types'
 
-const incrementKeyQuota = sqlite.prepare(
-  'UPDATE api_keys SET quota_used = quota_used + ?, last_used_at = ? WHERE id = ?',
-)
+let _incrementKeyQuota: ReturnType<typeof sqlite.prepare> | null = null
+function incrementKeyQuota() {
+  if (!_incrementKeyQuota) {
+    _incrementKeyQuota = sqlite.prepare(
+      'UPDATE api_keys SET quota_used = quota_used + ?, last_used_at = ? WHERE id = ?',
+    )
+  }
+  return _incrementKeyQuota
+}
 
 export interface UsageRecord {
   apiKeyId: string
@@ -39,7 +45,7 @@ export function recordUsage(record: UsageRecord): void {
       })
       .run()
     if (record.apiKeyId && cost > 0) {
-      incrementKeyQuota.run(cost, Date.now(), record.apiKeyId)
+      incrementKeyQuota().run(cost, Date.now(), record.apiKeyId)
     }
   } catch (err) {
     // Usage logging must never break the relay response.
