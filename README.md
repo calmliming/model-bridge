@@ -60,7 +60,7 @@ the password under **Settings** immediately.
 `install.sh` generates a `.env` with random `ENCRYPTION_KEY` / `JWT_SECRET`,
 then `docker compose up -d --build`. Once it finishes:
 
-- Dashboard: <http://localhost:3000>
+- Dashboard: <http://localhost:3001>
 - OAuth callback listener: `localhost:1455` (browser must reach it during
   OpenAI / Google sign-in)
 - Default admin: `admin / admin` — change it under **Settings** before
@@ -149,14 +149,39 @@ file under `./data/` — back up that folder.
 
 If you run model-bridge on a remote host (VPS / NAS / home server), the
 **OAuth callback on `localhost:1455` doesn't reach back** from the cloud
-provider's sign-in page. Two options:
+provider's sign-in page. Three options:
 
-1. **SSH tunnel.** On the laptop where you do the OAuth flow, run
-   `ssh -L 1455:127.0.0.1:1455 your-server` before clicking "生成授权链接".
-   The browser's redirect to `http://localhost:1455/...` now lands in the
-   remote container via the tunnel. Disconnect once accounts are added.
-2. **Add accounts locally**, then move `./data/` to the remote host. Tokens
-   stay valid; the background refresh job keeps them alive.
+| Method | Description | Best for |
+| ------ | ----------- | -------- |
+| **Paste callback URL** (recommended) | After authorizing in the browser, copy the full redirect URL from the address bar (`localhost:1455/auth/callback?code=...`) and paste it into the dashboard. The system auto-extracts code/state. | No extra tools needed |
+| **SSH tunnel** | Run `ssh -R 1455:localhost:1455 your-server` locally before authorizing. The browser redirect flows through the tunnel to the server. | Occasional account setup |
+| **Move database** | Add accounts locally first, then copy `./data/` to the remote host. The background refresh job keeps tokens alive. | Bulk migration |
+
+You can also use the **Direct Import Token** feature on the Add Account page
+if you already have an Access Token / Refresh Token — this bypasses OAuth entirely.
+
+### Docker deployment notes
+
+Docker Compose maps `3001:3000` (external 3001 → container 3000).
+Access the dashboard at `http://<server-ip>:3001`.
+
+### Updating a deployed instance
+
+```bash
+cd ~/model-bridge
+git pull
+docker compose up -d --build    # full rebuild (backend + frontend)
+```
+
+If only the frontend changed:
+
+```bash
+cd web && npm run build && cd ..
+docker compose restart
+```
+
+The `./data` directory is volume-mounted — rebuilding does not lose the database
+or account data. Back up `./data` regularly.
 
 > ⚠️ Using subscription OAuth tokens through a relay may violate provider
 > Terms of Service and risk account suspension. Intended for your own

@@ -59,7 +59,7 @@ npm run dev
 `install.sh` 会生成带随机 `ENCRYPTION_KEY` / `JWT_SECRET` 的 `.env`，然后
 `docker compose up -d --build`。完成后：
 
-- 管理后台：<http://localhost:3000>
+- 管理后台：<http://localhost:3001>
 - OAuth 回调监听：`localhost:1455`（OpenAI / Google 登录时浏览器需访问此端口）
 - 默认管理员：`admin / admin` —— 暴露后台前请在**设置**里改掉
 
@@ -142,13 +142,39 @@ Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 
 ## 远程部署
 
 如果把 model-bridge 部署在远程（VPS / NAS / 家庭服务器），授权回调的
-`localhost:1455` **从云端登录页是回不来的**。两种办法：
+`localhost:1455` 从云端是回不来的。三种处理方式：
 
-1. **SSH 隧道。** 在做 OAuth 那台本地电脑上先 `ssh -L 1455:127.0.0.1:1455
-   your-server`，再去后台点「生成授权链接」。浏览器跳转到
-   `http://localhost:1455/...` 时通过隧道送进远程容器。账户添完之后断开即可。
-2. **先在本地添账户**，再把 `./data/` 拷到远程。Token 仍然有效，后台的刷新
-   任务会自动续期。
+| 方式 | 说明 | 适用场景 |
+| ---- | ---- | -------- |
+| **粘贴回调 URL**（推荐） | 浏览器授权完成后，从地址栏复制完整回调 URL（`localhost:1455/auth/callback?code=...`），粘贴到后台输入框。系统自动提取 code/state 完成授权。 | 无法 SSH/搬数据库时最方便 |
+| **SSH 隧道** | 本地执行 `ssh -R 1455:localhost:1455 your-server`，授权时浏览器跳转会通过隧道送达服务器。 | 偶尔添加账号 |
+| **搬数据库** | 先在本地添加账户，再把 `./data/` 目录拷贝到服务器。Token 刷新任务会自动续期。 | 批量迁移或不方便实时操作 |
+
+另外，如果已有 Access Token / Refresh Token，可以直接用后台的「直接导入 Token」
+功能，完全跳过 OAuth 授权流程。
+
+### Docker 部署说明
+
+Docker Compose 的端口映射为 `3001:3000`（外部 3001 → 容器内 3000）。
+管理后台通过 `http://<服务器IP>:3001` 访问。
+
+### 代码更新后重新部署
+
+```bash
+cd ~/model-bridge
+git pull
+docker compose up -d --build    # 完整重建（前后端都改了）
+```
+
+如果只改了前端：
+
+```bash
+cd web && npm run build && cd ..
+docker compose restart
+```
+
+`./data` 目录是 volume 挂载的，重建不会丢失数据库和账户数据。
+建议定期备份 `./data` 目录。
 
 > ⚠️ 通过中转、用非官方工具使用订阅 OAuth 令牌，可能违反服务商服务条款并有
 > 账户被封风险。仅建议使用你自己的订阅、并在小范围可信群体内共享。详见
