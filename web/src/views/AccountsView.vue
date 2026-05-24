@@ -1,9 +1,23 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { NButton, NProgress, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
+
+interface AccountQuotaWindow {
+  key: 'hourly' | 'weekly' | 'primary' | 'secondary'
+  label: string
+  usedPercent: number | null
+  resetAt: number | null
+  exceeded: boolean
+}
+
+interface AccountQuotaSnapshot {
+  source: 'claude' | 'openai'
+  updatedAt: number
+  windows: AccountQuotaWindow[]
+}
 
 interface Account {
   id: string
@@ -14,6 +28,7 @@ interface Account {
   cooldownUntil: number | null
   lastUsedAt: number | null
   createdAt: number
+  quota: AccountQuotaSnapshot | null
 }
 
 type Provider = 'claude' | 'openai' | 'gemini'
@@ -34,6 +49,7 @@ const oauthState = ref('')
 const oauthMode = ref<'paste' | 'callback'>('paste')
 const pasteCode = ref('')
 const busy = ref(false)
+let refreshTimer: number | null = null
 
 const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
@@ -64,6 +80,62 @@ function effectiveStatus(row: Account) {
 
 function formatQuotaRefresh(row: Account) {
   return isCoolingDown(row) ? formatTime(row.cooldownUntil) : '—'
+}
+
+function formatPercent(value: number | null) {
+  if (value == null) return '—'
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)}%`
+}
+
+function quotaStatus(window: AccountQuotaWindow) {
+  if (window.exceeded) return 'error'
+  const used = window.usedPercent ?? 0
+  if (used >= 90) return 'error'
+  if (used >= 70) return 'warning'
+  return 'success'
+}
+
+function quotaPercent(window: AccountQuotaWindow) {
+  return Math.max(0, Math.min(100, Math.round(window.usedPercent ?? 0)))
+}
+
+function renderQuota(row: Account) {
+  const quota = row.quota
+  if (!quota || !quota.windows.length) return h('span', { class: 'muted-cell' }, '待请求更新')
+  const windows = quota.windows
+  return h('div', { class: 'quota-stack' }, [
+    ...windows.map((window) =>
+      h('div', { class: 'quota-window' }, [
+        h('span', { class: 'quota-label' }, window.label),
+        h(NProgress, {
+          type: 'line',
+          percentage: quotaPercent(window),
+          status: quotaStatus(window),
+          showIndicator: false,
+          height: 6,
+          borderRadius: 3,
+          class: 'quota-progress',
+        }),
+        h('span', { class: 'quota-percent' }, formatPercent(window.usedPercent)),
+      ]),
+    ),
+    h('span', { class: 'quota-updated' }, `刷新 ${formatTime(quota.updatedAt)}`),
+  ])
+}
+
+function renderQuotaReset(row: Account) {
+  const windows = row.quota?.windows ?? []
+  if (!windows.length) return formatQuotaRefresh(row)
+  return h(
+    'div',
+    { class: 'quota-reset-stack' },
+    windows.map((window) =>
+      h('span', { class: window.exceeded ? 'quota-reset is-exceeded' : 'quota-reset' }, [
+        h('strong', null, `${window.label} `),
+        formatTime(window.resetAt),
+      ]),
+    ),
+  )
 }
 
 async function load() {
@@ -218,7 +290,8 @@ const columns = computed<DataTableColumns<Account>>(() => [
     },
   },
   { title: '令牌到期', key: 'tokenExpiresAt', render: (row) => formatTime(row.tokenExpiresAt) },
-  { title: '配额更新', key: 'cooldownUntil', render: formatQuotaRefresh },
+  { title: '实时配额', key: 'quota', minWidth: 190, render: renderQuota },
+  { title: '配额更新', key: 'quotaReset', minWidth: 190, render: renderQuotaReset },
   { title: '最后使用', key: 'lastUsedAt', render: (row) => formatTime(row.lastUsedAt) },
   {
     title: '启用',
@@ -260,7 +333,14 @@ const columns = computed<DataTableColumns<Account>>(() => [
   },
 ])
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  refreshTimer = window.setInterval(() => void load(), 30_000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer != null) window.clearInterval(refreshTimer)
+})
 </script>
 
 <template>
@@ -270,7 +350,13 @@ onMounted(load)
     </div>
 
     <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="accounts" :loading="loading" :bordered="false" />
+      <n-data-table
+        :columns="columns"
+        :data="accounts"
+        :loading="loading"
+        :bordered="false"
+        :scroll-x="1180"
+      />
     </n-card>
 
     <n-modal v-model:show="showAdd" preset="card" title="添加上游账户" style="width: 520px">
@@ -351,3 +437,57 @@ onMounted(load)
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+.muted-cell {
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.quota-stack,
+.quota-reset-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.quota-window {
+  display: grid;
+  grid-template-columns: 42px minmax(72px, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-label,
+.quota-percent,
+.quota-updated,
+.quota-reset {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.quota-label,
+.quota-percent {
+  color: #0f172a;
+}
+
+.quota-progress {
+  min-width: 72px;
+}
+
+.quota-updated,
+.quota-reset {
+  color: rgba(15, 23, 42, 0.52);
+}
+
+.quota-reset strong {
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.quota-reset.is-exceeded,
+.quota-reset.is-exceeded strong {
+  color: #d03050;
+}
+</style>

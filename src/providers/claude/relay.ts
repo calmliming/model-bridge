@@ -6,6 +6,7 @@ const ANTHROPIC_VERSION = '2023-06-01'
 const ANTHROPIC_BETA = 'oauth-2025-04-20'
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 const USER_AGENT = 'claude-cli/1.0.0 (external, cli)'
+const FORBIDDEN_FIELDS = ['context_management'] as const
 
 interface TextBlock {
   type: 'text'
@@ -35,12 +36,20 @@ function normalizeSystem(system: unknown): unknown {
   return system
 }
 
+/** Normalises an incoming Messages-API body to what Anthropic accepts. */
+export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body }
+  for (const field of FORBIDDEN_FIELDS) delete out[field]
+  out.system = normalizeSystem(body.system)
+  return out
+}
+
 /** Relays a /v1/messages request to Anthropic using a subscription OAuth token. */
 export function relayClaudeMessages(
   accessToken: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const payload = { ...body, system: normalizeSystem(body.system) }
+  const payload = normalizeClaudeMessagesBody(body)
   return fetch(ANTHROPIC_MESSAGES_URL, {
     method: 'POST',
     headers: {

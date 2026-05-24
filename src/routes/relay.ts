@@ -1,7 +1,8 @@
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
-import { ensureFreshToken } from '../accounts/manager'
+import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
+import { extractAccountQuota } from '../accounts/quota'
 import { markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
@@ -381,6 +382,8 @@ async function executeRelay(
       penalizeAccount(account.id, 'error')
       continue
     }
+    const quota = extractAccountQuota(provider.id, upstream.headers)
+    if (quota) updateAccountQuota(account.id, quota)
 
     const failure = await classifyUpstreamFailure(provider.id, upstream)
     const lastAttempt = attempt === MAX_ATTEMPTS - 1

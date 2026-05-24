@@ -5,6 +5,7 @@ import { accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
+import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
@@ -15,6 +16,12 @@ export interface CreateAccountInput {
   tokens: TokenSet
   /** Provider-specific data needed at relay time (e.g. Gemini's project id). */
   metadata?: Record<string, unknown> | null
+}
+
+function metadataObject(metadata: unknown): Record<string, unknown> {
+  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...(metadata as Record<string, unknown>) }
+    : {}
 }
 
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
@@ -46,11 +53,16 @@ export function listAccounts() {
       tokenExpiresAt: accounts.tokenExpiresAt,
       cooldownUntil: accounts.cooldownUntil,
       lastUsedAt: accounts.lastUsedAt,
+      metadata: accounts.metadata,
       createdAt: accounts.createdAt,
     })
     .from(accounts)
     .orderBy(desc(accounts.createdAt))
     .all()
+    .map(({ metadata, ...account }) => ({
+      ...account,
+      quota: accountQuotaFromMetadata(metadata),
+    }))
 }
 
 export function getAccount(id: string) {
@@ -63,7 +75,16 @@ export function deleteAccount(id: string): void {
 
 /** Updates provider-specific metadata cached on an account. */
 export function updateAccountMetadata(id: string, metadata: Record<string, unknown>): void {
-  db.update(accounts).set({ metadata }).where(eq(accounts.id, id)).run()
+  const row = db.select({ metadata: accounts.metadata }).from(accounts).where(eq(accounts.id, id)).get()
+  db.update(accounts)
+    .set({ metadata: { ...metadataObject(row?.metadata), ...metadata } })
+    .where(eq(accounts.id, id))
+    .run()
+}
+
+/** Stores the latest non-secret quota snapshot observed from upstream headers. */
+export function updateAccountQuota(id: string, quota: AccountQuotaSnapshot): void {
+  updateAccountMetadata(id, { quota })
 }
 
 /** Enables or disables an account. */
