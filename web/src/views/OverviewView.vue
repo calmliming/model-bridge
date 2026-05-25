@@ -52,6 +52,10 @@ interface DashboardRecentLog {
   model: string | null
   status: string
   latencyMs: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
   apiKeyName: string | null
   accountName: string | null
@@ -303,6 +307,10 @@ function quotaLabel(row: DashboardKey): string {
 function latencyLabel(ms: number | null): string {
   return ms == null ? '—' : `${ms}ms`
 }
+
+function logTokens(row: DashboardRecentLog): number {
+  return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+}
 </script>
 
 <template>
@@ -437,19 +445,28 @@ function latencyLabel(ms: number | null): string {
 
       <div v-if="recentLogs.length" class="log-list">
         <div v-for="row in recentLogs" :key="row.id" class="log-row">
-          <div class="log-main">
-            <n-tag size="small" :type="logStatusType(row.status)" :bordered="false">
-              {{ row.status }}
-            </n-tag>
-            <div>
-              <strong>{{ row.model || '(unknown model)' }}</strong>
-              <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
+          <div class="log-top">
+            <div class="log-main">
+              <n-tag size="small" :type="logStatusType(row.status)" :bordered="false">
+                {{ row.status }}
+              </n-tag>
+              <div>
+                <strong>{{ row.model || '(unknown model)' }}</strong>
+                <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
+              </div>
+            </div>
+            <div class="log-meta">
+              <span>{{ latencyLabel(row.latencyMs) }}</span>
+              <span>{{ formatCost(row.cost) }}</span>
+              <span>{{ formatTime(row.ts) }}</span>
             </div>
           </div>
-          <div class="log-meta">
-            <span>{{ latencyLabel(row.latencyMs) }}</span>
-            <span>{{ formatCost(row.cost) }}</span>
-            <span>{{ formatTime(row.ts) }}</span>
+          <div class="log-token-grid">
+            <span>输入 <strong>{{ formatNumber(row.inputTokens) }}</strong></span>
+            <span>输出 <strong>{{ formatNumber(row.outputTokens) }}</strong></span>
+            <span>缓存 <strong>{{ formatNumber(row.cacheCreateTokens) }}</strong></span>
+            <span>命中 <strong>{{ formatNumber(row.cacheReadTokens) }}</strong></span>
+            <span>总计 <strong>{{ formatNumber(logTokens(row)) }}</strong></span>
           </div>
         </div>
       </div>
@@ -651,7 +668,7 @@ function latencyLabel(ms: number | null): string {
 
 .key-head,
 .key-foot,
-.log-row,
+.log-top,
 .log-main,
 .log-meta {
   display: flex;
@@ -660,7 +677,7 @@ function latencyLabel(ms: number | null): string {
 
 .key-head,
 .key-foot,
-.log-row {
+.log-top {
   justify-content: space-between;
   gap: 12px;
 }
@@ -672,7 +689,13 @@ function latencyLabel(ms: number | null): string {
 }
 
 .log-row {
+  display: grid;
+  gap: 12px;
   padding: 12px;
+}
+
+.log-top {
+  min-width: 0;
 }
 
 .log-main {
@@ -693,6 +716,33 @@ function latencyLabel(ms: number | null): string {
   text-align: right;
 }
 
+.log-token-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.log-token-grid span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: rgba(15, 23, 42, 0.54);
+  background: #f8fafc;
+  font-size: 12px;
+}
+
+.log-token-grid strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .empty-state {
   display: grid;
   min-height: 150px;
@@ -705,7 +755,7 @@ function latencyLabel(ms: number | null): string {
 }
 
 @media (max-width: 720px) {
-  .log-row,
+  .log-top,
   .key-head,
   .key-foot {
     align-items: flex-start;
@@ -715,6 +765,10 @@ function latencyLabel(ms: number | null): string {
   .log-meta {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .log-token-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

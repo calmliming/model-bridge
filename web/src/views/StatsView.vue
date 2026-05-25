@@ -64,7 +64,7 @@ interface Summary {
 
 const message = useMessage()
 const loading = ref(true)
-const range = ref<7 | 30 | 90>(30)
+const range = ref<1 | 7 | 30>(1)
 const summary = ref<Summary | null>(null)
 
 const PROVIDER_COLOR: Record<string, string> = {
@@ -301,7 +301,7 @@ const keyColumns: DataTableColumns<KeyStat> = [
   },
 ]
 
-const rangeLabel = (d: number) => `近 ${d} 天`
+const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 </script>
 
 <template>
@@ -312,9 +312,9 @@ const rangeLabel = (d: number) => `近 ${d} 天`
         <p>按 token、模型、服务商和 API Key 查看中转消耗。</p>
       </div>
       <n-radio-group v-model:value="range" size="small">
+        <n-radio-button :value="1">{{ rangeLabel(1) }}</n-radio-button>
         <n-radio-button :value="7">{{ rangeLabel(7) }}</n-radio-button>
         <n-radio-button :value="30">{{ rangeLabel(30) }}</n-radio-button>
-        <n-radio-button :value="90">{{ rangeLabel(90) }}</n-radio-button>
       </n-radio-group>
     </div>
 

@@ -93,6 +93,10 @@ export interface DashboardRecentLog {
   model: string | null
   status: string
   latencyMs: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
   apiKeyName: string | null
   accountName: string | null
@@ -123,6 +127,16 @@ const MS_PER_DAY = 86_400_000
 
 function utcDayKey(timestampMs: number): string {
   return new Date(timestampMs).toISOString().slice(0, 10)
+}
+
+function utcDayStart(timestampMs: number): number {
+  const d = new Date(timestampMs)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}
+
+function rangeStart(days: number): number {
+  const range = clampDays(days)
+  return utcDayStart(Date.now()) - (range - 1) * MS_PER_DAY
 }
 
 function clampDays(days: number): number {
@@ -199,7 +213,7 @@ function asKey(row: Record<string, unknown>): KeyStat {
  */
 export async function dailyStats(days: number): Promise<DailyStat[]> {
   const range = clampDays(days)
-  const since = Date.now() - range * MS_PER_DAY
+  const since = rangeStart(range)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT to_char(to_timestamp(ts / 1000), 'YYYY-MM-DD') AS day,
             COUNT(*) AS requests,
@@ -234,7 +248,7 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
 }
 
 export async function statsByProvider(days: number): Promise<ProviderStat[]> {
-  const since = Date.now() - clampDays(days) * MS_PER_DAY
+  const since = rangeStart(days)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT provider,
             COUNT(*) AS requests,
@@ -254,7 +268,7 @@ export async function statsByProvider(days: number): Promise<ProviderStat[]> {
 }
 
 export async function statsByModel(days: number, limit = 10): Promise<ModelStat[]> {
-  const since = Date.now() - clampDays(days) * MS_PER_DAY
+  const since = rangeStart(days)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT COALESCE(model, '(unknown)') AS model,
             COUNT(*) AS requests,
@@ -275,7 +289,7 @@ export async function statsByModel(days: number, limit = 10): Promise<ModelStat[
 }
 
 export async function statsByKey(days: number): Promise<KeyStat[]> {
-  const since = Date.now() - clampDays(days) * MS_PER_DAY
+  const since = rangeStart(days)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT api_keys.id AS id,
             api_keys.name AS name,
@@ -300,7 +314,7 @@ export async function statsByKey(days: number): Promise<KeyStat[]> {
 
 export async function statsSummary(days: number): Promise<StatsSummary> {
   const range = clampDays(days)
-  const since = Date.now() - range * MS_PER_DAY
+  const since = rangeStart(range)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT COUNT(*) AS requests,
             COALESCE(SUM(input_tokens), 0) AS inputTokens,
@@ -448,6 +462,10 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
             usage_logs.model AS model,
             usage_logs.status AS status,
             usage_logs.latency_ms AS latencyMs,
+            usage_logs.input_tokens AS inputTokens,
+            usage_logs.output_tokens AS outputTokens,
+            usage_logs.cache_create_tokens AS cacheCreateTokens,
+            usage_logs.cache_read_tokens AS cacheReadTokens,
             usage_logs.cost AS cost,
             api_keys.name AS apiKeyName,
             accounts.name AS accountName
@@ -464,6 +482,10 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     model: (row.model as string | null) ?? null,
     status: row.status as string,
     latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
+    inputTokens: toNum(row.inputtokens),
+    outputTokens: toNum(row.outputtokens),
+    cacheCreateTokens: toNum(row.cachecreatetokens),
+    cacheReadTokens: toNum(row.cachereadtokens),
     cost: toNum(row.cost),
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
