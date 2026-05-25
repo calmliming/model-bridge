@@ -83,6 +83,16 @@ npm start
 
 The backend then serves the built dashboard directly at <http://localhost:3000>.
 
+### Changing the port
+
+- **Backend** — set `PORT=<port>` in `.env` (defaults to 3000).
+- **Frontend dev server** — edit `server.port` in [web/vite.config.ts](web/vite.config.ts) (defaults to 5173).
+- **Dev proxy target** — if you change the backend port, also update the
+  proxy targets in [web/vite.config.ts](web/vite.config.ts) (`/api`, `/health`),
+  otherwise `npm run dev:all` will not be able to reach the backend.
+- **Docker** — change the host-side port in `docker-compose.yml` (the mapping
+  is `3001:3000`; only the left side is the published port).
+
 ## Connecting clients
 
 Create an API key on the **API Keys** page first, and add at least one

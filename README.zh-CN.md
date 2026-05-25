@@ -80,6 +80,13 @@ npm start
 
 之后后端会直接在 <http://localhost:3000> 托管构建好的管理后台。
 
+### 修改端口
+
+- **后端**：在 `.env` 里设置 `PORT=<端口号>`（默认 3000）。
+- **前端开发服务器**：修改 [web/vite.config.ts](web/vite.config.ts) 的 `server.port`（默认 5173）。
+- **前端开发代理目标**：如果改了后端端口，必须同步修改 [web/vite.config.ts](web/vite.config.ts) 里 `/api`、`/health` 两条代理的目标，否则 `npm run dev:all` 前端调不到后端。
+- **Docker**：修改 `docker-compose.yml` 里的端口映射（格式是 `3001:3000`，左侧才是对外暴露的端口）。
+
 ## 接入客户端
 
 先在 **API Keys** 页面创建一个密钥，再在 **上游账户** 页面至少添加一个上游
