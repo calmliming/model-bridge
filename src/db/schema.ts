@@ -29,6 +29,7 @@ export const apiKeys = sqliteTable('api_keys', {
   name: text('name').notNull(),
   ownerLabel: text('owner_label'), // friendly name of who holds the key
   keyHash: text('key_hash').notNull().unique(), // sha-256 of the secret
+  keySecretEncrypted: text('key_secret_encrypted'), // encrypted plaintext secret for admin reveal/copy
   keyPrefix: text('key_prefix').notNull(), // first chars, shown in the UI
   enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
   allowedProviders: text('allowed_providers', { mode: 'json' }).$type<string[]>(),

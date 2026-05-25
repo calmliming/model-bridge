@@ -45,7 +45,7 @@ export function recordUsage(record: UsageRecord): void {
       })
       .run()
     if (record.apiKeyId && cost > 0) {
-      incrementKeyQuota().run(cost, Date.now(), record.apiKeyId)
+      incrementKeyQuota().run([cost, Date.now(), record.apiKeyId])
     }
   } catch (err) {
     // Usage logging must never break the relay response.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NProgress, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -32,6 +32,7 @@ interface Account {
 }
 
 type Provider = 'claude' | 'openai' | 'gemini'
+type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -39,6 +40,7 @@ const dialog = useDialog()
 const accounts = ref<Account[]>([])
 const loading = ref(true)
 const testingId = ref<string | null>(null)
+const refreshingQuotaId = ref<string | null>(null)
 
 // Add-account modal state.
 const showAdd = ref(false)
@@ -60,13 +62,18 @@ const providerLabel: Record<Provider, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
 }
+const providerTagType: Record<Provider, TagType> = {
+  claude: 'info',
+  openai: 'success',
+  gemini: 'warning',
+}
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
   openai: 'auth.openai.com',
   gemini: 'accounts.google.com',
 }
 
-const statusMeta: Record<string, { label: string; type: 'success' | 'warning' | 'error' | 'default' }> = {
+const statusMeta: Record<string, { label: string; type: TagType }> = {
   active: { label: '正常', type: 'success' },
   rate_limited: { label: '限流冷却', type: 'warning' },
   error: { label: '异常', type: 'error' },
@@ -82,13 +89,49 @@ function effectiveStatus(row: Account) {
   return row.status
 }
 
-function formatQuotaRefresh(row: Account) {
-  return isCoolingDown(row) ? formatTime(row.cooldownUntil) : '—'
-}
-
 function formatPercent(value: number | null) {
   if (value == null) return '—'
   return `${value < 10 ? value.toFixed(1) : Math.round(value)}%`
+}
+
+function formatShortTime(ms: number | null | undefined): string {
+  if (!ms) return '—'
+  return new Date(ms).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatDurationUntil(ms: number | null | undefined): string {
+  if (!ms) return '—'
+  const totalMinutes = Math.max(0, Math.ceil((ms - Date.now()) / 60_000))
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours < 24) return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  const restHours = hours % 24
+  return restHours ? `${days}d ${restHours}h` : `${days}d`
+}
+
+function formatRelativePast(ms: number | null | undefined): string {
+  if (!ms) return '—'
+  const totalMinutes = Math.max(0, Math.floor((Date.now() - ms) / 60_000))
+  if (totalMinutes < 1) return '刚刚'
+  if (totalMinutes < 60) return `${totalMinutes}m前`
+  const hours = Math.floor(totalMinutes / 60)
+  if (hours < 24) return `${hours}h前`
+  return `${Math.floor(hours / 24)}d前`
+}
+
+function providerName(provider: string) {
+  return providerLabel[provider as Provider] ?? provider
+}
+
+function providerType(provider: string): TagType {
+  return providerTagType[provider as Provider] ?? 'default'
 }
 
 function quotaStatus(window: AccountQuotaWindow) {
@@ -103,42 +146,98 @@ function quotaPercent(window: AccountQuotaWindow) {
   return Math.max(0, Math.min(100, Math.round(window.usedPercent ?? 0)))
 }
 
-function renderQuota(row: Account) {
-  const quota = row.quota
-  if (!quota || !quota.windows.length) return h('span', { class: 'muted-cell' }, '待请求更新')
-  const windows = quota.windows
-  return h('div', { class: 'quota-stack' }, [
-    ...windows.map((window) =>
-      h('div', { class: 'quota-window' }, [
-        h('span', { class: 'quota-label' }, window.label),
-        h(NProgress, {
-          type: 'line',
-          percentage: quotaPercent(window),
-          status: quotaStatus(window),
-          showIndicator: false,
-          height: 6,
-          borderRadius: 3,
-          class: 'quota-progress',
-        }),
-        h('span', { class: 'quota-percent' }, formatPercent(window.usedPercent)),
-      ]),
-    ),
-    h('span', { class: 'quota-updated' }, `刷新 ${formatTime(quota.updatedAt)}`),
+function quotaLabel(window: AccountQuotaWindow) {
+  if (window.key === 'hourly' || window.key === 'secondary') return '5小时'
+  if (window.key === 'weekly' || window.key === 'primary') return '7天'
+  if (['主', '主额', '主额度', 'primary'].includes(window.label)) return '7天'
+  if (['次', '次额', '次额度', 'secondary'].includes(window.label)) return '5小时'
+  return window.label
+}
+
+function quotaWindowClass(window: AccountQuotaWindow) {
+  const label = quotaLabel(window)
+  return label === '7天' ? 'is-7d' : 'is-5h'
+}
+
+function renderAccount(row: Account) {
+  return h('div', { class: 'account-name' }, row.name)
+}
+
+function renderStatus(row: Account) {
+  const status = effectiveStatus(row)
+  const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
+  return h(
+    NSpace,
+    { size: 6, vertical: true },
+    {
+      default: () => [
+        h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label }),
+        isCoolingDown(row)
+          ? h('span', { class: 'muted-cell' }, `至 ${formatShortTime(row.cooldownUntil)}`)
+          : null,
+      ],
+    },
+  )
+}
+
+function renderQuotaWindow(window: AccountQuotaWindow) {
+  return h('div', { class: 'quota-row' }, [
+    h('span', { class: ['quota-label', quotaWindowClass(window)] }, quotaLabel(window)),
+    h('span', { class: 'quota-bar-track' }, [
+      h('span', {
+        class: ['quota-bar-fill', `is-${quotaStatus(window)}`],
+        style: { width: `${quotaPercent(window)}%` },
+      }),
+    ]),
+    h('span', { class: ['quota-percent', `is-${quotaStatus(window)}`] }, formatPercent(window.usedPercent)),
+    h('span', { class: 'quota-reset' }, formatDurationUntil(window.resetAt)),
   ])
 }
 
-function renderQuotaReset(row: Account) {
-  const windows = row.quota?.windows ?? []
-  if (!windows.length) return formatQuotaRefresh(row)
+function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
   return h(
     'div',
-    { class: 'quota-reset-stack' },
-    windows.map((window) =>
-      h('span', { class: window.exceeded ? 'quota-reset is-exceeded' : 'quota-reset' }, [
-        h('strong', null, `${window.label} `),
-        formatTime(window.resetAt),
+    { class: 'quota-refresh-wrap' },
+    [
+      updatedAt ? h('span', { class: 'quota-updated' }, formatRelativePast(updatedAt)) : null,
+      h(
+        NButton,
+        {
+          size: 'tiny',
+          quaternary: true,
+          circle: true,
+          title: '刷新配额',
+          'aria-label': '刷新配额',
+          loading: refreshingQuotaId.value === row.id,
+          class: 'quota-refresh',
+          onClick: (event: MouseEvent) => {
+            event.stopPropagation()
+            void refreshQuota(row)
+          },
+        },
+        { default: () => '↻' },
+      ),
+    ],
+  )
+}
+
+function renderQuota(row: Account) {
+  const quota = row.quota
+  if (!quota || !quota.windows.length) {
+    return h('div', { class: 'quota-cell' }, [
+      h('span', { class: 'muted-cell' }, '未更新'),
+      renderQuotaRefresh(row),
+    ])
+  }
+  return h(
+    'div',
+    { class: 'quota-cell' },
+    [
+      h('div', { class: 'quota-line' }, [
+        ...quota.windows.map(renderQuotaWindow),
       ]),
-    ),
+      renderQuotaRefresh(row, quota.updatedAt),
+    ],
   )
 }
 
@@ -313,6 +412,23 @@ async function testConnectivity(row: Account) {
   }
 }
 
+async function refreshQuota(row: Account) {
+  refreshingQuotaId.value = row.id
+  try {
+    const { data } = await api.post(`/admin/accounts/${row.id}/quota/refresh`)
+    if (data.success) {
+      message.success('配额已刷新')
+      await load()
+      return
+    }
+    message.error(data.message || '刷新配额失败')
+  } catch (e) {
+    message.error(errMsg(e, '刷新配额失败'))
+  } finally {
+    refreshingQuotaId.value = null
+  }
+}
+
 function confirmDelete(row: Account) {
   dialog.warning({
     title: '删除账户',
@@ -332,28 +448,31 @@ function confirmDelete(row: Account) {
 }
 
 const columns = computed<DataTableColumns<Account>>(() => [
-  { title: '名称', key: 'name', minWidth: 120 },
+  { title: '账户', key: 'name', minWidth: 160, fixed: 'left', render: renderAccount },
   {
     title: '服务商',
     key: 'provider',
-    render: (row) => h(NTag, { size: 'small', bordered: false }, { default: () => row.provider }),
+    width: 100,
+    render: (row) =>
+      h(
+        NTag,
+        { size: 'small', type: providerType(row.provider), bordered: false },
+        { default: () => providerName(row.provider) },
+      ),
   },
   {
     title: '状态',
     key: 'status',
-    render: (row) => {
-      const status = effectiveStatus(row)
-      const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
-      return h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
-    },
+    width: 110,
+    render: renderStatus,
   },
-  { title: '令牌到期', key: 'tokenExpiresAt', render: (row) => formatTime(row.tokenExpiresAt) },
-  { title: '实时配额', key: 'quota', minWidth: 190, render: renderQuota },
-  { title: '配额更新', key: 'quotaReset', minWidth: 190, render: renderQuotaReset },
-  { title: '最后使用', key: 'lastUsedAt', render: (row) => formatTime(row.lastUsedAt) },
+  { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
+  { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
+  { title: '最后使用', key: 'lastUsedAt', minWidth: 150, render: (row) => formatTime(row.lastUsedAt) },
   {
-    title: '启用',
+    title: '调度',
     key: 'toggle',
+    width: 86,
     render: (row) =>
       h(NSwitch, {
         value: row.status !== 'disabled',
@@ -364,6 +483,7 @@ const columns = computed<DataTableColumns<Account>>(() => [
   {
     title: '操作',
     key: 'actions',
+    width: 130,
     render: (row) =>
       h(
         NSpace,
@@ -413,7 +533,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1180"
+        :scroll-x="1120"
       />
     </n-card>
 
@@ -560,55 +680,143 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.muted-cell {
+:deep(.muted-cell) {
   color: rgba(15, 23, 42, 0.52);
-}
-
-.quota-stack,
-.quota-reset-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-
-.quota-window {
-  display: grid;
-  grid-template-columns: 42px minmax(72px, 1fr) 42px;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.quota-label,
-.quota-percent,
-.quota-updated,
-.quota-reset {
   font-size: 12px;
   line-height: 1.35;
 }
 
-.quota-label,
-.quota-percent {
+:deep(.account-name) {
+  overflow: hidden;
   color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.quota-progress {
-  min-width: 72px;
+:deep(.quota-cell) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 
-.quota-updated,
-.quota-reset {
-  color: rgba(15, 23, 42, 0.52);
+:deep(.quota-line) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
 }
 
-.quota-reset strong {
-  color: #0f172a;
-  font-weight: 500;
+:deep(.quota-row) {
+  display: grid;
+  grid-template-columns: 42px 48px 44px minmax(54px, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.quota-reset.is-exceeded,
-.quota-reset.is-exceeded strong {
+:deep(.quota-label) {
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+}
+
+:deep(.quota-label.is-5h) {
+  color: #3730a3;
+  background: #e0e7ff;
+}
+
+:deep(.quota-label.is-7d) {
+  color: #047857;
+  background: #d1fae5;
+}
+
+:deep(.quota-percent),
+:deep(.quota-reset),
+:deep(.quota-updated) {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+:deep(.quota-bar-track) {
+  display: block;
+  width: 48px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.1);
+}
+
+:deep(.quota-bar-fill) {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.2s ease;
+}
+
+:deep(.quota-bar-fill.is-success) {
+  background: #18a058;
+}
+
+:deep(.quota-bar-fill.is-warning) {
+  background: #f0a020;
+}
+
+:deep(.quota-bar-fill.is-error) {
+  background: #d03050;
+}
+
+:deep(.quota-percent) {
+  color: rgba(15, 23, 42, 0.68);
+  font-weight: 650;
+  text-align: right;
+  white-space: nowrap;
+}
+
+:deep(.quota-percent.is-success) {
+  color: #18a058;
+}
+
+:deep(.quota-percent.is-warning) {
+  color: #f0a020;
+}
+
+:deep(.quota-percent.is-error) {
   color: #d03050;
+}
+
+:deep(.quota-reset),
+:deep(.quota-updated) {
+  color: rgba(15, 23, 42, 0.52);
+  white-space: nowrap;
+}
+
+:deep(.quota-updated) {
+  font-size: 10px;
+}
+
+:deep(.quota-refresh-wrap) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+:deep(.quota-refresh) {
+  color: rgba(15, 23, 42, 0.52);
+  font-size: 14px;
+}
+
+:deep(.quota-refresh:hover) {
+  color: #2563eb;
 }
 </style>

@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
-import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from '../keys/manager'
+import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
@@ -42,6 +42,10 @@ const updateKeySchema = z
     expiresAt: z.number().int().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const idParamSchema = z.object({
+  id: z.string().min(1),
+})
 
 const oauthStartSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini']),
@@ -110,6 +114,22 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     }
     return reply.code(201).send(createApiKey(body.data))
   })
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/keys/:id/secret',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      if (!params.success) {
+        return reply.code(400).send({ error: 'invalid key id' })
+      }
+      const key = getApiKeySecret(params.data.id)
+      if (!key) {
+        return reply.code(404).send({ error: 'full API key is unavailable; recreate this key to enable copy' })
+      }
+      return { key }
+    },
+  )
 
   app.patch<{ Params: { id: string } }>(
     '/api/admin/keys/:id',
@@ -287,6 +307,26 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         return {
           success: false,
           message: err instanceof Error ? err.message : 'account connectivity test failed',
+          latencyMs: 0,
+          checkedAt: Date.now(),
+        }
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/quota/refresh',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        return await testAccountConnectivity(request.params.id)
+      } catch (err) {
+        if (err instanceof AccountTestError && err.statusCode === 404) {
+          return reply.code(404).send({ success: false, error: err.message })
+        }
+        return {
+          success: false,
+          message: err instanceof Error ? err.message : 'account quota refresh failed',
           latencyMs: 0,
           checkedAt: Date.now(),
         }

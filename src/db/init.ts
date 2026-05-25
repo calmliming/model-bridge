@@ -36,6 +36,7 @@ export function initDb(): void {
       name TEXT NOT NULL,
       owner_label TEXT,
       key_hash TEXT NOT NULL UNIQUE,
+      key_secret_encrypted TEXT,
       key_prefix TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       allowed_providers TEXT,
@@ -92,4 +93,5 @@ export function initDb(): void {
 
   // Forward-compatible column additions for existing databases.
   ensureColumn('oauth_sessions', 'account_name', 'TEXT')
+  ensureColumn('api_keys', 'key_secret_encrypted', 'TEXT')
 }

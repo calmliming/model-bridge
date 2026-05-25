@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
 import { apiKeys } from '../db/schema'
+import { decrypt, encrypt } from '../crypto'
 
 const KEY_PREFIX = 'mb-'
 
@@ -26,7 +27,7 @@ export interface CreateApiKeyInput {
 
 export interface CreatedApiKey {
   id: string
-  /** Plaintext secret — returned to the admin exactly once, never stored. */
+  /** Plaintext secret — returned to the admin and stored encrypted for later admin copy/reveal. */
   key: string
 }
 
@@ -40,6 +41,7 @@ export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
       name: input.name,
       ownerLabel: input.ownerLabel ?? null,
       keyHash: hashKey(secret),
+      keySecretEncrypted: encrypt(secret),
       keyPrefix: secret.slice(0, 11),
       allowedProviders: input.allowedProviders ?? null,
       allowedModels: input.allowedModels ?? null,
@@ -51,7 +53,7 @@ export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
   return { id, key: secret }
 }
 
-/** Lists every API key, newest first. The key hash is never exposed. */
+/** Lists every API key, newest first. The key hash and encrypted secret are never exposed. */
 export function listApiKeys() {
   return db
     .select({
@@ -59,6 +61,7 @@ export function listApiKeys() {
       name: apiKeys.name,
       ownerLabel: apiKeys.ownerLabel,
       keyPrefix: apiKeys.keyPrefix,
+      keySecretEncrypted: apiKeys.keySecretEncrypted,
       enabled: apiKeys.enabled,
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
@@ -72,11 +75,26 @@ export function listApiKeys() {
     .from(apiKeys)
     .orderBy(desc(apiKeys.createdAt))
     .all()
+    .map(({ keySecretEncrypted, ...key }) => ({
+      ...key,
+      canReveal: !!keySecretEncrypted,
+    }))
 }
 
 /** Looks up a key record by its plaintext secret. */
 export function findApiKeyBySecret(secret: string) {
   return db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret))).get()
+}
+
+/** Returns a full API key for admin copy/reveal when it was created after encrypted storage existed. */
+export function getApiKeySecret(id: string): string | null {
+  const row = db
+    .select({ keySecretEncrypted: apiKeys.keySecretEncrypted })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, id))
+    .get()
+  if (!row?.keySecretEncrypted) return null
+  return decrypt(row.keySecretEncrypted)
 }
 
 export function setApiKeyEnabled(id: string, enabled: boolean): void {

@@ -39,6 +39,11 @@ function percentFromUtilization(value: number | null): number | null {
   return Math.max(0, Math.min(100, percent))
 }
 
+function percentFromPercent(value: number | null): number | null {
+  if (value == null) return null
+  return Math.max(0, Math.min(100, value))
+}
+
 function parseClaudeQuota(headers: Headers, now: number): AccountQuotaSnapshot | null {
   const specs = [
     { key: 'hourly' as const, label: '5小时', prefix: 'anthropic-ratelimit-unified-5h-' },
@@ -64,35 +69,64 @@ function parseClaudeQuota(headers: Headers, now: number): AccountQuotaSnapshot |
   return windows.length ? { source: 'claude', updatedAt: now, windows } : null
 }
 
-function parseOpenAIQuota(headers: Headers, now: number): AccountQuotaSnapshot | null {
-  const specs = [
+interface CodexRawWindow {
+  usedPercent: number | null
+  resetAt: number | null
+  windowMinutes: number | null
+  hasData: boolean
+}
+
+function readCodexWindow(headers: Headers, prefix: string, now: number): CodexRawWindow {
+  const usedPercent = percentFromPercent(headerNumber(headers, `${prefix}-used-percent`))
+  const resetAt = resetAfter(headers, `${prefix}-reset-after-seconds`, now)
+  const windowMinutes = headerNumber(headers, `${prefix}-window-minutes`)
+  return {
+    usedPercent,
+    resetAt,
+    windowMinutes,
+    hasData: usedPercent != null || resetAt != null || windowMinutes != null,
+  }
+}
+
+function codexQuotaWindow(
+  key: Extract<AccountQuotaWindowKey, 'hourly' | 'weekly'>,
+  raw: CodexRawWindow,
+): AccountQuotaWindow[] {
+  if (!raw.hasData) return []
+  const label = key === 'hourly' ? '5小时' : '7天'
+  return [
     {
-      key: 'primary' as const,
-      label: '主额度',
-      used: 'x-codex-primary-used-percent',
-      reset: 'x-codex-primary-reset-after-seconds',
-    },
-    {
-      key: 'secondary' as const,
-      label: '次额度',
-      used: 'x-codex-secondary-used-percent',
-      reset: 'x-codex-secondary-reset-after-seconds',
+      key,
+      label,
+      usedPercent: raw.usedPercent,
+      resetAt: raw.resetAt,
+      exceeded: raw.usedPercent != null && raw.usedPercent >= 100,
     },
   ]
-  const windows = specs.flatMap<AccountQuotaWindow>((spec) => {
-    const usedPercent = percentFromUtilization(headerNumber(headers, spec.used))
-    const resetAt = resetAfter(headers, spec.reset, now)
-    if (usedPercent == null && resetAt == null) return []
-    return [
-      {
-        key: spec.key,
-        label: spec.label,
-        usedPercent,
-        resetAt,
-        exceeded: usedPercent != null && usedPercent >= 100,
-      },
-    ]
-  })
+}
+
+function parseOpenAIQuota(headers: Headers, now: number): AccountQuotaSnapshot | null {
+  const primary = readCodexWindow(headers, 'x-codex-primary', now)
+  const secondary = readCodexWindow(headers, 'x-codex-secondary', now)
+  if (!primary.hasData && !secondary.hasData) return null
+
+  let primaryIs5h = false
+  if (primary.windowMinutes != null && secondary.windowMinutes != null) {
+    primaryIs5h = primary.windowMinutes < secondary.windowMinutes
+  } else if (primary.windowMinutes != null) {
+    primaryIs5h = primary.windowMinutes <= 360
+  } else if (secondary.windowMinutes != null) {
+    primaryIs5h = secondary.windowMinutes > 360
+  }
+
+  // Codex used to omit window-minutes; sub2api treats that legacy shape as
+  // primary=7d and secondary=5h.
+  const fiveHour = primaryIs5h ? primary : secondary
+  const sevenDay = primaryIs5h ? secondary : primary
+  const windows = [
+    ...codexQuotaWindow('hourly', fiveHour),
+    ...codexQuotaWindow('weekly', sevenDay),
+  ]
 
   return windows.length ? { source: 'openai', updatedAt: now, windows } : null
 }

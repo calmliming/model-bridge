@@ -5,6 +5,8 @@ export interface DailyStat {
   requests: number
   inputTokens: number
   outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
 }
 
@@ -12,6 +14,10 @@ export interface ProviderStat {
   provider: string
   requests: number
   tokens: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
 }
 
@@ -19,6 +25,10 @@ export interface ModelStat {
   model: string
   requests: number
   tokens: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
 }
 
@@ -28,12 +38,23 @@ export interface KeyStat {
   ownerLabel: string | null
   requests: number
   tokens: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreateTokens: number
+  cacheReadTokens: number
   cost: number
 }
 
 export interface StatsSummary {
   rangeDays: number
-  totals: { requests: number; inputTokens: number; outputTokens: number; cost: number }
+  totals: {
+    requests: number
+    inputTokens: number
+    outputTokens: number
+    cacheCreateTokens: number
+    cacheReadTokens: number
+    cost: number
+  }
   daily: DailyStat[]
   byProvider: ProviderStat[]
   byModel: ModelStat[]
@@ -122,6 +143,8 @@ export function dailyStats(days: number): DailyStat[] {
               COUNT(*) AS requests,
               COALESCE(SUM(input_tokens), 0) AS inputTokens,
               COALESCE(SUM(output_tokens), 0) AS outputTokens,
+              COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cost), 0) AS cost
        FROM usage_logs
        WHERE ts >= ?
@@ -133,7 +156,17 @@ export function dailyStats(days: number): DailyStat[] {
   const out: DailyStat[] = []
   for (let i = range - 1; i >= 0; i--) {
     const day = utcDayKey(Date.now() - i * MS_PER_DAY)
-    out.push(byDay.get(day) ?? { day, requests: 0, inputTokens: 0, outputTokens: 0, cost: 0 })
+    out.push(
+      byDay.get(day) ?? {
+        day,
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreateTokens: 0,
+        cacheReadTokens: 0,
+        cost: 0,
+      },
+    )
   }
   return out
 }
@@ -144,7 +177,11 @@ export function statsByProvider(days: number): ProviderStat[] {
     .prepare(
       `SELECT provider,
               COUNT(*) AS requests,
-              COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+              COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0) AS tokens,
+              COALESCE(SUM(input_tokens), 0) AS inputTokens,
+              COALESCE(SUM(output_tokens), 0) AS outputTokens,
+              COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cost), 0) AS cost
        FROM usage_logs
        WHERE ts >= ?
@@ -160,7 +197,11 @@ export function statsByModel(days: number, limit = 10): ModelStat[] {
     .prepare(
       `SELECT COALESCE(model, '(unknown)') AS model,
               COUNT(*) AS requests,
-              COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+              COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0) AS tokens,
+              COALESCE(SUM(input_tokens), 0) AS inputTokens,
+              COALESCE(SUM(output_tokens), 0) AS outputTokens,
+              COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cost), 0) AS cost
        FROM usage_logs
        WHERE ts >= ?
@@ -179,7 +220,11 @@ export function statsByKey(days: number): KeyStat[] {
               api_keys.name AS name,
               api_keys.owner_label AS ownerLabel,
               COUNT(usage_logs.id) AS requests,
-              COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens), 0) AS tokens,
+              COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_create_tokens + usage_logs.cache_read_tokens), 0) AS tokens,
+              COALESCE(SUM(usage_logs.input_tokens), 0) AS inputTokens,
+              COALESCE(SUM(usage_logs.output_tokens), 0) AS outputTokens,
+              COALESCE(SUM(usage_logs.cache_create_tokens), 0) AS cacheCreateTokens,
+              COALESCE(SUM(usage_logs.cache_read_tokens), 0) AS cacheReadTokens,
               COALESCE(SUM(usage_logs.cost), 0) AS cost
        FROM api_keys
        LEFT JOIN usage_logs
@@ -199,10 +244,12 @@ export function statsSummary(days: number): StatsSummary {
       `SELECT COUNT(*) AS requests,
               COALESCE(SUM(input_tokens), 0) AS inputTokens,
               COALESCE(SUM(output_tokens), 0) AS outputTokens,
+              COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
+              COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
               COALESCE(SUM(cost), 0) AS cost
        FROM usage_logs WHERE ts >= ?`,
     )
-    .get(since) as { requests: number; inputTokens: number; outputTokens: number; cost: number }
+    .get(since) as StatsSummary['totals']
   return {
     rangeDays: range,
     totals,

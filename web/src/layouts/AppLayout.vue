@@ -55,7 +55,7 @@ function logout() {
           <span />
         </span>
         <div>
-          <strong>model-bridge</strong>
+          <strong>Model Bridge</strong>
           <small>AI API Gateway</small>
         </div>
       </div>

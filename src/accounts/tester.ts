@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { ensureFreshToken, getAccount, updateAccountMetadata } from './manager'
+import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota } from './manager'
+import { extractAccountQuota, type AccountQuotaSnapshot } from './quota'
 import { markAccountUsed } from './scheduler'
 
 const TEST_TIMEOUT_MS = 15_000
@@ -30,6 +31,12 @@ export class AccountTestError extends Error {
   ) {
     super(message)
   }
+}
+
+interface ProviderTestOutcome {
+  message: string
+  quota?: AccountQuotaSnapshot | null
+  metadata?: Record<string, unknown>
 }
 
 function abortSignal(timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
@@ -74,7 +81,28 @@ async function assertOk(response: Response): Promise<void> {
   throw new Error(`上游返回 ${response.status} ${response.statusText}${suffix}`)
 }
 
-async function testClaude(accessToken: string): Promise<string> {
+async function drainBody(response: Response): Promise<void> {
+  if (!response.body) return
+
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    await Promise.race([
+      response.text(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`上游响应超时（${TEST_TIMEOUT_MS / 1000}s）`)), TEST_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    try {
+      await response.body?.cancel()
+    } catch {
+      // The body may already be fully consumed.
+    }
+  }
+}
+
+async function testClaude(accessToken: string): Promise<ProviderTestOutcome> {
   const response = await fetchWithTimeout(ANTHROPIC_MODELS_URL, {
     method: 'GET',
     headers: {
@@ -86,10 +114,13 @@ async function testClaude(accessToken: string): Promise<string> {
     },
   })
   await assertOk(response)
-  return 'Claude 账号可访问模型列表'
+  return {
+    message: 'Claude 账号可访问模型列表',
+    quota: extractAccountQuota('claude', response.headers),
+  }
 }
 
-async function testOpenAI(accessToken: string): Promise<string> {
+async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
   const response = await fetchWithTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -114,11 +145,15 @@ async function testOpenAI(accessToken: string): Promise<string> {
       store: false,
     }),
   })
-  await assertOk(response)
-  return 'OpenAI / Codex Responses 端点可访问'
+  if (!response.ok) await assertOk(response)
+  await drainBody(response)
+  return {
+    message: 'OpenAI / Codex Responses 端点可访问',
+    quota: extractAccountQuota('openai', response.headers),
+  }
 }
 
-async function testGemini(accessToken: string): Promise<{ message: string; metadata: Record<string, unknown> }> {
+async function testGemini(accessToken: string): Promise<ProviderTestOutcome> {
   const response = await fetchWithTimeout(GEMINI_LOAD_CODE_ASSIST_URL, {
     method: 'POST',
     headers: {
@@ -149,14 +184,15 @@ async function testGemini(accessToken: string): Promise<{ message: string; metad
 }
 
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<string> {
-  if (account.provider === 'claude') return testClaude(accessToken)
-  if (account.provider === 'openai') return testOpenAI(accessToken)
-  if (account.provider === 'gemini') {
-    const result = await testGemini(accessToken)
-    updateAccountMetadata(account.id, result.metadata)
-    return result.message
-  }
-  throw new AccountTestError(`unsupported provider: ${account.provider}`)
+  let result: ProviderTestOutcome
+  if (account.provider === 'claude') result = await testClaude(accessToken)
+  else if (account.provider === 'openai') result = await testOpenAI(accessToken)
+  else if (account.provider === 'gemini') result = await testGemini(accessToken)
+  else throw new AccountTestError(`unsupported provider: ${account.provider}`)
+
+  if (result.metadata) updateAccountMetadata(account.id, result.metadata)
+  if (result.quota) updateAccountQuota(account.id, result.quota)
+  return result.message
 }
 
 /** Tests whether one upstream account can reach its provider with current credentials. */

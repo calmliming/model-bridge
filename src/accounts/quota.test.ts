@@ -33,21 +33,41 @@ describe('extractAccountQuota', () => {
     ])
   })
 
-  it('extracts Codex primary and secondary quota windows from response headers', () => {
+  it('extracts Codex 5-hour and 7-day quota windows from response headers', () => {
     const quota = extractAccountQuota(
       'openai',
       new Headers({
-        'x-codex-primary-used-percent': '31',
-        'x-codex-primary-reset-after-seconds': '3600',
-        'x-codex-secondary-used-percent': '64',
-        'x-codex-secondary-reset-after-seconds': '604800',
+        'x-codex-primary-used-percent': '88',
+        'x-codex-primary-reset-after-seconds': '604800',
+        'x-codex-primary-window-minutes': '10080',
+        'x-codex-secondary-used-percent': '42',
+        'x-codex-secondary-reset-after-seconds': '18000',
+        'x-codex-secondary-window-minutes': '300',
       }),
       1700000000000,
     )
 
     expect(quota?.windows.map((window) => [window.label, window.usedPercent, window.resetAt])).toEqual([
-      ['主额度', 31, 1700003600000],
-      ['次额度', 64, 1700604800000],
+      ['5小时', 42, 1700018000000],
+      ['7天', 88, 1700604800000],
+    ])
+  })
+
+  it('uses the Codex legacy primary=7d secondary=5h mapping when window size is absent', () => {
+    const quota = extractAccountQuota(
+      'openai',
+      new Headers({
+        'x-codex-primary-used-percent': '1',
+        'x-codex-primary-reset-after-seconds': '604800',
+        'x-codex-secondary-used-percent': '64',
+        'x-codex-secondary-reset-after-seconds': '3600',
+      }),
+      1700000000000,
+    )
+
+    expect(quota?.windows.map((window) => [window.label, window.usedPercent, window.resetAt])).toEqual([
+      ['5小时', 64, 1700003600000],
+      ['7天', 1, 1700604800000],
     ])
   })
 })
