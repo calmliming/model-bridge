@@ -5,9 +5,11 @@ import { accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
+import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
+const AUTH_TAG_ERROR = 'Unsupported state or unable to authenticate data'
 
 export interface CreateAccountInput {
   provider: string
@@ -17,10 +19,27 @@ export interface CreateAccountInput {
   metadata?: Record<string, unknown> | null
 }
 
+function metadataObject(metadata: unknown): Record<string, unknown> {
+  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...(metadata as Record<string, unknown>) }
+    : {}
+}
+
+function decryptAccountSecret(value: string): string {
+  try {
+    return decrypt(value)
+  } catch (err) {
+    if (err instanceof Error && err.message === AUTH_TAG_ERROR) {
+      throw new Error('无法解密账号 token：当前 ENCRYPTION_KEY 与保存该账号时使用的密钥不一致')
+    }
+    throw err
+  }
+}
+
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
-export function createAccount(input: CreateAccountInput): { id: string } {
+export async function createAccount(input: CreateAccountInput): Promise<{ id: string }> {
   const id = randomBytes(12).toString('hex')
-  db.insert(accounts)
+  await db.insert(accounts)
     .values({
       id,
       provider: input.provider,
@@ -31,13 +50,12 @@ export function createAccount(input: CreateAccountInput): { id: string } {
       status: 'active',
       metadata: input.metadata ?? null,
     })
-    .run()
   return { id }
 }
 
 /** Lists accounts for the dashboard — OAuth tokens are never exposed. */
-export function listAccounts() {
-  return db
+export async function listAccounts() {
+  const rows = await db
     .select({
       id: accounts.id,
       provider: accounts.provider,
@@ -46,53 +64,64 @@ export function listAccounts() {
       tokenExpiresAt: accounts.tokenExpiresAt,
       cooldownUntil: accounts.cooldownUntil,
       lastUsedAt: accounts.lastUsedAt,
+      metadata: accounts.metadata,
       createdAt: accounts.createdAt,
     })
     .from(accounts)
     .orderBy(desc(accounts.createdAt))
-    .all()
+  return rows.map(({ metadata, ...account }) => ({
+    ...account,
+    quota: accountQuotaFromMetadata(metadata),
+  }))
 }
 
-export function getAccount(id: string) {
-  return db.select().from(accounts).where(eq(accounts.id, id)).get()
+export async function getAccount(id: string) {
+  const [row] = await db.select().from(accounts).where(eq(accounts.id, id))
+  return row
 }
 
-export function deleteAccount(id: string): void {
-  db.delete(accounts).where(eq(accounts.id, id)).run()
+export async function deleteAccount(id: string): Promise<void> {
+  await db.delete(accounts).where(eq(accounts.id, id))
 }
 
 /** Updates provider-specific metadata cached on an account. */
-export function updateAccountMetadata(id: string, metadata: Record<string, unknown>): void {
-  db.update(accounts).set({ metadata }).where(eq(accounts.id, id)).run()
+export async function updateAccountMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+  const [row] = await db.select({ metadata: accounts.metadata }).from(accounts).where(eq(accounts.id, id))
+  await db.update(accounts)
+    .set({ metadata: { ...metadataObject(row?.metadata), ...metadata } })
+    .where(eq(accounts.id, id))
+}
+
+/** Stores the latest non-secret quota snapshot observed from upstream headers. */
+export async function updateAccountQuota(id: string, quota: AccountQuotaSnapshot): Promise<void> {
+  await updateAccountMetadata(id, { quota })
 }
 
 /** Enables or disables an account. */
-export function setAccountStatus(id: string, status: 'active' | 'disabled'): void {
-  db.update(accounts)
+export async function setAccountStatus(id: string, status: 'active' | 'disabled'): Promise<void> {
+  await db.update(accounts)
     .set({ status, cooldownUntil: status === 'active' ? null : undefined })
     .where(eq(accounts.id, id))
-    .run()
 }
 
-function persistTokens(id: string, tokens: TokenSet): void {
-  db.update(accounts)
+async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
+  await db.update(accounts)
     .set({
       oauthAccessToken: encrypt(tokens.accessToken),
       oauthRefreshToken: encrypt(tokens.refreshToken),
       tokenExpiresAt: tokens.expiresAt,
     })
     .where(eq(accounts.id, id))
-    .run()
 }
 
 /** Refreshes an account's OAuth token and persists it. Returns the new access token. */
 export async function refreshAccountToken(id: string): Promise<string> {
-  const account = getAccount(id)
+  const account = await getAccount(id)
   if (!account?.oauthRefreshToken) throw new Error('account has no refresh token')
   const provider = getProvider(account.provider)
   if (!provider) throw new Error(`unknown provider: ${account.provider}`)
-  const tokens = await provider.refreshToken(decrypt(account.oauthRefreshToken))
-  persistTokens(id, tokens)
+  const tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
+  await persistTokens(id, tokens)
   return tokens.accessToken
 }
 
@@ -106,5 +135,5 @@ export async function ensureFreshToken(account: {
     return refreshAccountToken(account.id)
   }
   if (!account.oauthAccessToken) throw new Error('account has no access token')
-  return decrypt(account.oauthAccessToken)
+  return decryptAccountSecret(account.oauthAccessToken)
 }

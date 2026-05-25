@@ -1,13 +1,17 @@
 import { defineConfig } from 'drizzle-kit'
+import { config as loadDotenv } from 'dotenv'
 
-// Drizzle Kit config — used for `npm run db:generate` to produce SQL
-// migrations. At runtime the app creates tables idempotently via
-// src/db/init.ts, so the app boots with zero migration steps.
+loadDotenv()
+
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL is required for drizzle-kit (set it in .env)')
+}
+
 export default defineConfig({
   schema: './src/db/schema.ts',
   out: './src/db/migrations',
-  dialect: 'sqlite',
+  dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_PATH ?? './data/model-bridge.db',
+    url: process.env.DATABASE_URL,
   },
 })

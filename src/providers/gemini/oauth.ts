@@ -8,11 +8,14 @@ import type { TokenSet } from '../types'
 // repo, model-bridge reads them from the environment at startup.
 const CLIENT_ID = process.env.GEMINI_OAUTH_CLIENT_ID ?? ''
 const CLIENT_SECRET = process.env.GEMINI_OAUTH_CLIENT_SECRET ?? ''
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  throw new Error(
-    'GEMINI_OAUTH_CLIENT_ID / GEMINI_OAUTH_CLIENT_SECRET must be set. ' +
-      'See .env.example for where to obtain the Gemini CLI public client.',
-  )
+
+function requireGeminiCredentials(): void {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error(
+      'GEMINI_OAUTH_CLIENT_ID / GEMINI_OAUTH_CLIENT_SECRET must be set. ' +
+        'See .env.example for where to obtain the Gemini CLI public client.',
+    )
+  }
 }
 const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -44,6 +47,7 @@ export function generatePkce(): PkcePair {
 
 /** Builds the accounts.google.com authorization URL the admin opens in a browser. */
 export function buildAuthorizeUrl(state: string, challenge: string): string {
+  requireGeminiCredentials()
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: 'code',
@@ -79,6 +83,7 @@ export async function exchangeCode(
   verifier: string,
   _state: string,
 ): Promise<TokenSet> {
+  requireGeminiCredentials()
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code: code.trim(),
@@ -99,6 +104,7 @@ export async function exchangeCode(
 }
 
 export async function refreshToken(refreshTokenValue: string): Promise<TokenSet> {
+  requireGeminiCredentials()
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshTokenValue,

@@ -16,7 +16,7 @@ FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # tsx lives in `dependencies` so --omit=dev still leaves it available
-# at runtime; better-sqlite3 picks up its prebuilt linux binaries.
+# at runtime; `pg` ships pure JS, no native build step required.
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # ── Stage 3: slim runtime image ─────────────────────────────────
@@ -24,14 +24,13 @@ FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOST=0.0.0.0 \
-    DATABASE_PATH=/app/data/model-bridge.db
+    HOST=0.0.0.0
 
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY src ./src
+COPY scripts ./scripts
 COPY --from=web-builder /web/dist ./web/dist
-RUN mkdir -p /app/data
 
 # 3000 = HTTP API + admin dashboard. 1455 = OAuth callback (OpenAI &
 # Google's installed-app redirects only accept loopback callbacks).

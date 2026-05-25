@@ -1,89 +1,87 @@
-import { sql } from 'drizzle-orm'
-import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { bigint, boolean, doublePrecision, jsonb, pgTable, text } from 'drizzle-orm/pg-core'
 
-const createdAt = () =>
-  integer('created_at')
+const epochMs = (name: string) =>
+  bigint(name, { mode: 'number' })
     .notNull()
-    .default(sql`(unixepoch() * 1000)`)
+    .$defaultFn(() => Date.now())
 
 /** One upstream subscription account (e.g. one Claude Max account). */
-export const accounts = sqliteTable('accounts', {
+export const accounts = pgTable('accounts', {
   id: text('id').primaryKey(),
   provider: text('provider').notNull(), // claude | openai | gemini
   name: text('name').notNull(),
   oauthAccessToken: text('oauth_access_token'), // encrypted
   oauthRefreshToken: text('oauth_refresh_token'), // encrypted
-  tokenExpiresAt: integer('token_expires_at'), // epoch ms
+  tokenExpiresAt: bigint('token_expires_at', { mode: 'number' }), // epoch ms
   status: text('status').notNull().default('active'), // active | rate_limited | error | disabled
-  cooldownUntil: integer('cooldown_until'), // epoch ms; skip account until then
+  cooldownUntil: bigint('cooldown_until', { mode: 'number' }), // epoch ms; skip account until then
   proxyUrl: text('proxy_url'),
-  weight: integer('weight').notNull().default(1),
-  lastUsedAt: integer('last_used_at'),
-  metadata: text('metadata', { mode: 'json' }),
-  createdAt: createdAt(),
+  weight: bigint('weight', { mode: 'number' }).notNull().default(1),
+  lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  metadata: jsonb('metadata'),
+  createdAt: epochMs('created_at'),
 })
 
 /** A platform API key issued to a user (yourself or a friend). */
-export const apiKeys = sqliteTable('api_keys', {
+export const apiKeys = pgTable('api_keys', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   ownerLabel: text('owner_label'), // friendly name of who holds the key
   keyHash: text('key_hash').notNull().unique(), // sha-256 of the secret
+  keySecretEncrypted: text('key_secret_encrypted'), // encrypted plaintext secret for admin reveal/copy
   keyPrefix: text('key_prefix').notNull(), // first chars, shown in the UI
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  allowedProviders: text('allowed_providers', { mode: 'json' }).$type<string[]>(),
-  allowedModels: text('allowed_models', { mode: 'json' }).$type<string[]>(),
-  rateLimit: integer('rate_limit'), // requests per minute; null = unlimited
-  quotaLimit: real('quota_limit'), // cost cap in USD; null = unlimited
-  quotaUsed: real('quota_used').notNull().default(0),
-  expiresAt: integer('expires_at'),
-  lastUsedAt: integer('last_used_at'),
-  createdAt: createdAt(),
+  enabled: boolean('enabled').notNull().default(true),
+  allowedProviders: jsonb('allowed_providers').$type<string[]>(),
+  allowedModels: jsonb('allowed_models').$type<string[]>(),
+  rateLimit: bigint('rate_limit', { mode: 'number' }), // requests per minute; null = unlimited
+  quotaLimit: doublePrecision('quota_limit'), // cost cap in USD; null = unlimited
+  quotaUsed: doublePrecision('quota_used').notNull().default(0),
+  expiresAt: bigint('expires_at', { mode: 'number' }),
+  lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  createdAt: epochMs('created_at'),
 })
 
 /** One relayed request — the basis for usage and cost statistics. */
-export const usageLogs = sqliteTable('usage_logs', {
+export const usageLogs = pgTable('usage_logs', {
   id: text('id').primaryKey(),
   apiKeyId: text('api_key_id'),
   accountId: text('account_id'),
   provider: text('provider').notNull(),
   model: text('model'),
-  ts: integer('ts')
-    .notNull()
-    .default(sql`(unixepoch() * 1000)`),
-  inputTokens: integer('input_tokens').notNull().default(0),
-  outputTokens: integer('output_tokens').notNull().default(0),
-  cacheCreateTokens: integer('cache_create_tokens').notNull().default(0),
-  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
-  cost: real('cost').notNull().default(0),
+  ts: epochMs('ts'),
+  inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
+  outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
+  cacheCreateTokens: bigint('cache_create_tokens', { mode: 'number' }).notNull().default(0),
+  cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }).notNull().default(0),
+  cost: doublePrecision('cost').notNull().default(0),
   status: text('status').notNull().default('success'),
-  latencyMs: integer('latency_ms'),
+  latencyMs: bigint('latency_ms', { mode: 'number' }),
 })
 
 /** Per-model pricing used to turn token counts into cost. */
-export const modelPricing = sqliteTable('model_pricing', {
+export const modelPricing = pgTable('model_pricing', {
   id: text('id').primaryKey(),
   provider: text('provider').notNull(),
   model: text('model').notNull(),
-  inputPrice: real('input_price').notNull().default(0), // USD per 1M tokens
-  outputPrice: real('output_price').notNull().default(0),
-  cacheWritePrice: real('cache_write_price').notNull().default(0),
-  cacheReadPrice: real('cache_read_price').notNull().default(0),
+  inputPrice: doublePrecision('input_price').notNull().default(0), // USD per 1M tokens
+  outputPrice: doublePrecision('output_price').notNull().default(0),
+  cacheWritePrice: doublePrecision('cache_write_price').notNull().default(0),
+  cacheReadPrice: doublePrecision('cache_read_price').notNull().default(0),
 })
 
 /** Transient state for an in-progress OAuth authorization. */
-export const oauthSessions = sqliteTable('oauth_sessions', {
+export const oauthSessions = pgTable('oauth_sessions', {
   state: text('state').primaryKey(),
   provider: text('provider').notNull(),
   codeVerifier: text('code_verifier').notNull(),
   // Account name supplied at /oauth/start; the callback / finish step reads it
   // back to label the new account (OpenAI uses a browser redirect, not paste).
   accountName: text('account_name'),
-  createdAt: createdAt(),
+  createdAt: epochMs('created_at'),
 })
 
 /** Generic key/value store (admin credentials, etc.). */
-export const settings = sqliteTable('settings', {
+export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
 })

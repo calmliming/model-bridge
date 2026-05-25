@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
 import { apiKeys } from '../db/schema'
+import { decrypt, encrypt } from '../crypto'
 
 const KEY_PREFIX = 'mb-'
 
@@ -26,20 +27,21 @@ export interface CreateApiKeyInput {
 
 export interface CreatedApiKey {
   id: string
-  /** Plaintext secret — returned to the admin exactly once, never stored. */
+  /** Plaintext secret — returned to the admin and stored encrypted for later admin copy/reveal. */
   key: string
 }
 
 /** Creates a new API key and returns its plaintext secret once. */
-export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
+export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApiKey> {
   const secret = KEY_PREFIX + randomBytes(24).toString('hex')
   const id = generateId()
-  db.insert(apiKeys)
+  await db.insert(apiKeys)
     .values({
       id,
       name: input.name,
       ownerLabel: input.ownerLabel ?? null,
       keyHash: hashKey(secret),
+      keySecretEncrypted: encrypt(secret),
       keyPrefix: secret.slice(0, 11),
       allowedProviders: input.allowedProviders ?? null,
       allowedModels: input.allowedModels ?? null,
@@ -47,18 +49,18 @@ export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
       quotaLimit: input.quotaLimit ?? null,
       expiresAt: input.expiresAt ?? null,
     })
-    .run()
   return { id, key: secret }
 }
 
-/** Lists every API key, newest first. The key hash is never exposed. */
-export function listApiKeys() {
-  return db
+/** Lists every API key, newest first. The key hash and encrypted secret are never exposed. */
+export async function listApiKeys() {
+  const rows = await db
     .select({
       id: apiKeys.id,
       name: apiKeys.name,
       ownerLabel: apiKeys.ownerLabel,
       keyPrefix: apiKeys.keyPrefix,
+      keySecretEncrypted: apiKeys.keySecretEncrypted,
       enabled: apiKeys.enabled,
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
@@ -71,16 +73,30 @@ export function listApiKeys() {
     })
     .from(apiKeys)
     .orderBy(desc(apiKeys.createdAt))
-    .all()
+  return rows.map(({ keySecretEncrypted, ...key }) => ({
+    ...key,
+    canReveal: !!keySecretEncrypted,
+  }))
 }
 
 /** Looks up a key record by its plaintext secret. */
-export function findApiKeyBySecret(secret: string) {
-  return db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret))).get()
+export async function findApiKeyBySecret(secret: string) {
+  const [row] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret)))
+  return row
 }
 
-export function setApiKeyEnabled(id: string, enabled: boolean): void {
-  db.update(apiKeys).set({ enabled }).where(eq(apiKeys.id, id)).run()
+/** Returns a full API key for admin copy/reveal when it was created after encrypted storage existed. */
+export async function getApiKeySecret(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ keySecretEncrypted: apiKeys.keySecretEncrypted })
+    .from(apiKeys)
+    .where(eq(apiKeys.id, id))
+  if (!row?.keySecretEncrypted) return null
+  return decrypt(row.keySecretEncrypted)
+}
+
+export async function setApiKeyEnabled(id: string, enabled: boolean): Promise<void> {
+  await db.update(apiKeys).set({ enabled }).where(eq(apiKeys.id, id))
 }
 
 export interface UpdateApiKeyPatch {
@@ -94,11 +110,11 @@ export interface UpdateApiKeyPatch {
 }
 
 /** Updates an API key's metadata and limits. Only provided fields change. */
-export function updateApiKey(id: string, patch: UpdateApiKeyPatch): void {
+export async function updateApiKey(id: string, patch: UpdateApiKeyPatch): Promise<void> {
   if (Object.keys(patch).length === 0) return
-  db.update(apiKeys).set(patch).where(eq(apiKeys.id, id)).run()
+  await db.update(apiKeys).set(patch).where(eq(apiKeys.id, id))
 }
 
-export function deleteApiKey(id: string): void {
-  db.delete(apiKeys).where(eq(apiKeys.id, id)).run()
+export async function deleteApiKey(id: string): Promise<void> {
+  await db.delete(apiKeys).where(eq(apiKeys.id, id))
 }

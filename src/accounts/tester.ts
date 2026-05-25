@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { ensureFreshToken, getAccount, updateAccountMetadata } from './manager'
-import { markAccountUsed } from './scheduler'
+import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota } from './manager'
+import {
+  extractAccountQuota,
+  extractClaudeOAuthUsageQuota,
+  quotaCooldownUntil,
+  type AccountQuotaSnapshot,
+} from './quota'
+import { markAccountUsed, penalizeAccount } from './scheduler'
 
 const TEST_TIMEOUT_MS = 15_000
-const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models'
+const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 const GEMINI_LOAD_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
 
@@ -30,6 +36,12 @@ export class AccountTestError extends Error {
   ) {
     super(message)
   }
+}
+
+interface ProviderTestOutcome {
+  message: string
+  quota?: AccountQuotaSnapshot | null
+  metadata?: Record<string, unknown>
 }
 
 function abortSignal(timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
@@ -74,22 +86,47 @@ async function assertOk(response: Response): Promise<void> {
   throw new Error(`上游返回 ${response.status} ${response.statusText}${suffix}`)
 }
 
-async function testClaude(accessToken: string): Promise<string> {
-  const response = await fetchWithTimeout(ANTHROPIC_MODELS_URL, {
+async function drainBody(response: Response): Promise<void> {
+  if (!response.body) return
+
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    await Promise.race([
+      response.text(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`上游响应超时（${TEST_TIMEOUT_MS / 1000}s）`)), TEST_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    try {
+      await response.body?.cancel()
+    } catch {
+      // The body may already be fully consumed.
+    }
+  }
+}
+
+async function testClaude(accessToken: string): Promise<ProviderTestOutcome> {
+  const response = await fetchWithTimeout(ANTHROPIC_USAGE_URL, {
     method: 'GET',
     headers: {
       authorization: `Bearer ${accessToken}`,
-      'anthropic-version': '2023-06-01',
       'anthropic-beta': 'oauth-2025-04-20',
-      accept: 'application/json',
-      'user-agent': 'claude-cli/1.0.0 (external, cli)',
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json',
+      'user-agent': 'claude-code/2.1.7',
     },
   })
-  await assertOk(response)
-  return 'Claude 账号可访问模型列表'
+  if (!response.ok) await assertOk(response)
+  const data = await response.json()
+  return {
+    message: 'Claude 账号可访问用量接口',
+    quota: extractClaudeOAuthUsageQuota(data) ?? extractAccountQuota('claude', response.headers),
+  }
 }
 
-async function testOpenAI(accessToken: string): Promise<string> {
+async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
   const response = await fetchWithTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -114,11 +151,15 @@ async function testOpenAI(accessToken: string): Promise<string> {
       store: false,
     }),
   })
-  await assertOk(response)
-  return 'OpenAI / Codex Responses 端点可访问'
+  if (!response.ok) await assertOk(response)
+  await drainBody(response)
+  return {
+    message: 'OpenAI / Codex Responses 端点可访问',
+    quota: extractAccountQuota('openai', response.headers),
+  }
 }
 
-async function testGemini(accessToken: string): Promise<{ message: string; metadata: Record<string, unknown> }> {
+async function testGemini(accessToken: string): Promise<ProviderTestOutcome> {
   const response = await fetchWithTimeout(GEMINI_LOAD_CODE_ASSIST_URL, {
     method: 'POST',
     headers: {
@@ -148,32 +189,38 @@ async function testGemini(accessToken: string): Promise<{ message: string; metad
   }
 }
 
-async function runProviderTest(account: AccountRow, accessToken: string): Promise<string> {
-  if (account.provider === 'claude') return testClaude(accessToken)
-  if (account.provider === 'openai') return testOpenAI(accessToken)
-  if (account.provider === 'gemini') {
-    const result = await testGemini(accessToken)
-    updateAccountMetadata(account.id, result.metadata)
-    return result.message
-  }
-  throw new AccountTestError(`unsupported provider: ${account.provider}`)
+async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
+  let result: ProviderTestOutcome
+  if (account.provider === 'claude') result = await testClaude(accessToken)
+  else if (account.provider === 'openai') result = await testOpenAI(accessToken)
+  else if (account.provider === 'gemini') result = await testGemini(accessToken)
+  else throw new AccountTestError(`unsupported provider: ${account.provider}`)
+
+  if (result.metadata) await updateAccountMetadata(account.id, result.metadata)
+  if (result.quota) await updateAccountQuota(account.id, result.quota)
+  return result
 }
 
 /** Tests whether one upstream account can reach its provider with current credentials. */
 export async function testAccountConnectivity(id: string): Promise<AccountTestResult> {
-  const account = getAccount(id)
+  const account = await getAccount(id)
   if (!account) throw new AccountTestError('account not found', 404)
 
   const startedAt = Date.now()
   const accessToken = await ensureFreshToken(account)
-  const message = await runProviderTest(account, accessToken)
+  const result = await runProviderTest(account, accessToken)
   const latencyMs = Date.now() - startedAt
 
-  markAccountUsed(account.id)
+  const cooldownUntil = quotaCooldownUntil(result.quota)
+  if (cooldownUntil) {
+    await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
+  } else {
+    await markAccountUsed(account.id)
+  }
   return {
     success: true,
     provider: account.provider,
-    message,
+    message: result.message,
     latencyMs,
     checkedAt: Date.now(),
   }

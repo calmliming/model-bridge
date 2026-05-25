@@ -42,7 +42,7 @@ async function login() {
         <span class="brand-mark">
           <span />
         </span>
-        <span>model-bridge</span>
+        <span>Model Bridge</span>
       </div>
 
       <section class="login-main">

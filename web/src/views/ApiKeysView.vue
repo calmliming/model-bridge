@@ -10,6 +10,7 @@ interface ApiKey {
   name: string
   ownerLabel: string | null
   keyPrefix: string
+  canReveal: boolean
   enabled: boolean
   allowedProviders: string[] | null
   rateLimit: number | null
@@ -35,6 +36,8 @@ const newKey = ref<string | null>(null)
 const showUse = ref(false)
 const useKeyName = ref('')
 const useKeySecret = ref('')
+
+const manualCopy = ref<{ name: string; text: string } | null>(null)
 
 // Edit-limits modal state.
 const showEdit = ref(false)
@@ -63,6 +66,18 @@ const providerOptions = [
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
 ]
+
+const providerLabel: Record<string, string> = {
+  claude: 'Claude',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+}
+
+const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'> = {
+  claude: 'info',
+  openai: 'success',
+  gemini: 'warning',
+}
 
 async function load() {
   loading.value = true
@@ -171,25 +186,117 @@ function confirmDelete(row: ApiKey) {
   })
 }
 
+function execCopyFallback(text: string): boolean {
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      message.success('已复制到剪贴板')
+      return true
+    }
+  } catch {
+    // 继续走 fallback
+  }
+  if (execCopyFallback(text)) {
+    message.success('已复制到剪贴板')
+    return true
+  }
+  message.error('复制失败，请手动复制')
+  return false
+}
+
 function copyKey(text: string) {
-  navigator.clipboard.writeText(text).then(
-    () => message.success('已复制到剪贴板'),
-    () => message.error('复制失败，请手动复制'),
-  )
+  void writeClipboard(text)
+}
+
+function showManualCopy(name: string, text: string) {
+  manualCopy.value = { name, text }
+}
+
+async function fetchFullKey(row: ApiKey): Promise<string | null> {
+  if (!row.canReveal) {
+    message.warning('这个 Key 创建时未保存密文，无法再次显示完整值。请重新创建一个 Key。')
+    return null
+  }
+  try {
+    const { data } = await api.get(`/admin/keys/${row.id}/secret`)
+    return data.key
+  } catch (e) {
+    message.error(errMsg(e, '获取完整 Key 失败'))
+    return null
+  }
+}
+
+async function copyApiKey(row: ApiKey) {
+  if (!row.canReveal) {
+    message.warning('这个 Key 创建时未保存密文，无法再次显示完整值。请重新创建一个 Key。')
+    return
+  }
+  // 在 secure context 下用 ClipboardItem 包装异步 Promise，
+  // 这样浏览器认可的“用户手势”不会因 await 网络请求而失效。
+  const canUseAsyncClipboard =
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    typeof window.ClipboardItem === 'function' &&
+    !!navigator.clipboard?.write
+  if (canUseAsyncClipboard) {
+    try {
+      const item = new ClipboardItem({
+        'text/plain': fetchFullKey(row).then((key) => {
+          if (!key) throw new Error('no key')
+          return new Blob([key], { type: 'text/plain' })
+        }),
+      })
+      await navigator.clipboard.write([item])
+      message.success('已复制到剪贴板')
+      return
+    } catch {
+      // 走下面的回退路径
+    }
+  }
+  // 非 secure context 或 ClipboardItem 不可用：先取 key，再尝试同步 fallback；
+  // fallback 失败则弹出手动复制框。
+  const key = await fetchFullKey(row)
+  if (!key) return
+  if (execCopyFallback(key)) {
+    message.success('已复制到剪贴板')
+    return
+  }
+  showManualCopy(row.name, key)
 }
 
 function closeNewKeyModal(shown: boolean) {
   if (!shown) newKey.value = null
 }
 
-function copyAndClose() {
-  if (newKey.value) copyKey(newKey.value)
-  newKey.value = null
+async function copyAndClose() {
+  if (!newKey.value) return
+  const ok = await writeClipboard(newKey.value)
+  if (ok) newKey.value = null
 }
 
-function openUse(row: ApiKey) {
+async function openUse(row: ApiKey) {
   useKeyName.value = row.name
-  useKeySecret.value = `${row.keyPrefix}...`
+  useKeySecret.value = (await fetchFullKey(row)) ?? `${row.keyPrefix}...`
   showUse.value = true
 }
 
@@ -229,53 +336,123 @@ API Key:  ${key}`,
   }
 })
 
-function formatQuota(row: ApiKey): string {
-  if (row.quotaLimit == null) return `$${row.quotaUsed.toFixed(4)} / 不限`
-  return `$${row.quotaUsed.toFixed(4)} / $${row.quotaLimit.toFixed(2)}`
+function quotaPercent(row: ApiKey): number {
+  if (!row.quotaLimit || row.quotaLimit <= 0) return 0
+  return Math.max(0, Math.min(100, Math.round((row.quotaUsed / row.quotaLimit) * 100)))
+}
+
+function quotaStatus(row: ApiKey) {
+  const percent = quotaPercent(row)
+  if (percent >= 90) return 'error'
+  if (percent >= 70) return 'warning'
+  return 'success'
+}
+
+function formatRateLimit(row: ApiKey): string {
+  return row.rateLimit == null ? '不限速' : `${row.rateLimit}/min`
+}
+
+function renderKeyInfo(row: ApiKey) {
+  return h('div', { class: 'key-name' }, row.name)
+}
+
+function renderOwner(row: ApiKey) {
+  return row.ownerLabel
+    ? h('span', { class: 'plain-cell' }, row.ownerLabel)
+    : h('span', { class: 'muted-cell' }, '—')
+}
+
+function renderKeyPrefix(row: ApiKey) {
+  return h('div', { class: 'key-prefix-cell' }, [
+      h('code', null, `${row.keyPrefix}…`),
+      h(
+        NButton,
+        { size: 'tiny', quaternary: true, class: 'inline-action', onClick: () => copyApiKey(row) },
+        { default: () => '复制' },
+      ),
+  ])
+}
+
+function renderProviders(row: ApiKey) {
+  const list = row.allowedProviders
+  if (!list || list.length === 0) {
+    return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
+  }
+  return h(
+    NSpace,
+    { size: 4 },
+    {
+      default: () =>
+        list.map((p) =>
+          h(
+            NTag,
+            { size: 'small', type: providerTagType[p] ?? 'default', bordered: false },
+            { default: () => providerLabel[p] ?? p },
+          ),
+        ),
+    },
+  )
+}
+
+function renderUsage(row: ApiKey) {
+  return h('span', { class: ['usage-value', `is-${quotaStatus(row)}`] }, `$${row.quotaUsed.toFixed(4)}`)
+}
+
+function renderQuotaLimit(row: ApiKey) {
+  return row.quotaLimit == null
+    ? h('span', { class: 'muted-cell' }, '不限')
+    : h('span', { class: 'plain-cell' }, `$${row.quotaLimit.toFixed(2)}`)
+}
+
+function renderRateLimit(row: ApiKey) {
+  return h('span', { class: row.rateLimit == null ? 'muted-cell' : 'plain-cell' }, formatRateLimit(row))
+}
+
+function renderTime(value: number | null) {
+  return value ? h('span', { class: 'plain-cell' }, formatTime(value)) : h('span', { class: 'muted-cell' }, '—')
 }
 
 const columns = computed<DataTableColumns<ApiKey>>(() => [
-  { title: '名称', key: 'name', minWidth: 120 },
+  { title: '名称', key: 'name', minWidth: 150, fixed: 'left', render: renderKeyInfo },
+  { title: '持有者', key: 'ownerLabel', minWidth: 120, render: renderOwner },
   {
-    title: '持有者',
-    key: 'ownerLabel',
-    render: (row) => row.ownerLabel || h('span', { style: 'opacity:0.35' }, '—'),
-  },
-  {
-    title: 'Key 前缀',
+    title: '密钥',
     key: 'keyPrefix',
-    render: (row) => h('code', null, `${row.keyPrefix}…`),
+    minWidth: 170,
+    render: renderKeyPrefix,
   },
   {
-    title: '允许的服务商',
+    title: '服务商',
     key: 'allowedProviders',
-    render: (row) => {
-      const list = row.allowedProviders
-      if (!list || list.length === 0) {
-        return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
-      }
-      return h(
-        NSpace,
-        { size: 4 },
-        { default: () => list.map((p) => h(NTag, { size: 'small', bordered: false }, { default: () => p })) },
-      )
-    },
+    minWidth: 150,
+    render: renderProviders,
   },
   {
-    title: '配额（已用 / 上限）',
+    title: '已用',
     key: 'quota',
-    render: (row) => formatQuota(row),
+    minWidth: 110,
+    render: renderUsage,
+  },
+  { title: '上限', key: 'quotaLimit', minWidth: 100, render: renderQuotaLimit },
+  { title: '限速', key: 'rateLimit', minWidth: 100, render: renderRateLimit },
+  { title: '过期', key: 'expiresAt', minWidth: 160, render: (row) => renderTime(row.expiresAt) },
+  { title: '最后使用', key: 'lastUsedAt', minWidth: 160, render: (row) => renderTime(row.lastUsedAt) },
+  {
+    title: '创建时间',
+    key: 'createdAt',
+    minWidth: 160,
+    render: (row) => renderTime(row.createdAt),
   },
   {
     title: '状态',
     key: 'enabled',
+    width: 86,
     render: (row) => h(NSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
   },
-  { title: '最后使用', key: 'lastUsedAt', render: (row) => formatTime(row.lastUsedAt) },
-  { title: '创建时间', key: 'createdAt', render: (row) => formatTime(row.createdAt) },
   {
     title: '操作',
     key: 'actions',
+    width: 180,
     render: (row) =>
       h(
         NSpace,
@@ -313,7 +490,13 @@ onMounted(load)
     </div>
 
     <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="keys" :loading="loading" :bordered="false" />
+      <n-data-table
+        :columns="columns"
+        :data="keys"
+        :loading="loading"
+        :bordered="false"
+        :scroll-x="1500"
+      />
     </n-card>
 
     <!-- create -->
@@ -363,6 +546,29 @@ onMounted(load)
         <n-space justify="end">
           <n-button secondary @click="openUseNewKey">查看接入方式</n-button>
           <n-button type="primary" @click="copyAndClose">复制并关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal
+      :show="!!manualCopy"
+      preset="card"
+      title="请手动复制"
+      style="width: 480px"
+      @update:show="(shown: boolean) => { if (!shown) manualCopy = null }"
+    >
+      <n-alert type="info" style="margin-bottom: 12px">
+        当前页面不在安全上下文（HTTPS 或 localhost），浏览器禁止自动写入剪贴板。请手动选中下方内容复制。
+      </n-alert>
+      <n-input
+        :value="manualCopy?.text ?? ''"
+        type="textarea"
+        readonly
+        :autosize="{ minRows: 2, maxRows: 4 }"
+      />
+      <template #footer>
+        <n-space justify="end">
+          <n-button type="primary" @click="manualCopy = null">关闭</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -455,4 +661,65 @@ pre code {
   font-size: 13px;
   line-height: 1.65;
 }
+
+:deep(.key-name) {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.plain-cell),
+:deep(.muted-cell) {
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+:deep(.plain-cell) {
+  color: #0f172a;
+}
+
+:deep(.muted-cell) {
+  color: rgba(15, 23, 42, 0.52);
+}
+
+:deep(.key-prefix-cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.52);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+:deep(.inline-action) {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+:deep(.usage-value) {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+:deep(.usage-value.is-success) {
+  color: #18a058;
+}
+
+:deep(.usage-value.is-warning) {
+  color: #f0a020;
+}
+
+:deep(.usage-value.is-error) {
+  color: #d03050;
+}
+
 </style>

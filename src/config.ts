@@ -29,7 +29,15 @@ ensureSecret('JWT_SECRET', () => randomBytes(32).toString('hex'))
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
-  DATABASE_PATH: z.string().default('./data/model-bridge.db'),
+  DATABASE_URL: z
+    .string()
+    .url()
+    .refine((v) => v.startsWith('postgres://') || v.startsWith('postgresql://'), {
+      message: 'must be a postgres:// or postgresql:// URL',
+    }),
+  // Legacy SQLite path. Only consumed by scripts/migrate-sqlite-to-pg.ts
+  // when importing an old database — runtime no longer reads it.
+  DATABASE_PATH: z.string().optional(),
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),

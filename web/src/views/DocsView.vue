@@ -1,3 +1,17 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const baseOrigin = computed(() => {
+  if (typeof window === 'undefined') return 'http://localhost:3000'
+  return window.location.origin
+})
+
+const isSecureContext = computed(() => {
+  if (typeof window === 'undefined') return true
+  return window.isSecureContext
+})
+</script>
+
 <template>
   <div class="docs-page">
     <n-grid :cols="12" :x-gap="16" :y-gap="16" responsive="screen">
@@ -19,6 +33,13 @@
               <strong>密钥只显示一次</strong>
               <p>创建后立即复制保存，后台之后只展示 Key 前缀。</p>
             </div>
+            <div v-if="!isSecureContext">
+              <strong>HTTP 访问下的复制</strong>
+              <p>
+                当前页面不在 HTTPS / localhost，浏览器不允许自动写入剪贴板。点击复制时若失败，
+                后台会弹出一个文本框，请在框内手动选中并复制。
+              </p>
+            </div>
             <div>
               <strong>服务商限制</strong>
               <p>留空表示允许全部服务商；选择后只允许访问指定服务商。</p>
@@ -35,7 +56,7 @@
     <n-card class="surface-card" title="客户端接入" :bordered="false">
       <n-tabs type="line" animated>
         <n-tab-pane name="claude" tab="Claude Code">
-          <pre><code>export ANTHROPIC_BASE_URL=http://localhost:3000
+          <pre><code>export ANTHROPIC_BASE_URL={{ baseOrigin }}
 export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude</code></pre>
         </n-tab-pane>
@@ -47,7 +68,7 @@ model = "gpt-5.4"
 
 [model_providers.model-bridge]
 name = "model-bridge"
-base_url = "http://localhost:3000/v1"
+base_url = "{{ baseOrigin }}/v1"
 env_key = "MODEL_BRIDGE_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
@@ -60,11 +81,11 @@ codex --profile model-bridge</code></pre>
           <div class="endpoint-list">
             <div>
               <span>Anthropic</span>
-              <code>http://localhost:3000</code>
+              <code>{{ baseOrigin }}</code>
             </div>
             <div>
               <span>Gemini</span>
-              <code>http://localhost:3000</code>
+              <code>{{ baseOrigin }}</code>
             </div>
           </div>
           <p class="doc-note">API Key 填后台生成的 `mb-...` 密钥。</p>

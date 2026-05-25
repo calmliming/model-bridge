@@ -12,8 +12,8 @@ import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startOauthCallbackServer } from './oauthCallback'
 
 async function main(): Promise<void> {
-  initDb()
-  ensureAdmin()
+  await initDb()
+  await ensureAdmin()
 
   const app = Fastify({
     logger: true,
