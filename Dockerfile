@@ -29,6 +29,7 @@ ENV NODE_ENV=production \
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY src ./src
+COPY scripts ./scripts
 COPY --from=web-builder /web/dist ./web/dist
 
 # 3000 = HTTP API + admin dashboard. 1455 = OAuth callback (OpenAI &
