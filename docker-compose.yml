@@ -43,7 +43,9 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
     volumes:
-      # Read-only access to legacy SQLite backups so migrate-to-pg.sh can
-      # import old data via scripts/migrate-sqlite-to-pg.ts. Harmless in
-      # normal operation — the app no longer reads from this directory.
-      - ./data:/app/data:ro
+      # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
+      # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or
+      # writes here — PostgreSQL data lives under ./data/pg in its own
+      # service. Read-write because SQLite WAL mode needs to create
+      # sidecar -shm/-wal files even when opened readonly.
+      - ./data:/app/data
