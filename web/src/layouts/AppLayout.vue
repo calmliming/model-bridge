@@ -200,6 +200,7 @@ function logout() {
 
 .main-layout {
   background: transparent;
+  min-width: 0;
 }
 
 .header {
@@ -232,10 +233,11 @@ function logout() {
   height: calc(100vh - 74px);
   height: calc(100dvh - 74px);
   padding: 28px 30px;
+  min-width: 0;
 }
 
 .content-inner {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 </style>
