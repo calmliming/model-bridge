@@ -37,6 +37,8 @@ const showUse = ref(false)
 const useKeyName = ref('')
 const useKeySecret = ref('')
 
+const manualCopy = ref<{ name: string; text: string } | null>(null)
+
 // Edit-limits modal state.
 const showEdit = ref(false)
 const editing = ref(false)
@@ -184,17 +186,50 @@ function confirmDelete(row: ApiKey) {
   })
 }
 
-async function writeClipboard(text: string) {
+function execCopyFallback(text: string): boolean {
   try {
-    await navigator.clipboard.writeText(text)
-    message.success('已复制到剪贴板')
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
   } catch {
-    message.error('复制失败，请手动复制')
+    return false
   }
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      message.success('已复制到剪贴板')
+      return true
+    }
+  } catch {
+    // 继续走 fallback
+  }
+  if (execCopyFallback(text)) {
+    message.success('已复制到剪贴板')
+    return true
+  }
+  message.error('复制失败，请手动复制')
+  return false
 }
 
 function copyKey(text: string) {
   void writeClipboard(text)
+}
+
+function showManualCopy(name: string, text: string) {
+  manualCopy.value = { name, text }
 }
 
 async function fetchFullKey(row: ApiKey): Promise<string | null> {
@@ -212,9 +247,41 @@ async function fetchFullKey(row: ApiKey): Promise<string | null> {
 }
 
 async function copyApiKey(row: ApiKey) {
+  if (!row.canReveal) {
+    message.warning('这个 Key 创建时未保存密文，无法再次显示完整值。请重新创建一个 Key。')
+    return
+  }
+  // 在 secure context 下用 ClipboardItem 包装异步 Promise，
+  // 这样浏览器认可的“用户手势”不会因 await 网络请求而失效。
+  const canUseAsyncClipboard =
+    typeof window !== 'undefined' &&
+    window.isSecureContext &&
+    typeof window.ClipboardItem === 'function' &&
+    !!navigator.clipboard?.write
+  if (canUseAsyncClipboard) {
+    try {
+      const item = new ClipboardItem({
+        'text/plain': fetchFullKey(row).then((key) => {
+          if (!key) throw new Error('no key')
+          return new Blob([key], { type: 'text/plain' })
+        }),
+      })
+      await navigator.clipboard.write([item])
+      message.success('已复制到剪贴板')
+      return
+    } catch {
+      // 走下面的回退路径
+    }
+  }
+  // 非 secure context 或 ClipboardItem 不可用：先取 key，再尝试同步 fallback；
+  // fallback 失败则弹出手动复制框。
   const key = await fetchFullKey(row)
   if (!key) return
-  await writeClipboard(key)
+  if (execCopyFallback(key)) {
+    message.success('已复制到剪贴板')
+    return
+  }
+  showManualCopy(row.name, key)
 }
 
 function closeNewKeyModal(shown: boolean) {
@@ -223,8 +290,8 @@ function closeNewKeyModal(shown: boolean) {
 
 async function copyAndClose() {
   if (!newKey.value) return
-  await writeClipboard(newKey.value)
-  newKey.value = null
+  const ok = await writeClipboard(newKey.value)
+  if (ok) newKey.value = null
 }
 
 async function openUse(row: ApiKey) {
@@ -479,6 +546,29 @@ onMounted(load)
         <n-space justify="end">
           <n-button secondary @click="openUseNewKey">查看接入方式</n-button>
           <n-button type="primary" @click="copyAndClose">复制并关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal
+      :show="!!manualCopy"
+      preset="card"
+      title="请手动复制"
+      style="width: 480px"
+      @update:show="(shown: boolean) => { if (!shown) manualCopy = null }"
+    >
+      <n-alert type="info" style="margin-bottom: 12px">
+        当前页面不在安全上下文（HTTPS 或 localhost），浏览器禁止自动写入剪贴板。请手动选中下方内容复制。
+      </n-alert>
+      <n-input
+        :value="manualCopy?.text ?? ''"
+        type="textarea"
+        readonly
+        :autosize="{ minRows: 2, maxRows: 4 }"
+      />
+      <template #footer>
+        <n-space justify="end">
+          <n-button type="primary" @click="manualCopy = null">关闭</n-button>
         </n-space>
       </template>
     </n-modal>
