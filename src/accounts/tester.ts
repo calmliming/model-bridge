@@ -3,9 +3,10 @@ import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota
 import {
   extractAccountQuota,
   extractClaudeOAuthUsageQuota,
+  quotaCooldownUntil,
   type AccountQuotaSnapshot,
 } from './quota'
-import { markAccountUsed } from './scheduler'
+import { markAccountUsed, penalizeAccount } from './scheduler'
 
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -188,7 +189,7 @@ async function testGemini(accessToken: string): Promise<ProviderTestOutcome> {
   }
 }
 
-async function runProviderTest(account: AccountRow, accessToken: string): Promise<string> {
+async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
   else if (account.provider === 'openai') result = await testOpenAI(accessToken)
@@ -197,7 +198,7 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
 
   if (result.metadata) await updateAccountMetadata(account.id, result.metadata)
   if (result.quota) await updateAccountQuota(account.id, result.quota)
-  return result.message
+  return result
 }
 
 /** Tests whether one upstream account can reach its provider with current credentials. */
@@ -207,14 +208,19 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
 
   const startedAt = Date.now()
   const accessToken = await ensureFreshToken(account)
-  const message = await runProviderTest(account, accessToken)
+  const result = await runProviderTest(account, accessToken)
   const latencyMs = Date.now() - startedAt
 
-  await markAccountUsed(account.id)
+  const cooldownUntil = quotaCooldownUntil(result.quota)
+  if (cooldownUntil) {
+    await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
+  } else {
+    await markAccountUsed(account.id)
+  }
   return {
     success: true,
     provider: account.provider,
-    message,
+    message: result.message,
     latencyMs,
     checkedAt: Date.now(),
   }

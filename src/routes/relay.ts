@@ -2,7 +2,7 @@ import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
-import { extractAccountQuota } from '../accounts/quota'
+import { extractAccountQuota, quotaCooldownUntil } from '../accounts/quota'
 import { markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
@@ -397,7 +397,12 @@ async function executeRelay(
     if (failure.penalty) {
       await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
-      await markAccountUsed(account.id)
+      const quotaCooldown = quotaCooldownUntil(quota)
+      if (quotaCooldown) {
+        await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
+      } else {
+        await markAccountUsed(account.id)
+      }
     }
 
     const meta: RelayMeta = {

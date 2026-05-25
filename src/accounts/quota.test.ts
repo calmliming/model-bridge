@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { accountQuotaFromMetadata, extractAccountQuota, extractClaudeOAuthUsageQuota } from './quota'
+import {
+  accountQuotaFromMetadata,
+  extractAccountQuota,
+  extractClaudeOAuthUsageQuota,
+  quotaCooldownUntil,
+} from './quota'
 
 describe('extractAccountQuota', () => {
   it('extracts Claude 5-hour and 7-day quota windows from response headers', () => {
@@ -121,5 +126,40 @@ describe('accountQuotaFromMetadata', () => {
         },
       ],
     })
+  })
+})
+
+describe('quotaCooldownUntil', () => {
+  it('uses the nearest future reset time from exceeded quota windows', () => {
+    expect(
+      quotaCooldownUntil(
+        {
+          source: 'claude',
+          updatedAt: 1700000000000,
+          windows: [
+            { key: 'hourly', label: '5小时', usedPercent: 100, resetAt: 1700007200000, exceeded: true },
+            { key: 'weekly', label: '7天', usedPercent: 100, resetAt: 1700604800000, exceeded: true },
+            { key: 'weekly_sonnet', label: '7天 Sonnet', usedPercent: 80, resetAt: 1700100000000, exceeded: false },
+          ],
+        },
+        1700000000000,
+      ),
+    ).toBe(1700007200000)
+  })
+
+  it('ignores exceeded quota windows without a future reset time', () => {
+    expect(
+      quotaCooldownUntil(
+        {
+          source: 'openai',
+          updatedAt: 1700000000000,
+          windows: [
+            { key: 'hourly', label: '5小时', usedPercent: 100, resetAt: null, exceeded: true },
+            { key: 'weekly', label: '7天', usedPercent: 100, resetAt: 1699999999999, exceeded: true },
+          ],
+        },
+        1700000000000,
+      ),
+    ).toBeNull()
   })
 })

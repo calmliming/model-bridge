@@ -216,7 +216,9 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
             void refreshQuota(row)
           },
         },
-        { default: () => '↻' },
+        {
+          icon: () => h('span', { class: 'quota-refresh-icon', 'aria-hidden': 'true' }, '↻'),
+        },
       ),
     ],
   )
@@ -813,11 +815,20 @@ onBeforeUnmount(() => {
 }
 
 :deep(.quota-refresh) {
+  --n-width: 22px;
+  --n-height: 22px;
   color: rgba(15, 23, 42, 0.52);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 :deep(.quota-refresh:hover) {
   color: #2563eb;
+}
+
+:deep(.quota-refresh-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 </style>

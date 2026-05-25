@@ -220,6 +220,16 @@ export function extractAccountQuota(
   return null
 }
 
+export function quotaCooldownUntil(
+  quota: AccountQuotaSnapshot | null | undefined,
+  now = Date.now(),
+): number | null {
+  const resetTimes = quota?.windows
+    .filter((window) => window.exceeded && window.resetAt != null && window.resetAt > now)
+    .map((window) => window.resetAt!) ?? []
+  return resetTimes.length ? Math.min(...resetTimes) : null
+}
+
 function isQuotaWindow(value: unknown): value is AccountQuotaWindow {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as Partial<AccountQuotaWindow>
