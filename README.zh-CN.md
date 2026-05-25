@@ -18,7 +18,7 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）账户接入�
 
 ## 技术栈
 
-- **后端：** Node.js + TypeScript、Fastify、SQLite（Drizzle ORM）
+- **后端：** Node.js + TypeScript、Fastify、PostgreSQL（Drizzle ORM）
 - **前端：** Vue 3 + Vite + Naive UI + ECharts
 
 ## 快速开始（开发环境）
@@ -144,7 +144,40 @@ codex --profile model-bridge
 
 Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 Docker 模式可
 把 `.env.example` 复制为 `.env`，`ENCRYPTION_KEY` 与 `JWT_SECRET` 在首次运行
-时自动生成。所有数据保存在 `./data/` 下的 SQLite 文件中 —— 请备份该目录。
+时自动生成。首次启动前请设置 `PG_PASSWORD` 和 `DATABASE_URL`——内置的
+`postgres` 容器把数据存放在 `./data/pg/` 下，请备份这个目录。
+
+### 从旧版 SQLite 升级到 PostgreSQL（一键迁移）
+
+如果你之前跑过 SQLite 版本（`./data/model-bridge.db` 存在），更新代码后
+**直接跑一键脚本**即可，不用手动操作：
+
+```bash
+git pull
+./install.sh          # 会自动给 .env 补上 PG_PASSWORD 等字段
+./migrate-to-pg.sh    # 备份 SQLite → 起 PG → 自动建表 → 自动导入数据 → 起完整服务
+```
+
+`migrate-to-pg.sh` 全程有进度提示，行数对不上会直接报错退出。原 SQLite
+文件会备份为 `./data/model-bridge.db.bak-<时间戳>`，确认无误前不要删。
+
+### 本地开发与生产共用数据
+
+数据库改为独立的 PostgreSQL 服务后，本地开发进程可以通过 SSH 隧道直连生产
+数据库——不再需要手动导出/导入。在 `~/.ssh/config` 里加：
+
+```sshconfig
+Host model-bridge-prod
+  HostName your.server.com
+  User your-ssh-user
+  LocalForward 5432 127.0.0.1:5432
+```
+
+然后 `ssh model-bridge-prod` 启动隧道，本地 `.env` 里把 `DATABASE_URL`
+设成 `postgres://model_bridge:PASSWORD@127.0.0.1:5432/model_bridge`。
+后端启动时若 `NODE_ENV != production` 且数据库 host 不是 `localhost`，
+会打印醒目警告横幅,提示当前正在写生产库。生产服务器上 PostgreSQL 端口
+只绑在 `127.0.0.1`，不暴露到公网。
 
 ## 远程部署
 
@@ -180,8 +213,8 @@ cd web && npm run build && cd ..
 docker compose restart
 ```
 
-`./data` 目录是 volume 挂载的，重建不会丢失数据库和账户数据。
-建议定期备份 `./data` 目录。
+`./data` 目录是 volume 挂载的（PostgreSQL 数据位于 `./data/pg/` 下），
+重建不会丢失数据库和账户数据。建议定期备份 `./data` 目录。
 
 > ⚠️ 通过中转、用非官方工具使用订阅 OAuth 令牌，可能违反服务商服务条款并有
 > 账户被封风险。仅建议使用你自己的订阅、并在小范围可信群体内共享。详见

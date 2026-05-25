@@ -349,7 +349,7 @@ async function executeRelay(
   const tried: string[] = []
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const account = pickAccount(provider.id, tried)
+    const account = await pickAccount(provider.id, tried)
     if (!account) {
       await reply.code(503).send({
         error: tried.length
@@ -365,7 +365,7 @@ async function executeRelay(
       token = await ensureFreshToken(account)
     } catch (err) {
       request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
-      penalizeAccount(account.id, 'error')
+      await penalizeAccount(account.id, 'error')
       continue
     }
 
@@ -379,25 +379,25 @@ async function executeRelay(
       })
     } catch (err) {
       request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
-      penalizeAccount(account.id, 'error')
+      await penalizeAccount(account.id, 'error')
       continue
     }
     const quota = extractAccountQuota(provider.id, upstream.headers)
-    if (quota) updateAccountQuota(account.id, quota)
+    if (quota) await updateAccountQuota(account.id, quota)
 
     const failure = await classifyUpstreamFailure(provider.id, upstream)
     const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
     if (failure.retryable && !lastAttempt) {
-      if (failure.penalty) penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      if (failure.penalty) await penalizeAccount(account.id, failure.penalty, failure.resetAt)
       await upstream.body?.cancel().catch(() => {})
       continue
     }
 
     if (failure.penalty) {
-      penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
-      markAccountUsed(account.id)
+      await markAccountUsed(account.id)
     }
 
     const meta: RelayMeta = {
@@ -472,7 +472,7 @@ async function sendStreaming(
   }
   raw.end()
 
-  recordUsage({
+  void recordUsage({
     apiKeyId: meta.apiKeyId,
     accountId: meta.accountId,
     provider: meta.provider,
@@ -502,7 +502,7 @@ async function sendBuffered(
   } catch {
     // Error responses aren't valid JSON — leave usage empty.
   }
-  recordUsage({
+  void recordUsage({
     apiKeyId: meta.apiKeyId,
     accountId: meta.accountId,
     provider: meta.provider,

@@ -80,7 +80,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
-    if (!verifyAdminCredentials(body.data.username, body.data.password)) {
+    if (!(await verifyAdminCredentials(body.data.username, body.data.password))) {
       return reply.code(401).send({ error: 'invalid username or password' })
     }
     const token = app.jwt.sign({ sub: body.data.username, role: 'admin' }, { expiresIn: '7d' })
@@ -88,7 +88,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   })
 
   app.get('/api/admin/me', { preHandler: requireAdmin }, async () => {
-    return { username: getAdminUsername() }
+    return { username: await getAdminUsername() }
   })
 
   app.post('/api/admin/change-password', { preHandler: requireAdmin }, async (request, reply) => {
@@ -96,7 +96,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'new password must be at least 6 characters' })
     }
-    if (!changeAdminPassword(body.data.currentPassword, body.data.newPassword)) {
+    if (!(await changeAdminPassword(body.data.currentPassword, body.data.newPassword))) {
       return reply.code(400).send({ error: 'current password is incorrect' })
     }
     return { ok: true }
@@ -104,7 +104,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   // ── API keys ─────────────────────────────────────────────
   app.get('/api/admin/keys', { preHandler: requireAdmin }, async () => {
-    return { keys: listApiKeys() }
+    return { keys: await listApiKeys() }
   })
 
   app.post('/api/admin/keys', { preHandler: requireAdmin }, async (request, reply) => {
@@ -112,7 +112,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
-    return reply.code(201).send(createApiKey(body.data))
+    return reply.code(201).send(await createApiKey(body.data))
   })
 
   app.get<{ Params: { id: string } }>(
@@ -123,7 +123,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!params.success) {
         return reply.code(400).send({ error: 'invalid key id' })
       }
-      const key = getApiKeySecret(params.data.id)
+      const key = await getApiKeySecret(params.data.id)
       if (!key) {
         return reply.code(404).send({ error: 'full API key is unavailable; recreate this key to enable copy' })
       }
@@ -139,7 +139,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      updateApiKey(request.params.id, body.data)
+      await updateApiKey(request.params.id, body.data)
       return { ok: true }
     },
   )
@@ -148,14 +148,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     '/api/admin/keys/:id',
     { preHandler: requireAdmin },
     async (request) => {
-      deleteApiKey(request.params.id)
+      await deleteApiKey(request.params.id)
       return { ok: true }
     },
   )
 
   // ── Upstream accounts ────────────────────────────────────
   app.get('/api/admin/accounts', { preHandler: requireAdmin }, async () => {
-    return { accounts: listAccounts() }
+    return { accounts: await listAccounts() }
   })
 
   // Step 1: store the chosen name + PKCE verifier, return the authorize URL.
@@ -170,14 +170,13 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const oauth = getProvider(body.data.provider)!
     const { verifier, challenge } = oauth.generatePkce()
     const state = randomBytes(16).toString('hex')
-    db.insert(oauthSessions)
+    await db.insert(oauthSessions)
       .values({
         state,
         provider: body.data.provider,
         codeVerifier: verifier,
         accountName: body.data.name,
       })
-      .run()
     return {
       state,
       authorizeUrl: oauth.buildAuthorizeUrl(state, challenge),
@@ -217,11 +216,10 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!code || !state) {
       return reply.code(400).send({ error: 'missing code or state' })
     }
-    const session = db
+    const [session] = await db
       .select()
       .from(oauthSessions)
       .where(eq(oauthSessions.state, state))
-      .get()
     if (!session) {
       return reply.code(400).send({ error: 'OAuth session expired — please restart authorization' })
     }
@@ -245,8 +243,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           .send({ error: `account setup failed: ${(err as Error).message}` })
       }
     }
-    db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
-    const created = createAccount({
+    await db.delete(oauthSessions).where(eq(oauthSessions.state, state))
+    const created = await createAccount({
       provider: session.provider,
       name: session.accountName ?? `${session.provider} account`,
       tokens,
@@ -267,7 +265,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: 'invalid request body' })
       }
       const { provider, name, accessToken, refreshToken, expiresAt } = body.data
-      const created = createAccount({
+      const created = await createAccount({
         provider,
         name,
         tokens: {
@@ -289,7 +287,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      setAccountStatus(request.params.id, body.data.status)
+      await setAccountStatus(request.params.id, body.data.status)
       return { ok: true }
     },
   )
@@ -338,14 +336,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     '/api/admin/accounts/:id',
     { preHandler: requireAdmin },
     async (request) => {
-      deleteAccount(request.params.id)
+      await deleteAccount(request.params.id)
       return { ok: true }
     },
   )
 
   // ── Dashboard overview ───────────────────────────────────
   app.get('/api/admin/overview', { preHandler: requireAdmin }, async () => {
-    return dashboardOverview()
+    return await dashboardOverview()
   })
 
   // ── Usage statistics ─────────────────────────────────────
@@ -354,7 +352,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     { preHandler: requireAdmin },
     async (request) => {
       const days = request.query.days ? Number(request.query.days) : 30
-      return statsSummary(days)
+      return await statsSummary(days)
     },
   )
 }

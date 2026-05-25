@@ -1,9 +1,32 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: model-bridge-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:-model_bridge}
+      POSTGRES_USER: ${PG_USER:-model_bridge}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      # PostgreSQL data — back this up to preserve accounts, API keys, and usage logs.
+      - ./data/pg:/var/lib/postgresql/data
+    ports:
+      # Bind to loopback only; remote access goes through an SSH tunnel.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-model_bridge} -d ${PG_DATABASE:-model_bridge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   model-bridge:
     build: .
     image: model-bridge:latest
     container_name: model-bridge
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       # Dashboard + relay API.
       - "3001:3000"
@@ -14,11 +37,13 @@ services:
     environment:
       PORT: 3000
       HOST: 0.0.0.0
-      DATABASE_PATH: /app/data/model-bridge.db
+      DATABASE_URL: postgres://${PG_USER:-model_bridge}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_bridge}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
     volumes:
-      # SQLite database — back this up to preserve accounts & API keys.
-      - ./data:/app/data
+      # Read-only access to legacy SQLite backups so migrate-to-pg.sh can
+      # import old data via scripts/migrate-sqlite-to-pg.ts. Harmless in
+      # normal operation — the app no longer reads from this directory.
+      - ./data:/app/data:ro

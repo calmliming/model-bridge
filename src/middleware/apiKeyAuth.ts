@@ -48,7 +48,7 @@ export async function requireApiKey(
     reply.code(401).send({ error: 'missing API key' })
     return
   }
-  const record = findApiKeyBySecret(secret)
+  const record = await findApiKeyBySecret(secret)
   if (!record || !record.enabled) {
     reply.code(401).send({ error: 'invalid or disabled API key' })
     return
@@ -61,7 +61,7 @@ export async function requireApiKey(
     reply.code(429).send({ error: 'API key quota exceeded' })
     return
   }
-  db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, record.id)).run()
+  await db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, record.id))
   request.apiKey = {
     id: record.id,
     name: record.name,

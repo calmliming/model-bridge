@@ -13,13 +13,12 @@ const COOLDOWN_MS: Record<'rate_limited' | 'error', number> = {
  * Skips disabled accounts, accounts in cooldown, and any in `exclude`
  * (already tried this request). Returns null when none are available.
  */
-export function pickAccount(provider: string, exclude: string[] = []) {
+export async function pickAccount(provider: string, exclude: string[] = []) {
   const now = Date.now()
-  const rows = db
+  const rows = await db
     .select()
     .from(accounts)
     .where(and(eq(accounts.provider, provider), ne(accounts.status, 'disabled')))
-    .all()
 
   const available = rows.filter(
     (a) => !exclude.includes(a.id) && (!a.cooldownUntil || a.cooldownUntil < now),
@@ -32,23 +31,21 @@ export function pickAccount(provider: string, exclude: string[] = []) {
 }
 
 /** Marks an account as healthy and just used (clears any cooldown). */
-export function markAccountUsed(id: string): void {
-  db.update(accounts)
+export async function markAccountUsed(id: string): Promise<void> {
+  await db.update(accounts)
     .set({ lastUsedAt: Date.now(), status: 'active', cooldownUntil: null })
     .where(eq(accounts.id, id))
-    .run()
 }
 
 /** Puts an account into cooldown after a 429 (rate_limited) or other failure (error). */
-export function penalizeAccount(
+export async function penalizeAccount(
   id: string,
   kind: 'rate_limited' | 'error',
   cooldownUntil?: number | null,
-): void {
+): Promise<void> {
   const fallbackUntil = Date.now() + COOLDOWN_MS[kind]
   const until = cooldownUntil && cooldownUntil > Date.now() ? cooldownUntil : fallbackUntil
-  db.update(accounts)
+  await db.update(accounts)
     .set({ status: kind, cooldownUntil: until })
     .where(eq(accounts.id, id))
-    .run()
 }

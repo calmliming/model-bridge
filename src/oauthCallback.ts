@@ -53,11 +53,10 @@ export function startOauthCallbackServer(): void {
     if (error) return writeResult(400, false, `OAuth 返回错误：${error}`)
     if (!code || !state) return writeResult(400, false, '缺少 code 或 state 参数')
 
-    const session = db
+    const [session] = await db
       .select()
       .from(oauthSessions)
       .where(eq(oauthSessions.state, state))
-      .get()
     if (!session) {
       return writeResult(400, false, 'OAuth 会话已过期或不存在，请重新发起授权')
     }
@@ -71,13 +70,13 @@ export function startOauthCallbackServer(): void {
       if (provider.fetchAccountMetadata) {
         metadata = await provider.fetchAccountMetadata(tokens.accessToken)
       }
-      createAccount({
+      await createAccount({
         provider: session.provider,
         name: session.accountName ?? `${session.provider} account`,
         tokens,
         metadata,
       })
-      db.delete(oauthSessions).where(eq(oauthSessions.state, state)).run()
+      await db.delete(oauthSessions).where(eq(oauthSessions.state, state))
       writeResult(200, true, '您可以关闭此页面，回到 model-bridge 后台。')
     } catch (err) {
       writeResult(400, false, `授权失败：${(err as Error).message}`)

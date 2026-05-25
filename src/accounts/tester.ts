@@ -190,14 +190,14 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
   else if (account.provider === 'gemini') result = await testGemini(accessToken)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 
-  if (result.metadata) updateAccountMetadata(account.id, result.metadata)
-  if (result.quota) updateAccountQuota(account.id, result.quota)
+  if (result.metadata) await updateAccountMetadata(account.id, result.metadata)
+  if (result.quota) await updateAccountQuota(account.id, result.quota)
   return result.message
 }
 
 /** Tests whether one upstream account can reach its provider with current credentials. */
 export async function testAccountConnectivity(id: string): Promise<AccountTestResult> {
-  const account = getAccount(id)
+  const account = await getAccount(id)
   if (!account) throw new AccountTestError('account not found', 404)
 
   const startedAt = Date.now()
@@ -205,7 +205,7 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
   const message = await runProviderTest(account, accessToken)
   const latencyMs = Date.now() - startedAt
 
-  markAccountUsed(account.id)
+  await markAccountUsed(account.id)
   return {
     success: true,
     provider: account.provider,

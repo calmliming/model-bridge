@@ -19,7 +19,7 @@ model / key breakdowns, and a one-command Docker deploy.
 
 ## Tech stack
 
-- **Backend:** Node.js + TypeScript, Fastify, SQLite (Drizzle ORM)
+- **Backend:** Node.js + TypeScript, Fastify, PostgreSQL (Drizzle ORM)
 - **Frontend:** Vue 3 + Vite + Naive UI + ECharts
 
 ## Quick start (development)
@@ -152,8 +152,44 @@ lets you set the Gemini base URL) for the Gemini relay.
 
 For Docker deploys, `install.sh` writes everything into the host `.env`.
 For non-Docker runs, copy `.env.example` to `.env`; `ENCRYPTION_KEY` and
-`JWT_SECRET` are auto-generated on first start. All data lives in the SQLite
-file under `./data/` — back up that folder.
+`JWT_SECRET` are auto-generated on first start. Set `PG_PASSWORD` and
+`DATABASE_URL` before the first boot — the bundled `postgres` container
+stores its data under `./data/pg/`, so back up that folder.
+
+### Upgrading from the old SQLite version (one-click)
+
+If you used to run the SQLite version (`./data/model-bridge.db` exists),
+**just run the two scripts** after pulling — no manual steps needed:
+
+```bash
+git pull
+./install.sh          # tops up .env with PG_PASSWORD / DATABASE_URL
+./migrate-to-pg.sh    # backs up SQLite → starts PG → auto-creates tables → imports data → brings stack up
+```
+
+The migration prints progress for each table and refuses to continue if
+row counts don't match. The old SQLite file is preserved as
+`./data/model-bridge.db.bak-<timestamp>` — don't delete it until you've
+verified everything works.
+
+### Sharing data between local dev and prod
+
+Because the database now runs as a real PostgreSQL service, your local dev
+process can connect to the production database through an SSH tunnel —
+no manual export/import required. Add to your `~/.ssh/config`:
+
+```sshconfig
+Host model-bridge-prod
+  HostName your.server.com
+  User your-ssh-user
+  LocalForward 5432 127.0.0.1:5432
+```
+
+Then `ssh model-bridge-prod` and set `DATABASE_URL=postgres://model_bridge:PASSWORD@127.0.0.1:5432/model_bridge`
+in your local `.env`. The backend prints a loud warning at startup when
+`NODE_ENV != production` and the DB host isn't `localhost`, so you know
+you're writing to prod. The production PostgreSQL port is bound to
+`127.0.0.1` only — it's not exposed on the public internet.
 
 ## Remote deployment
 
@@ -190,8 +226,9 @@ cd web && npm run build && cd ..
 docker compose restart
 ```
 
-The `./data` directory is volume-mounted — rebuilding does not lose the database
-or account data. Back up `./data` regularly.
+The `./data` directory is volume-mounted (PostgreSQL data lives under
+`./data/pg/`) — rebuilding does not lose the database or account data.
+Back up `./data` regularly.
 
 > ⚠️ Using subscription OAuth tokens through a relay may violate provider
 > Terms of Service and risk account suspension. Intended for your own

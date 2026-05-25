@@ -32,10 +32,10 @@ export interface CreatedApiKey {
 }
 
 /** Creates a new API key and returns its plaintext secret once. */
-export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
+export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApiKey> {
   const secret = KEY_PREFIX + randomBytes(24).toString('hex')
   const id = generateId()
-  db.insert(apiKeys)
+  await db.insert(apiKeys)
     .values({
       id,
       name: input.name,
@@ -49,13 +49,12 @@ export function createApiKey(input: CreateApiKeyInput): CreatedApiKey {
       quotaLimit: input.quotaLimit ?? null,
       expiresAt: input.expiresAt ?? null,
     })
-    .run()
   return { id, key: secret }
 }
 
 /** Lists every API key, newest first. The key hash and encrypted secret are never exposed. */
-export function listApiKeys() {
-  return db
+export async function listApiKeys() {
+  const rows = await db
     .select({
       id: apiKeys.id,
       name: apiKeys.name,
@@ -74,31 +73,30 @@ export function listApiKeys() {
     })
     .from(apiKeys)
     .orderBy(desc(apiKeys.createdAt))
-    .all()
-    .map(({ keySecretEncrypted, ...key }) => ({
-      ...key,
-      canReveal: !!keySecretEncrypted,
-    }))
+  return rows.map(({ keySecretEncrypted, ...key }) => ({
+    ...key,
+    canReveal: !!keySecretEncrypted,
+  }))
 }
 
 /** Looks up a key record by its plaintext secret. */
-export function findApiKeyBySecret(secret: string) {
-  return db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret))).get()
+export async function findApiKeyBySecret(secret: string) {
+  const [row] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret)))
+  return row
 }
 
 /** Returns a full API key for admin copy/reveal when it was created after encrypted storage existed. */
-export function getApiKeySecret(id: string): string | null {
-  const row = db
+export async function getApiKeySecret(id: string): Promise<string | null> {
+  const [row] = await db
     .select({ keySecretEncrypted: apiKeys.keySecretEncrypted })
     .from(apiKeys)
     .where(eq(apiKeys.id, id))
-    .get()
   if (!row?.keySecretEncrypted) return null
   return decrypt(row.keySecretEncrypted)
 }
 
-export function setApiKeyEnabled(id: string, enabled: boolean): void {
-  db.update(apiKeys).set({ enabled }).where(eq(apiKeys.id, id)).run()
+export async function setApiKeyEnabled(id: string, enabled: boolean): Promise<void> {
+  await db.update(apiKeys).set({ enabled }).where(eq(apiKeys.id, id))
 }
 
 export interface UpdateApiKeyPatch {
@@ -112,11 +110,11 @@ export interface UpdateApiKeyPatch {
 }
 
 /** Updates an API key's metadata and limits. Only provided fields change. */
-export function updateApiKey(id: string, patch: UpdateApiKeyPatch): void {
+export async function updateApiKey(id: string, patch: UpdateApiKeyPatch): Promise<void> {
   if (Object.keys(patch).length === 0) return
-  db.update(apiKeys).set(patch).where(eq(apiKeys.id, id)).run()
+  await db.update(apiKeys).set(patch).where(eq(apiKeys.id, id))
 }
 
-export function deleteApiKey(id: string): void {
-  db.delete(apiKeys).where(eq(apiKeys.id, id)).run()
+export async function deleteApiKey(id: string): Promise<void> {
+  await db.delete(apiKeys).where(eq(apiKeys.id, id))
 }

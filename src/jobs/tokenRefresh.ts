@@ -9,7 +9,7 @@ const REFRESH_AHEAD_MS = 5 * 60_000
 /** Refreshes the OAuth token of every account that is close to expiring. */
 async function refreshExpiringTokens(): Promise<void> {
   const threshold = Date.now() + REFRESH_AHEAD_MS
-  const rows = db.select().from(accounts).where(ne(accounts.status, 'disabled')).all()
+  const rows = await db.select().from(accounts).where(ne(accounts.status, 'disabled'))
   for (const account of rows) {
     if (!account.tokenExpiresAt || account.tokenExpiresAt > threshold) continue
     if (!account.oauthRefreshToken) continue
