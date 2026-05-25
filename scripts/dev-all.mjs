@@ -4,7 +4,9 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const npmCli = process.platform === 'win32' ? process.env.npm_execpath : undefined
+const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'cmd.exe' : 'npm'
+const npmArgsPrefix = npmCli ? [npmCli] : process.platform === 'win32' ? ['/d', '/s', '/c', 'npm'] : []
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined
 
 const ansi = {
@@ -25,7 +27,7 @@ const services = [
     color: ansi.blue,
     cwd: rootDir,
     command: npmCommand,
-    args: ['run', '--silent', 'dev'],
+    args: [...npmArgsPrefix, 'run', '--silent', 'dev'],
   },
   {
     name: 'frontend',
@@ -33,7 +35,7 @@ const services = [
     color: ansi.green,
     cwd: resolve(rootDir, 'web'),
     command: npmCommand,
-    args: ['run', '--silent', 'dev'],
+    args: [...npmArgsPrefix, 'run', '--silent', 'dev'],
   },
 ]
 
