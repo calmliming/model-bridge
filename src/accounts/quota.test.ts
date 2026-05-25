@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { accountQuotaFromMetadata, extractAccountQuota } from './quota'
+import { accountQuotaFromMetadata, extractAccountQuota, extractClaudeOAuthUsageQuota } from './quota'
 
 describe('extractAccountQuota', () => {
   it('extracts Claude 5-hour and 7-day quota windows from response headers', () => {
@@ -30,6 +30,23 @@ describe('extractAccountQuota', () => {
         resetAt: 1800100000000,
         exceeded: false,
       },
+    ])
+  })
+
+  it('extracts Claude OAuth usage from the usage endpoint response', () => {
+    const quota = extractClaudeOAuthUsageQuota(
+      {
+        five_hour: { utilization: 12.5, resets_at: '2026-05-25T12:00:00Z' },
+        seven_day: { utilization: 45, resets_at: '2026-05-26T12:00:00Z' },
+        seven_day_sonnet: { utilization: 67, resets_at: '2026-05-27T12:00:00Z' },
+      },
+      1700000000000,
+    )
+
+    expect(quota?.windows.map((window) => [window.key, window.label, window.usedPercent, window.resetAt])).toEqual([
+      ['hourly', '5小时', 12.5, 1779710400000],
+      ['weekly', '7天', 45, 1779796800000],
+      ['weekly_sonnet', '7天 Sonnet', 67, 1779883200000],
     ])
   })
 

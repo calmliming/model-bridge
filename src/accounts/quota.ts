@@ -1,4 +1,4 @@
-export type AccountQuotaWindowKey = 'hourly' | 'weekly' | 'primary' | 'secondary'
+export type AccountQuotaWindowKey = 'hourly' | 'weekly' | 'weekly_sonnet' | 'primary' | 'secondary'
 
 export interface AccountQuotaWindow {
   key: AccountQuotaWindowKey
@@ -28,6 +28,14 @@ function parseEpochMs(raw: string | null): number | null {
   return n > 10_000_000_000 ? Math.trunc(n) : Math.trunc(n * 1000)
 }
 
+function parseTimeMs(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  const epoch = parseEpochMs(raw)
+  if (epoch != null) return epoch
+  const parsed = Date.parse(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 function resetAfter(headers: Headers, name: string, now: number): number | null {
   const seconds = headerNumber(headers, name)
   return seconds == null || seconds < 0 ? null : now + seconds * 1000
@@ -37,6 +45,11 @@ function percentFromUtilization(value: number | null): number | null {
   if (value == null) return null
   const percent = value <= 1 ? value * 100 : value
   return Math.max(0, Math.min(100, percent))
+}
+
+function percentFromLimitRemaining(limit: number | null, remaining: number | null): number | null {
+  if (limit == null || remaining == null || limit <= 0) return null
+  return Math.max(0, Math.min(100, ((limit - remaining) / limit) * 100))
 }
 
 function percentFromPercent(value: number | null): number | null {
@@ -66,6 +79,72 @@ function parseClaudeQuota(headers: Headers, now: number): AccountQuotaSnapshot |
     ]
   })
 
+  if (windows.length) return { source: 'claude', updatedAt: now, windows }
+
+  const tokenUsedPercent = percentFromLimitRemaining(
+    headerNumber(headers, 'anthropic-ratelimit-tokens-limit'),
+    headerNumber(headers, 'anthropic-ratelimit-tokens-remaining'),
+  )
+  const tokenResetAt = parseTimeMs(headers.get('anthropic-ratelimit-tokens-reset'))
+  if (tokenUsedPercent != null || tokenResetAt != null) {
+    return {
+      source: 'claude',
+      updatedAt: now,
+      windows: [
+        {
+          key: 'primary',
+          label: 'Token',
+          usedPercent: tokenUsedPercent,
+          resetAt: tokenResetAt,
+          exceeded: tokenUsedPercent != null && tokenUsedPercent >= 100,
+        },
+      ],
+    }
+  }
+
+  return null
+}
+
+interface ClaudeOAuthUsageWindow {
+  utilization?: unknown
+  resets_at?: unknown
+}
+
+function readClaudeOAuthWindow(
+  body: Record<string, unknown>,
+  field: string,
+  key: Extract<AccountQuotaWindowKey, 'hourly' | 'weekly' | 'weekly_sonnet'>,
+  label: string,
+): AccountQuotaWindow[] {
+  const raw = body[field]
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+  const row = raw as ClaudeOAuthUsageWindow
+  const utilization = typeof row.utilization === 'number' ? row.utilization : null
+  const resetAt = typeof row.resets_at === 'string' ? parseTimeMs(row.resets_at) : null
+  if (utilization == null && resetAt == null) return []
+  const usedPercent = percentFromPercent(utilization)
+  return [
+    {
+      key,
+      label,
+      usedPercent,
+      resetAt,
+      exceeded: usedPercent != null && usedPercent >= 100,
+    },
+  ]
+}
+
+export function extractClaudeOAuthUsageQuota(
+  body: unknown,
+  now = Date.now(),
+): AccountQuotaSnapshot | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const row = body as Record<string, unknown>
+  const windows = [
+    ...readClaudeOAuthWindow(row, 'five_hour', 'hourly', '5小时'),
+    ...readClaudeOAuthWindow(row, 'seven_day', 'weekly', '7天'),
+    ...readClaudeOAuthWindow(row, 'seven_day_sonnet', 'weekly_sonnet', '7天 Sonnet'),
+  ]
   return windows.length ? { source: 'claude', updatedAt: now, windows } : null
 }
 
@@ -144,7 +223,7 @@ export function extractAccountQuota(
 function isQuotaWindow(value: unknown): value is AccountQuotaWindow {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as Partial<AccountQuotaWindow>
-  const keys: AccountQuotaWindowKey[] = ['hourly', 'weekly', 'primary', 'secondary']
+  const keys: AccountQuotaWindowKey[] = ['hourly', 'weekly', 'weekly_sonnet', 'primary', 'secondary']
   return (
     typeof row.key === 'string' &&
     keys.includes(row.key as AccountQuotaWindowKey) &&

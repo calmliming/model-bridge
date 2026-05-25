@@ -9,6 +9,7 @@ import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
+const AUTH_TAG_ERROR = 'Unsupported state or unable to authenticate data'
 
 export interface CreateAccountInput {
   provider: string
@@ -22,6 +23,17 @@ function metadataObject(metadata: unknown): Record<string, unknown> {
   return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? { ...(metadata as Record<string, unknown>) }
     : {}
+}
+
+function decryptAccountSecret(value: string): string {
+  try {
+    return decrypt(value)
+  } catch (err) {
+    if (err instanceof Error && err.message === AUTH_TAG_ERROR) {
+      throw new Error('无法解密账号 token：当前 ENCRYPTION_KEY 与保存该账号时使用的密钥不一致')
+    }
+    throw err
+  }
 }
 
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
@@ -108,7 +120,7 @@ export async function refreshAccountToken(id: string): Promise<string> {
   if (!account?.oauthRefreshToken) throw new Error('account has no refresh token')
   const provider = getProvider(account.provider)
   if (!provider) throw new Error(`unknown provider: ${account.provider}`)
-  const tokens = await provider.refreshToken(decrypt(account.oauthRefreshToken))
+  const tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
   await persistTokens(id, tokens)
   return tokens.accessToken
 }
@@ -123,5 +135,5 @@ export async function ensureFreshToken(account: {
     return refreshAccountToken(account.id)
   }
   if (!account.oauthAccessToken) throw new Error('account has no access token')
-  return decrypt(account.oauthAccessToken)
+  return decryptAccountSecret(account.oauthAccessToken)
 }

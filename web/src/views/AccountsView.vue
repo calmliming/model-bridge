@@ -6,7 +6,7 @@ import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
 interface AccountQuotaWindow {
-  key: 'hourly' | 'weekly' | 'primary' | 'secondary'
+  key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'primary' | 'secondary'
   label: string
   usedPercent: number | null
   resetAt: number | null
@@ -148,6 +148,7 @@ function quotaPercent(window: AccountQuotaWindow) {
 
 function quotaLabel(window: AccountQuotaWindow) {
   if (window.key === 'hourly' || window.key === 'secondary') return '5小时'
+  if (window.key === 'weekly_sonnet') return '7天 Sonnet'
   if (window.key === 'weekly' || window.key === 'primary') return '7天'
   if (['主', '主额', '主额度', 'primary'].includes(window.label)) return '7天'
   if (['次', '次额', '次额度', 'secondary'].includes(window.label)) return '5小时'
@@ -156,7 +157,7 @@ function quotaLabel(window: AccountQuotaWindow) {
 
 function quotaWindowClass(window: AccountQuotaWindow) {
   const label = quotaLabel(window)
-  return label === '7天' ? 'is-7d' : 'is-5h'
+  return label.includes('7天') ? 'is-7d' : 'is-5h'
 }
 
 function renderAccount(row: Account) {

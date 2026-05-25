@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota } from './manager'
-import { extractAccountQuota, type AccountQuotaSnapshot } from './quota'
+import {
+  extractAccountQuota,
+  extractClaudeOAuthUsageQuota,
+  type AccountQuotaSnapshot,
+} from './quota'
 import { markAccountUsed } from './scheduler'
 
 const TEST_TIMEOUT_MS = 15_000
-const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models'
+const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 const GEMINI_LOAD_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
 
@@ -103,20 +107,21 @@ async function drainBody(response: Response): Promise<void> {
 }
 
 async function testClaude(accessToken: string): Promise<ProviderTestOutcome> {
-  const response = await fetchWithTimeout(ANTHROPIC_MODELS_URL, {
+  const response = await fetchWithTimeout(ANTHROPIC_USAGE_URL, {
     method: 'GET',
     headers: {
       authorization: `Bearer ${accessToken}`,
-      'anthropic-version': '2023-06-01',
       'anthropic-beta': 'oauth-2025-04-20',
-      accept: 'application/json',
-      'user-agent': 'claude-cli/1.0.0 (external, cli)',
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json',
+      'user-agent': 'claude-code/2.1.7',
     },
   })
-  await assertOk(response)
+  if (!response.ok) await assertOk(response)
+  const data = await response.json()
   return {
-    message: 'Claude 账号可访问模型列表',
-    quota: extractAccountQuota('claude', response.headers),
+    message: 'Claude 账号可访问用量接口',
+    quota: extractClaudeOAuthUsageQuota(data) ?? extractAccountQuota('claude', response.headers),
   }
 }
 
