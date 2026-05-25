@@ -107,7 +107,19 @@ async function main(): Promise<void> {
 
   try {
     for (const table of TABLES) {
-      const srcRows = sqlite.prepare(`SELECT ${table.cols.join(', ')} FROM ${table.name}`).all() as Record<string, unknown>[]
+      // Older SQLite databases may lack columns that were added later by
+      // ensureColumn() (e.g. api_keys.key_secret_encrypted). Intersect the
+      // expected column list with what actually exists, and let PG fill the
+      // rest with its default values / NULL.
+      const presentCols = (
+        sqlite.prepare(`PRAGMA table_info(${table.name})`).all() as { name: string }[]
+      ).map((c) => c.name)
+      const cols = table.cols.filter((c) => presentCols.includes(c))
+      const skipped = table.cols.filter((c) => !presentCols.includes(c))
+      if (skipped.length) {
+        console.log(`[migrate] ${table.name}: source missing columns ${skipped.join(', ')} — will use PG defaults`)
+      }
+      const srcRows = sqlite.prepare(`SELECT ${cols.join(', ')} FROM ${table.name}`).all() as Record<string, unknown>[]
       const { rows: [{ count }] } = await pgClient.query<{ count: string }>(
         `SELECT COUNT(*)::text AS count FROM ${table.name}`,
       )
@@ -131,7 +143,7 @@ async function main(): Promise<void> {
       for (let i = 0; i < srcRows.length; i++) {
         const row = srcRows[i]
         const rowPlaceholders: string[] = []
-        for (const col of table.cols) {
+        for (const col of cols) {
           let val: unknown = row[col]
           const t = table.transforms?.[col]
           if (t) val = t(val)
@@ -142,7 +154,7 @@ async function main(): Promise<void> {
 
         // Flush every BATCH rows OR on the last row.
         if (placeholders.length >= BATCH || i === srcRows.length - 1) {
-          const sql = `INSERT INTO ${table.name} (${table.cols.join(', ')}) VALUES ${placeholders.join(', ')}`
+          const sql = `INSERT INTO ${table.name} (${cols.join(', ')}) VALUES ${placeholders.join(', ')}`
           await pgClient.query(sql, params)
           written += placeholders.length
           placeholders.length = 0
