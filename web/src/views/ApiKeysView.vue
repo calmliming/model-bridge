@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -418,8 +418,18 @@ function renderProviders(row: ApiKey) {
   )
 }
 
+// Fixed USD→CNY rate for DeepSeek cost tooltip.
+const USD_TO_CNY = 7.28
+
 function renderUsage(row: ApiKey) {
-  return h('span', { class: ['usage-value', `is-${quotaStatus(row)}`] }, `$${row.quotaUsed.toFixed(4)}`)
+  const span = h('span', { class: ['usage-value', `is-${quotaStatus(row)}`] }, `$${row.quotaUsed.toFixed(4)}`)
+  const hasDeepSeek = !row.allowedProviders || row.allowedProviders.includes('deepseek')
+  if (!hasDeepSeek) return span
+  const cny = (row.quotaUsed * USD_TO_CNY).toFixed(4)
+  return h(NTooltip, null, {
+    trigger: () => span,
+    default: () => `≈ ¥${cny}`,
+  })
 }
 
 function renderQuotaLimit(row: ApiKey) {

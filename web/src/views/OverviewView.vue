@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
 import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
@@ -80,14 +80,24 @@ interface DashboardOverview {
   byProvider: ProviderStat[]
   accounts: DashboardAccount[]
   keys: DashboardKey[]
-  recentLogs: DashboardRecentLog[]
+}
+
+interface DashboardRecentLogsPage {
+  page: number
+  pageSize: number
+  total: number
+  logs: DashboardRecentLog[]
 }
 
 const message = useMessage()
 const loading = ref(true)
+const recentLoading = ref(true)
 const dashboard = ref<DashboardOverview | null>(null)
 const recentPage = ref(1)
+const recentLogs = ref<DashboardRecentLog[]>([])
+const recentTotal = ref(0)
 const selectedLog = ref<DashboardRecentLog | null>(null)
+const RECENT_PAGE_SIZE = 10
 
 const emptyTotals: DashboardOverview['totals'] = {
   keyCount: 0,
@@ -116,12 +126,7 @@ const providerColors: Record<string, string> = {
 }
 
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
-const recentLogs = computed(() => dashboard.value?.recentLogs ?? [])
 const providerRows = computed(() => dashboard.value?.byProvider ?? [])
-const pagedRecentLogs = computed(() => {
-  const start = (recentPage.value - 1) * 10
-  return recentLogs.value.slice(start, start + 10)
-})
 
 const cards = computed(() => [
   {
@@ -224,9 +229,17 @@ const providerOption = computed(() => {
   }
 })
 
+watch(recentPage, () => {
+  loadRecentLogs()
+})
+
 onMounted(load)
 
 async function load() {
+  await Promise.all([loadOverview(), loadRecentLogs()])
+}
+
+async function loadOverview() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/overview')
@@ -235,6 +248,21 @@ async function load() {
     message.error(errMsg(e))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadRecentLogs() {
+  recentLoading.value = true
+  try {
+    const { data } = await api.get<DashboardRecentLogsPage>('/admin/overview/recent-logs', {
+      params: { page: recentPage.value, pageSize: RECENT_PAGE_SIZE },
+    })
+    recentLogs.value = data.logs
+    recentTotal.value = data.total
+  } catch (e) {
+    message.error(errMsg(e))
+  } finally {
+    recentLoading.value = false
   }
 }
 
@@ -335,7 +363,7 @@ function openRequestInput(row: DashboardRecentLog) {
       </div>
 
       <div v-if="recentLogs.length" class="log-list">
-        <div v-for="row in pagedRecentLogs" :key="row.id" class="log-row">
+        <div v-for="row in recentLogs" :key="row.id" class="log-row">
           <n-tag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
             {{ row.status }}
           </n-tag>
@@ -367,10 +395,15 @@ function openRequestInput(row: DashboardRecentLog) {
           <n-button size="small" secondary @click="openRequestInput(row)">查看</n-button>
         </div>
         <div class="log-pagination">
-          <n-pagination v-model:page="recentPage" :page-size="10" :item-count="recentLogs.length" />
+          <n-pagination
+            v-model:page="recentPage"
+            :page-size="RECENT_PAGE_SIZE"
+            :item-count="recentTotal"
+            :disabled="recentLoading"
+          />
         </div>
       </div>
-      <div v-else class="empty-state">暂无请求记录</div>
+      <div v-else class="empty-state">{{ recentLoading ? '加载中...' : '暂无请求记录' }}</div>
     </n-card>
 
     <n-modal

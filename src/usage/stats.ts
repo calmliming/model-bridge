@@ -121,7 +121,13 @@ export interface DashboardOverview {
   byProvider: ProviderStat[]
   accounts: DashboardAccount[]
   keys: DashboardKey[]
-  recentLogs: DashboardRecentLog[]
+}
+
+export interface DashboardRecentLogsPage {
+  page: number
+  pageSize: number
+  total: number
+  logs: DashboardRecentLog[]
 }
 
 const MS_PER_DAY = 86_400_000
@@ -205,6 +211,25 @@ function asKey(row: Record<string, unknown>): KeyStat {
     cacheCreateTokens: toNum(row.cachecreatetokens),
     cacheReadTokens: toNum(row.cachereadtokens),
     cost: toNum(row.cost),
+  }
+}
+
+function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog {
+  return {
+    id: row.id as string,
+    ts: toNum(row.ts),
+    provider: row.provider as string,
+    model: (row.model as string | null) ?? null,
+    status: row.status as string,
+    latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
+    inputTokens: toNum(row.inputtokens),
+    outputTokens: toNum(row.outputtokens),
+    cacheCreateTokens: toNum(row.cachecreatetokens),
+    cacheReadTokens: toNum(row.cachereadtokens),
+    cost: toNum(row.cost),
+    apiKeyName: (row.apikeyname as string | null) ?? null,
+    accountName: (row.accountname as string | null) ?? null,
+    requestInput: (row.requestinput as string | null) ?? null,
   }
 }
 
@@ -456,48 +481,55 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     cost: toNum(row.cost),
   }))
 
-  const recentLogsRes = await pool.query<Record<string, unknown>>(
-    `SELECT usage_logs.id AS id,
-            usage_logs.ts AS ts,
-            usage_logs.provider AS provider,
-            usage_logs.model AS model,
-            usage_logs.status AS status,
-            usage_logs.latency_ms AS latencyMs,
-            usage_logs.input_tokens AS inputTokens,
-            usage_logs.output_tokens AS outputTokens,
-            usage_logs.cache_create_tokens AS cacheCreateTokens,
-            usage_logs.cache_read_tokens AS cacheReadTokens,
-            usage_logs.cost AS cost,
-            usage_logs.request_input AS requestInput,
-            api_keys.name AS apiKeyName,
-            accounts.name AS accountName
-     FROM usage_logs
-     LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
-     LEFT JOIN accounts ON accounts.id = usage_logs.account_id
-     ORDER BY usage_logs.ts DESC
-     LIMIT 100`,
-  )
-  const recentLogs: DashboardRecentLog[] = recentLogsRes.rows.map((row) => ({
-    id: row.id as string,
-    ts: toNum(row.ts),
-    provider: row.provider as string,
-    model: (row.model as string | null) ?? null,
-    status: row.status as string,
-    latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
-    inputTokens: toNum(row.inputtokens),
-    outputTokens: toNum(row.outputtokens),
-    cacheCreateTokens: toNum(row.cachecreatetokens),
-    cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
-    apiKeyName: (row.apikeyname as string | null) ?? null,
-    accountName: (row.accountname as string | null) ?? null,
-    requestInput: (row.requestinput as string | null) ?? null,
-  }))
-
   const [daily, byProvider] = await Promise.all([
     dailyStats(14),
     statsByProvider(30),
   ])
 
-  return { totals, daily, byProvider, accounts, keys, recentLogs }
+  return { totals, daily, byProvider, accounts, keys }
+}
+
+export async function dashboardRecentLogs(
+  page = 1,
+  pageSize = 10,
+): Promise<DashboardRecentLogsPage> {
+  const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
+  const safePageSize = Math.max(
+    1,
+    Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 10)),
+  )
+  const offset = (safePage - 1) * safePageSize
+
+  const [totalRes, logsRes] = await Promise.all([
+    pool.query<Record<string, unknown>>('SELECT COUNT(*) AS total FROM usage_logs'),
+    pool.query<Record<string, unknown>>(
+      `SELECT usage_logs.id AS id,
+              usage_logs.ts AS ts,
+              usage_logs.provider AS provider,
+              usage_logs.model AS model,
+              usage_logs.status AS status,
+              usage_logs.latency_ms AS latencyMs,
+              usage_logs.input_tokens AS inputTokens,
+              usage_logs.output_tokens AS outputTokens,
+              usage_logs.cache_create_tokens AS cacheCreateTokens,
+              usage_logs.cache_read_tokens AS cacheReadTokens,
+              usage_logs.cost AS cost,
+              usage_logs.request_input AS requestInput,
+              api_keys.name AS apiKeyName,
+              accounts.name AS accountName
+       FROM usage_logs
+       LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
+       LEFT JOIN accounts ON accounts.id = usage_logs.account_id
+       ORDER BY usage_logs.ts DESC, usage_logs.id DESC
+       LIMIT $1 OFFSET $2`,
+      [safePageSize, offset],
+    ),
+  ])
+
+  return {
+    page: safePage,
+    pageSize: safePageSize,
+    total: toNum(totalRes.rows[0]?.total),
+    logs: logsRes.rows.map(asDashboardRecentLog),
+  }
 }

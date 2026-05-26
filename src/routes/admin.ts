@@ -6,7 +6,7 @@ import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
-import { dashboardOverview, statsSummary } from '../usage/stats'
+import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
@@ -70,6 +70,11 @@ const importTokenSchema = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
   expiresAt: z.number().int().positive().optional(),
+})
+
+const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
 /** Registers all `/api/admin/*` endpoints used by the dashboard. */
@@ -346,7 +351,20 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     return await dashboardOverview()
   })
 
-  // ── Usage statistics ─────────────────────────────────────
+  // Dashboard recent calls
+  app.get<{ Querystring: { page?: string; pageSize?: string } }>(
+    '/api/admin/overview/recent-logs',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const query = paginationQuerySchema.safeParse(request.query)
+      if (!query.success) {
+        return reply.code(400).send({ error: 'invalid pagination query' })
+      }
+      return await dashboardRecentLogs(query.data.page, query.data.pageSize)
+    },
+  )
+
+  // Usage statistics
   app.get<{ Querystring: { days?: string } }>(
     '/api/admin/stats/summary',
     { preHandler: requireAdmin },
