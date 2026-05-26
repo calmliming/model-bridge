@@ -12,6 +12,7 @@ const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 const GEMINI_LOAD_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
+const DEEPSEEK_MESSAGES_URL = 'https://api.deepseek.com/anthropic/v1/messages'
 
 interface AccountRow {
   id: string
@@ -189,11 +190,31 @@ async function testGemini(accessToken: string): Promise<ProviderTestOutcome> {
   }
 }
 
+async function testDeepSeek(apiKey: string): Promise<ProviderTestOutcome> {
+  const response = await fetchWithTimeout(DEEPSEEK_MESSAGES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'deepseek-v4-pro',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'hi' }],
+    }),
+  })
+  await assertOk(response)
+  return { message: 'DeepSeek Anthropic 端点可访问' }
+}
+
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
   else if (account.provider === 'openai') result = await testOpenAI(accessToken)
   else if (account.provider === 'gemini') result = await testGemini(accessToken)
+  else if (account.provider === 'deepseek') result = await testDeepSeek(accessToken)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 
   if (result.metadata) await updateAccountMetadata(account.id, result.metadata)

@@ -1,4 +1,4 @@
-export type ProviderId = 'claude' | 'openai' | 'gemini'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek'
 
 /** OAuth credentials for one upstream subscription account. */
 export interface TokenSet {

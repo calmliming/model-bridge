@@ -31,7 +31,7 @@ interface Account {
   quota: AccountQuotaSnapshot | null
 }
 
-type Provider = 'claude' | 'openai' | 'gemini'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 const message = useMessage()
@@ -54,6 +54,7 @@ const pasteCallbackUrl = ref('')
 const showImportToken = ref(false)
 const importAccessToken = ref('')
 const importRefreshToken = ref('')
+const deepseekApiKey = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
 
@@ -61,16 +62,19 @@ const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  deepseek: 'DeepSeek',
 }
 const providerTagType: Record<Provider, TagType> = {
   claude: 'info',
   openai: 'success',
   gemini: 'warning',
+  deepseek: 'error',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
   openai: 'auth.openai.com',
   gemini: 'accounts.google.com',
+  deepseek: 'platform.deepseek.com',
 }
 
 const statusMeta: Record<string, { label: string; type: TagType }> = {
@@ -294,7 +298,34 @@ function openAdd() {
   showImportToken.value = false
   importAccessToken.value = ''
   importRefreshToken.value = ''
+  deepseekApiKey.value = ''
   showAdd.value = true
+}
+
+async function finishDeepseekImport() {
+  if (!form.value.name.trim()) {
+    message.warning('请填写账户名称')
+    return
+  }
+  if (!deepseekApiKey.value.trim()) {
+    message.warning('请填写 DeepSeek API Key')
+    return
+  }
+  busy.value = true
+  try {
+    await api.post('/admin/accounts/import/token', {
+      provider: 'deepseek',
+      name: form.value.name.trim(),
+      accessToken: deepseekApiKey.value.trim(),
+    })
+    message.success('DeepSeek 账户已添加')
+    showAdd.value = false
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '添加失败'))
+  } finally {
+    busy.value = false
+  }
 }
 
 async function startOAuth() {
@@ -575,6 +606,7 @@ onBeforeUnmount(() => {
               <n-radio-button value="claude">Claude</n-radio-button>
               <n-radio-button value="openai">OpenAI</n-radio-button>
               <n-radio-button value="gemini">Gemini</n-radio-button>
+              <n-radio-button value="deepseek">DeepSeek</n-radio-button>
             </n-radio-group>
           </n-form-item>
           <n-form-item label="账户名称">
@@ -583,10 +615,21 @@ onBeforeUnmount(() => {
               :placeholder="`例如：我的 ${providerLabel[form.provider]}`"
             />
           </n-form-item>
+          <n-form-item v-if="form.provider === 'deepseek'" label="API Key">
+            <n-input
+              v-model:value="deepseekApiKey"
+              placeholder="sk-..."
+              type="password"
+              show-password-on="click"
+            />
+          </n-form-item>
         </n-form>
-        <n-text depth="3" style="font-size: 13px">
+        <n-text v-if="form.provider !== 'deepseek'" depth="3" style="font-size: 13px">
           下一步会生成 {{ authorizeHost[form.provider] }} 的授权链接；
           你需要用拥有该订阅的账号登录并授权。
+        </n-text>
+        <n-text v-else depth="3" style="font-size: 13px">
+          在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。
         </n-text>
       </div>
 
@@ -689,7 +732,20 @@ onBeforeUnmount(() => {
       <template #footer>
         <n-space justify="end">
           <n-button @click="showAdd = false">取消</n-button>
-          <n-button v-if="step === 'name'" type="primary" :loading="busy" @click="startOAuth">
+          <n-button
+            v-if="step === 'name' && form.provider === 'deepseek'"
+            type="primary"
+            :loading="busy"
+            @click="finishDeepseekImport"
+          >
+            添加账户
+          </n-button>
+          <n-button
+            v-else-if="step === 'name'"
+            type="primary"
+            :loading="busy"
+            @click="startOAuth"
+          >
             生成授权链接
           </n-button>
           <n-button

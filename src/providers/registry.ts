@@ -3,6 +3,10 @@ import * as openaiOauth from './openai/oauth'
 import * as geminiOauth from './gemini/oauth'
 import type { TokenSet } from './types'
 
+function notSupported(method: string): never {
+  throw new Error(`DeepSeek does not use OAuth (called: ${method})`)
+}
+
 /** OAuth surface every provider exposes for account onboarding. */
 export interface OAuthProvider {
   id: string
@@ -49,6 +53,19 @@ const registry: Record<string, OAuthProvider> = {
     exchangeCode: geminiOauth.exchangeCode,
     refreshToken: geminiOauth.refreshToken,
     fetchAccountMetadata: geminiOauth.fetchAccountMetadata,
+  },
+  deepseek: {
+    id: 'deepseek',
+    // DeepSeek uses API keys — the OAuth methods below are never called.
+    // Accounts are added via the import/token endpoint with expiresAt: 0.
+    mode: 'paste' as const,
+    generatePkce(): never { return notSupported('generatePkce') },
+    buildAuthorizeUrl(): never { return notSupported('buildAuthorizeUrl') },
+    async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
+    async refreshToken(token: string): Promise<TokenSet> {
+      // API keys don't expire — return unchanged.
+      return { accessToken: token, refreshToken: '', expiresAt: 0 }
+    },
   },
 }
 

@@ -65,18 +65,21 @@ const providerOptions = [
   { label: 'Claude', value: 'claude' },
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
+  { label: 'DeepSeek', value: 'deepseek' },
 ]
 
 const providerLabel: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  deepseek: 'DeepSeek',
 }
 
-const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'> = {
+const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
   claude: 'info',
   openai: 'success',
   gemini: 'warning',
+  deepseek: 'error',
 }
 
 async function load() {
@@ -332,6 +335,12 @@ const snippets = computed(() => {
   return {
     claude: `export ANTHROPIC_BASE_URL=${baseOrigin.value}
 export ANTHROPIC_AUTH_TOKEN=${key}
+claude`,
+    deepseek: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/deepseek
+export ANTHROPIC_AUTH_TOKEN=${key}
+export ANTHROPIC_MODEL=deepseek-v4-pro
+export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
 claude`,
     codex: `[profiles.model-bridge]
 model_provider = "model-bridge"
@@ -593,6 +602,10 @@ onMounted(load)
         <n-tab-pane name="claude" tab="Claude Code">
           <pre><code>{{ snippets.claude }}</code></pre>
           <n-button size="small" secondary @click="copyKey(snippets.claude)">复制</n-button>
+        </n-tab-pane>
+        <n-tab-pane name="deepseek" tab="DeepSeek (Claude Code)">
+          <pre><code>{{ snippets.deepseek }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.deepseek)">复制</n-button>
         </n-tab-pane>
         <n-tab-pane name="codex" tab="Codex CLI">
           <pre><code>{{ snippets.codex }}</code></pre>

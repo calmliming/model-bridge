@@ -10,6 +10,8 @@ import { relayOpenaiResponses } from '../providers/openai/relay'
 import * as openaiUsage from '../providers/openai/usage'
 import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
+import { relayDeepseekMessages } from '../providers/deepseek/relay'
+import * as deepseekUsage from '../providers/deepseek/usage'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 
@@ -102,6 +104,17 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: geminiUsage.createStreamParser,
     parseJsonUsage: geminiUsage.parseJsonUsage,
     transformEventData: unwrapResponseEnvelope,
+  },
+  deepseek: {
+    id: 'deepseek',
+    forceStream: false,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayDeepseekMessages(token, body),
+    createStreamParser: deepseekUsage.createStreamParser,
+    parseJsonUsage: deepseekUsage.parseJsonUsage,
   },
 }
 
@@ -315,12 +328,17 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.openai!)
   const geminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.gemini!)
+  const deepseekHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.deepseek!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+  // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
+  // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
+  app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey }, deepseekHandler)
 
   // Clean provider-native aliases for custom domains:
   // - OpenAI/Codex: base_url = https://api.example.com/v1

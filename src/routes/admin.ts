@@ -25,7 +25,7 @@ const changePasswordSchema = z.object({
 const createKeySchema = z.object({
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
-  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini'])).optional(),
+  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).optional(),
   rateLimit: z.number().int().positive().optional(),
   quotaLimit: z.number().positive().optional(),
   expiresAt: z.number().int().optional(),
@@ -36,7 +36,7 @@ const updateKeySchema = z
     enabled: z.boolean().optional(),
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
-    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini'])).nullable().optional(),
+    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).nullable().optional(),
     rateLimit: z.number().int().positive().nullable().optional(),
     quotaLimit: z.number().positive().nullable().optional(),
     expiresAt: z.number().int().nullable().optional(),
@@ -65,7 +65,7 @@ const oauthFinishSchema = z
 const accountUpdateSchema = z.object({ status: z.enum(['active', 'disabled']) })
 
 const importTokenSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']),
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
