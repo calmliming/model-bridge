@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -167,12 +167,39 @@ function renderAccount(row: Account) {
 function renderStatus(row: Account) {
   const status = effectiveStatus(row)
   const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
+  const tag = h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
+  const cooldownText = `限流至 ${formatShortTime(row.cooldownUntil)}`
+
+  if (status === 'rate_limited' && isCoolingDown(row)) {
+    return h('div', { class: 'status-cell' }, [
+      tag,
+      h(
+        NTooltip,
+        { placement: 'top', trigger: 'hover' },
+        {
+          trigger: () =>
+            h(
+              'span',
+              {
+                class: 'cooldown-hint-icon',
+                tabindex: 0,
+                title: cooldownText,
+                'aria-label': cooldownText,
+              },
+              '?',
+            ),
+          default: () => cooldownText,
+        },
+      ),
+    ])
+  }
+
   return h(
     NSpace,
     { size: 6, vertical: true },
     {
       default: () => [
-        h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label }),
+        tag,
         isCoolingDown(row)
           ? h('span', { class: 'muted-cell' }, `至 ${formatShortTime(row.cooldownUntil)}`)
           : null,
@@ -697,6 +724,34 @@ onBeforeUnmount(() => {
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+:deep(.status-cell) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+:deep(.cooldown-hint-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(240, 160, 32, 0.14);
+  color: #c87900;
+  cursor: help;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+:deep(.cooldown-hint-icon:hover),
+:deep(.cooldown-hint-icon:focus-visible) {
+  background: rgba(240, 160, 32, 0.22);
+  outline: none;
 }
 
 :deep(.quota-cell) {
