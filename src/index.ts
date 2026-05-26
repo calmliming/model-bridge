@@ -5,6 +5,7 @@ import fastifyJwt from '@fastify/jwt'
 import fastifyStatic from '@fastify/static'
 import { config } from './config'
 import { initDb } from './db/init'
+import { initPricing } from './usage/pricing'
 import { ensureAdmin } from './auth/admin'
 import { registerAdminRoutes } from './routes/admin'
 import { registerRelayRoutes } from './routes/relay'
@@ -13,6 +14,7 @@ import { startOauthCallbackServer } from './oauthCallback'
 
 async function main(): Promise<void> {
   await initDb()
+  await initPricing()
   await ensureAdmin()
 
   const app = Fastify({
