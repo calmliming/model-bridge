@@ -47,6 +47,7 @@ export async function initDb(): Promise<void> {
       account_id TEXT,
       provider TEXT NOT NULL,
       model TEXT,
+      request_input TEXT,
       ts BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
       input_tokens BIGINT NOT NULL DEFAULT 0,
       output_tokens BIGINT NOT NULL DEFAULT 0,
@@ -87,4 +88,5 @@ export async function initDb(): Promise<void> {
   // PostgreSQL 9.6+ supports IF NOT EXISTS on ADD COLUMN, so this is idempotent.
   await pool.query(`ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS account_name TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_secret_encrypted TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_input TEXT;`)
 }

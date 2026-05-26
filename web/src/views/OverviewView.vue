@@ -59,6 +59,7 @@ interface DashboardRecentLog {
   cost: number
   apiKeyName: string | null
   accountName: string | null
+  requestInput: string | null
 }
 
 interface DashboardOverview {
@@ -85,6 +86,8 @@ interface DashboardOverview {
 const message = useMessage()
 const loading = ref(true)
 const dashboard = ref<DashboardOverview | null>(null)
+const recentPage = ref(1)
+const selectedLog = ref<DashboardRecentLog | null>(null)
 
 const emptyTotals: DashboardOverview['totals'] = {
   keyCount: 0,
@@ -113,10 +116,12 @@ const providerColors: Record<string, string> = {
 }
 
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
-const accounts = computed(() => dashboard.value?.accounts ?? [])
-const keys = computed(() => dashboard.value?.keys ?? [])
 const recentLogs = computed(() => dashboard.value?.recentLogs ?? [])
 const providerRows = computed(() => dashboard.value?.byProvider ?? [])
+const pagedRecentLogs = computed(() => {
+  const start = (recentPage.value - 1) * 10
+  return recentLogs.value.slice(start, start + 10)
+})
 
 const cards = computed(() => [
   {
@@ -249,37 +254,6 @@ function providerStyle(provider: string) {
   return { '--provider-color': providerColors[provider] ?? '#6366f1' }
 }
 
-function isCoolingDown(row: DashboardAccount): boolean {
-  return !!row.cooldownUntil && row.cooldownUntil > Date.now()
-}
-
-function accountStatus(row: DashboardAccount): string {
-  if (row.status === 'disabled') return 'disabled'
-  if (row.status === 'error') return 'error'
-  if (isCoolingDown(row)) return 'rate_limited'
-  return 'active'
-}
-
-function accountStatusLabel(row: DashboardAccount): string {
-  const status = accountStatus(row)
-  return (
-    {
-      active: '正常',
-      rate_limited: '限流冷却',
-      error: '异常',
-      disabled: '已禁用',
-    }[status] ?? status
-  )
-}
-
-function accountStatusType(row: DashboardAccount) {
-  const status = accountStatus(row)
-  if (status === 'active') return 'success'
-  if (status === 'rate_limited') return 'warning'
-  if (status === 'error') return 'error'
-  return 'default'
-}
-
 function logStatusType(status: string) {
   if (status === 'success') return 'success'
   if (status === 'rate_limited') return 'warning'
@@ -287,29 +261,16 @@ function logStatusType(status: string) {
   return 'default'
 }
 
-function quotaPercent(row: DashboardKey): number {
-  if (!row.quotaLimit || row.quotaLimit <= 0) return 0
-  return Math.min(100, Math.round((row.quotaUsed / row.quotaLimit) * 100))
-}
-
-function quotaStatus(row: DashboardKey) {
-  const percent = quotaPercent(row)
-  if (percent >= 90) return 'error'
-  if (percent >= 70) return 'warning'
-  return 'success'
-}
-
-function quotaLabel(row: DashboardKey): string {
-  if (row.quotaLimit == null) return `${formatCost(row.quotaUsed)} / 不限`
-  return `${formatCost(row.quotaUsed)} / ${formatCost(row.quotaLimit)}`
-}
-
 function latencyLabel(ms: number | null): string {
-  return ms == null ? '—' : `${ms}ms`
+  return ms == null ? '-' : `${ms}ms`
 }
 
 function logTokens(row: DashboardRecentLog): number {
   return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+}
+
+function openRequestInput(row: DashboardRecentLog) {
+  selectedLog.value = row
 }
 </script>
 
@@ -364,76 +325,6 @@ function logTokens(row: DashboardRecentLog): number {
       </n-gi>
     </n-grid>
 
-    <n-grid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <n-gi span="12 l:5">
-        <n-card class="surface-card panel-card" :bordered="false">
-          <div class="panel-head">
-            <div>
-              <h3>账号健康</h3>
-              <span>限流、异常和配额更新时间</span>
-            </div>
-            <router-link class="panel-link" to="/accounts">管理</router-link>
-          </div>
-
-          <div v-if="accounts.length" class="account-list">
-            <div v-for="row in accounts" :key="row.id" class="account-row">
-              <div class="account-main">
-                <span class="provider-chip" :style="providerStyle(row.provider)">
-                  {{ providerLabel(row.provider) }}
-                </span>
-                <strong>{{ row.name }}</strong>
-                <small>最后使用 {{ formatTime(row.lastUsedAt) }}</small>
-                <small v-if="isCoolingDown(row)">配额更新 {{ formatTime(row.cooldownUntil) }}</small>
-              </div>
-              <n-tag size="small" :type="accountStatusType(row)" :bordered="false">
-                {{ accountStatusLabel(row) }}
-              </n-tag>
-            </div>
-          </div>
-          <div v-else class="empty-state">还没有接入上游账户</div>
-        </n-card>
-      </n-gi>
-
-      <n-gi span="12 l:7">
-        <n-card class="surface-card panel-card" :bordered="false">
-          <div class="panel-head">
-            <div>
-              <h3>Key 配额</h3>
-              <span>额度消耗和近 30 天调用</span>
-            </div>
-            <router-link class="panel-link" to="/keys">管理</router-link>
-          </div>
-
-          <div v-if="keys.length" class="key-list">
-            <div v-for="row in keys" :key="row.id" class="key-row">
-              <div class="key-head">
-                <div>
-                  <strong>{{ row.name }}</strong>
-                  <span>{{ row.ownerLabel || row.keyPrefix + '…' }}</span>
-                </div>
-                <n-tag size="small" :type="row.enabled ? 'success' : 'default'" :bordered="false">
-                  {{ row.enabled ? '启用' : '停用' }}
-                </n-tag>
-              </div>
-              <n-progress
-                type="line"
-                :percentage="quotaPercent(row)"
-                :status="quotaStatus(row)"
-                :show-indicator="false"
-                :height="8"
-                border-radius="4px"
-              />
-              <div class="key-foot">
-                <span>{{ quotaLabel(row) }}</span>
-                <span>{{ formatNumber(row.requests) }} 次 · {{ formatCost(row.cost) }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-else class="empty-state">还没有创建 API Key</div>
-        </n-card>
-      </n-gi>
-    </n-grid>
-
     <n-card class="surface-card panel-card" :bordered="false">
       <div class="panel-head">
         <div>
@@ -444,34 +335,58 @@ function logTokens(row: DashboardRecentLog): number {
       </div>
 
       <div v-if="recentLogs.length" class="log-list">
-        <div v-for="row in recentLogs" :key="row.id" class="log-row">
-          <div class="log-top">
-            <div class="log-main">
-              <n-tag size="small" :type="logStatusType(row.status)" :bordered="false">
-                {{ row.status }}
-              </n-tag>
-              <div>
-                <strong>{{ row.model || '(unknown model)' }}</strong>
-                <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
-              </div>
-            </div>
-            <div class="log-meta">
-              <span>{{ latencyLabel(row.latencyMs) }}</span>
-              <span>{{ formatCost(row.cost) }}</span>
-              <span>{{ formatTime(row.ts) }}</span>
-            </div>
+        <div v-for="row in pagedRecentLogs" :key="row.id" class="log-row">
+          <n-tag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
+            {{ row.status }}
+          </n-tag>
+          <div class="log-model">
+            <strong>{{ row.model || '(unknown model)' }}</strong>
+            <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
           </div>
-          <div class="log-token-grid">
-            <span>输入 <strong>{{ formatNumber(row.inputTokens) }}</strong></span>
-            <span>输出 <strong>{{ formatNumber(row.outputTokens) }}</strong></span>
-            <span>缓存 <strong>{{ formatNumber(row.cacheCreateTokens) }}</strong></span>
-            <span>命中 <strong>{{ formatNumber(row.cacheReadTokens) }}</strong></span>
-            <span>总计 <strong>{{ formatNumber(logTokens(row)) }}</strong></span>
+          <div class="log-metric">
+            <span>输入</span>
+            <strong>{{ formatNumber(row.inputTokens) }}</strong>
           </div>
+          <div class="log-metric">
+            <span>输出</span>
+            <strong>{{ formatNumber(row.outputTokens) }}</strong>
+          </div>
+          <div class="log-metric">
+            <span>总计</span>
+            <strong>{{ formatNumber(logTokens(row)) }}</strong>
+          </div>
+          <div class="log-metric">
+            <span>耗时</span>
+            <strong>{{ latencyLabel(row.latencyMs) }}</strong>
+          </div>
+          <div class="log-metric">
+            <span>成本</span>
+            <strong>{{ formatCost(row.cost) }}</strong>
+          </div>
+          <div class="log-time">{{ formatTime(row.ts) }}</div>
+          <n-button size="small" secondary @click="openRequestInput(row)">查看</n-button>
+        </div>
+        <div class="log-pagination">
+          <n-pagination v-model:page="recentPage" :page-size="10" :item-count="recentLogs.length" />
         </div>
       </div>
       <div v-else class="empty-state">暂无请求记录</div>
     </n-card>
+
+    <n-modal
+      :show="!!selectedLog"
+      preset="card"
+      title="请求输入"
+      style="width: min(760px, calc(100vw - 32px))"
+      @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
+    >
+      <n-input
+        :value="selectedLog?.requestInput || '未记录输入内容'"
+        type="textarea"
+        readonly
+        :autosize="{ minRows: 12, maxRows: 22 }"
+      />
+    </n-modal>
   </div>
 </template>
 
@@ -608,8 +523,6 @@ function logTokens(row: DashboardRecentLog): number {
   font-size: 13px;
 }
 
-.account-row,
-.key-row,
 .log-row {
   border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 14px;
@@ -632,7 +545,7 @@ function logTokens(row: DashboardRecentLog): number {
 
 .account-main strong,
 .key-head strong,
-.log-main strong {
+.log-model strong {
   overflow: hidden;
   color: #0f172a;
   font-size: 14px;
@@ -644,7 +557,7 @@ function logTokens(row: DashboardRecentLog): number {
 .account-main small,
 .key-head span,
 .key-foot,
-.log-main span,
+.log-model span,
 .log-meta {
   color: rgba(15, 23, 42, 0.48);
   font-size: 12px;
@@ -690,57 +603,51 @@ function logTokens(row: DashboardRecentLog): number {
 
 .log-row {
   display: grid;
-  gap: 12px;
-  padding: 12px;
-}
-
-.log-top {
-  min-width: 0;
-}
-
-.log-main {
+  grid-template-columns: 88px minmax(180px, 1.4fr) repeat(5, minmax(72px, 0.6fr)) minmax(138px, 0.9fr) 64px;
+  align-items: center;
   gap: 10px;
-  min-width: 0;
+  padding: 10px 12px;
 }
 
-.log-main > div {
+.log-status {
+  justify-self: start;
+}
+
+.log-model {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.log-meta {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-  text-align: right;
-}
-
-.log-token-grid {
+.log-metric {
   display: grid;
-  grid-template-columns: repeat(5, minmax(96px, 1fr));
-  gap: 8px;
-}
-
-.log-token-grid span {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 2px;
   min-width: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: rgba(15, 23, 42, 0.54);
-  background: #f8fafc;
-  font-size: 12px;
 }
 
-.log-token-grid strong {
+.log-metric span,
+.log-time {
+  color: rgba(15, 23, 42, 0.46);
+  font-size: 11px;
+}
+
+.log-metric strong,
+.log-time {
   overflow: hidden;
-  color: #0f172a;
-  font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.log-metric strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.log-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
 }
 
 .empty-state {
@@ -755,20 +662,21 @@ function logTokens(row: DashboardRecentLog): number {
 }
 
 @media (max-width: 720px) {
-  .log-top,
   .key-head,
   .key-foot {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .log-meta {
-    justify-content: flex-start;
-    text-align: left;
+  .log-row {
+    grid-template-columns: minmax(0, 1fr) 64px;
   }
 
-  .log-token-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .log-status,
+  .log-model,
+  .log-metric,
+  .log-time {
+    grid-column: 1;
   }
 }
 </style>

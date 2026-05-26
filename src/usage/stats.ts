@@ -100,6 +100,7 @@ export interface DashboardRecentLog {
   cost: number
   apiKeyName: string | null
   accountName: string | null
+  requestInput: string | null
 }
 
 export interface DashboardOverview {
@@ -467,13 +468,14 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
             usage_logs.cache_create_tokens AS cacheCreateTokens,
             usage_logs.cache_read_tokens AS cacheReadTokens,
             usage_logs.cost AS cost,
+            usage_logs.request_input AS requestInput,
             api_keys.name AS apiKeyName,
             accounts.name AS accountName
      FROM usage_logs
      LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
      LEFT JOIN accounts ON accounts.id = usage_logs.account_id
      ORDER BY usage_logs.ts DESC
-     LIMIT 8`,
+     LIMIT 100`,
   )
   const recentLogs: DashboardRecentLog[] = recentLogsRes.rows.map((row) => ({
     id: row.id as string,
@@ -489,6 +491,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     cost: toNum(row.cost),
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
+    requestInput: (row.requestinput as string | null) ?? null,
   }))
 
   const [daily, byProvider] = await Promise.all([

@@ -451,7 +451,7 @@ function confirmDelete(row: Account) {
 }
 
 const columns = computed<DataTableColumns<Account>>(() => [
-  { title: '账户', key: 'name', minWidth: 160, fixed: 'left', render: renderAccount },
+  { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
   {
     title: '服务商',
     key: 'provider',
@@ -536,7 +536,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1120"
+        :scroll-x="1240"
       />
     </n-card>
 

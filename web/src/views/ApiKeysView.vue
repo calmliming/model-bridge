@@ -413,50 +413,50 @@ function renderTime(value: number | null) {
 }
 
 const columns = computed<DataTableColumns<ApiKey>>(() => [
-  { title: '名称', key: 'name', minWidth: 150, fixed: 'left', render: renderKeyInfo },
-  { title: '持有者', key: 'ownerLabel', minWidth: 120, render: renderOwner },
+  { title: '名称', key: 'name', minWidth: 140, render: renderKeyInfo },
+  { title: '持有者', key: 'ownerLabel', minWidth: 100, render: renderOwner },
   {
     title: '密钥',
     key: 'keyPrefix',
-    minWidth: 170,
+    minWidth: 150,
     render: renderKeyPrefix,
   },
   {
     title: '服务商',
     key: 'allowedProviders',
-    minWidth: 150,
+    minWidth: 120,
     render: renderProviders,
   },
   {
     title: '已用',
     key: 'quota',
-    minWidth: 110,
+    minWidth: 100,
     render: renderUsage,
   },
-  { title: '上限', key: 'quotaLimit', minWidth: 100, render: renderQuotaLimit },
-  { title: '限速', key: 'rateLimit', minWidth: 100, render: renderRateLimit },
-  { title: '过期', key: 'expiresAt', minWidth: 160, render: (row) => renderTime(row.expiresAt) },
-  { title: '最后使用', key: 'lastUsedAt', minWidth: 160, render: (row) => renderTime(row.lastUsedAt) },
+  { title: '上限', key: 'quotaLimit', minWidth: 88, render: renderQuotaLimit },
+  { title: '限速', key: 'rateLimit', minWidth: 88, render: renderRateLimit },
+  { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => renderTime(row.expiresAt) },
+  { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => renderTime(row.lastUsedAt) },
   {
     title: '创建时间',
     key: 'createdAt',
-    minWidth: 160,
+    minWidth: 140,
     render: (row) => renderTime(row.createdAt),
   },
   {
     title: '状态',
     key: 'enabled',
-    width: 86,
+    width: 76,
     render: (row) => h(NSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
   },
   {
     title: '操作',
     key: 'actions',
-    width: 180,
+    width: 172,
     render: (row) =>
       h(
         NSpace,
-        { size: 4 },
+        { size: 4, wrap: false },
         {
           default: () => [
             h(
@@ -495,7 +495,7 @@ onMounted(load)
         :data="keys"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1500"
+        :scroll-x="1440"
       />
     </n-card>
 

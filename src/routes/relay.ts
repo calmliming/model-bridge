@@ -110,6 +110,7 @@ interface RelayMeta {
   accountId: string
   provider: string
   model: string
+  requestInput: string | null
   startedAt: number
 }
 
@@ -410,6 +411,7 @@ async function executeRelay(
       accountId: account.id,
       provider: provider.id,
       model: parsed.model,
+      requestInput: summarizeRequestInput(body),
       startedAt,
     }
     if (wantStream) {
@@ -485,6 +487,7 @@ async function sendStreaming(
     usage: parser.result(),
     status: upstream.ok ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
+    requestInput: meta.requestInput,
   })
 }
 
@@ -515,11 +518,42 @@ async function sendBuffered(
     usage,
     status: upstream.ok ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
+    requestInput: meta.requestInput,
   })
   await reply
     .code(upstream.status)
     .header('content-type', upstream.headers.get('content-type') ?? 'application/json')
     .send(text)
+}
+
+function summarizeRequestInput(body: Record<string, unknown>): string | null {
+  const sanitized = sanitizeRequestValue(body)
+  const text = typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized, null, 2)
+  if (!text || text === '{}') return null
+  return text.length > 12_000 ? `${text.slice(0, 12_000)}\n...[truncated]` : text
+}
+
+function sanitizeRequestValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeRequestValue)
+  if (!value || typeof value !== 'object') return value
+
+  const out: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const lower = key.toLowerCase()
+    if (
+      lower.includes('token') ||
+      lower.includes('secret') ||
+      lower.includes('password') ||
+      lower.includes('authorization') ||
+      lower === 'key' ||
+      lower === 'api_key'
+    ) {
+      out[key] = '[redacted]'
+      continue
+    }
+    out[key] = sanitizeRequestValue(child)
+  }
+  return out
 }
 
 /** Passthrough mode: parses each event for usage without rewriting. */

@@ -9,6 +9,7 @@ export interface UsageRecord {
   accountId: string
   provider: string
   model: string
+  requestInput?: string | null
   usage: UsageData
   status: string
   latencyMs: number
@@ -24,6 +25,7 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       accountId: record.accountId,
       provider: record.provider,
       model: record.model || null,
+      requestInput: record.requestInput ?? null,
       inputTokens: record.usage.inputTokens,
       outputTokens: record.usage.outputTokens,
       cacheCreateTokens: record.usage.cacheCreateTokens,
