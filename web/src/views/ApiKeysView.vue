@@ -206,15 +206,22 @@ function execCopyFallback(text: string): boolean {
   }
 }
 
-async function writeClipboard(text: string): Promise<boolean> {
+async function writeClipboardText(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text)
-      message.success('已复制到剪贴板')
       return true
     }
   } catch {
-    // 继续走 fallback
+    return false
+  }
+  return false
+}
+
+async function writeClipboard(text: string): Promise<boolean> {
+  if (await writeClipboardText(text)) {
+    message.success('已复制到剪贴板')
+    return true
   }
   if (execCopyFallback(text)) {
     message.success('已复制到剪贴板')
@@ -289,9 +296,17 @@ function closeNewKeyModal(shown: boolean) {
 }
 
 async function copyAndClose() {
-  if (!newKey.value) return
-  const ok = await writeClipboard(newKey.value)
-  if (ok) newKey.value = null
+  const key = newKey.value
+  if (!key) return
+  const ok = await writeClipboardText(key)
+  if (ok) {
+    message.success('已复制到剪贴板')
+    newKey.value = null
+    return
+  }
+  newKey.value = null
+  showManualCopy('新建 API Key', key)
+  message.warning('浏览器未允许自动复制，请手动复制下方内容')
 }
 
 async function openUse(row: ApiKey) {
