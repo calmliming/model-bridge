@@ -359,7 +359,10 @@ function openRequestInput(row: DashboardRecentLog) {
           <h3>最近调用</h3>
           <span>快速查看入口、模型、耗时和状态</span>
         </div>
-        <router-link class="panel-link" to="/stats">详细统计</router-link>
+        <div class="panel-actions">
+          <n-button size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</n-button>
+          <router-link class="panel-link" to="/stats">详细统计</router-link>
+        </div>
       </div>
 
       <div v-if="recentLogs.length" class="log-list">
@@ -510,6 +513,12 @@ function openRequestInput(row: DashboardRecentLog) {
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .provider-list,
