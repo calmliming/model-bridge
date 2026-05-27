@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { extractAccountQuota, quotaCooldownUntil } from '../accounts/quota'
-import { markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
+import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
 import { relayOpenaiResponses } from '../providers/openai/relay'
@@ -131,6 +131,8 @@ interface UpstreamFailure {
   penalty: 'rate_limited' | 'error' | null
   retryable: boolean
   resetAt?: number | null
+  /** When true the account token is permanently invalid — disable it instead of cooldown. */
+  disable?: boolean
 }
 
 function textLooksRateLimited(text: string): boolean {
@@ -300,6 +302,15 @@ function parseRateLimitReset(provider: string, response: Response, text: string)
   )
 }
 
+function isTokenRevoked(text: string): boolean {
+  try {
+    const body = JSON.parse(text) as { error?: { code?: string } }
+    return body.error?.code === 'token_revoked'
+  } catch {
+    return false
+  }
+}
+
 async function classifyUpstreamFailure(
   provider: string,
   response: Response,
@@ -308,7 +319,14 @@ async function classifyUpstreamFailure(
     const text = await readErrorText(response)
     return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
   }
-  if (response.status === 401 || response.status >= 500) {
+  if (response.status === 401) {
+    const text = await readErrorText(response)
+    if (isTokenRevoked(text)) {
+      return { penalty: null, retryable: true, disable: true }
+    }
+    return { penalty: 'error', retryable: true }
+  }
+  if (response.status >= 500) {
     return { penalty: 'error', retryable: true }
   }
   if (response.status === 400 || response.status === 403) {
@@ -408,12 +426,15 @@ async function executeRelay(
     const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
     if (failure.retryable && !lastAttempt) {
-      if (failure.penalty) await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      if (failure.disable) await disableAccount(account.id)
+      else if (failure.penalty) await penalizeAccount(account.id, failure.penalty, failure.resetAt)
       await upstream.body?.cancel().catch(() => {})
       continue
     }
 
-    if (failure.penalty) {
+    if (failure.disable) {
+      await disableAccount(account.id)
+    } else if (failure.penalty) {
       await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
       const quotaCooldown = quotaCooldownUntil(quota)

@@ -37,6 +37,13 @@ export async function markAccountUsed(id: string): Promise<void> {
     .where(eq(accounts.id, id))
 }
 
+/** Permanently disables an account (e.g. revoked OAuth token that cannot self-heal). */
+export async function disableAccount(id: string): Promise<void> {
+  await db.update(accounts)
+    .set({ status: 'disabled', cooldownUntil: null })
+    .where(eq(accounts.id, id))
+}
+
 /** Puts an account into cooldown after a 429 (rate_limited) or other failure (error). */
 export async function penalizeAccount(
   id: string,
