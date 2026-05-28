@@ -76,10 +76,10 @@ const providerLabel: Record<Provider, string> = {
 }
 const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek']
 const providerTagType: Record<Provider, TagType> = {
-  claude: 'info',
+  claude: 'error',
   openai: 'success',
   gemini: 'warning',
-  deepseek: 'error',
+  deepseek: 'info',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',

@@ -2,7 +2,7 @@
 
 > [English](./README.md) · **中文**
 
-自托管的 AI API 中转平台 —— 把你的 **Claude / OpenAI / Gemini** 订阅转化为
+自托管的 AI API 中转平台 —— 把你的 **Claude / OpenAI / Gemini / DeepSeek** 订阅转化为
 标准 API 端点，可与好友共享；支持按用户隔离的 API Key、用量统计，以及多账户
 自动轮换。
 
@@ -11,8 +11,8 @@
 ## 当前状态
 
 ✅ **v1 已交付。** 管理后台、带成本配额的 API Key、Claude（粘贴 code）/
-OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）账户接入、多账户
-轮换、三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
+OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek（API key）账户接入、
+多账户轮换（支持优先级）、三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
 `/v1/responses`、`/v1beta/models/*`），按日 / 服务商 / 模型 / Key 的用量统计，
 以及一键 Docker 部署。
 
@@ -90,7 +90,14 @@ npm start
 ## 接入客户端
 
 先在 **API Keys** 页面创建一个密钥，再在 **上游账户** 页面至少添加一个上游
-账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调）。
+账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调，DeepSeek 填 API key）。
+
+### 账户优先级
+
+同一服务商有多个账户时，可在账户列表中设置**优先级**（1–100，默认 1）来控制
+调度顺序。数值越高越优先使用，相同优先级则按最近最少使用策略轮换。
+
+在**上游账户**页面直接调整优先级列的数值即可，修改即时生效。
 
 ### Claude Code
 

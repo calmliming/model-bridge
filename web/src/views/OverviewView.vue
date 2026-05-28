@@ -117,12 +117,14 @@ const providerLabels: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  deepseek: 'DeepSeek',
 }
 
 const providerColors: Record<string, string> = {
   claude: '#d97757',
   openai: '#10a37f',
   gemini: '#4285f4',
+  deepseek: '#6366f1',
 }
 
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
@@ -372,7 +374,7 @@ function openRequestInput(row: DashboardRecentLog) {
           </n-tag>
           <div class="log-model">
             <strong>{{ row.model || '(unknown model)' }}</strong>
-            <span>{{ row.apiKeyName || '未知 Key' }} · {{ providerLabel(row.provider) }}</span>
+            <span>{{ providerLabel(row.provider) }} · {{ row.accountName || '未知账号' }} · {{ row.apiKeyName || '未知 Key' }}</span>
           </div>
           <div class="log-metric">
             <span>输入</span>

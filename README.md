@@ -2,7 +2,7 @@
 
 > **English** · [中文](./README.zh-CN.md)
 
-Self-hosted AI API relay platform — turn your **Claude / OpenAI / Gemini**
+Self-hosted AI API relay platform — turn your **Claude / OpenAI / Gemini / DeepSeek**
 subscriptions into standard API endpoints you can share with friends, with
 per-user API keys, usage statistics and automatic multi-account rotation.
 
@@ -12,7 +12,8 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ✅ **v1 shipped.** Admin dashboard, API keys with per-key cost quotas, Claude
 (paste-code OAuth) / OpenAI (browser callback) / Gemini (Google OAuth +
-Code Assist) account onboarding, multi-account rotation, relay surfaces with
+Code Assist) / DeepSeek (API key) account onboarding, multi-account rotation
+with configurable priority, relay surfaces with
 legacy `/api/*` paths plus clean provider-native aliases (`/v1/messages`,
 `/v1/responses`, `/v1beta/models/*`), usage logging with daily / provider /
 model / key breakdowns, and a one-command Docker deploy.
@@ -97,7 +98,17 @@ The backend then serves the built dashboard directly at <http://localhost:3000>.
 
 Create an API key on the **API Keys** page first, and add at least one
 upstream account on the **Upstream Accounts** page (paste-code for Claude,
-browser callback for OpenAI/Gemini).
+browser callback for OpenAI/Gemini, API key for DeepSeek).
+
+### Account priority
+
+When you have multiple accounts for the same provider, you can control which
+one is tried first by setting the **Priority** (1–100, default 1) in the
+accounts table. Higher values are tried before lower ones. Accounts with the
+same priority fall back to least-recently-used rotation.
+
+Set this on the **Upstream Accounts** page — adjust the number in the
+**Priority** column and the value is saved immediately.
 
 ### Claude Code
 
