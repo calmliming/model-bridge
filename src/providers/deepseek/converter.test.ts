@@ -291,6 +291,51 @@ describe('responsesToChatCompletions', () => {
     ])
   })
 
+  it('backfills empty reasoning_content on assistants that lack it when others have it', () => {
+    // DeepSeek thinking mode is "all-or-nothing": if any assistant message
+    // carries reasoning_content, every assistant must. Codex sometimes drops
+    // reasoning on echo, leaving a mixed history — the converter must repair
+    // it so DeepSeek doesn't 400 the request.
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q1' }] },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'r1' }] },
+        { type: 'function_call', call_id: 'c1', name: 'ls', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'c1', output: 'ok' },
+        // Second assistant turn echoed without a preceding reasoning item.
+        { role: 'assistant', content: [{ type: 'output_text', text: 'done' }] },
+        { role: 'user', content: [{ type: 'input_text', text: 'q2' }] },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q1' },
+      {
+        role: 'assistant',
+        content: null,
+        reasoning_content: 'r1',
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'ls', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+      { role: 'assistant', content: 'done', reasoning_content: '' },
+      { role: 'user', content: 'q2' },
+    ])
+  })
+
+  it('leaves assistants untouched when no reasoning_content is present anywhere', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'a' }] },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ])
+  })
+
   it('drops pending reasoning when no assistant message follows it', () => {
     const out = responsesToChatCompletions({
       input: [

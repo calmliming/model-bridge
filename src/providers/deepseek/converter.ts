@@ -91,6 +91,16 @@ export function responsesToChatCompletions(
     for (const item of input) convertInputItem(item, messages, state)
   }
 
+  // DeepSeek thinking-mode "all-or-nothing" rule: if ANY assistant message in
+  // the history carries `reasoning_content`, every other assistant message —
+  // including tool-call-only ones — must carry it too, or the API rejects the
+  // whole request with `reasoning_content ... must be passed back`. Codex CLI
+  // sometimes drops the reasoning text on echo (older sessions, or when the
+  // mb1: marker on `encrypted_content` was filtered out), which would leave a
+  // mixed history. Backfill missing assistants with an empty string so the
+  // request still validates.
+  ensureUniformReasoningContent(messages)
+
   const tools = Array.isArray(body.tools)
     ? (body.tools as Array<Record<string, unknown>>)
         .map(convertTool)
@@ -227,6 +237,17 @@ function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState
   }
   state.pendingReasoning = ''
   out.push(msg)
+}
+
+function ensureUniformReasoningContent(messages: ChatMessage[]): void {
+  const hasAny = messages.some(
+    (m) => m.role === 'assistant' && typeof m.reasoning_content === 'string' && m.reasoning_content.length > 0,
+  )
+  if (!hasAny) return
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue
+    if (m.reasoning_content == null) m.reasoning_content = ''
+  }
 }
 
 // Inverse of stream.ts `encodeReasoningMarker`. Anything that doesn't carry
