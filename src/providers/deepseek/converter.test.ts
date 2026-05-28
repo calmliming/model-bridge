@@ -167,4 +167,76 @@ describe('responsesToChatCompletions', () => {
     const out = responsesToChatCompletions({ input: 'hi' })
     expect(out.stream).toBe(false)
   })
+
+  it('attaches reasoning summary to the next assistant message', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'think...' }] },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'a' }] },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a', reasoning_content: 'think...' },
+    ])
+  })
+
+  it('attaches reasoning summary to a function_call assistant message', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'plan' }] },
+        { type: 'function_call', call_id: 'c1', name: 'ls', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'c1', output: 'ok' },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: null,
+        reasoning_content: 'plan',
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'ls', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+    ])
+  })
+
+  it('merges consecutive function_calls into one assistant message so tool replies follow as a block', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { type: 'function_call', call_id: 'a', name: 'fa', arguments: '{}' },
+        { type: 'function_call', call_id: 'b', name: 'fb', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'a', output: 'ra' },
+        { type: 'function_call_output', call_id: 'b', output: 'rb' },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'a', type: 'function', function: { name: 'fa', arguments: '{}' } },
+          { id: 'b', type: 'function', function: { name: 'fb', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'a', content: 'ra' },
+      { role: 'tool', tool_call_id: 'b', content: 'rb' },
+    ])
+  })
+
+  it('drops pending reasoning when no assistant message follows it', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'orphan' }] },
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+      ],
+    })
+    expect(out.messages).toEqual([{ role: 'user', content: 'q' }])
+  })
 })

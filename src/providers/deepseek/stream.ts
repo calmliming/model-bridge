@@ -93,10 +93,14 @@ function nextSeq(s: StreamState): number {
 }
 
 function mapUsageToResponses(u: ChatUsage | null) {
+  const input = u?.prompt_tokens ?? 0
+  const output = u?.completion_tokens ?? 0
   return {
-    input_tokens: u?.prompt_tokens ?? 0,
-    output_tokens: u?.completion_tokens ?? 0,
+    input_tokens: input,
     input_tokens_details: { cached_tokens: u?.prompt_cache_hit_tokens ?? 0 },
+    output_tokens: output,
+    output_tokens_details: { reasoning_tokens: 0 },
+    total_tokens: input + output,
   }
 }
 

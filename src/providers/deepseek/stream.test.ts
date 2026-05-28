@@ -15,7 +15,13 @@ interface ResponsesEvent {
     status?: string
     model?: string
     output?: unknown[]
-    usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } }
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      total_tokens?: number
+      input_tokens_details?: { cached_tokens?: number }
+      output_tokens_details?: { reasoning_tokens?: number }
+    }
   }
   item?: { id?: string; type?: string; name?: string; call_id?: string; arguments?: string }
 }
@@ -44,8 +50,10 @@ describe('createDeepseekResponsesStreamTransform', () => {
     expect(events[2]?.response?.status).toBe('completed')
     expect(events[2]?.response?.usage).toEqual({
       input_tokens: 0,
-      output_tokens: 0,
       input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 0,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 0,
     })
   })
 
@@ -90,8 +98,10 @@ describe('createDeepseekResponsesStreamTransform', () => {
     expect(completed.response?.status).toBe('completed')
     expect(completed.response?.usage).toEqual({
       input_tokens: 10,
-      output_tokens: 5,
       input_tokens_details: { cached_tokens: 4 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 15,
     })
     const output = completed.response?.output ?? []
     expect(output).toHaveLength(1)
@@ -221,8 +231,10 @@ describe('createDeepseekResponsesStreamTransform', () => {
     const completed = events[events.length - 1]!
     expect(completed.response?.usage).toEqual({
       input_tokens: 0,
-      output_tokens: 0,
       input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 0,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 0,
     })
   })
 

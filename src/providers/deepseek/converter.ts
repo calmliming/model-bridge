@@ -13,6 +13,7 @@
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content?: string | null
+  reasoning_content?: string
   tool_calls?: Array<{
     id: string
     type: 'function'
@@ -86,7 +87,8 @@ export function responsesToChatCompletions(
   if (typeof input === 'string') {
     messages.push({ role: 'user', content: input })
   } else if (Array.isArray(input)) {
-    for (const item of input) convertInputItem(item, messages)
+    const state = { pendingReasoning: '' }
+    for (const item of input) convertInputItem(item, messages, state)
   }
 
   const tools = Array.isArray(body.tools)
@@ -113,29 +115,60 @@ export function responsesToChatCompletions(
   return out
 }
 
-function convertInputItem(item: unknown, out: ChatMessage[]): void {
+interface ConvertState {
+  pendingReasoning: string
+}
+
+function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState): void {
   if (!item || typeof item !== 'object') return
   const it = item as Record<string, unknown>
   const type = typeof it.type === 'string' ? it.type : undefined
 
+  if (type === 'reasoning') {
+    // Buffer reasoning summary text; attach to the next assistant message
+    // (DeepSeek thinking mode requires reasoning_content to be passed back).
+    const summary = it.summary
+    if (Array.isArray(summary)) {
+      for (const part of summary) {
+        if (!part || typeof part !== 'object') continue
+        const p = part as Record<string, unknown>
+        if (p.type === 'summary_text' && typeof p.text === 'string') {
+          state.pendingReasoning += p.text
+        }
+      }
+    } else if (typeof it.content === 'string') {
+      state.pendingReasoning += it.content
+    }
+    return
+  }
+
   if (type === 'function_call') {
-    out.push({
-      role: 'assistant',
-      content: null,
-      tool_calls: [
-        {
-          id: String(it.call_id ?? it.id ?? ''),
-          type: 'function',
-          function: {
-            name: String(it.name ?? ''),
-            arguments:
-              typeof it.arguments === 'string'
-                ? it.arguments
-                : JSON.stringify(it.arguments ?? {}),
-          },
-        },
-      ],
-    })
+    const toolCall = {
+      id: String(it.call_id ?? it.id ?? ''),
+      type: 'function' as const,
+      function: {
+        name: String(it.name ?? ''),
+        arguments:
+          typeof it.arguments === 'string'
+            ? it.arguments
+            : JSON.stringify(it.arguments ?? {}),
+      },
+    }
+    // Merge consecutive function_calls into a single assistant message so the
+    // tool messages can follow as a block (DeepSeek rejects an assistant
+    // tool_calls message that isn't immediately followed by its tool replies).
+    const last = out[out.length - 1]
+    if (last && last.role === 'assistant' && last.tool_calls && last.content == null) {
+      last.tool_calls.push(toolCall)
+      if (state.pendingReasoning && !last.reasoning_content) {
+        last.reasoning_content = state.pendingReasoning
+      }
+    } else {
+      const msg: ChatMessage = { role: 'assistant', content: null, tool_calls: [toolCall] }
+      if (state.pendingReasoning) msg.reasoning_content = state.pendingReasoning
+      out.push(msg)
+    }
+    state.pendingReasoning = ''
     return
   }
 
@@ -146,6 +179,7 @@ function convertInputItem(item: unknown, out: ChatMessage[]): void {
       tool_call_id: String(it.call_id ?? ''),
       content: typeof output === 'string' ? output : JSON.stringify(output ?? ''),
     })
+    state.pendingReasoning = ''
     return
   }
 
@@ -178,7 +212,12 @@ function convertInputItem(item: unknown, out: ChatMessage[]): void {
       // chat/completions doesn't support multimodal input.
     }
   }
-  out.push({ role, content: text })
+  const msg: ChatMessage = { role, content: text }
+  if (role === 'assistant' && state.pendingReasoning) {
+    msg.reasoning_content = state.pendingReasoning
+  }
+  state.pendingReasoning = ''
+  out.push(msg)
 }
 
 function convertTool(tool: Record<string, unknown>): ChatTool | null {
