@@ -344,7 +344,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
 claude`,
     codex: `[profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 [model_providers.model-bridge]
 name = "model-bridge"
@@ -355,6 +355,19 @@ requires_openai_auth = false
 
 export MODEL_BRIDGE_API_KEY=${key}
 codex --profile model-bridge`,
+    codexDeepseek: `[profiles.model-bridge-deepseek]
+model_provider = "model-bridge-deepseek"
+model = "deepseek-v4-pro"
+
+[model_providers.model-bridge-deepseek]
+name = "model-bridge-deepseek"
+base_url = "${baseOrigin.value}/api/deepseek/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=${key}
+codex --profile model-bridge-deepseek`,
     gemini: `Base URL: ${baseOrigin.value}
 API Key:  ${key}`,
   }
@@ -620,6 +633,10 @@ onMounted(load)
         <n-tab-pane name="codex" tab="Codex CLI">
           <pre><code>{{ snippets.codex }}</code></pre>
           <n-button size="small" secondary @click="copyKey(snippets.codex)">复制</n-button>
+        </n-tab-pane>
+        <n-tab-pane name="codex-deepseek" tab="Codex CLI (DeepSeek)">
+          <pre><code>{{ snippets.codexDeepseek }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.codexDeepseek)">复制</n-button>
         </n-tab-pane>
         <n-tab-pane name="gemini" tab="Gemini / 自定义客户端">
           <pre><code>{{ snippets.gemini }}</code></pre>

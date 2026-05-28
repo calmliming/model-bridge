@@ -100,6 +100,10 @@ export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
+想让 Claude Code 走 DeepSeek 上游（DeepSeek 提供 Anthropic 兼容端点），把
+`ANTHROPIC_BASE_URL` 改成 `http://localhost:3000/api/deepseek` 即可，账号池
+和 [Codex CLI 接 DeepSeek](#codex-cli-接-deepseek) 共享同一份 DeepSeek API key。
+
 ### Codex CLI
 
 较新的 Codex CLI 使用 `model_providers` 配置自定义 Responses API：
@@ -108,7 +112,7 @@ claude
 # ~/.codex/config.toml
 [profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 [model_providers.model-bridge]
 name = "model-bridge"
@@ -129,16 +133,22 @@ codex --profile model-bridge
 
 ### Codex CLI 接 DeepSeek
 
-`/api/deepseek/v1/responses` 是给 Codex CLI 用的 Responses API 入口——网关
-把请求改写成 DeepSeek 的 `chat/completions` 协议，再把响应流转换回 Codex 期望
-的 Responses 事件。账号池和 `/api/deepseek/v1/messages`（Claude Code 路径）
-共享，同一份 DeepSeek API key 即可。
+让 Codex CLI 用 DeepSeek 的 API key 跑——网关在 `/api/deepseek/v1/responses`
+暴露一个 Responses API 入口，内部把请求改写成 DeepSeek 的 `chat/completions`
+协议，再把响应流转换回 Codex 期望的 Responses 事件。账号池和 `/api/deepseek/v1/messages`
+（Claude Code 路径）共享，**同一份 DeepSeek API key 同时服务两端**。
+
+#### 1. 后台准备
+
+- **上游账户** 页面 → 添加 DeepSeek 账户，把你的 DeepSeek API key（`sk-...`）粘进去
+- **API Keys** 页面 → 新建一个中转 key（拿到 `mb-xxxxxxxx`）；若设了 `allowedProviders`，勾上 `deepseek`
+
+#### 2. 编辑 `~/.codex/config.toml`
 
 ```toml
-# ~/.codex/config.toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-chat"   # 或 "deepseek-reasoner" 用推理模型
+model = "deepseek-v4-pro"   # 或 "deepseek-v4-flash" 用更便宜的轻量模型
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -148,8 +158,34 @@ wire_api = "responses"
 requires_openai_auth = false
 ```
 
-模型名重写规则：以 `deepseek-` 开头透传，其余（如 Codex 默认的 `gpt-5-codex`）
-强制改为 `deepseek-chat`。该端点始终以 SSE 返回。
+- `base_url` 必须包含 `/api/deepseek/v1` 这段前缀，不能写成裸 `/v1`
+- 中转站不在本机就把 `localhost:3000` 换成实际地址（如 `https://your-host`）
+
+#### 3. 启动 Codex
+
+```bash
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge-deepseek
+```
+
+#### 4. 验证（可选）
+
+不确定通不通时先用 curl 试一发：
+
+```bash
+curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","input":"say hi","stream":true}'
+```
+
+正常会看到 SSE：`response.created` → 若干 `response.output_text.delta` → `response.completed`。
+
+#### 说明
+
+- **模型名重写**：以 `deepseek-` 开头的透传（`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-reasoner` 等），其它（包括 Codex 默认的 `gpt-5-codex`）一律强制改为 `deepseek-v4-pro`，所以即使 toml 里 `model` 写错或不写也能跑通
+- **始终 SSE**：该端点忽略客户端的 `stream` 字段，永远以 text/event-stream 返回
+- **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计
 
 ### Cherry Studio
 

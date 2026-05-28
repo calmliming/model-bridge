@@ -3,29 +3,29 @@ import { describe, expect, it } from 'vitest'
 import { mapModel, responsesToChatCompletions } from './converter'
 
 describe('mapModel', () => {
-  it('rewrites non-deepseek model names to deepseek-chat', () => {
-    expect(mapModel('gpt-5-codex')).toBe('deepseek-chat')
-    expect(mapModel('gpt-4o')).toBe('deepseek-chat')
-    expect(mapModel('o3-mini')).toBe('deepseek-chat')
+  it('rewrites non-deepseek model names to deepseek-v4-pro', () => {
+    expect(mapModel('gpt-5-codex')).toBe('deepseek-v4-pro')
+    expect(mapModel('gpt-4o')).toBe('deepseek-v4-pro')
+    expect(mapModel('o3-mini')).toBe('deepseek-v4-pro')
   })
 
   it('passes through any deepseek-prefixed model name', () => {
-    expect(mapModel('deepseek-chat')).toBe('deepseek-chat')
+    expect(mapModel('deepseek-v4-pro')).toBe('deepseek-v4-pro')
     expect(mapModel('deepseek-reasoner')).toBe('deepseek-reasoner')
     expect(mapModel('deepseek-anything-else')).toBe('deepseek-anything-else')
   })
 
-  it('falls back to deepseek-chat for empty / non-string input', () => {
-    expect(mapModel('')).toBe('deepseek-chat')
-    expect(mapModel(undefined)).toBe('deepseek-chat')
-    expect(mapModel(123)).toBe('deepseek-chat')
+  it('falls back to deepseek-v4-pro for empty / non-string input', () => {
+    expect(mapModel('')).toBe('deepseek-v4-pro')
+    expect(mapModel(undefined)).toBe('deepseek-v4-pro')
+    expect(mapModel(123)).toBe('deepseek-v4-pro')
   })
 })
 
 describe('responsesToChatCompletions', () => {
   it('converts string input to a single user message', () => {
     const out = responsesToChatCompletions({ model: 'gpt-5-codex', input: 'hi', stream: true })
-    expect(out.model).toBe('deepseek-chat')
+    expect(out.model).toBe('deepseek-v4-pro')
     expect(out.stream).toBe(true)
     expect(out.messages).toEqual([{ role: 'user', content: 'hi' }])
   })

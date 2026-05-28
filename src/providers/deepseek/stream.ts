@@ -304,7 +304,7 @@ function closeToolCall(s: StreamState, b: ToolCallBucket, out: unknown[]): void 
 export function createDeepseekResponsesStreamTransform(): StreamTransform {
   const state: StreamState = {
     responseId: shortId('resp'),
-    model: 'deepseek-chat',
+    model: 'deepseek-v4-pro',
     createdAt: Math.floor(Date.now() / 1000),
     sequenceNumber: 0,
     startedEmitted: false,

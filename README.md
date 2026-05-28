@@ -107,6 +107,11 @@ export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
+To route Claude Code through DeepSeek's Anthropic-compatible upstream
+instead, point `ANTHROPIC_BASE_URL` at `http://localhost:3000/api/deepseek`.
+This shares the same DeepSeek account pool as [Codex CLI on DeepSeek](#codex-cli-on-deepseek)
+— one DeepSeek API key serves both clients.
+
 ### Codex CLI
 
 Recent Codex CLI uses `model_providers` for a custom Responses API:
@@ -115,7 +120,7 @@ Recent Codex CLI uses `model_providers` for a custom Responses API:
 # ~/.codex/config.toml
 [profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-5.4"
+model = "gpt-5.5"
 
 [model_providers.model-bridge]
 name = "model-bridge"
@@ -136,17 +141,24 @@ generic OpenAI clients is not implemented.
 
 ### Codex CLI on DeepSeek
 
-`/api/deepseek/v1/responses` is a Responses-API surface for Codex CLI backed
-by DeepSeek's `chat/completions` upstream — the relay rewrites the request
-and translates the streamed reply back into Responses events. It shares the
-same DeepSeek account pool as `/api/deepseek/v1/messages` (used by Claude
-Code), so one DeepSeek API key serves both.
+Run Codex CLI against your DeepSeek API key. The relay exposes a
+Responses-API surface at `/api/deepseek/v1/responses` that rewrites incoming
+requests into DeepSeek's `chat/completions` format and translates the
+streamed reply back into Responses events. The same DeepSeek account pool is
+shared with `/api/deepseek/v1/messages` (used by Claude Code), so **one
+DeepSeek API key serves both clients**.
+
+#### 1. Prepare the dashboard
+
+- **Upstream Accounts** → add a DeepSeek account and paste in your DeepSeek API key (`sk-...`)
+- **API Keys** → create a relay key (you'll get `mb-xxxxxxxx`); if you set `allowedProviders`, include `deepseek`
+
+#### 2. Edit `~/.codex/config.toml`
 
 ```toml
-# ~/.codex/config.toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-chat"   # or "deepseek-reasoner" for the reasoning model
+model = "deepseek-v4-pro"   # or "deepseek-v4-flash" for the cheaper, lighter variant
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -156,10 +168,35 @@ wire_api = "responses"
 requires_openai_auth = false
 ```
 
-Model-name rewrite rule: anything starting with `deepseek-` is passed through;
-anything else (including Codex's default `gpt-5-codex`) is forced to
-`deepseek-chat`. This endpoint always streams (SSE) regardless of the
-client's `stream` flag.
+- `base_url` must include the `/api/deepseek/v1` prefix — don't shorten it to bare `/v1`
+- Replace `localhost:3000` with your real host (e.g. `https://your-host`) if the relay isn't local
+
+#### 3. Run Codex
+
+```bash
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge-deepseek
+```
+
+#### 4. Verify (optional)
+
+If you're unsure the route works, smoke-test it with curl:
+
+```bash
+curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","input":"say hi","stream":true}'
+```
+
+A healthy response is an SSE stream: `response.created` → several
+`response.output_text.delta` → `response.completed`.
+
+#### Notes
+
+- **Model-name rewrite**: anything starting with `deepseek-` is passed through (`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-reasoner` etc.); everything else (including Codex's default `gpt-5-codex`) is forced to `deepseek-v4-pro`, so the route works even if `model` is wrong or absent in your toml.
+- **Always streams**: this endpoint ignores the client's `stream` field and always returns `text/event-stream`.
+- **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.
 
 ### Cherry Studio
 

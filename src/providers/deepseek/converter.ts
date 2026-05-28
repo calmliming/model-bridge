@@ -43,12 +43,15 @@ export interface ChatCompletionsRequest {
 /**
  * Codex defaults to model names like `gpt-5-codex` which DeepSeek does not
  * recognise. Rewrite anything that doesn't already look like a DeepSeek model
- * to `deepseek-chat`. Users who want the reasoner explicitly set
- * `model="deepseek-reasoner"` in their Codex config.
+ * to `deepseek-v4-pro` (the highest-quality V4 model). Anything starting
+ * with `deepseek-` is passed through, so users can set
+ * `model="deepseek-v4-flash"` for the cheaper variant or
+ * `model="deepseek-reasoner"` for the legacy reasoning model in their Codex
+ * config.
  */
 export function mapModel(input: unknown): string {
-  if (typeof input !== 'string' || !input) return 'deepseek-chat'
-  return input.startsWith('deepseek-') ? input : 'deepseek-chat'
+  if (typeof input !== 'string' || !input) return 'deepseek-v4-pro'
+  return input.startsWith('deepseek-') ? input : 'deepseek-v4-pro'
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */
