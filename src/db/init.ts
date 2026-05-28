@@ -86,6 +86,7 @@ export async function initDb(): Promise<void> {
 
   // Forward-compatible column additions for existing databases.
   // PostgreSQL 9.6+ supports IF NOT EXISTS on ADD COLUMN, so this is idempotent.
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS weight BIGINT NOT NULL DEFAULT 1;`)
   await pool.query(`ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS account_name TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_secret_encrypted TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_input TEXT;`)

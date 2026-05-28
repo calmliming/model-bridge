@@ -65,6 +65,7 @@ export async function listAccounts() {
       status: accounts.status,
       tokenExpiresAt: accounts.tokenExpiresAt,
       cooldownUntil: accounts.cooldownUntil,
+      weight: accounts.weight,
       lastUsedAt: accounts.lastUsedAt,
       metadata: accounts.metadata,
       createdAt: accounts.createdAt,
@@ -103,6 +104,14 @@ export async function updateAccountQuota(id: string, quota: AccountQuotaSnapshot
 export async function setAccountStatus(id: string, status: 'active' | 'disabled'): Promise<void> {
   await db.update(accounts)
     .set({ status, cooldownUntil: status === 'active' ? null : undefined })
+    .where(eq(accounts.id, id))
+}
+
+/** Updates the scheduler priority. Higher weight accounts are tried first. */
+export async function setAccountWeight(id: string, weight: number): Promise<void> {
+  const normalized = Math.max(1, Math.min(100, Math.trunc(weight)))
+  await db.update(accounts)
+    .set({ weight: normalized })
     .where(eq(accounts.id, id))
 }
 

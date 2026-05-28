@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInputNumber, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -26,6 +26,7 @@ interface Account {
   status: string
   tokenExpiresAt: number | null
   cooldownUntil: number | null
+  weight: number
   lastUsedAt: number | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
@@ -41,6 +42,7 @@ const accounts = ref<Account[]>([])
 const loading = ref(true)
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
+const savingWeightId = ref<string | null>(null)
 
 // Add-account modal state.
 const showAdd = ref(false)
@@ -277,6 +279,23 @@ function renderQuota(row: Account) {
   )
 }
 
+function renderPriority(row: Account) {
+  return h(NInputNumber, {
+    value: row.weight,
+    min: 1,
+    max: 100,
+    precision: 0,
+    size: 'small',
+    showButton: true,
+    disabled: savingWeightId.value === row.id,
+    class: 'priority-input',
+    'aria-label': `${row.name} 优先级`,
+    onUpdateValue: (value: number | null) => {
+      void updateWeight(row, value)
+    },
+  })
+}
+
 async function load() {
   loading.value = true
   try {
@@ -457,6 +476,24 @@ async function toggle(row: Account) {
   }
 }
 
+async function updateWeight(row: Account, value: number | null) {
+  if (value == null) return
+  const next = Math.max(1, Math.min(100, Math.trunc(value)))
+  if (!Number.isFinite(next) || next === row.weight) return
+
+  const previous = row.weight
+  row.weight = next
+  savingWeightId.value = row.id
+  try {
+    await api.patch(`/admin/accounts/${row.id}`, { weight: next })
+  } catch (e) {
+    row.weight = previous
+    message.error(errMsg(e, '更新优先级失败'))
+  } finally {
+    if (savingWeightId.value === row.id) savingWeightId.value = null
+  }
+}
+
 async function testConnectivity(row: Account) {
   testingId.value = row.id
   try {
@@ -531,6 +568,7 @@ const columns = computed<DataTableColumns<Account>>(() => [
   },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
+  { title: '优先级', key: 'weight', width: 110, render: renderPriority },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 150, render: (row) => formatTime(row.lastUsedAt) },
   {
     title: '调度',
@@ -596,7 +634,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1240"
+        :scroll-x="1340"
       />
     </n-card>
 
@@ -943,5 +981,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   line-height: 1;
+}
+
+:deep(.priority-input) {
+  width: 82px;
 }
 </style>

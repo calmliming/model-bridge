@@ -19,7 +19,7 @@ export async function clearExpiredAccountCooldowns(now = Date.now()): Promise<vo
 }
 
 /**
- * Picks an account for a provider using least-recently-used rotation.
+ * Picks an account for a provider by scheduler priority, then LRU rotation.
  * Skips disabled accounts, accounts in cooldown, and any in `exclude`
  * (already tried this request). Returns null when none are available.
  */
@@ -36,8 +36,11 @@ export async function pickAccount(provider: string, exclude: string[] = []) {
   )
   if (available.length === 0) return null
 
-  // Least-recently-used first — spreads load evenly across accounts.
-  available.sort((a, b) => (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0))
+  available.sort((a, b) => {
+    const weightDiff = Math.max(1, b.weight ?? 1) - Math.max(1, a.weight ?? 1)
+    if (weightDiff !== 0) return weightDiff
+    return (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0)
+  })
   return available[0]
 }
 

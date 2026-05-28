@@ -7,7 +7,7 @@ import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
-import { createAccount, deleteAccount, listAccounts, setAccountStatus } from '../accounts/manager'
+import { createAccount, deleteAccount, listAccounts, setAccountStatus, setAccountWeight } from '../accounts/manager'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -62,7 +62,12 @@ const oauthFinishSchema = z
     message: 'need (state+code) or callbackUrl',
   })
 
-const accountUpdateSchema = z.object({ status: z.enum(['active', 'disabled']) })
+const accountUpdateSchema = z
+  .object({
+    status: z.enum(['active', 'disabled']).optional(),
+    weight: z.number().int().min(1).max(100).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
 const importTokenSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']),
@@ -292,7 +297,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      await setAccountStatus(request.params.id, body.data.status)
+      if (body.data.status) await setAccountStatus(request.params.id, body.data.status)
+      if (body.data.weight !== undefined) await setAccountWeight(request.params.id, body.data.weight)
       return { ok: true }
     },
   )
