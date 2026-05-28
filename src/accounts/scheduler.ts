@@ -1,4 +1,4 @@
-import { and, eq, ne } from 'drizzle-orm'
+import { and, eq, inArray, lte, ne } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accounts } from '../db/schema'
 
@@ -8,6 +8,16 @@ const COOLDOWN_MS: Record<'rate_limited' | 'error', number> = {
   error: 2 * 60_000,
 }
 
+/** Clears transient cooldown states once their retry window has elapsed. */
+export async function clearExpiredAccountCooldowns(now = Date.now()): Promise<void> {
+  await db.update(accounts)
+    .set({ status: 'active', cooldownUntil: null })
+    .where(and(
+      inArray(accounts.status, ['rate_limited', 'error']),
+      lte(accounts.cooldownUntil, now),
+    ))
+}
+
 /**
  * Picks an account for a provider using least-recently-used rotation.
  * Skips disabled accounts, accounts in cooldown, and any in `exclude`
@@ -15,6 +25,7 @@ const COOLDOWN_MS: Record<'rate_limited' | 'error', number> = {
  */
 export async function pickAccount(provider: string, exclude: string[] = []) {
   const now = Date.now()
+  await clearExpiredAccountCooldowns(now)
   const rows = await db
     .select()
     .from(accounts)

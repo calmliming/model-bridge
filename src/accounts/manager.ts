@@ -6,6 +6,7 @@ import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
 import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
+import { clearExpiredAccountCooldowns } from './scheduler'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
@@ -55,6 +56,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
 
 /** Lists accounts for the dashboard — OAuth tokens are never exposed. */
 export async function listAccounts() {
+  await clearExpiredAccountCooldowns()
   const rows = await db
     .select({
       id: accounts.id,

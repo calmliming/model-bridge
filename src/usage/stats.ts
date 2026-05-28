@@ -1,4 +1,5 @@
 import { pool } from '../db/index'
+import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
 
 export interface DailyStat {
   day: string // YYYY-MM-DD (UTC)
@@ -372,6 +373,7 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
 /** Compact, mixed-source data used by the dashboard landing page. */
 export async function dashboardOverview(): Promise<DashboardOverview> {
   const now = Date.now()
+  await clearExpiredAccountCooldowns(now)
   const since24h = now - MS_PER_DAY
   const since30d = now - 30 * MS_PER_DAY
 

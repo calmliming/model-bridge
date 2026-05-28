@@ -89,7 +89,9 @@ function isCoolingDown(row: Account) {
 }
 
 function effectiveStatus(row: Account) {
+  if (row.status === 'disabled') return 'disabled'
   if (isCoolingDown(row)) return row.status === 'error' ? 'error' : 'rate_limited'
+  if (row.status === 'error' || row.status === 'rate_limited') return 'active'
   return row.status
 }
 
