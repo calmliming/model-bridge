@@ -397,6 +397,28 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // Codex: configure base_url=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey }, deepseekResponsesHandler)
 
+
+  // ── Model discovery (GET /v1/models) ───────────────────
+  app.get('/api/deepseek/v1/models', { preHandler: requireApiKey }, (_req, reply) => {
+    return reply.send({
+      object: 'list',
+      data: [
+        { id: 'deepseek-v4-flash', object: 'model', owned_by: 'deepseek' },
+        { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
+      ],
+    })
+  })
+
+  app.get('/v1/models', { preHandler: requireApiKey }, (_req, reply) => {
+    return reply.send({
+      object: 'list',
+      data: [
+        { id: 'deepseek-v4-flash', object: 'model', owned_by: 'deepseek' },
+        { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
+      ],
+    })
+  })
+
   // Clean provider-native aliases for custom domains:
   // - OpenAI/Codex: base_url = https://api.example.com/v1
   // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com
