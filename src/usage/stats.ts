@@ -62,31 +62,6 @@ export interface StatsSummary {
   byKey: KeyStat[]
 }
 
-export interface DashboardAccount {
-  id: string
-  provider: string
-  name: string
-  status: string
-  cooldownUntil: number | null
-  tokenExpiresAt: number | null
-  lastUsedAt: number | null
-  createdAt: number
-}
-
-export interface DashboardKey {
-  id: string
-  name: string
-  ownerLabel: string | null
-  keyPrefix: string
-  enabled: boolean
-  quotaLimit: number | null
-  quotaUsed: number
-  lastUsedAt: number | null
-  requests: number
-  tokens: number
-  cost: number
-}
-
 export interface DashboardRecentLog {
   id: string
   ts: number
@@ -120,8 +95,6 @@ export interface DashboardOverview {
   }
   daily: DailyStat[]
   byProvider: ProviderStat[]
-  accounts: DashboardAccount[]
-  keys: DashboardKey[]
 }
 
 export interface DashboardRecentLogsPage {
@@ -393,7 +366,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
        (SELECT COUNT(*) FROM accounts WHERE status = 'error') AS errorAccountCount,
        (SELECT COUNT(*) FROM usage_logs) AS requestCount,
        (SELECT COUNT(*) FROM usage_logs WHERE ts >= $3) AS requests24h,
-       (SELECT COALESCE(SUM(input_tokens + output_tokens), 0)
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0)
           FROM usage_logs WHERE ts >= $4) AS tokens30d,
        (SELECT COALESCE(SUM(cost), 0)
           FROM usage_logs WHERE ts >= $5) AS cost30d`,
@@ -414,81 +387,12 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     cost30d: toNum(t.cost30d),
   }
 
-  const accountsRes = await pool.query<Record<string, unknown>>(
-    `SELECT id,
-            provider,
-            name,
-            status,
-            cooldown_until AS cooldownUntil,
-            token_expires_at AS tokenExpiresAt,
-            last_used_at AS lastUsedAt,
-            created_at AS createdAt
-     FROM accounts
-     ORDER BY
-       CASE
-         WHEN status = 'error' THEN 0
-         WHEN status != 'disabled'
-           AND cooldown_until IS NOT NULL
-           AND cooldown_until > $1 THEN 1
-         WHEN status = 'disabled' THEN 3
-         ELSE 2
-       END,
-       COALESCE(last_used_at, created_at) DESC
-     LIMIT 8`,
-    [now],
-  )
-  const accounts: DashboardAccount[] = accountsRes.rows.map((row) => ({
-    id: row.id as string,
-    provider: row.provider as string,
-    name: row.name as string,
-    status: row.status as string,
-    cooldownUntil: row.cooldownuntil == null ? null : toNum(row.cooldownuntil),
-    tokenExpiresAt: row.tokenexpiresat == null ? null : toNum(row.tokenexpiresat),
-    lastUsedAt: row.lastusedat == null ? null : toNum(row.lastusedat),
-    createdAt: toNum(row.createdat),
-  }))
-
-  const keysRes = await pool.query<Record<string, unknown>>(
-    `SELECT api_keys.id AS id,
-            api_keys.name AS name,
-            api_keys.owner_label AS ownerLabel,
-            api_keys.key_prefix AS keyPrefix,
-            api_keys.enabled AS enabled,
-            api_keys.quota_limit AS quotaLimit,
-            api_keys.quota_used AS quotaUsed,
-            api_keys.last_used_at AS lastUsedAt,
-            COUNT(usage_logs.id) AS requests,
-            COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens), 0) AS tokens,
-            COALESCE(SUM(usage_logs.cost), 0) AS cost
-     FROM api_keys
-     LEFT JOIN usage_logs
-            ON usage_logs.api_key_id = api_keys.id
-           AND usage_logs.ts >= $1
-     GROUP BY api_keys.id
-     ORDER BY cost DESC, api_keys.quota_used DESC, api_keys.last_used_at DESC
-     LIMIT 6`,
-    [since30d],
-  )
-  const keys: DashboardKey[] = keysRes.rows.map((row) => ({
-    id: row.id as string,
-    name: row.name as string,
-    ownerLabel: (row.ownerlabel as string | null) ?? null,
-    keyPrefix: row.keyprefix as string,
-    enabled: Boolean(row.enabled),
-    quotaLimit: row.quotalimit == null ? null : toNum(row.quotalimit),
-    quotaUsed: toNum(row.quotaused),
-    lastUsedAt: row.lastusedat == null ? null : toNum(row.lastusedat),
-    requests: toNum(row.requests),
-    tokens: toNum(row.tokens),
-    cost: toNum(row.cost),
-  }))
-
   const [daily, byProvider] = await Promise.all([
     dailyStats(14),
     statsByProvider(30),
   ])
 
-  return { totals, daily, byProvider, accounts, keys }
+  return { totals, daily, byProvider }
 }
 
 export async function dashboardRecentLogs(

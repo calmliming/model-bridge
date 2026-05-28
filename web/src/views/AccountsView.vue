@@ -35,6 +35,14 @@ interface Account {
 type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
+interface AccountGroup {
+  provider: string
+  accounts: Account[]
+  activeCount: number
+  coolingCount: number
+  disabledCount: number
+}
+
 const message = useMessage()
 const dialog = useDialog()
 
@@ -66,6 +74,7 @@ const providerLabel: Record<Provider, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
 }
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'info',
   openai: 'success',
@@ -550,17 +559,6 @@ function confirmDelete(row: Account) {
 const columns = computed<DataTableColumns<Account>>(() => [
   { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
   {
-    title: '服务商',
-    key: 'provider',
-    width: 100,
-    render: (row) =>
-      h(
-        NTag,
-        { size: 'small', type: providerType(row.provider), bordered: false },
-        { default: () => providerName(row.provider) },
-      ),
-  },
-  {
     title: '状态',
     key: 'status',
     width: 110,
@@ -612,6 +610,30 @@ const columns = computed<DataTableColumns<Account>>(() => [
   },
 ])
 
+const accountGroups = computed<AccountGroup[]>(() => {
+  const groups = new Map<string, Account[]>()
+  for (const account of accounts.value) {
+    const rows = groups.get(account.provider) ?? []
+    rows.push(account)
+    groups.set(account.provider, rows)
+  }
+
+  return [...groups.entries()]
+    .sort(([a], [b]) => providerRank(a) - providerRank(b) || providerName(a).localeCompare(providerName(b)))
+    .map(([provider, rows]) => ({
+      provider,
+      accounts: rows,
+      activeCount: rows.filter((row) => effectiveStatus(row) === 'active').length,
+      coolingCount: rows.filter((row) => isCoolingDown(row)).length,
+      disabledCount: rows.filter((row) => row.status === 'disabled').length,
+    }))
+})
+
+function providerRank(provider: string): number {
+  const index = providerOrder.indexOf(provider as Provider)
+  return index === -1 ? providerOrder.length : index
+}
+
 onMounted(() => {
   void load()
   refreshTimer = window.setInterval(() => void load(), 30_000)
@@ -628,13 +650,43 @@ onBeforeUnmount(() => {
       <n-button type="primary" @click="openAdd">添加账户</n-button>
     </div>
 
-    <n-card class="table-card" :bordered="false">
+    <div v-if="accountGroups.length" class="account-groups">
+      <n-card
+        v-for="group in accountGroups"
+        :key="group.provider"
+        class="table-card account-group-card"
+        :bordered="false"
+      >
+        <div class="account-group-head">
+          <div class="account-group-title">
+            <n-tag size="small" :type="providerType(group.provider)" :bordered="false">
+              {{ providerName(group.provider) }}
+            </n-tag>
+            <strong>{{ group.accounts.length }} 个账户</strong>
+          </div>
+          <div class="account-group-meta">
+            <span>正常 {{ group.activeCount }}</span>
+            <span>冷却 {{ group.coolingCount }}</span>
+            <span>禁用 {{ group.disabledCount }}</span>
+          </div>
+        </div>
+        <n-data-table
+          :columns="columns"
+          :data="group.accounts"
+          :loading="loading"
+          :bordered="false"
+          :scroll-x="1240"
+        />
+      </n-card>
+    </div>
+
+    <n-card v-else class="table-card" :bordered="false">
       <n-data-table
         :columns="columns"
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1340"
+        :scroll-x="1240"
       />
     </n-card>
 
@@ -806,6 +858,45 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.account-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.account-group-card {
+  overflow: hidden;
+}
+
+.account-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.account-group-title,
+.account-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-group-title strong {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.account-group-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  color: rgba(15, 23, 42, 0.52);
+  font-size: 12px;
+}
+
 :deep(.muted-cell) {
   color: rgba(15, 23, 42, 0.52);
   font-size: 12px;
@@ -985,5 +1076,16 @@ onBeforeUnmount(() => {
 
 :deep(.priority-input) {
   width: 82px;
+}
+
+@media (max-width: 720px) {
+  .account-group-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-group-meta {
+    justify-content: flex-start;
+  }
 }
 </style>
