@@ -88,6 +88,16 @@ function shortId(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString('hex')}`
 }
 
+// Encodes the buffered reasoning text into a self-identifying token that we
+// place in the reasoning item's `encrypted_content` field. Codex CLI, when
+// configured with `include: ['reasoning.encrypted_content']`, round-trips this
+// field verbatim. We read it back in converter.ts so DeepSeek's reasoner gets
+// `reasoning_content` on every echoed assistant turn (otherwise DeepSeek
+// rejects the call with `reasoning_content must be passed back to the API`).
+function encodeReasoningMarker(text: string): string {
+  return `mb1:${Buffer.from(text, 'utf8').toString('base64')}`
+}
+
 function nextSeq(s: StreamState): number {
   return s.sequenceNumber++
 }
@@ -125,6 +135,7 @@ function buildFinalOutput(s: StreamState): unknown[] {
       id: s.reasoningItemId,
       type: 'reasoning',
       summary: [{ type: 'summary_text', text: s.reasoningBuffer }],
+      encrypted_content: encodeReasoningMarker(s.reasoningBuffer),
     })
   }
   if (s.messageItemId) {
@@ -201,6 +212,7 @@ function closeReasoning(s: StreamState, out: unknown[]): void {
       id: s.reasoningItemId,
       type: 'reasoning',
       summary: [{ type: 'summary_text', text: s.reasoningBuffer }],
+      encrypted_content: encodeReasoningMarker(s.reasoningBuffer),
     },
   })
   s.reasoningPartOpened = false

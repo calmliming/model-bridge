@@ -128,17 +128,26 @@ function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState
     // Buffer reasoning summary text; attach to the next assistant message
     // (DeepSeek thinking mode requires reasoning_content to be passed back).
     const summary = it.summary
+    let captured = ''
     if (Array.isArray(summary)) {
       for (const part of summary) {
         if (!part || typeof part !== 'object') continue
         const p = part as Record<string, unknown>
         if (p.type === 'summary_text' && typeof p.text === 'string') {
-          state.pendingReasoning += p.text
+          captured += p.text
         }
       }
     } else if (typeof it.content === 'string') {
-      state.pendingReasoning += it.content
+      captured += it.content
     }
+    // Codex CLI configured with `include: ['reasoning.encrypted_content']`
+    // round-trips the reasoning item but often with an empty `summary` — the
+    // text we need is in `encrypted_content`, which we previously stamped with
+    // our `mb1:` marker in stream.ts.
+    if (!captured && typeof it.encrypted_content === 'string') {
+      captured = decodeReasoningMarker(it.encrypted_content)
+    }
+    state.pendingReasoning += captured
     return
   }
 
@@ -218,6 +227,19 @@ function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState
   }
   state.pendingReasoning = ''
   out.push(msg)
+}
+
+// Inverse of stream.ts `encodeReasoningMarker`. Anything that doesn't carry
+// our prefix is treated as an opaque blob we can't decode (e.g. a real OpenAI
+// encrypted reasoning token) and we return '' so the caller falls back to
+// other sources.
+function decodeReasoningMarker(raw: string): string {
+  if (!raw.startsWith('mb1:')) return ''
+  try {
+    return Buffer.from(raw.slice(4), 'base64').toString('utf8')
+  } catch {
+    return ''
+  }
 }
 
 function convertTool(tool: Record<string, unknown>): ChatTool | null {

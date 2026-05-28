@@ -230,6 +230,67 @@ describe('responsesToChatCompletions', () => {
     ])
   })
 
+  it('recovers reasoning from encrypted_content when Codex echoes empty summary', () => {
+    // Codex CLI with `include: ['reasoning.encrypted_content']` echoes the
+    // reasoning item with summary=[] but encrypted_content set. Our stream
+    // layer stamps the reasoning text into encrypted_content with an `mb1:`
+    // prefix so we can round-trip it here.
+    const marker = `mb1:${Buffer.from('plan via marker', 'utf8').toString('base64')}`
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: marker },
+        { type: 'function_call', call_id: 'c1', name: 'ls', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'c1', output: 'ok' },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: null,
+        reasoning_content: 'plan via marker',
+        tool_calls: [
+          { id: 'c1', type: 'function', function: { name: 'ls', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+    ])
+  })
+
+  it('prefers summary text over encrypted_content when both are present', () => {
+    const marker = `mb1:${Buffer.from('from marker', 'utf8').toString('base64')}`
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        {
+          type: 'reasoning',
+          summary: [{ type: 'summary_text', text: 'from summary' }],
+          encrypted_content: marker,
+        },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'a' }] },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a', reasoning_content: 'from summary' },
+    ])
+  })
+
+  it('ignores encrypted_content that does not carry the mb1: marker', () => {
+    const out = responsesToChatCompletions({
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'q' }] },
+        { type: 'reasoning', summary: [], encrypted_content: 'opaque-openai-token' },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'a' }] },
+      ],
+    })
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'q' },
+      { role: 'assistant', content: 'a' },
+    ])
+  })
+
   it('drops pending reasoning when no assistant message follows it', () => {
     const out = responsesToChatCompletions({
       input: [

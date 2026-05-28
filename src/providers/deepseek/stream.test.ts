@@ -23,7 +23,15 @@ interface ResponsesEvent {
       output_tokens_details?: { reasoning_tokens?: number }
     }
   }
-  item?: { id?: string; type?: string; name?: string; call_id?: string; arguments?: string }
+  item?: {
+    id?: string
+    type?: string
+    name?: string
+    call_id?: string
+    arguments?: string
+    encrypted_content?: string
+    summary?: Array<{ type: string; text: string }>
+  }
 }
 
 function feed(xf: ReturnType<typeof createDeepseekResponsesStreamTransform>, chunks: unknown[]): ResponsesEvent[] {
@@ -140,8 +148,27 @@ describe('createDeepseekResponsesStreamTransform', () => {
     expect(reasoningDone?.text).toBe('think about')
 
     const completed = events[events.length - 1]!
-    const output = (completed.response?.output ?? []) as Array<{ type: string }>
+    const output = (completed.response?.output ?? []) as Array<{
+      type: string
+      encrypted_content?: string
+      summary?: Array<{ text: string }>
+    }>
     expect(output.map((o) => o.type)).toEqual(['reasoning', 'message'])
+
+    // The reasoning item is stamped with an `mb1:` encrypted_content marker so
+    // Codex CLI (with include:['reasoning.encrypted_content']) round-trips the
+    // reasoning text back to us on the next turn — see converter.ts.
+    const finalReasoning = output[0]!
+    expect(finalReasoning.encrypted_content).toBe(
+      `mb1:${Buffer.from('think about', 'utf8').toString('base64')}`,
+    )
+
+    const itemDone = eventsOfType(events, 'response.output_item.done').find(
+      (e) => e.item?.type === 'reasoning',
+    )
+    expect(itemDone?.item?.encrypted_content).toBe(
+      `mb1:${Buffer.from('think about', 'utf8').toString('base64')}`,
+    )
   })
 
   it('streams a single tool call with arguments accumulated across chunks', () => {
