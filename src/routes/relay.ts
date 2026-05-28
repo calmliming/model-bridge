@@ -12,6 +12,9 @@ import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
 import { relayDeepseekMessages } from '../providers/deepseek/relay'
 import * as deepseekUsage from '../providers/deepseek/usage'
+import { relayDeepseekResponses } from '../providers/deepseek/responses-relay'
+import * as deepseekResponsesUsage from '../providers/deepseek/responses-usage'
+import { createDeepseekResponsesStreamTransform } from '../providers/deepseek/stream'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 
@@ -42,6 +45,13 @@ interface UpstreamContext {
   account: { id: string; metadata: unknown }
 }
 
+interface StreamTransform {
+  /** Translate one upstream SSE event into zero or more downstream events. */
+  transform(data: unknown): unknown[]
+  /** Emit closing / completion events once the upstream stream ends. */
+  flush(): unknown[]
+}
+
 interface ProviderHandler {
   id: string
   /** Always stream the response regardless of the client's stream flag (Codex backend). */
@@ -56,6 +66,13 @@ interface ProviderHandler {
   parseJsonUsage(body: unknown): UsageData
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
   transformEventData?: (data: unknown) => unknown
+  /**
+   * Optional stateful, one-chunk-to-many-events stream transform. Mutually
+   * exclusive with `transformEventData` — providers should pick one. Used by
+   * the DeepSeek Responses adapter to translate chat/completions chunks into
+   * a Responses-API event sequence.
+   */
+  createStreamTransform?: () => StreamTransform
 }
 
 const PROVIDERS: Record<string, ProviderHandler> = {
@@ -115,6 +132,22 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, _ctx) => relayDeepseekMessages(token, body),
     createStreamParser: deepseekUsage.createStreamParser,
     parseJsonUsage: deepseekUsage.parseJsonUsage,
+  },
+  // Route key only — provider.id stays 'deepseek' so account pool, allowed-
+  // provider checks, and usage records all reuse the existing deepseek setup.
+  // Backed by DeepSeek's OpenAI-compatible chat/completions endpoint with a
+  // Responses-API ↔ Chat-Completions stream converter for Codex CLI.
+  'deepseek-responses': {
+    id: 'deepseek',
+    forceStream: true,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayDeepseekResponses(token, body),
+    createStreamParser: deepseekResponsesUsage.createStreamParser,
+    parseJsonUsage: deepseekResponsesUsage.parseJsonUsage,
+    createStreamTransform: createDeepseekResponsesStreamTransform,
   },
 }
 
@@ -348,6 +381,8 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.gemini!)
   const deepseekHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.deepseek!)
+  const deepseekResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['deepseek-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
@@ -357,6 +392,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey }, deepseekHandler)
+  // DeepSeek: OpenAI Responses-API surface for Codex CLI. The relay rewrites
+  // requests into chat/completions and translates the SSE stream back.
+  // Codex: configure base_url=https://your-host/api/deepseek
+  app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey }, deepseekResponsesHandler)
 
   // Clean provider-native aliases for custom domains:
   // - OpenAI/Codex: base_url = https://api.example.com/v1
@@ -465,9 +504,11 @@ async function executeRelay(
 }
 
 /**
- * Streams an SSE response back. Without `transformEventData` it's a raw
- * byte passthrough with a side-channel parse for usage. With a transform
- * (Gemini) it parses each event, rewrites the payload, and re-emits.
+ * Streams an SSE response back. Three modes, selected per provider:
+ *   - `createStreamTransform` (DeepSeek Responses): stateful transform that
+ *     emits 0-N downstream events per upstream event, plus a flush at end.
+ *   - `transformEventData` (Gemini): 1:1 payload rewrite per event.
+ *   - neither: raw byte passthrough with side-channel usage parsing.
  */
 async function sendStreaming(
   reply: FastifyReply,
@@ -477,14 +518,21 @@ async function sendStreaming(
 ): Promise<void> {
   reply.hijack()
   const raw = reply.raw
+  // When the upstream errored (non-2xx) we still pass through the bytes, but
+  // for a transformed stream we must emit text/event-stream — Codex won't
+  // accept anything else. The stream transform is only engaged on success.
+  const useStreamTransform = provider.createStreamTransform && upstream.ok
   raw.writeHead(upstream.status, {
-    'content-type': upstream.headers.get('content-type') ?? 'text/event-stream',
+    'content-type': useStreamTransform
+      ? 'text/event-stream'
+      : (upstream.headers.get('content-type') ?? 'text/event-stream'),
     'cache-control': 'no-cache',
     connection: 'keep-alive',
   })
 
   const parser = provider.createStreamParser()
   const transform = provider.transformEventData
+  const streamTransform = useStreamTransform ? provider.createStreamTransform!() : null
   let buffer = ''
 
   if (upstream.body) {
@@ -495,7 +543,16 @@ async function sendStreaming(
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        if (transform) {
+        if (streamTransform) {
+          // Stateful multi-event transform: drain whole SSE blocks, feed
+          // upstream JSON events to the transform, write each result as its
+          // own `data:` line, and feed it to the usage parser.
+          let sep: number
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser)
+            buffer = buffer.slice(sep + 2)
+          }
+        } else if (transform) {
           // Event-buffered: only emit complete events, rewriting payloads.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -514,6 +571,12 @@ async function sendStreaming(
       }
     } catch {
       // Client disconnected or upstream aborted — stop quietly.
+    }
+  }
+  if (streamTransform) {
+    for (const event of streamTransform.flush()) {
+      parser.feed(event)
+      raw.write(`data: ${JSON.stringify(event)}\n\n`)
     }
   }
   raw.end()
@@ -606,6 +669,36 @@ function feedSseBlock(block: string, parser: { feed(event: unknown): void }): vo
       parser.feed(JSON.parse(payload))
     } catch {
       // Ignore non-JSON data lines.
+    }
+  }
+}
+
+/**
+ * Stateful transform mode: parses each upstream `data:` JSON event, feeds it
+ * to the stream transform, and writes each emitted event as its own SSE
+ * frame. Non-data lines and `[DONE]` are dropped (the downstream protocol
+ * has its own completion signal).
+ */
+function emitFromStreamTransform(
+  raw: ServerResponse,
+  block: string,
+  xform: StreamTransform,
+  parser: { feed(event: unknown): void },
+): void {
+  for (const line of block.split('\n')) {
+    const trimmed = line.trimStart()
+    if (!trimmed.startsWith('data:')) continue
+    const payload = trimmed.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(payload)
+    } catch {
+      continue
+    }
+    for (const event of xform.transform(parsed)) {
+      parser.feed(event)
+      raw.write(`data: ${JSON.stringify(event)}\n\n`)
     }
   }
 }

@@ -134,6 +134,33 @@ The relay only exposes the OpenAI **Responses** API (`/v1/responses`) since
 that's what Codex CLI uses. A Chat-Completions surface for Cherry Studio /
 generic OpenAI clients is not implemented.
 
+### Codex CLI on DeepSeek
+
+`/api/deepseek/v1/responses` is a Responses-API surface for Codex CLI backed
+by DeepSeek's `chat/completions` upstream — the relay rewrites the request
+and translates the streamed reply back into Responses events. It shares the
+same DeepSeek account pool as `/api/deepseek/v1/messages` (used by Claude
+Code), so one DeepSeek API key serves both.
+
+```toml
+# ~/.codex/config.toml
+[profiles.model-bridge-deepseek]
+model_provider = "model-bridge-deepseek"
+model = "deepseek-chat"   # or "deepseek-reasoner" for the reasoning model
+
+[model_providers.model-bridge-deepseek]
+name = "model-bridge-deepseek"
+base_url = "http://localhost:3000/api/deepseek/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+Model-name rewrite rule: anything starting with `deepseek-` is passed through;
+anything else (including Codex's default `gpt-5-codex`) is forced to
+`deepseek-chat`. This endpoint always streams (SSE) regardless of the
+client's `stream` flag.
+
 ### Cherry Studio
 
 Add a custom provider per service:

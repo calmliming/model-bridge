@@ -127,6 +127,30 @@ codex --profile model-bridge
 用的就是它。给 Cherry Studio / 通用 OpenAI 客户端用的 Chat Completions 入口
 **尚未实现**。
 
+### Codex CLI 接 DeepSeek
+
+`/api/deepseek/v1/responses` 是给 Codex CLI 用的 Responses API 入口——网关
+把请求改写成 DeepSeek 的 `chat/completions` 协议，再把响应流转换回 Codex 期望
+的 Responses 事件。账号池和 `/api/deepseek/v1/messages`（Claude Code 路径）
+共享，同一份 DeepSeek API key 即可。
+
+```toml
+# ~/.codex/config.toml
+[profiles.model-bridge-deepseek]
+model_provider = "model-bridge-deepseek"
+model = "deepseek-chat"   # 或 "deepseek-reasoner" 用推理模型
+
+[model_providers.model-bridge-deepseek]
+name = "model-bridge-deepseek"
+base_url = "http://localhost:3000/api/deepseek/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+模型名重写规则：以 `deepseek-` 开头透传，其余（如 Codex 默认的 `gpt-5-codex`）
+强制改为 `deepseek-chat`。该端点始终以 SSE 返回。
+
 ### Cherry Studio
 
 为每个服务商各加一个自定义 provider：
