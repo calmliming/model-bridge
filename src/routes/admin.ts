@@ -27,6 +27,7 @@ const createKeySchema = z.object({
   ownerLabel: z.string().optional(),
   allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).optional(),
   rateLimit: z.number().int().positive().optional(),
+  concurrencyLimit: z.number().int().positive().optional(),
   quotaLimit: z.number().positive().optional(),
   expiresAt: z.number().int().optional(),
 })
@@ -38,6 +39,7 @@ const updateKeySchema = z
     ownerLabel: z.string().nullable().optional(),
     allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).nullable().optional(),
     rateLimit: z.number().int().positive().nullable().optional(),
+    concurrencyLimit: z.number().int().positive().nullable().optional(),
     quotaLimit: z.number().positive().nullable().optional(),
     expiresAt: z.number().int().nullable().optional(),
   })

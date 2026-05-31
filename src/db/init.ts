@@ -34,6 +34,7 @@ export async function initDb(): Promise<void> {
       allowed_providers JSONB,
       allowed_models JSONB,
       rate_limit BIGINT,
+      concurrency_limit BIGINT,
       quota_limit DOUBLE PRECISION,
       quota_used DOUBLE PRECISION NOT NULL DEFAULT 0,
       expires_at BIGINT,
@@ -90,4 +91,5 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS account_name TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_secret_encrypted TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_input TEXT;`)
+  await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
 }

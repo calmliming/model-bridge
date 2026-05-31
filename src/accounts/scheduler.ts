@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, ne } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accounts } from '../db/schema'
+import { getStickyAccountId } from './session'
 
 /** How long an account stays in cooldown after a failure, by kind. */
 const COOLDOWN_MS: Record<'rate_limited' | 'error', number> = {
@@ -22,8 +23,18 @@ export async function clearExpiredAccountCooldowns(now = Date.now()): Promise<vo
  * Picks an account for a provider by scheduler priority, then LRU rotation.
  * Skips disabled accounts, accounts in cooldown, and any in `exclude`
  * (already tried this request). Returns null when none are available.
+ *
+ * When `sessionKey` is given and that session is already bound to an available
+ * account, the bound account is reused (sticky session) so a conversation
+ * stays on one upstream and keeps its prompt cache warm. If the bound account
+ * is unavailable (cooldown / disabled / already tried), it transparently falls
+ * back to LRU.
  */
-export async function pickAccount(provider: string, exclude: string[] = []) {
+export async function pickAccount(
+  provider: string,
+  exclude: string[] = [],
+  sessionKey?: string | null,
+) {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
   const rows = await db
@@ -35,6 +46,14 @@ export async function pickAccount(provider: string, exclude: string[] = []) {
     (a) => !exclude.includes(a.id) && (!a.cooldownUntil || a.cooldownUntil < now),
   )
   if (available.length === 0) return null
+
+  if (sessionKey) {
+    const stickyId = getStickyAccountId(sessionKey, now)
+    if (stickyId) {
+      const stuck = available.find((a) => a.id === stickyId)
+      if (stuck) return stuck
+    }
+  }
 
   available.sort((a, b) => {
     const weightDiff = Math.max(1, b.weight ?? 1) - Math.max(1, a.weight ?? 1)

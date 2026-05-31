@@ -21,6 +21,7 @@ export interface CreateApiKeyInput {
   allowedProviders?: string[] | null
   allowedModels?: string[] | null
   rateLimit?: number | null
+  concurrencyLimit?: number | null
   quotaLimit?: number | null
   expiresAt?: number | null
 }
@@ -46,6 +47,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
       allowedProviders: input.allowedProviders ?? null,
       allowedModels: input.allowedModels ?? null,
       rateLimit: input.rateLimit ?? null,
+      concurrencyLimit: input.concurrencyLimit ?? null,
       quotaLimit: input.quotaLimit ?? null,
       expiresAt: input.expiresAt ?? null,
     })
@@ -65,6 +67,7 @@ export async function listApiKeys() {
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
       rateLimit: apiKeys.rateLimit,
+      concurrencyLimit: apiKeys.concurrencyLimit,
       quotaLimit: apiKeys.quotaLimit,
       quotaUsed: apiKeys.quotaUsed,
       expiresAt: apiKeys.expiresAt,
@@ -105,6 +108,7 @@ export interface UpdateApiKeyPatch {
   ownerLabel?: string | null
   allowedProviders?: string[] | null
   rateLimit?: number | null
+  concurrencyLimit?: number | null
   quotaLimit?: number | null
   expiresAt?: number | null
 }

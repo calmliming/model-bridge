@@ -10,6 +10,7 @@ export interface AuthedApiKey {
   allowedProviders: string[] | null
   allowedModels: string[] | null
   rateLimit: number | null
+  concurrencyLimit: number | null
   quotaLimit: number | null
   quotaUsed: number
 }
@@ -68,6 +69,7 @@ export async function requireApiKey(
     allowedProviders: record.allowedProviders ?? null,
     allowedModels: record.allowedModels ?? null,
     rateLimit: record.rateLimit ?? null,
+    concurrencyLimit: record.concurrencyLimit ?? null,
     quotaLimit: record.quotaLimit ?? null,
     quotaUsed: record.quotaUsed,
   }

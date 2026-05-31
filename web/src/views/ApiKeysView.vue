@@ -14,6 +14,7 @@ interface ApiKey {
   enabled: boolean
   allowedProviders: string[] | null
   rateLimit: number | null
+  concurrencyLimit: number | null
   quotaLimit: number | null
   quotaUsed: number
   expiresAt: number | null
@@ -49,6 +50,7 @@ const editForm = ref<{
   enabled: boolean
   allowedProviders: string[]
   rateLimit: number | null
+  concurrencyLimit: number | null
   quotaLimit: number | null
   expiresAt: number | null
 }>({
@@ -57,6 +59,7 @@ const editForm = ref<{
   enabled: true,
   allowedProviders: [],
   rateLimit: null,
+  concurrencyLimit: null,
   quotaLimit: null,
   expiresAt: null,
 })
@@ -136,6 +139,7 @@ function openEdit(row: ApiKey) {
     enabled: row.enabled,
     allowedProviders: row.allowedProviders ?? [],
     rateLimit: row.rateLimit,
+    concurrencyLimit: row.concurrencyLimit,
     quotaLimit: row.quotaLimit,
     expiresAt: row.expiresAt,
   }
@@ -158,6 +162,7 @@ async function saveEdit() {
         ? editForm.value.allowedProviders
         : null,
       rateLimit: editForm.value.rateLimit,
+      concurrencyLimit: editForm.value.concurrencyLimit,
       quotaLimit: editForm.value.quotaLimit,
       expiresAt: editForm.value.expiresAt,
     })
@@ -455,6 +460,12 @@ function renderRateLimit(row: ApiKey) {
   return h('span', { class: row.rateLimit == null ? 'muted-cell' : 'plain-cell' }, formatRateLimit(row))
 }
 
+function renderConcurrency(row: ApiKey) {
+  return row.concurrencyLimit == null
+    ? h('span', { class: 'muted-cell' }, '不限')
+    : h('span', { class: 'plain-cell' }, `${row.concurrencyLimit}`)
+}
+
 function renderTime(value: number | null) {
   return value ? h('span', { class: 'plain-cell' }, formatTime(value)) : h('span', { class: 'muted-cell' }, '—')
 }
@@ -482,6 +493,7 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
   },
   { title: '上限', key: 'quotaLimit', minWidth: 88, render: renderQuotaLimit },
   { title: '限速', key: 'rateLimit', minWidth: 88, render: renderRateLimit },
+  { title: '并发', key: 'concurrencyLimit', minWidth: 72, render: renderConcurrency },
   { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => renderTime(row.expiresAt) },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => renderTime(row.lastUsedAt) },
   {
@@ -680,6 +692,15 @@ onMounted(load)
             :min="1"
             :step="10"
             placeholder="例如：60"
+            style="width: 100%"
+          />
+        </n-form-item>
+        <n-form-item label="并发上限（同时进行的请求数，留空 = 不限）">
+          <n-input-number
+            v-model:value="editForm.concurrencyLimit"
+            :min="1"
+            :step="1"
+            placeholder="例如：5"
             style="width: 100%"
           />
         </n-form-item>

@@ -4,6 +4,8 @@ import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { extractAccountQuota, quotaCooldownUntil } from '../accounts/quota'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
+import { bindStickyAccount, clearStickyAccount, computeSessionKey } from '../accounts/session'
+import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
 import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
 import { relayOpenaiResponses } from '../providers/openai/relay'
@@ -428,7 +430,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
 }
 
-/** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
+/**
+ * Entry point: enforces per-key provider allow-list, rate limit and
+ * concurrency gate, then runs the relay loop while holding a concurrency slot.
+ */
 async function executeRelay(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -440,14 +445,43 @@ async function executeRelay(
     return
   }
 
+  // Per-key request-rate limit (requests / minute).
+  if (apiKey.rateLimit != null && !checkRateLimit(apiKey.id, apiKey.rateLimit)) {
+    await reply.code(429).send({ error: 'rate limit exceeded for this API key' })
+    return
+  }
+
+  // Per-key concurrency gate. Hold a slot for the whole request (including the
+  // streamed body) and release it once the response is fully sent. Streaming
+  // hijacks the reply, so onResponse hooks can't be relied on — release here.
+  const concurrencyLimit = apiKey.concurrencyLimit
+  if (concurrencyLimit != null && !acquireSlot(apiKey.id, concurrencyLimit)) {
+    await reply.code(429).send({ error: 'too many concurrent requests for this API key' })
+    return
+  }
+  try {
+    await runRelayLoop(request, reply, provider)
+  } finally {
+    if (concurrencyLimit != null) releaseSlot(apiKey.id)
+  }
+}
+
+/** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
+async function runRelayLoop(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  provider: ProviderHandler,
+): Promise<void> {
+  const apiKey = request.apiKey!
   const body = (request.body ?? {}) as Record<string, unknown>
   const parsed = provider.parseRoute(request, body)
   const wantStream =
     provider.forceStream || body.stream === true || parsed.action === 'streamGenerateContent'
+  const sessionKey = computeSessionKey(provider.id, apiKey.id, request.headers, body)
   const tried: string[] = []
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const account = await pickAccount(provider.id, tried)
+    const account = await pickAccount(provider.id, tried, sessionKey)
     if (!account) {
       await reply.code(503).send({
         error: tried.length
@@ -487,14 +521,19 @@ async function executeRelay(
     const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
     if (failure.retryable && !lastAttempt) {
-      if (failure.disable) await disableAccount(account.id)
-      else if (failure.penalty) await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      if (failure.disable) {
+        await disableAccount(account.id)
+        if (sessionKey) clearStickyAccount(sessionKey)
+      } else if (failure.penalty) {
+        await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      }
       await upstream.body?.cancel().catch(() => {})
       continue
     }
 
     if (failure.disable) {
       await disableAccount(account.id)
+      if (sessionKey) clearStickyAccount(sessionKey)
     } else if (failure.penalty) {
       await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
@@ -503,6 +542,8 @@ async function executeRelay(
         await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
       } else {
         await markAccountUsed(account.id)
+        // Pin this conversation to the account so its prompt cache stays warm.
+        if (sessionKey) bindStickyAccount(sessionKey, account.id)
       }
     }
 
