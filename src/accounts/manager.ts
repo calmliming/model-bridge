@@ -20,10 +20,31 @@ export interface CreateAccountInput {
   metadata?: Record<string, unknown> | null
 }
 
+export interface AccountHealthSnapshot {
+  status: 'healthy' | 'limited' | 'unhealthy'
+  checkedAt: number
+  latencyMs: number
+  message: string
+}
+
 function metadataObject(metadata: unknown): Record<string, unknown> {
   return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? { ...(metadata as Record<string, unknown>) }
     : {}
+}
+
+function accountHealthFromMetadata(metadata: unknown): AccountHealthSnapshot | null {
+  const health = metadataObject(metadata).health
+  if (!health || typeof health !== 'object' || Array.isArray(health)) return null
+  const h = health as Record<string, unknown>
+  const status = h.status
+  if (status !== 'healthy' && status !== 'limited' && status !== 'unhealthy') return null
+  return {
+    status,
+    checkedAt: typeof h.checkedAt === 'number' ? h.checkedAt : 0,
+    latencyMs: typeof h.latencyMs === 'number' ? h.latencyMs : 0,
+    message: typeof h.message === 'string' ? h.message : '',
+  }
 }
 
 function decryptAccountSecret(value: string): string {
@@ -75,6 +96,7 @@ export async function listAccounts() {
   return rows.map(({ metadata, ...account }) => ({
     ...account,
     quota: accountQuotaFromMetadata(metadata),
+    health: accountHealthFromMetadata(metadata),
   }))
 }
 
@@ -98,6 +120,10 @@ export async function updateAccountMetadata(id: string, metadata: Record<string,
 /** Stores the latest non-secret quota snapshot observed from upstream headers. */
 export async function updateAccountQuota(id: string, quota: AccountQuotaSnapshot): Promise<void> {
   await updateAccountMetadata(id, { quota })
+}
+
+export async function updateAccountHealth(id: string, health: AccountHealthSnapshot): Promise<void> {
+  await updateAccountMetadata(id, { health })
 }
 
 /** Enables or disables an account. */

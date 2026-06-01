@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { chatCompletionsToResponses } from './chat'
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 
@@ -45,4 +46,12 @@ export function relayOpenaiResponses(
     },
     body: JSON.stringify(normalizeBody(body)),
   })
+}
+
+/** Relays a Chat Completions request through the same Responses-only backend. */
+export function relayOpenaiChatCompletions(
+  accessToken: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return relayOpenaiResponses(accessToken, chatCompletionsToResponses(body))
 }

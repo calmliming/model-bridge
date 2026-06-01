@@ -13,8 +13,8 @@
 ✅ **v1 已交付。** 管理后台、带成本配额的 API Key、Claude（粘贴 code）/
 OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek（API key）账户接入、
 多账户轮换（支持优先级）、三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
-`/v1/responses`、`/v1beta/models/*`），按日 / 服务商 / 模型 / Key 的用量统计，
-以及一键 Docker 部署。
+`/v1/responses`、`/v1/chat/completions`、`/v1/models`、`/v1beta/models/*`），
+按日 / 服务商 / 模型 / Key 的用量统计，以及一键 Docker 部署。
 
 ## 技术栈
 
@@ -92,12 +92,19 @@ npm start
 先在 **API Keys** 页面创建一个密钥，再在 **上游账户** 页面至少添加一个上游
 账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调，DeepSeek 填 API key）。
 
+API Key 可按需限制服务商/模型，也可配置 `gpt-public=gpt-5.4` 这类模型映射。
+模型映射是客户端可见的别名：`GET /v1/models` 会展示别名，实际请求上游时改写为
+映射后的模型。
+
 ### 账户优先级
 
 同一服务商有多个账户时，可在账户列表中设置**优先级**（1–100，默认 1）来控制
 调度顺序。数值越高越优先使用，相同优先级则按最近最少使用策略轮换。
 
 在**上游账户**页面直接调整优先级列的数值即可，修改即时生效。
+
+账户页还提供手动健康检查，会把最近一次连通性结果记录到账号元数据里；它不会在后台
+自动循环运行，避免已有部署意外消耗额度。
 
 ### Claude Code
 
@@ -134,16 +141,20 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge
 ```
 
-中转目前暴露 OpenAI 的 **Responses** API（`/v1/responses`），因为 Codex CLI
-用的就是它。给 Cherry Studio / 通用 OpenAI 客户端用的 Chat Completions 入口
-**尚未实现**。
+中转暴露 OpenAI 的 **Responses** API（`/v1/responses`）供 Codex CLI 使用，
+同时提供兼容 OpenAI 客户端的 **Chat Completions** 入口
+（`/v1/chat/completions`）。Chat Completions 内部仍走同一套 Responses
+后端转换，所以文本对话可用；embeddings 和图片生成暂未暴露。`GET /v1/models`
+会返回兼容格式的模型列表，并按 API Key 的服务商和模型限制过滤。
 
 ### Codex CLI 接 DeepSeek
 
 让 Codex CLI 用 DeepSeek 的 API key 跑——网关在 `/api/deepseek/v1/responses`
 暴露一个 Responses API 入口，内部把请求改写成 DeepSeek 的 `chat/completions`
 协议，再把响应流转换回 Codex 期望的 Responses 事件。账号池和 `/api/deepseek/v1/messages`
-（Claude Code 路径）共享，**同一份 DeepSeek API key 同时服务两端**。
+（Claude Code 路径）共享，**同一份 DeepSeek API key 同时服务两端**。OpenAI
+兼容客户端也可以直接把 base URL 填成 `http://localhost:3000/api/deepseek/v1`，
+走 `chat/completions` 入口。
 
 #### 1. 后台准备
 
@@ -200,7 +211,8 @@ curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
 
 - **Anthropic** —— base URL `http://localhost:3000`，API key `mb-xxxx`
 - **Gemini** —— base URL `http://localhost:3000`，API key `mb-xxxx`
-- **OpenAI** —— 暂未实现（见上面 Codex CLI 一节）
+- **OpenAI** —— base URL `http://localhost:3000/v1`，API key `mb-xxxx`
+- **DeepSeek as OpenAI** —— base URL `http://localhost:3000/api/deepseek/v1`，API key `mb-xxxx`
 
 ### Gemini CLI
 

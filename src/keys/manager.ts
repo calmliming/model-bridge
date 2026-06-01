@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
 import { apiKeys } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
+import { normalizeModelMappings, type ModelMappings } from './modelMapping'
 
 const KEY_PREFIX = 'mb-'
 
@@ -20,6 +21,7 @@ export interface CreateApiKeyInput {
   ownerLabel?: string | null
   allowedProviders?: string[] | null
   allowedModels?: string[] | null
+  modelMappings?: ModelMappings | null
   rateLimit?: number | null
   concurrencyLimit?: number | null
   quotaLimit?: number | null
@@ -46,6 +48,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
       keyPrefix: secret.slice(0, 11),
       allowedProviders: input.allowedProviders ?? null,
       allowedModels: input.allowedModels ?? null,
+      modelMappings: normalizeModelMappings(input.modelMappings),
       rateLimit: input.rateLimit ?? null,
       concurrencyLimit: input.concurrencyLimit ?? null,
       quotaLimit: input.quotaLimit ?? null,
@@ -66,6 +69,7 @@ export async function listApiKeys() {
       enabled: apiKeys.enabled,
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
+      modelMappings: apiKeys.modelMappings,
       rateLimit: apiKeys.rateLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
       quotaLimit: apiKeys.quotaLimit,
@@ -107,6 +111,8 @@ export interface UpdateApiKeyPatch {
   name?: string
   ownerLabel?: string | null
   allowedProviders?: string[] | null
+  allowedModels?: string[] | null
+  modelMappings?: ModelMappings | null
   rateLimit?: number | null
   concurrencyLimit?: number | null
   quotaLimit?: number | null
@@ -116,6 +122,9 @@ export interface UpdateApiKeyPatch {
 /** Updates an API key's metadata and limits. Only provided fields change. */
 export async function updateApiKey(id: string, patch: UpdateApiKeyPatch): Promise<void> {
   if (Object.keys(patch).length === 0) return
+  if ('modelMappings' in patch) {
+    patch.modelMappings = normalizeModelMappings(patch.modelMappings)
+  }
   await db.update(apiKeys).set(patch).where(eq(apiKeys.id, id))
 }
 

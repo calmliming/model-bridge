@@ -6,17 +6,33 @@ import { extractAccountQuota, quotaCooldownUntil } from '../accounts/quota'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { bindStickyAccount, clearStickyAccount, computeSessionKey } from '../accounts/session'
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
+import { isAllowedModel } from '../keys/modelAllowlist'
+import { mapRequestedModel } from '../keys/modelMapping'
 import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
-import { relayOpenaiResponses } from '../providers/openai/relay'
+import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
+import {
+  createChatCompletionStreamParser,
+  createOpenaiChatCompletionsStreamTransform,
+  parseChatCompletionUsage,
+  responsesSseToChatCompletion,
+} from '../providers/openai/chat'
 import * as openaiUsage from '../providers/openai/usage'
 import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
 import { relayDeepseekMessages } from '../providers/deepseek/relay'
 import * as deepseekUsage from '../providers/deepseek/usage'
+import { relayDeepseekChatCompletions } from '../providers/deepseek/chat-relay'
 import { relayDeepseekResponses } from '../providers/deepseek/responses-relay'
 import * as deepseekResponsesUsage from '../providers/deepseek/responses-usage'
 import { createDeepseekResponsesStreamTransform } from '../providers/deepseek/stream'
+import { mapModel as mapDeepseekResponsesModel } from '../providers/deepseek/converter'
+import {
+  isProviderAllowed,
+  listGeminiModels,
+  listOpenAIStyleModels,
+} from '../providers/modelDiscovery'
+import type { ProviderId } from '../providers/types'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 
@@ -59,6 +75,7 @@ interface ProviderHandler {
   /** Always stream the response regardless of the client's stream flag (Codex backend). */
   forceStream: boolean
   parseRoute(request: FastifyRequest, body: Record<string, unknown>): ParsedRoute
+  normalizeModel?: (model: string) => string
   callUpstream(
     token: string,
     body: Record<string, unknown>,
@@ -66,6 +83,14 @@ interface ProviderHandler {
   ): Promise<Response>
   createStreamParser(): { feed(event: unknown): void; result(): UsageData }
   parseJsonUsage(body: unknown): UsageData
+  /**
+   * Stream transforms usually parse usage from their downstream event shape.
+   * Set this to `upstream` when the transformed output is only a compatibility
+   * envelope and usage should be read from the original upstream event.
+   */
+  parseStreamEventsFrom?: 'upstream' | 'downstream'
+  /** Optional converter for a streaming upstream that must become one JSON response. */
+  bufferSseResponse?: (text: string, meta: RelayMeta) => { body: unknown; usage: UsageData }
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
   transformEventData?: (data: unknown) => unknown
   /**
@@ -100,6 +125,20 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
   },
+  'openai-chat': {
+    id: 'openai',
+    forceStream: false,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayOpenaiChatCompletions(token, body),
+    createStreamParser: openaiUsage.createStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+    parseStreamEventsFrom: 'upstream',
+    bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
+    createStreamTransform: createOpenaiChatCompletionsStreamTransform,
+  },
   gemini: {
     id: 'gemini',
     forceStream: false,
@@ -127,6 +166,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   deepseek: {
     id: 'deepseek',
     forceStream: false,
+    normalizeModel: mapDeepseekResponsesModel,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
@@ -135,6 +175,18 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: deepseekUsage.createStreamParser,
     parseJsonUsage: deepseekUsage.parseJsonUsage,
   },
+  'deepseek-chat': {
+    id: 'deepseek',
+    forceStream: false,
+    normalizeModel: mapDeepseekResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayDeepseekChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
   // Route key only — provider.id stays 'deepseek' so account pool, allowed-
   // provider checks, and usage records all reuse the existing deepseek setup.
   // Backed by DeepSeek's OpenAI-compatible chat/completions endpoint with a
@@ -142,6 +194,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   'deepseek-responses': {
     id: 'deepseek',
     forceStream: true,
+    normalizeModel: mapDeepseekResponsesModel,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
@@ -379,21 +432,29 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.claude!)
   const openaiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.openai!)
+  const openaiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['openai-chat']!)
   const geminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.gemini!)
   const deepseekHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.deepseek!)
+  const deepseekChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['deepseek-chat']!)
   const deepseekResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['deepseek-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
+  app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
   // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey }, deepseekHandler)
+  // DeepSeek: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/deepseek/v1
+  app.post('/api/deepseek/v1/chat/completions', { preHandler: requireApiKey }, deepseekChatHandler)
   // DeepSeek: OpenAI Responses-API surface for Codex CLI. The relay rewrites
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/deepseek
@@ -401,25 +462,23 @@ export function registerRelayRoutes(app: FastifyInstance): void {
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
-  app.get('/api/deepseek/v1/models', { preHandler: requireApiKey }, (_req, reply) => {
-    return reply.send({
-      object: 'list',
-      data: [
-        { id: 'deepseek-v4-flash', object: 'model', owned_by: 'deepseek' },
-        { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
-      ],
-    })
-  })
+  app.get('/api/claude/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'claude'),
+  )
+  app.get('/api/openai/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'openai'),
+  )
+  app.get('/api/deepseek/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'deepseek'),
+  )
+  app.get('/api/gemini/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
+  app.get('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
 
-  app.get('/v1/models', { preHandler: requireApiKey }, (_req, reply) => {
-    return reply.send({
-      object: 'list',
-      data: [
-        { id: 'deepseek-v4-flash', object: 'model', owned_by: 'deepseek' },
-        { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek' },
-      ],
-    })
-  })
+  app.get('/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply),
+  )
+  app.get('/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
+  app.get('/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
 
   // Clean provider-native aliases for custom domains:
   // - OpenAI/Codex: base_url = https://api.example.com/v1
@@ -427,7 +486,49 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // - Gemini:       base URL = https://api.example.com
   app.post('/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, openaiHandler)
+  app.post('/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
   app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+}
+
+function sendOpenAIStyleModelList(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  provider?: ProviderId,
+): void {
+  const apiKey = request.apiKey!
+  if (provider && !isProviderAllowed(provider, apiKey)) {
+    void reply.code(403).send({ error: `this API key may not use ${provider}` })
+    return
+  }
+  void reply.send({
+    object: 'list',
+    data: listOpenAIStyleModels(apiKey, provider),
+  })
+}
+
+function sendGeminiModelList(request: FastifyRequest, reply: FastifyReply): void {
+  const apiKey = request.apiKey!
+  if (!isProviderAllowed('gemini', apiKey)) {
+    void reply.code(403).send({ error: 'this API key may not use gemini' })
+    return
+  }
+  void reply.send({ models: listGeminiModels(apiKey) })
+}
+
+function sendGeminiModel(request: FastifyRequest, reply: FastifyReply): void {
+  const apiKey = request.apiKey!
+  if (!isProviderAllowed('gemini', apiKey)) {
+    void reply.code(403).send({ error: 'this API key may not use gemini' })
+    return
+  }
+  const modelName = (request.params as { '*'?: string } | undefined)?.['*'] ?? ''
+  const normalized = modelName.startsWith('models/') ? modelName : `models/${modelName}`
+  const model = listGeminiModels(apiKey).find((item) => item.name === normalized)
+  if (!model) {
+    void reply.code(404).send({ error: `model ${modelName || '(missing)'} not found` })
+    return
+  }
+  void reply.send(model)
 }
 
 /**
@@ -440,8 +541,20 @@ async function executeRelay(
   provider: ProviderHandler,
 ): Promise<void> {
   const apiKey = request.apiKey!
+  const body = (request.body ?? {}) as Record<string, unknown>
+  const route = provider.parseRoute(request, body)
+  const mappedModel = mapRequestedModel(route.model, apiKey.modelMappings)
+  const parsed: ParsedRoute = {
+    ...route,
+    model: provider.normalizeModel ? provider.normalizeModel(mappedModel) : mappedModel,
+  }
+
   if (apiKey.allowedProviders && !apiKey.allowedProviders.includes(provider.id)) {
     await reply.code(403).send({ error: `this API key may not use ${provider.id}` })
+    return
+  }
+  if (!isAnyAllowedModel([route.model, mappedModel, parsed.model], apiKey.allowedModels)) {
+    await reply.code(403).send({ error: `this API key may not use model ${parsed.model || '(missing)'}` })
     return
   }
 
@@ -460,10 +573,21 @@ async function executeRelay(
     return
   }
   try {
-    await runRelayLoop(request, reply, provider)
+    await runRelayLoop(request, reply, provider, bodyWithMappedModel(body, parsed.model), parsed)
   } finally {
     if (concurrencyLimit != null) releaseSlot(apiKey.id)
   }
+}
+
+function isAnyAllowedModel(models: string[], allowedModels: string[] | null | undefined): boolean {
+  if (!allowedModels || allowedModels.length === 0) return true
+  return [...new Set(models.map((model) => model.trim()).filter(Boolean))]
+    .some((model) => isAllowedModel(model, allowedModels))
+}
+
+function bodyWithMappedModel(body: Record<string, unknown>, model: string): Record<string, unknown> {
+  if (!model || typeof body.model !== 'string' || body.model === model) return body
+  return { ...body, model }
 }
 
 /** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
@@ -471,10 +595,10 @@ async function runRelayLoop(
   request: FastifyRequest,
   reply: FastifyReply,
   provider: ProviderHandler,
+  body: Record<string, unknown>,
+  parsed: ParsedRoute,
 ): Promise<void> {
   const apiKey = request.apiKey!
-  const body = (request.body ?? {}) as Record<string, unknown>
-  const parsed = provider.parseRoute(request, body)
   const wantStream =
     provider.forceStream || body.stream === true || parsed.action === 'streamGenerateContent'
   const sessionKey = computeSessionKey(provider.id, apiKey.id, request.headers, body)
@@ -596,6 +720,7 @@ async function sendStreaming(
   const parser = provider.createStreamParser()
   const transform = provider.transformEventData
   const streamTransform = useStreamTransform ? provider.createStreamTransform!() : null
+  const parseUpstreamStream = provider.parseStreamEventsFrom === 'upstream'
   let buffer = ''
 
   if (upstream.body) {
@@ -612,7 +737,7 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser)
+            emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser, parseUpstreamStream)
             buffer = buffer.slice(sep + 2)
           }
         } else if (transform) {
@@ -638,8 +763,8 @@ async function sendStreaming(
   }
   if (streamTransform) {
     for (const event of streamTransform.flush()) {
-      parser.feed(event)
-      raw.write(`data: ${JSON.stringify(event)}\n\n`)
+      if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
+      writeSseData(raw, event)
     }
   }
   raw.end()
@@ -663,6 +788,35 @@ async function sendBuffered(
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
+  const contentType = upstream.headers.get('content-type') ?? 'application/json'
+  if (provider.bufferSseResponse && contentType.includes('text/event-stream')) {
+    const sseText = await upstream.text()
+    let responseText = sseText
+    let usage: UsageData = emptyUsage()
+    let responseContentType = contentType
+    if (upstream.ok) {
+      const converted = provider.bufferSseResponse(sseText, meta)
+      responseText = JSON.stringify(converted.body)
+      usage = converted.usage
+      responseContentType = 'application/json'
+    }
+    void recordUsage({
+      apiKeyId: meta.apiKeyId,
+      accountId: meta.accountId,
+      provider: meta.provider,
+      model: meta.model,
+      usage,
+      status: upstream.ok ? 'success' : 'error',
+      latencyMs: Date.now() - meta.startedAt,
+      requestInput: meta.requestInput,
+    })
+    await reply
+      .code(upstream.status)
+      .header('content-type', responseContentType)
+      .send(responseText)
+    return
+  }
+
   let text = await upstream.text()
   let usage: UsageData = emptyUsage()
   try {
@@ -687,7 +841,7 @@ async function sendBuffered(
   })
   await reply
     .code(upstream.status)
-    .header('content-type', upstream.headers.get('content-type') ?? 'application/json')
+    .header('content-type', contentType)
     .send(text)
 }
 
@@ -747,6 +901,7 @@ function emitFromStreamTransform(
   block: string,
   xform: StreamTransform,
   parser: { feed(event: unknown): void },
+  parseUpstream: boolean,
 ): void {
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -759,11 +914,20 @@ function emitFromStreamTransform(
     } catch {
       continue
     }
+    if (parseUpstream) parser.feed(parsed)
     for (const event of xform.transform(parsed)) {
-      parser.feed(event)
-      raw.write(`data: ${JSON.stringify(event)}\n\n`)
+      if (!parseUpstream && event !== '[DONE]') parser.feed(event)
+      writeSseData(raw, event)
     }
   }
+}
+
+function writeSseData(raw: ServerResponse, event: unknown): void {
+  if (event === '[DONE]') {
+    raw.write('data: [DONE]\n\n')
+    return
+  }
+  raw.write(`data: ${JSON.stringify(event)}\n\n`)
 }
 
 /** Transform mode: parses each event, applies transform, re-emits SSE. */

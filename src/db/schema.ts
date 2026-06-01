@@ -33,6 +33,7 @@ export const apiKeys = pgTable('api_keys', {
   enabled: boolean('enabled').notNull().default(true),
   allowedProviders: jsonb('allowed_providers').$type<string[]>(),
   allowedModels: jsonb('allowed_models').$type<string[]>(),
+  modelMappings: jsonb('model_mappings').$type<Record<string, string>>(),
   rateLimit: bigint('rate_limit', { mode: 'number' }), // requests per minute; null = unlimited
   concurrencyLimit: bigint('concurrency_limit', { mode: 'number' }), // max simultaneous in-flight requests; null = unlimited
   quotaLimit: doublePrecision('quota_limit'), // cost cap in USD; null = unlimited

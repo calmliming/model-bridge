@@ -38,6 +38,8 @@ export function buildAuthorizeUrl(state: string, challenge: string): string {
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state,
+    id_token_add_organizations: 'true',
+    codex_cli_simplified_flow: 'true',
   })
   return `${AUTHORIZE_URL}?${params.toString()}`
 }

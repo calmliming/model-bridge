@@ -45,6 +45,14 @@ const isSecureContext = computed(() => {
               <p>留空表示允许全部服务商；选择后只允许访问指定服务商。</p>
             </div>
             <div>
+              <strong>模型限制</strong>
+              <p>留空表示允许全部模型；支持精确模型名和 `*` 通配符。</p>
+            </div>
+            <div>
+              <strong>模型映射</strong>
+              <p>按 `客户端模型=上游模型` 配置；留空表示不改写模型名。</p>
+            </div>
+            <div>
               <strong>成本配额</strong>
               <p>设置后达到配额会拒绝继续调用；留空表示不限。</p>
             </div>
@@ -87,8 +95,19 @@ codex --profile model-bridge</code></pre>
               <span>Gemini</span>
               <code>{{ baseOrigin }}</code>
             </div>
+            <div>
+              <span>OpenAI</span>
+              <code>{{ baseOrigin }}/v1</code>
+            </div>
+            <div>
+              <span>DeepSeek (OpenAI)</span>
+              <code>{{ baseOrigin }}/api/deepseek/v1</code>
+            </div>
           </div>
-          <p class="doc-note">API Key 填后台生成的 `mb-...` 密钥。</p>
+          <p class="doc-note">
+            API Key 填后台生成的 `mb-...` 密钥；OpenAI 兼容客户端使用 Chat Completions，
+            `/v1/models` 会按 Key 的服务商和模型限制返回列表。
+          </p>
         </n-tab-pane>
       </n-tabs>
     </n-card>
@@ -104,6 +123,10 @@ codex --profile model-bridge</code></pre>
             <div>
               <strong>OpenAI / Gemini</strong>
               <p>浏览器回调到本机 `localhost:1455` 后，回到后台刷新检测账户。</p>
+            </div>
+            <div>
+              <strong>健康检查</strong>
+              <p>账户页可手动批量检查连通性；结果只记录最近状态，不会自动循环消耗额度。</p>
             </div>
           </div>
         </n-card>

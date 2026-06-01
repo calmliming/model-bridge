@@ -8,9 +8,10 @@ import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '.
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountStatus, setAccountWeight } from '../accounts/manager'
-import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
+import { AccountTestError, testAccountConnectivity, testAllAccountsConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
+import { normalizeModelMappings } from '../keys/modelMapping'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -26,6 +27,8 @@ const createKeySchema = z.object({
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
   allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).optional(),
+  allowedModels: z.array(z.string().trim().min(1)).optional(),
+  modelMappings: z.record(z.string()).optional(),
   rateLimit: z.number().int().positive().optional(),
   concurrencyLimit: z.number().int().positive().optional(),
   quotaLimit: z.number().positive().optional(),
@@ -38,6 +41,8 @@ const updateKeySchema = z
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
     allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).nullable().optional(),
+    allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
+    modelMappings: z.record(z.string()).nullable().optional(),
     rateLimit: z.number().int().positive().nullable().optional(),
     concurrencyLimit: z.number().int().positive().nullable().optional(),
     quotaLimit: z.number().positive().nullable().optional(),
@@ -78,6 +83,10 @@ const importTokenSchema = z.object({
   refreshToken: z.string().optional(),
   expiresAt: z.number().int().positive().optional(),
 })
+
+const accountHealthCheckSchema = z.object({
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']).optional(),
+}).optional()
 
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -124,7 +133,10 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
-    return reply.code(201).send(await createApiKey(body.data))
+    return reply.code(201).send(await createApiKey({
+      ...body.data,
+      modelMappings: normalizeModelMappings(body.data.modelMappings),
+    }))
   })
 
   app.get<{ Params: { id: string } }>(
@@ -151,7 +163,13 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      await updateApiKey(request.params.id, body.data)
+      await updateApiKey(request.params.id, {
+        ...body.data,
+        modelMappings:
+          'modelMappings' in body.data
+            ? normalizeModelMappings(body.data.modelMappings)
+            : undefined,
+      })
       return { ok: true }
     },
   )
@@ -344,6 +362,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
     },
   )
+
+  app.post('/api/admin/accounts/health/check', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = accountHealthCheckSchema.safeParse(request.body ?? {})
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    return await testAllAccountsConnectivity(body.data?.provider)
+  })
 
   app.delete<{ Params: { id: string } }>(
     '/api/admin/accounts/:id',

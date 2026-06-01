@@ -13,6 +13,8 @@ interface ApiKey {
   canReveal: boolean
   enabled: boolean
   allowedProviders: string[] | null
+  allowedModels: string[] | null
+  modelMappings: Record<string, string> | null
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -30,7 +32,13 @@ const loading = ref(true)
 
 const showCreate = ref(false)
 const creating = ref(false)
-const form = ref({ name: '', ownerLabel: '', allowedProviders: [] as string[] })
+const form = ref({
+  name: '',
+  ownerLabel: '',
+  allowedProviders: [] as string[],
+  allowedModels: [] as string[],
+  modelMappings: [] as string[],
+})
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
 const newKey = ref<string | null>(null)
@@ -49,6 +57,8 @@ const editForm = ref<{
   ownerLabel: string
   enabled: boolean
   allowedProviders: string[]
+  allowedModels: string[]
+  modelMappings: string[]
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -58,6 +68,8 @@ const editForm = ref<{
   ownerLabel: '',
   enabled: true,
   allowedProviders: [],
+  allowedModels: [],
+  modelMappings: [],
   rateLimit: null,
   concurrencyLimit: null,
   quotaLimit: null,
@@ -85,6 +97,40 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   deepseek: 'error',
 }
 
+const commonModelOptions = [
+  'claude-*',
+  'gpt-*',
+  'gemini-*',
+  'deepseek-*',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
+].map((value) => ({ label: value, value }))
+
+const commonMappingOptions = [
+  'gpt-public=gpt-5.4',
+  'gpt-fast=gpt-5.4-mini',
+  'deepseek-pro=deepseek-v4-pro',
+  'deepseek-fast=deepseek-v4-flash',
+].map((value) => ({ label: value, value }))
+
+function parseMappingEntries(entries: string[]): Record<string, string> | null {
+  const out: Record<string, string> = {}
+  for (const entry of entries) {
+    const index = entry.indexOf('=')
+    if (index <= 0) continue
+    const from = entry.slice(0, index).trim()
+    const to = entry.slice(index + 1).trim()
+    if (from && to) out[from] = to
+  }
+  return Object.keys(out).length ? out : null
+}
+
+function mappingEntriesFromObject(value: Record<string, string> | null): string[] {
+  return Object.entries(value ?? {})
+    .filter(([from, to]) => from.trim() && to.trim())
+    .map(([from, to]) => `${from}=${to}`)
+}
+
 async function load() {
   loading.value = true
   try {
@@ -104,16 +150,21 @@ async function create() {
   }
   creating.value = true
   try {
+    const modelMappings = parseMappingEntries(form.value.modelMappings)
     const { data } = await api.post('/admin/keys', {
       name: form.value.name.trim(),
       ownerLabel: form.value.ownerLabel.trim() || undefined,
       allowedProviders: form.value.allowedProviders.length
         ? form.value.allowedProviders
         : undefined,
+      allowedModels: form.value.allowedModels.length
+        ? form.value.allowedModels
+        : undefined,
+      modelMappings: modelMappings ?? undefined,
     })
     showCreate.value = false
     newKey.value = data.key
-    form.value = { name: '', ownerLabel: '', allowedProviders: [] }
+    form.value = { name: '', ownerLabel: '', allowedProviders: [], allowedModels: [], modelMappings: [] }
     await load()
   } catch (e) {
     message.error(errMsg(e, '创建失败'))
@@ -138,6 +189,8 @@ function openEdit(row: ApiKey) {
     ownerLabel: row.ownerLabel ?? '',
     enabled: row.enabled,
     allowedProviders: row.allowedProviders ?? [],
+    allowedModels: row.allowedModels ?? [],
+    modelMappings: mappingEntriesFromObject(row.modelMappings),
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
     quotaLimit: row.quotaLimit,
@@ -154,6 +207,7 @@ async function saveEdit() {
   }
   editing.value = true
   try {
+    const modelMappings = parseMappingEntries(editForm.value.modelMappings)
     await api.patch(`/admin/keys/${editId.value}`, {
       name: editForm.value.name.trim(),
       ownerLabel: editForm.value.ownerLabel.trim() || null,
@@ -161,6 +215,10 @@ async function saveEdit() {
       allowedProviders: editForm.value.allowedProviders.length
         ? editForm.value.allowedProviders
         : null,
+      allowedModels: editForm.value.allowedModels.length
+        ? editForm.value.allowedModels
+        : null,
+      modelMappings,
       rateLimit: editForm.value.rateLimit,
       concurrencyLimit: editForm.value.concurrencyLimit,
       quotaLimit: editForm.value.quotaLimit,
@@ -375,6 +433,22 @@ export MODEL_BRIDGE_API_KEY=${key}
 codex --profile model-bridge-deepseek`,
     gemini: `Base URL: ${baseOrigin.value}
 API Key:  ${key}`,
+    openaiCompat: `Base URL: ${baseOrigin.value}/v1
+API Key:  ${key}
+
+# Chat Completions endpoint:
+POST ${baseOrigin.value}/v1/chat/completions
+
+# Model list:
+GET ${baseOrigin.value}/v1/models`,
+    deepseekOpenai: `Base URL: ${baseOrigin.value}/api/deepseek/v1
+API Key:  ${key}
+
+# Chat Completions endpoint:
+POST ${baseOrigin.value}/api/deepseek/v1/chat/completions
+
+# Model list:
+GET ${baseOrigin.value}/api/deepseek/v1/models`,
   }
 })
 
@@ -436,6 +510,50 @@ function renderProviders(row: ApiKey) {
   )
 }
 
+function renderModels(row: ApiKey) {
+  const list = row.allowedModels
+  if (!list || list.length === 0) {
+    return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
+  }
+  const visible = list.slice(0, 2)
+  const tags = visible.map((model) =>
+    h(NTag, { size: 'small', bordered: false }, { default: () => model }),
+  )
+  if (list.length > visible.length) {
+    tags.push(
+      h(
+        NTooltip,
+        null,
+        {
+          trigger: () => h(NTag, { size: 'small', bordered: false }, { default: () => `+${list.length - visible.length}` }),
+          default: () => list.slice(visible.length).join(', '),
+        },
+      ),
+    )
+  }
+  return h(NSpace, { size: 4 }, { default: () => tags })
+}
+
+function renderMappings(row: ApiKey) {
+  const entries = Object.entries(row.modelMappings ?? {})
+  if (entries.length === 0) {
+    return h('span', { class: 'muted-cell' }, '—')
+  }
+  const visible = entries.slice(0, 1)
+  const tags = visible.map(([from, to]) =>
+    h(NTag, { size: 'small', bordered: false }, { default: () => `${from}→${to}` }),
+  )
+  if (entries.length > visible.length) {
+    tags.push(
+      h(NTooltip, null, {
+        trigger: () => h(NTag, { size: 'small', bordered: false }, { default: () => `+${entries.length - visible.length}` }),
+        default: () => entries.slice(visible.length).map(([from, to]) => `${from}→${to}`).join(', '),
+      }),
+    )
+  }
+  return h(NSpace, { size: 4 }, { default: () => tags })
+}
+
 // Fixed USD→CNY rate for DeepSeek cost tooltip.
 const USD_TO_CNY = 7.28
 
@@ -484,6 +602,18 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     key: 'allowedProviders',
     minWidth: 120,
     render: renderProviders,
+  },
+  {
+    title: '模型',
+    key: 'allowedModels',
+    minWidth: 140,
+    render: renderModels,
+  },
+  {
+    title: '映射',
+    key: 'modelMappings',
+    minWidth: 170,
+    render: renderMappings,
   },
   {
     title: '已用',
@@ -554,7 +684,7 @@ onMounted(load)
         :data="keys"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1440"
+        :scroll-x="1750"
       />
     </n-card>
 
@@ -563,7 +693,7 @@ onMounted(load)
       v-model:show="showCreate"
       preset="card"
       title="新建 API Key"
-      style="width: 440px"
+      style="width: 520px"
     >
       <n-form label-placement="top">
         <n-form-item label="名称">
@@ -578,6 +708,26 @@ onMounted(load)
             multiple
             :options="providerOptions"
             placeholder="不限"
+          />
+        </n-form-item>
+        <n-form-item label="允许的模型（留空 = 不限）">
+          <n-select
+            v-model:value="form.allowedModels"
+            multiple
+            filterable
+            tag
+            :options="commonModelOptions"
+            placeholder="例如：gpt-*、claude-sonnet-*"
+          />
+        </n-form-item>
+        <n-form-item label="模型映射（客户端=上游，留空 = 不映射）">
+          <n-select
+            v-model:value="form.modelMappings"
+            multiple
+            filterable
+            tag
+            :options="commonMappingOptions"
+            placeholder="例如：gpt-public=gpt-5.4"
           />
         </n-form-item>
       </n-form>
@@ -654,6 +804,14 @@ onMounted(load)
           <pre><code>{{ snippets.gemini }}</code></pre>
           <n-button size="small" secondary @click="copyKey(snippets.gemini)">复制</n-button>
         </n-tab-pane>
+        <n-tab-pane name="openai" tab="OpenAI 兼容">
+          <pre><code>{{ snippets.openaiCompat }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.openaiCompat)">复制</n-button>
+        </n-tab-pane>
+        <n-tab-pane name="deepseek-openai" tab="DeepSeek (OpenAI)">
+          <pre><code>{{ snippets.deepseekOpenai }}</code></pre>
+          <n-button size="small" secondary @click="copyKey(snippets.deepseekOpenai)">复制</n-button>
+        </n-tab-pane>
       </n-tabs>
       <n-alert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
         已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。
@@ -661,7 +819,7 @@ onMounted(load)
     </n-modal>
 
     <!-- edit limits -->
-    <n-modal v-model:show="showEdit" preset="card" title="编辑 API Key" style="width: 480px">
+    <n-modal v-model:show="showEdit" preset="card" title="编辑 API Key" style="width: 520px">
       <n-form label-placement="top">
         <n-form-item label="名称">
           <n-input v-model:value="editForm.name" />
@@ -675,6 +833,26 @@ onMounted(load)
             multiple
             :options="providerOptions"
             placeholder="不限"
+          />
+        </n-form-item>
+        <n-form-item label="允许的模型（留空 = 不限）">
+          <n-select
+            v-model:value="editForm.allowedModels"
+            multiple
+            filterable
+            tag
+            :options="commonModelOptions"
+            placeholder="例如：gpt-*、claude-sonnet-*"
+          />
+        </n-form-item>
+        <n-form-item label="模型映射（客户端=上游，留空 = 不映射）">
+          <n-select
+            v-model:value="editForm.modelMappings"
+            multiple
+            filterable
+            tag
+            :options="commonMappingOptions"
+            placeholder="例如：gpt-public=gpt-5.4"
           />
         </n-form-item>
         <n-form-item label="成本上限（USD，留空 = 不限）">

@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota } from './manager'
+import { and, eq, ne } from 'drizzle-orm'
+import { db } from '../db/index'
+import { accounts } from '../db/schema'
+import {
+  ensureFreshToken,
+  getAccount,
+  updateAccountHealth,
+  updateAccountMetadata,
+  updateAccountQuota,
+} from './manager'
 import {
   extractAccountQuota,
   extractClaudeOAuthUsageQuota,
@@ -24,10 +33,20 @@ interface AccountRow {
 
 export interface AccountTestResult {
   success: boolean
+  healthStatus?: 'healthy' | 'limited' | 'unhealthy'
   provider: string
   message: string
   latencyMs: number
   checkedAt: number
+}
+
+export interface AccountHealthCheckSummary {
+  total: number
+  checked: number
+  healthy: number
+  limited: number
+  unhealthy: number
+  results: AccountTestResult[]
 }
 
 export class AccountTestError extends Error {
@@ -228,21 +247,72 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
   if (!account) throw new AccountTestError('account not found', 404)
 
   const startedAt = Date.now()
-  const accessToken = await ensureFreshToken(account)
-  const result = await runProviderTest(account, accessToken)
-  const latencyMs = Date.now() - startedAt
+  try {
+    const accessToken = await ensureFreshToken(account)
+    const result = await runProviderTest(account, accessToken)
+    const latencyMs = Date.now() - startedAt
 
-  const cooldownUntil = quotaCooldownUntil(result.quota)
-  if (cooldownUntil) {
-    await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
-  } else {
-    await markAccountUsed(account.id)
+    const cooldownUntil = quotaCooldownUntil(result.quota)
+    if (cooldownUntil) {
+      await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
+    } else {
+      await markAccountUsed(account.id)
+    }
+    const healthStatus = cooldownUntil ? 'limited' : 'healthy'
+    await updateAccountHealth(account.id, {
+      status: healthStatus,
+      message: result.message,
+      latencyMs,
+      checkedAt: Date.now(),
+    })
+    return {
+      success: true,
+      healthStatus,
+      provider: account.provider,
+      message: result.message,
+      latencyMs,
+      checkedAt: Date.now(),
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'account connectivity test failed'
+    await updateAccountHealth(account.id, {
+      status: 'unhealthy',
+      message,
+      latencyMs: Date.now() - startedAt,
+      checkedAt: Date.now(),
+    })
+    throw err
   }
+}
+
+export async function testAllAccountsConnectivity(provider?: string): Promise<AccountHealthCheckSummary> {
+  const rows = await db
+    .select({ id: accounts.id, provider: accounts.provider })
+    .from(accounts)
+    .where(provider ? and(eq(accounts.provider, provider), ne(accounts.status, 'disabled')) : ne(accounts.status, 'disabled'))
+  const results: AccountTestResult[] = []
+
+  for (const row of rows) {
+    try {
+      results.push(await testAccountConnectivity(row.id))
+    } catch (err) {
+      results.push({
+        success: false,
+        healthStatus: 'unhealthy',
+        provider: row.provider,
+        message: err instanceof Error ? err.message : 'account connectivity test failed',
+        latencyMs: 0,
+        checkedAt: Date.now(),
+      })
+    }
+  }
+
   return {
-    success: true,
-    provider: account.provider,
-    message: result.message,
-    latencyMs,
-    checkedAt: Date.now(),
+    total: rows.length,
+    checked: results.length,
+    healthy: results.filter((result) => result.healthStatus === 'healthy').length,
+    limited: results.filter((result) => result.healthStatus === 'limited').length,
+    unhealthy: results.filter((result) => result.healthStatus === 'unhealthy' || !result.success).length,
+    results,
   }
 }

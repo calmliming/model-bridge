@@ -15,8 +15,9 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 Code Assist) / DeepSeek (API key) account onboarding, multi-account rotation
 with configurable priority, relay surfaces with
 legacy `/api/*` paths plus clean provider-native aliases (`/v1/messages`,
-`/v1/responses`, `/v1beta/models/*`), usage logging with daily / provider /
-model / key breakdowns, and a one-command Docker deploy.
+`/v1/responses`, `/v1/chat/completions`, `/v1/models`,
+`/v1beta/models/*`), usage logging with daily / provider / model / key
+breakdowns, and a one-command Docker deploy.
 
 ## Tech stack
 
@@ -100,6 +101,11 @@ Create an API key on the **API Keys** page first, and add at least one
 upstream account on the **Upstream Accounts** page (paste-code for Claude,
 browser callback for OpenAI/Gemini, API key for DeepSeek).
 
+API keys can optionally restrict providers/models and define model mappings
+such as `gpt-public=gpt-5.4`. Model mappings are client-facing aliases:
+`GET /v1/models` lists the alias, while relay requests are sent upstream with
+the mapped model.
+
 ### Account priority
 
 When you have multiple accounts for the same provider, you can control which
@@ -109,6 +115,10 @@ same priority fall back to least-recently-used rotation.
 
 Set this on the **Upstream Accounts** page — adjust the number in the
 **Priority** column and the value is saved immediately.
+
+The account page also has a manual health check. It records the latest
+connectivity result on each account without running continuously in the
+background, so existing deployments do not start spending quota unexpectedly.
 
 ### Claude Code
 
@@ -146,9 +156,12 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge
 ```
 
-The relay only exposes the OpenAI **Responses** API (`/v1/responses`) since
-that's what Codex CLI uses. A Chat-Completions surface for Cherry Studio /
-generic OpenAI clients is not implemented.
+The relay exposes OpenAI **Responses** (`/v1/responses`) for Codex CLI and a
+compatibility **Chat Completions** surface (`/v1/chat/completions`) for
+OpenAI-compatible clients. The Chat Completions path is translated through
+the same Responses backend, so text chat works while embeddings and image
+generation are still not exposed. `GET /v1/models` returns a compatibility
+model list filtered by the API key's provider and model allow-lists.
 
 ### Codex CLI on DeepSeek
 
@@ -157,7 +170,9 @@ Responses-API surface at `/api/deepseek/v1/responses` that rewrites incoming
 requests into DeepSeek's `chat/completions` format and translates the
 streamed reply back into Responses events. The same DeepSeek account pool is
 shared with `/api/deepseek/v1/messages` (used by Claude Code), so **one
-DeepSeek API key serves both clients**.
+DeepSeek API key serves both clients**. OpenAI-compatible clients can also use
+DeepSeek directly with base URL `http://localhost:3000/api/deepseek/v1` and
+the `chat/completions` endpoint.
 
 #### 1. Prepare the dashboard
 
@@ -215,7 +230,8 @@ Add a custom provider per service:
 
 - **Anthropic** — base URL `http://localhost:3000`, API key `mb-xxxx`
 - **Gemini** — base URL `http://localhost:3000`, API key `mb-xxxx`
-- **OpenAI** — not yet (see the Codex CLI note above)
+- **OpenAI** — base URL `http://localhost:3000/v1`, API key `mb-xxxx`
+- **DeepSeek as OpenAI** — base URL `http://localhost:3000/api/deepseek/v1`, API key `mb-xxxx`
 
 ### Gemini CLI
 
