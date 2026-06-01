@@ -764,6 +764,10 @@ async function sendStreaming(
   const streamTransform = useStreamTransform ? provider.createStreamTransform!() : null
   const parseUpstreamStream = provider.parseStreamEventsFrom === 'upstream'
   let buffer = ''
+  let firstTokenMs: number | null = null
+  const markFirstToken = () => {
+    firstTokenMs ??= Date.now() - meta.startedAt
+  }
   // For Responses-protocol providers, track whether a terminal event reached
   // the client so we can synthesize one if the stream drops early.
   let sawTerminal = false
@@ -782,7 +786,16 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            if (emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser, parseUpstreamStream)) {
+            if (
+              emitFromStreamTransform(
+                raw,
+                buffer.slice(0, sep),
+                streamTransform,
+                parser,
+                parseUpstreamStream,
+                markFirstToken,
+              )
+            ) {
               sawTerminal = true
             }
             buffer = buffer.slice(sep + 2)
@@ -791,11 +804,12 @@ async function sendStreaming(
           // Event-buffered: only emit complete events, rewriting payloads.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser)
+            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser, markFirstToken)
             buffer = buffer.slice(sep + 2)
           }
         } else {
           // Raw passthrough; side-channel parse for usage.
+          if (value.byteLength > 0) markFirstToken()
           raw.write(Buffer.from(value))
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
@@ -812,6 +826,7 @@ async function sendStreaming(
     for (const event of streamTransform.flush()) {
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
       if (isResponsesTerminalEvent(event)) sawTerminal = true
+      markFirstToken()
       writeSseData(raw, event)
     }
   }
@@ -836,6 +851,7 @@ async function sendStreaming(
     usage: parser.result(),
     status: upstream.ok && (!responsesProtocol || sawTerminal) ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
+    firstTokenMs,
     requestInput: meta.requestInput,
   })
 }
@@ -1001,6 +1017,7 @@ function emitFromStreamTransform(
   xform: StreamTransform,
   parser: { feed(event: unknown): void },
   parseUpstream: boolean,
+  onEmit?: () => void,
 ): boolean {
   let sawTerminal = false
   for (const line of block.split('\n')) {
@@ -1018,6 +1035,7 @@ function emitFromStreamTransform(
     for (const event of xform.transform(parsed)) {
       if (!parseUpstream && event !== '[DONE]') parser.feed(event)
       if (isResponsesTerminalEvent(event)) sawTerminal = true
+      onEmit?.()
       writeSseData(raw, event)
     }
   }
@@ -1038,6 +1056,7 @@ function rewriteAndEmit(
   block: string,
   transform: (data: unknown) => unknown,
   parser: { feed(event: unknown): void },
+  onEmit?: () => void,
 ): void {
   const out: string[] = []
   for (const line of block.split('\n')) {
@@ -1060,5 +1079,6 @@ function rewriteAndEmit(
       out.push(line) // keep the original if we can't parse
     }
   }
+  if (out.length > 0) onEmit?.()
   raw.write(out.join('\n') + '\n\n')
 }

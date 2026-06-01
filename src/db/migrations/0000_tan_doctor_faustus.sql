@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS "usage_logs" (
 	"cache_read_tokens" bigint DEFAULT 0 NOT NULL,
 	"cost" double precision DEFAULT 0 NOT NULL,
 	"status" text DEFAULT 'success' NOT NULL,
-	"latency_ms" bigint
+	"latency_ms" bigint,
+	"first_token_ms" bigint
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "user_invites" (
@@ -116,6 +117,8 @@ CREATE TABLE IF NOT EXISTS "wallet_transactions" (
 ALTER TABLE "api_keys" ADD COLUMN IF NOT EXISTS "user_id" text;
 --> statement-breakpoint
 ALTER TABLE "usage_logs" ADD COLUMN IF NOT EXISTS "user_id" text;
+--> statement-breakpoint
+ALTER TABLE "usage_logs" ADD COLUMN IF NOT EXISTS "first_token_ms" bigint;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_api_keys_user_id" ON "api_keys" ("user_id");
 --> statement-breakpoint

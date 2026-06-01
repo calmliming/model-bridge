@@ -97,7 +97,8 @@ export async function initDb(): Promise<void> {
       cache_read_tokens BIGINT NOT NULL DEFAULT 0,
       cost DOUBLE PRECISION NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'success',
-      latency_ms BIGINT
+      latency_ms BIGINT,
+      first_token_ms BIGINT
     );
     CREATE INDEX IF NOT EXISTS idx_usage_logs_ts ON usage_logs (ts);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key ON usage_logs (api_key_id);
@@ -137,6 +138,7 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS user_id TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS first_token_ms BIGINT;`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);`)
 }

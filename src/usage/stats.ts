@@ -69,6 +69,7 @@ export interface DashboardRecentLog {
   model: string | null
   status: string
   latencyMs: number | null
+  firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
   cacheCreateTokens: number
@@ -196,6 +197,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     model: (row.model as string | null) ?? null,
     status: row.status as string,
     latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
+    firstTokenMs: row.firsttokenms == null ? null : toNum(row.firsttokenms),
     inputTokens: toNum(row.inputtokens),
     outputTokens: toNum(row.outputtokens),
     cacheCreateTokens: toNum(row.cachecreatetokens),
@@ -415,6 +417,7 @@ export async function dashboardRecentLogs(
               usage_logs.model AS model,
               usage_logs.status AS status,
               usage_logs.latency_ms AS latencyMs,
+              usage_logs.first_token_ms AS firstTokenMs,
               usage_logs.input_tokens AS inputTokens,
               usage_logs.output_tokens AS outputTokens,
               usage_logs.cache_create_tokens AS cacheCreateTokens,

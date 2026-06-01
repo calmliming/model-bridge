@@ -98,6 +98,7 @@ export const usageLogs = pgTable('usage_logs', {
   cost: doublePrecision('cost').notNull().default(0),
   status: text('status').notNull().default('success'),
   latencyMs: bigint('latency_ms', { mode: 'number' }),
+  firstTokenMs: bigint('first_token_ms', { mode: 'number' }),
 })
 
 /** Per-model pricing used to turn token counts into cost. */

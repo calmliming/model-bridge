@@ -14,6 +14,7 @@ export interface UsageRecord {
   usage: UsageData
   status: string
   latencyMs: number
+  firstTokenMs?: number | null
 }
 
 /** Writes one usage-log row, bumps key quota, and debits the owning user wallet. */
@@ -27,8 +28,8 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
           input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-          cost, status, latency_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          cost, status, latency_ms, first_token_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         record.apiKeyId,
@@ -44,6 +45,7 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
         cost,
         record.status,
         record.latencyMs,
+        record.firstTokenMs ?? null,
       ],
     )
     if (record.apiKeyId && cost > 0) {

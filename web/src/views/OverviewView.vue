@@ -52,6 +52,7 @@ interface DashboardRecentLog {
   model: string | null
   status: string
   latencyMs: number | null
+  firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
   cacheCreateTokens: number
@@ -393,6 +394,10 @@ function openRequestInput(row: DashboardRecentLog) {
             <strong>{{ latencyLabel(row.latencyMs) }}</strong>
           </div>
           <div class="log-metric">
+            <span>首 Token</span>
+            <strong>{{ latencyLabel(row.firstTokenMs) }}</strong>
+          </div>
+          <div class="log-metric">
             <span>成本</span>
             <strong>{{ formatCost(row.cost) }}</strong>
           </div>
@@ -647,7 +652,7 @@ function openRequestInput(row: DashboardRecentLog) {
 
 .log-row {
   display: grid;
-  grid-template-columns: 88px minmax(180px, 1.4fr) repeat(5, minmax(72px, 0.6fr)) minmax(138px, 0.9fr) 64px;
+  grid-template-columns: 88px minmax(180px, 1.4fr) repeat(6, minmax(72px, 0.6fr)) minmax(138px, 0.9fr) 64px;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;

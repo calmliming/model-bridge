@@ -454,6 +454,12 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
+        },
+        "first_token_ms": {
+          "name": "first_token_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
