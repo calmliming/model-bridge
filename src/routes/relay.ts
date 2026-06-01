@@ -12,6 +12,7 @@ import { relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
 import {
+  buildResponsesErrorEvents,
   createChatCompletionStreamParser,
   createOpenaiChatCompletionsStreamTransform,
   parseChatCompletionUsage,
@@ -74,6 +75,15 @@ interface ProviderHandler {
   id: string
   /** Always stream the response regardless of the client's stream flag (Codex backend). */
   forceStream: boolean
+  /**
+   * Downstream speaks the OpenAI Responses-API SSE protocol (Codex backend).
+   * The relay then guarantees the stream always ends with a terminal event
+   * (`response.completed` / `response.failed`): on an upstream error it emits a
+   * synthetic `response.failed` carrying the real error, and if the stream
+   * drops before any terminal event it appends one. Without this, Codex sees
+   * "stream closed before response.completed" and reconnects in a loop.
+   */
+  responsesProtocol?: boolean
   parseRoute(request: FastifyRequest, body: Record<string, unknown>): ParsedRoute
   normalizeModel?: (model: string) => string
   callUpstream(
@@ -117,6 +127,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   openai: {
     id: 'openai',
     forceStream: true, // Codex backend itself rejects non-streaming.
+    responsesProtocol: true,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
@@ -194,6 +205,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   'deepseek-responses': {
     id: 'deepseek',
     forceStream: true,
+    responsesProtocol: true,
     normalizeModel: mapDeepseekResponsesModel,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
@@ -705,14 +717,41 @@ async function sendStreaming(
 ): Promise<void> {
   reply.hijack()
   const raw = reply.raw
-  // When the upstream errored (non-2xx) we still pass through the bytes, but
-  // for a transformed stream we must emit text/event-stream — Codex won't
-  // accept anything else. The stream transform is only engaged on success.
+  const responsesProtocol = provider.responsesProtocol === true
+
+  // Responses-protocol providers (Codex backend): an upstream error body is
+  // usually JSON, not Responses SSE. Streaming it verbatim makes Codex reconnect
+  // forever without ever showing the cause. Emit a synthetic `response.failed`
+  // stream carrying the real error message instead.
+  if (responsesProtocol && !upstream.ok) {
+    const errorText = await upstream.text().catch(() => '')
+    const { code, message } = extractUpstreamError(errorText, upstream.status)
+    raw.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    })
+    for (const event of buildResponsesErrorEvents(message, code)) writeSseData(raw, event)
+    raw.end()
+    void recordUsage({
+      apiKeyId: meta.apiKeyId,
+      accountId: meta.accountId,
+      provider: meta.provider,
+      model: meta.model,
+      usage: emptyUsage(),
+      status: 'error',
+      latencyMs: Date.now() - meta.startedAt,
+      requestInput: meta.requestInput,
+    })
+    return
+  }
+
   const useStreamTransform = provider.createStreamTransform && upstream.ok
   raw.writeHead(upstream.status, {
-    'content-type': useStreamTransform
-      ? 'text/event-stream'
-      : (upstream.headers.get('content-type') ?? 'text/event-stream'),
+    'content-type':
+      responsesProtocol || useStreamTransform
+        ? 'text/event-stream'
+        : (upstream.headers.get('content-type') ?? 'text/event-stream'),
     'cache-control': 'no-cache',
     connection: 'keep-alive',
   })
@@ -722,6 +761,9 @@ async function sendStreaming(
   const streamTransform = useStreamTransform ? provider.createStreamTransform!() : null
   const parseUpstreamStream = provider.parseStreamEventsFrom === 'upstream'
   let buffer = ''
+  // For Responses-protocol providers, track whether a terminal event reached
+  // the client so we can synthesize one if the stream drops early.
+  let sawTerminal = false
 
   if (upstream.body) {
     const reader = upstream.body.getReader()
@@ -737,7 +779,9 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser, parseUpstreamStream)
+            if (emitFromStreamTransform(raw, buffer.slice(0, sep), streamTransform, parser, parseUpstreamStream)) {
+              sawTerminal = true
+            }
             buffer = buffer.slice(sep + 2)
           }
         } else if (transform) {
@@ -752,7 +796,7 @@ async function sendStreaming(
           raw.write(Buffer.from(value))
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            feedSseBlock(buffer.slice(0, sep), parser)
+            if (feedSseBlock(buffer.slice(0, sep), parser)) sawTerminal = true
             buffer = buffer.slice(sep + 2)
           }
         }
@@ -764,6 +808,17 @@ async function sendStreaming(
   if (streamTransform) {
     for (const event of streamTransform.flush()) {
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
+      if (isResponsesTerminalEvent(event)) sawTerminal = true
+      writeSseData(raw, event)
+    }
+  }
+  // Stream ended without a terminal event (upstream dropped mid-response) —
+  // append one so Codex stops and reports it instead of reconnecting.
+  if (responsesProtocol && !sawTerminal) {
+    for (const event of buildResponsesErrorEvents(
+      'Upstream stream closed before completion.',
+      'upstream_stream_closed',
+    )) {
       writeSseData(raw, event)
     }
   }
@@ -775,10 +830,41 @@ async function sendStreaming(
     provider: meta.provider,
     model: meta.model,
     usage: parser.result(),
-    status: upstream.ok ? 'success' : 'error',
+    status: upstream.ok && (!responsesProtocol || sawTerminal) ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
   })
+}
+
+const RESPONSES_TERMINAL_EVENTS = new Set([
+  'response.completed',
+  'response.failed',
+  'response.incomplete',
+])
+
+/** True when a Responses-API SSE event is one of the stream-terminating types. */
+function isResponsesTerminalEvent(event: unknown): boolean {
+  if (!event || typeof event !== 'object') return false
+  const type = (event as { type?: unknown }).type
+  return typeof type === 'string' && RESPONSES_TERMINAL_EVENTS.has(type)
+}
+
+/** Extracts a displayable error code + message from an upstream error body. */
+function extractUpstreamError(text: string, status: number): { code: string; message: string } {
+  try {
+    const body = JSON.parse(text) as {
+      error?: { message?: unknown; code?: unknown; type?: unknown }
+    }
+    const message = body.error?.message
+    if (typeof message === 'string' && message) {
+      const code = body.error?.code ?? body.error?.type
+      return { code: typeof code === 'string' && code ? code : `upstream_${status}`, message }
+    }
+  } catch {
+    // Not JSON — fall back to the raw text below.
+  }
+  const trimmed = text.trim().slice(0, 500)
+  return { code: `upstream_${status}`, message: trimmed || `Upstream returned HTTP ${status}.` }
 }
 
 /** Buffers a non-streaming response, optionally rewriting the JSON body, and records usage. */
@@ -875,19 +961,26 @@ function sanitizeRequestValue(value: unknown): unknown {
   return out
 }
 
-/** Passthrough mode: parses each event for usage without rewriting. */
-function feedSseBlock(block: string, parser: { feed(event: unknown): void }): void {
+/**
+ * Passthrough mode: parses each event for usage without rewriting. Returns
+ * true if the block contained a Responses-API terminal event.
+ */
+function feedSseBlock(block: string, parser: { feed(event: unknown): void }): boolean {
+  let sawTerminal = false
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
     const payload = trimmed.slice(5).trim()
     if (!payload || payload === '[DONE]') continue
     try {
-      parser.feed(JSON.parse(payload))
+      const parsed = JSON.parse(payload)
+      parser.feed(parsed)
+      if (isResponsesTerminalEvent(parsed)) sawTerminal = true
     } catch {
       // Ignore non-JSON data lines.
     }
   }
+  return sawTerminal
 }
 
 /**
@@ -902,7 +995,8 @@ function emitFromStreamTransform(
   xform: StreamTransform,
   parser: { feed(event: unknown): void },
   parseUpstream: boolean,
-): void {
+): boolean {
+  let sawTerminal = false
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
@@ -917,9 +1011,11 @@ function emitFromStreamTransform(
     if (parseUpstream) parser.feed(parsed)
     for (const event of xform.transform(parsed)) {
       if (!parseUpstream && event !== '[DONE]') parser.feed(event)
+      if (isResponsesTerminalEvent(event)) sawTerminal = true
       writeSseData(raw, event)
     }
   }
+  return sawTerminal
 }
 
 function writeSseData(raw: ServerResponse, event: unknown): void {

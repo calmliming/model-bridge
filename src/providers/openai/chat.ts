@@ -230,6 +230,37 @@ export function createChatCompletionStreamParser() {
   }
 }
 
+/**
+ * Builds a minimal but valid OpenAI Responses-API error event sequence
+ * (`response.created` → `response.in_progress` → `response.failed`). The Codex
+ * CLI requires every SSE stream to end with a terminal event; when the upstream
+ * errored or dropped before sending one, the relay emits this so Codex surfaces
+ * the real failure instead of reconnecting forever.
+ */
+export function buildResponsesErrorEvents(message: string, code: string): unknown[] {
+  const id = `resp_${randomUUID().replace(/-/g, '')}`
+  const created = Math.floor(Date.now() / 1000)
+  const base = {
+    id,
+    object: 'response',
+    created_at: created,
+    model: '',
+    output: [] as unknown[],
+    parallel_tool_calls: false,
+    tool_choice: 'auto',
+    tools: [] as unknown[],
+  }
+  return [
+    { type: 'response.created', sequence_number: 0, response: { ...base, status: 'in_progress' } },
+    { type: 'response.in_progress', sequence_number: 1, response: { ...base, status: 'in_progress' } },
+    {
+      type: 'response.failed',
+      sequence_number: 2,
+      response: { ...base, status: 'failed', error: { code, message } },
+    },
+  ]
+}
+
 export function parseResponsesSseEvents(text: string): unknown[] {
   const events: unknown[] = []
   for (const block of text.split(/\r?\n\r?\n/)) {

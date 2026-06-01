@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildResponsesErrorEvents,
   chatCompletionsToResponses,
   createOpenaiChatCompletionsStreamTransform,
   responsesSseToChatCompletion,
@@ -193,5 +194,23 @@ describe('createOpenaiChatCompletionsStreamTransform', () => {
       choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":"hi"}' } }] } }],
     })
     expect(done[0]).toMatchObject({ choices: [{ finish_reason: 'tool_calls' }] })
+  })
+})
+
+describe('buildResponsesErrorEvents', () => {
+  it('emits a created → in_progress → failed sequence carrying the error', () => {
+    const events = buildResponsesErrorEvents('usage limit reached', 'rate_limit_exceeded') as Array<{
+      type: string
+      response: { status: string; error?: { code: string; message: string } }
+    }>
+
+    expect(events.map((e) => e.type)).toEqual([
+      'response.created',
+      'response.in_progress',
+      'response.failed',
+    ])
+    const failed = events[2]!
+    expect(failed.response.status).toBe('failed')
+    expect(failed.response.error).toEqual({ code: 'rate_limit_exceeded', message: 'usage limit reached' })
   })
 })
