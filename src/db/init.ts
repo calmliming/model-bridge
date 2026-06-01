@@ -61,6 +61,27 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user_id ON wallet_transactions (user_id);
     CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created_at ON wallet_transactions (created_at);
 
+    CREATE TABLE IF NOT EXISTS payment_orders (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'manual',
+      status TEXT NOT NULL DEFAULT 'pending',
+      amount_micros BIGINT NOT NULL,
+      provider_order_id TEXT,
+      payment_url TEXT,
+      wallet_transaction_id TEXT,
+      note TEXT,
+      expires_at BIGINT NOT NULL,
+      paid_at BIGINT,
+      canceled_at BIGINT,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+      updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders (user_id);
+    CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders (status);
+    CREATE INDEX IF NOT EXISTS idx_payment_orders_created_at ON payment_orders (created_at);
+    CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_order_id ON payment_orders (provider_order_id);
+
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,
       user_id TEXT,
@@ -139,6 +160,26 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS first_token_ms BIGINT;`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS payment_orders (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'manual',
+    status TEXT NOT NULL DEFAULT 'pending',
+    amount_micros BIGINT NOT NULL,
+    provider_order_id TEXT,
+    payment_url TEXT,
+    wallet_transaction_id TEXT,
+    note TEXT,
+    expires_at BIGINT NOT NULL,
+    paid_at BIGINT,
+    canceled_at BIGINT,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+    updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+  );`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders (user_id);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders (status);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_created_at ON payment_orders (created_at);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_order_id ON payment_orders (provider_order_id);`)
 }

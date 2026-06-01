@@ -20,6 +20,12 @@ import {
   UserManagerError,
 } from '../users/manager'
 import { adjustWalletUsd, listWalletTransactions } from '../wallet/manager'
+import {
+  cancelPaymentOrder,
+  confirmPaymentOrder,
+  listPaymentOrders,
+  PaymentOrderError,
+} from '../payments/manager'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -120,11 +126,23 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
+const paymentOrdersQuerySchema = paginationQuerySchema.extend({
+  status: z.enum(['pending', 'paid', 'canceled', 'expired']).optional(),
+})
+
+const paymentOrderActionSchema = z.object({
+  providerOrderId: z.string().trim().max(200).optional(),
+  note: z.string().trim().max(500).optional(),
+})
+
 function sendUserManagerError(
   reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } },
   err: unknown,
 ) {
   if (err instanceof UserManagerError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  if (err instanceof PaymentOrderError) {
     return reply.code(err.statusCode).send({ error: err.message })
   }
   throw err
@@ -251,6 +269,65 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: 'invalid request' })
       }
       return listUserUsage(params.data.id, query.data.page, query.data.pageSize)
+    },
+  )
+
+  app.get<{ Querystring: { page?: string; pageSize?: string; status?: string } }>(
+    '/api/admin/payment-orders',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const query = paymentOrdersQuerySchema.safeParse(request.query)
+      if (!query.success) {
+        return reply.code(400).send({ error: 'invalid pagination query' })
+      }
+      return listPaymentOrders(query.data)
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/payment-orders/:id/confirm',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = paymentOrderActionSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      try {
+        const paidBy = (request.user as { sub?: string } | undefined)?.sub ?? 'admin'
+        const order = await confirmPaymentOrder({
+          id: params.data.id,
+          paidBy,
+          providerOrderId: body.data.providerOrderId,
+          note: body.data.note,
+        })
+        return { order }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/payment-orders/:id/cancel',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = paymentOrderActionSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      try {
+        const canceledBy = (request.user as { sub?: string } | undefined)?.sub ?? 'admin'
+        const order = await cancelPaymentOrder({
+          id: params.data.id,
+          canceledBy,
+          note: body.data.note,
+        })
+        return { order }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
     },
   )
 

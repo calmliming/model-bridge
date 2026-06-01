@@ -29,6 +29,7 @@ export const router = createRouter({
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'keys', name: 'keys', component: () => import('../views/ApiKeysView.vue') },
         { path: 'users', name: 'users', component: () => import('../views/AdminUsersView.vue') },
+        { path: 'payments', name: 'payments', component: () => import('../views/PaymentOrdersView.vue') },
         { path: 'stats', name: 'stats', component: () => import('../views/StatsView.vue') },
         { path: 'docs', name: 'docs', component: () => import('../views/DocsView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },

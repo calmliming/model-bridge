@@ -54,6 +54,18 @@ const schema = z.object({
   JWT_SECRET: z.string().min(16, 'must be at least 16 characters'),
   ADMIN_USERNAME: z.string().min(1).default('admin'),
   ADMIN_PASSWORD: z.string().min(1).default('admin'),
+  GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
+  GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
+  // Payment providers
+  ALIPAY_APP_ID: z.string().optional(),
+  ALIPAY_PRIVATE_KEY: z.string().optional(),
+  ALIPAY_PUBLIC_KEY: z.string().optional(),
+  ALIPAY_NOTIFY_URL: z.string().optional(),
+  ALIPAY_RETURN_URL: z.string().optional(),
+  WECHAT_APP_ID: z.string().optional(),
+  WECHAT_MCH_ID: z.string().optional(),
+  WECHAT_API_KEY: z.string().optional(),
+  WECHAT_NOTIFY_URL: z.string().optional(),
 })
 
 const parsed = schema.safeParse(process.env)

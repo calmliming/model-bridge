@@ -11,13 +11,42 @@ import { registerAuthRoutes } from './routes/auth'
 import { registerAdminRoutes } from './routes/admin'
 import { registerUserRoutes } from './routes/users'
 import { registerRelayRoutes } from './routes/relay'
+import { registerPaymentCallbackRoutes } from './routes/payment-callback'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startOauthCallbackServer } from './oauthCallback'
+import { initPaymentProviders } from './payments/providers/index'
 
 async function main(): Promise<void> {
   await initDb()
   await initPricing()
   await ensureAdmin()
+
+  // 初始化支付提供商
+  initPaymentProviders({
+    alipay:
+      config.ALIPAY_APP_ID &&
+      config.ALIPAY_PRIVATE_KEY &&
+      config.ALIPAY_PUBLIC_KEY &&
+      config.ALIPAY_NOTIFY_URL &&
+      config.ALIPAY_RETURN_URL
+        ? {
+            appId: config.ALIPAY_APP_ID,
+            privateKey: config.ALIPAY_PRIVATE_KEY,
+            alipayPublicKey: config.ALIPAY_PUBLIC_KEY,
+            notifyUrl: config.ALIPAY_NOTIFY_URL,
+            returnUrl: config.ALIPAY_RETURN_URL,
+          }
+        : undefined,
+    wechat:
+      config.WECHAT_APP_ID && config.WECHAT_MCH_ID && config.WECHAT_API_KEY && config.WECHAT_NOTIFY_URL
+        ? {
+            appId: config.WECHAT_APP_ID,
+            mchId: config.WECHAT_MCH_ID,
+            apiKey: config.WECHAT_API_KEY,
+            notifyUrl: config.WECHAT_NOTIFY_URL,
+          }
+        : undefined,
+  })
 
   const app = Fastify({
     logger: true,
@@ -32,6 +61,7 @@ async function main(): Promise<void> {
   registerAdminRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
+  registerPaymentCallbackRoutes(app)
 
   // Serve the built admin dashboard (web/dist) if it has been built.
   const webDist = join(process.cwd(), 'web', 'dist')

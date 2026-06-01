@@ -10,6 +10,8 @@ import {
   verifyUserCredentials,
 } from '../users/manager'
 import { listWalletTransactions } from '../wallet/manager'
+import { createPaymentOrder, listPaymentOrdersForUser, PaymentOrderError } from '../payments/manager'
+import { getAvailableProviders } from '../payments/providers/index'
 
 const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek'])
 
@@ -56,12 +58,22 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 })
 
+const createPaymentOrderSchema = z.object({
+  amount: z.number().refine((v) => Number.isFinite(v) && v > 0, {
+    message: 'amount must be positive',
+  }),
+  provider: z.enum(['manual', 'alipay', 'wechat']).optional(),
+})
+
 function userSessionPayload(user: { id: string; email: string; name: string }) {
   return { sub: user.id, role: 'user', email: user.email, name: user.name }
 }
 
 function sendUserError(reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } }, err: unknown) {
   if (err instanceof UserManagerError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  if (err instanceof PaymentOrderError) {
     return reply.code(err.statusCode).send({ error: err.message })
   }
   throw err
@@ -99,12 +111,45 @@ export function registerUserRoutes(app: FastifyInstance): void {
     return { user: request.currentUser! }
   })
 
+  app.get('/api/users/payment-providers', { preHandler: requireUser }, async () => {
+    return { providers: getAvailableProviders() }
+  })
+
   app.get('/api/users/wallet', { preHandler: requireUser }, async (request) => {
     return {
       user: request.currentUser!,
       ...(await listWalletTransactions(request.currentUser!.id, 1, 10)),
     }
   })
+
+  app.post('/api/users/payment-orders', { preHandler: requireUser }, async (request, reply) => {
+    const body = createPaymentOrderSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      const order = await createPaymentOrder({
+        userId: request.currentUser!.id,
+        amount: body.data.amount,
+        provider: body.data.provider,
+      })
+      return reply.code(201).send({ order })
+    } catch (err) {
+      return sendUserError(reply, err)
+    }
+  })
+
+  app.get<{ Querystring: { page?: string; pageSize?: string } }>(
+    '/api/users/payment-orders',
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const query = paginationQuerySchema.safeParse(request.query)
+      if (!query.success) {
+        return reply.code(400).send({ error: 'invalid pagination query' })
+      }
+      return listPaymentOrdersForUser(request.currentUser!.id, query.data.page, query.data.pageSize)
+    },
+  )
 
   app.get<{ Querystring: { page?: string; pageSize?: string } }>(
     '/api/users/wallet/transactions',

@@ -59,6 +59,24 @@ export const walletTransactions = pgTable('wallet_transactions', {
   createdAt: epochMs('created_at'),
 })
 
+/** Recharge orders. Provider webhooks or admin confirmation settle these into wallet credits. */
+export const paymentOrders = pgTable('payment_orders', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  provider: text('provider').notNull().default('manual'),
+  status: text('status').notNull().default('pending'), // pending | paid | canceled | expired
+  amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
+  providerOrderId: text('provider_order_id'),
+  paymentUrl: text('payment_url'),
+  walletTransactionId: text('wallet_transaction_id'),
+  note: text('note'),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  paidAt: bigint('paid_at', { mode: 'number' }),
+  canceledAt: bigint('canceled_at', { mode: 'number' }),
+  createdAt: epochMs('created_at'),
+  updatedAt: epochMs('updated_at'),
+})
+
 /** A platform API key issued to a user (yourself, a customer, or a friend). */
 export const apiKeys = pgTable('api_keys', {
   id: text('id').primaryKey(),
