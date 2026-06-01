@@ -10,7 +10,13 @@ export async function requireAdmin(
 ): Promise<void> {
   try {
     await request.jwtVerify()
+    const role = (request.user as { role?: string } | undefined)?.role
+    if (role && role !== 'admin') {
+      void reply.code(403).send({ error: 'admin access required' })
+      return
+    }
   } catch {
-    reply.code(401).send({ error: 'unauthorized' })
+    void reply.code(401).send({ error: 'unauthorized' })
+    return
   }
 }

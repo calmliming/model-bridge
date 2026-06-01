@@ -23,8 +23,47 @@ export async function initDb(): Promise<void> {
       created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      password_hash TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      balance_micros BIGINT NOT NULL DEFAULT 0,
+      accepted_at BIGINT,
+      last_login_at BIGINT,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS user_invites (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at BIGINT NOT NULL,
+      accepted_at BIGINT,
+      created_by TEXT,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_invites_user_id ON user_invites (user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_invites_expires_at ON user_invites (expires_at);
+
+    CREATE TABLE IF NOT EXISTS wallet_transactions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      amount_micros BIGINT NOT NULL,
+      balance_after_micros BIGINT NOT NULL,
+      usage_log_id TEXT,
+      note TEXT,
+      created_by TEXT,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user_id ON wallet_transactions (user_id);
+    CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created_at ON wallet_transactions (created_at);
+
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       name TEXT NOT NULL,
       owner_label TEXT,
       key_hash TEXT NOT NULL UNIQUE,
@@ -46,6 +85,7 @@ export async function initDb(): Promise<void> {
     CREATE TABLE IF NOT EXISTS usage_logs (
       id TEXT PRIMARY KEY,
       api_key_id TEXT,
+      user_id TEXT,
       account_id TEXT,
       provider TEXT NOT NULL,
       model TEXT,
@@ -95,4 +135,8 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS model_mappings JSONB;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_input TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
+  await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS user_id TEXT;`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);`)
 }

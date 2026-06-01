@@ -10,16 +10,38 @@ export const router = createRouter({
       component: () => import('../views/LoginView.vue'),
     },
     {
+      path: '/user-login',
+      name: 'user-login',
+      component: () => import('../views/UserLoginView.vue'),
+    },
+    {
+      path: '/accept-invite',
+      name: 'accept-invite',
+      component: () => import('../views/AcceptInviteView.vue'),
+    },
+    {
       path: '/',
       component: () => import('../layouts/AppLayout.vue'),
+      meta: { role: 'admin' },
       children: [
         { path: '', redirect: '/overview' },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'keys', name: 'keys', component: () => import('../views/ApiKeysView.vue') },
+        { path: 'users', name: 'users', component: () => import('../views/AdminUsersView.vue') },
         { path: 'stats', name: 'stats', component: () => import('../views/StatsView.vue') },
         { path: 'docs', name: 'docs', component: () => import('../views/DocsView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+      ],
+    },
+    {
+      path: '/app',
+      component: () => import('../layouts/UserLayout.vue'),
+      meta: { role: 'user' },
+      children: [
+        { path: '', name: 'user-overview', component: () => import('../views/UserOverviewView.vue') },
+        { path: 'keys', name: 'user-keys', component: () => import('../views/UserKeysView.vue') },
+        { path: 'usage', name: 'user-usage', component: () => import('../views/UserUsageView.vue') },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -28,10 +50,26 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (to.name !== 'login' && !auth.isAuthenticated) {
+  if (to.name === 'accept-invite') return
+  const requiredRole = to.matched.find((record) => record.meta.role)?.meta.role
+  if (requiredRole === 'admin' || to.name === 'login') {
+    auth.activateRole('admin')
+  } else if (requiredRole === 'user' || to.name === 'user-login') {
+    auth.activateRole('user')
+  }
+  if (!auth.isAuthenticated) {
+    if (requiredRole === 'user') return { name: 'user-login' }
+    if (to.name !== 'login' && to.name !== 'user-login') return { name: 'login' }
+    return
+  }
+  if (requiredRole === 'admin' && !auth.isAdmin) {
     return { name: 'login' }
   }
-  if (to.name === 'login' && auth.isAuthenticated) {
+  if (requiredRole === 'user' && !auth.isUser) {
+    return { name: 'user-login' }
+  }
+  if ((to.name === 'login' || to.name === 'user-login') && auth.isAuthenticated) {
+    if (auth.isUser) return { name: 'user-overview' }
     return { name: 'overview' }
   }
 })

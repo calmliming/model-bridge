@@ -8,6 +8,7 @@ import { initDb } from './db/init'
 import { initPricing } from './usage/pricing'
 import { ensureAdmin } from './auth/admin'
 import { registerAdminRoutes } from './routes/admin'
+import { registerUserRoutes } from './routes/users'
 import { registerRelayRoutes } from './routes/relay'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startOauthCallbackServer } from './oauthCallback'
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 
   registerAdminRoutes(app)
+  registerUserRoutes(app)
   registerRelayRoutes(app)
 
   // Serve the built admin dashboard (web/dist) if it has been built.

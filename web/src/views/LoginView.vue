@@ -24,7 +24,7 @@ async function login() {
       username: username.value,
       password: password.value,
     })
-    auth.setSession(data.token, data.username)
+    auth.setSession(data.token, data.username, 'admin')
     void router.push({ name: 'overview' })
   } catch (e) {
     message.error(errMsg(e, '登录失败'))

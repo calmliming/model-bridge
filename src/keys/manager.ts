@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
-import { apiKeys } from '../db/schema'
+import { apiKeys, users } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { normalizeModelMappings, type ModelMappings } from './modelMapping'
 
@@ -17,6 +17,7 @@ function hashKey(key: string): string {
 }
 
 export interface CreateApiKeyInput {
+  userId?: string | null
   name: string
   ownerLabel?: string | null
   allowedProviders?: string[] | null
@@ -41,6 +42,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
   await db.insert(apiKeys)
     .values({
       id,
+      userId: input.userId ?? null,
       name: input.name,
       ownerLabel: input.ownerLabel ?? null,
       keyHash: hashKey(secret),
@@ -62,6 +64,9 @@ export async function listApiKeys() {
   const rows = await db
     .select({
       id: apiKeys.id,
+      userId: apiKeys.userId,
+      userEmail: users.email,
+      userName: users.name,
       name: apiKeys.name,
       ownerLabel: apiKeys.ownerLabel,
       keyPrefix: apiKeys.keyPrefix,
@@ -79,6 +84,7 @@ export async function listApiKeys() {
       createdAt: apiKeys.createdAt,
     })
     .from(apiKeys)
+    .leftJoin(users, eq(apiKeys.userId, users.id))
     .orderBy(desc(apiKeys.createdAt))
   return rows.map(({ keySecretEncrypted, ...key }) => ({
     ...key,
@@ -88,16 +94,45 @@ export async function listApiKeys() {
 
 /** Looks up a key record by its plaintext secret. */
 export async function findApiKeyBySecret(secret: string) {
-  const [row] = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hashKey(secret)))
+  const [row] = await db
+    .select({
+      id: apiKeys.id,
+      userId: apiKeys.userId,
+      name: apiKeys.name,
+      ownerLabel: apiKeys.ownerLabel,
+      keyHash: apiKeys.keyHash,
+      keySecretEncrypted: apiKeys.keySecretEncrypted,
+      keyPrefix: apiKeys.keyPrefix,
+      enabled: apiKeys.enabled,
+      allowedProviders: apiKeys.allowedProviders,
+      allowedModels: apiKeys.allowedModels,
+      modelMappings: apiKeys.modelMappings,
+      rateLimit: apiKeys.rateLimit,
+      concurrencyLimit: apiKeys.concurrencyLimit,
+      quotaLimit: apiKeys.quotaLimit,
+      quotaUsed: apiKeys.quotaUsed,
+      expiresAt: apiKeys.expiresAt,
+      lastUsedAt: apiKeys.lastUsedAt,
+      createdAt: apiKeys.createdAt,
+      userStatus: users.status,
+      userBalanceMicros: users.balanceMicros,
+      userEmail: users.email,
+    })
+    .from(apiKeys)
+    .leftJoin(users, eq(apiKeys.userId, users.id))
+    .where(eq(apiKeys.keyHash, hashKey(secret)))
   return row
 }
 
 /** Returns a full API key for admin copy/reveal when it was created after encrypted storage existed. */
-export async function getApiKeySecret(id: string): Promise<string | null> {
+export async function getApiKeySecret(id: string, userId?: string): Promise<string | null> {
+  const where = userId
+    ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
+    : eq(apiKeys.id, id)
   const [row] = await db
     .select({ keySecretEncrypted: apiKeys.keySecretEncrypted })
     .from(apiKeys)
-    .where(eq(apiKeys.id, id))
+    .where(where)
   if (!row?.keySecretEncrypted) return null
   return decrypt(row.keySecretEncrypted)
 }
@@ -120,14 +155,54 @@ export interface UpdateApiKeyPatch {
 }
 
 /** Updates an API key's metadata and limits. Only provided fields change. */
-export async function updateApiKey(id: string, patch: UpdateApiKeyPatch): Promise<void> {
+export async function updateApiKey(
+  id: string,
+  patch: UpdateApiKeyPatch,
+  userId?: string,
+): Promise<void> {
   if (Object.keys(patch).length === 0) return
   if ('modelMappings' in patch) {
     patch.modelMappings = normalizeModelMappings(patch.modelMappings)
   }
-  await db.update(apiKeys).set(patch).where(eq(apiKeys.id, id))
+  const where = userId
+    ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
+    : eq(apiKeys.id, id)
+  await db.update(apiKeys).set(patch).where(where)
 }
 
-export async function deleteApiKey(id: string): Promise<void> {
-  await db.delete(apiKeys).where(eq(apiKeys.id, id))
+export async function deleteApiKey(id: string, userId?: string): Promise<void> {
+  const where = userId
+    ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
+    : eq(apiKeys.id, id)
+  await db.delete(apiKeys).where(where)
+}
+
+export async function listApiKeysForUser(userId: string) {
+  const rows = await db
+    .select({
+      id: apiKeys.id,
+      userId: apiKeys.userId,
+      name: apiKeys.name,
+      ownerLabel: apiKeys.ownerLabel,
+      keyPrefix: apiKeys.keyPrefix,
+      keySecretEncrypted: apiKeys.keySecretEncrypted,
+      enabled: apiKeys.enabled,
+      allowedProviders: apiKeys.allowedProviders,
+      allowedModels: apiKeys.allowedModels,
+      modelMappings: apiKeys.modelMappings,
+      rateLimit: apiKeys.rateLimit,
+      concurrencyLimit: apiKeys.concurrencyLimit,
+      quotaLimit: apiKeys.quotaLimit,
+      quotaUsed: apiKeys.quotaUsed,
+      expiresAt: apiKeys.expiresAt,
+      lastUsedAt: apiKeys.lastUsedAt,
+      createdAt: apiKeys.createdAt,
+    })
+    .from(apiKeys)
+    .where(eq(apiKeys.userId, userId))
+    .orderBy(desc(apiKeys.createdAt))
+  return rows.map(({ keySecretEncrypted, ...key }) => ({
+    ...key,
+    canReveal: !!keySecretEncrypted,
+  }))
 }

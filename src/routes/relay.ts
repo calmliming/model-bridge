@@ -220,6 +220,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
 
 interface RelayMeta {
   apiKeyId: string
+  userId: string | null
   accountId: string
   provider: string
   model: string
@@ -685,6 +686,7 @@ async function runRelayLoop(
 
     const meta: RelayMeta = {
       apiKeyId: apiKey.id,
+      userId: apiKey.userId,
       accountId: account.id,
       provider: provider.id,
       model: parsed.model,
@@ -735,6 +737,7 @@ async function sendStreaming(
     raw.end()
     void recordUsage({
       apiKeyId: meta.apiKeyId,
+      userId: meta.userId,
       accountId: meta.accountId,
       provider: meta.provider,
       model: meta.model,
@@ -826,6 +829,7 @@ async function sendStreaming(
 
   void recordUsage({
     apiKeyId: meta.apiKeyId,
+    userId: meta.userId,
     accountId: meta.accountId,
     provider: meta.provider,
     model: meta.model,
@@ -888,6 +892,7 @@ async function sendBuffered(
     }
     void recordUsage({
       apiKeyId: meta.apiKeyId,
+      userId: meta.userId,
       accountId: meta.accountId,
       provider: meta.provider,
       model: meta.model,
@@ -917,6 +922,7 @@ async function sendBuffered(
   }
   void recordUsage({
     apiKeyId: meta.apiKeyId,
+    userId: meta.userId,
     accountId: meta.accountId,
     provider: meta.provider,
     model: meta.model,

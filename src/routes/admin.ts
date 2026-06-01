@@ -12,6 +12,14 @@ import { AccountTestError, testAccountConnectivity, testAllAccountsConnectivity 
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
+import {
+  createUserInvite,
+  listUserUsage,
+  listUsers,
+  updateUser,
+  UserManagerError,
+} from '../users/manager'
+import { adjustWalletUsd, listWalletTransactions } from '../wallet/manager'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -21,6 +29,25 @@ const loginSchema = z.object({
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(6),
+})
+
+const inviteUserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().trim().min(1).optional(),
+})
+
+const updateUserSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    status: z.enum(['active', 'disabled']).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const walletAdjustSchema = z.object({
+  amount: z.number().refine((v) => Number.isFinite(v) && v !== 0, {
+    message: 'amount must be non-zero',
+  }),
+  note: z.string().trim().max(500).optional(),
 })
 
 const createKeySchema = z.object({
@@ -93,6 +120,16 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
+function sendUserManagerError(
+  reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } },
+  err: unknown,
+) {
+  if (err instanceof UserManagerError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  throw err
+}
+
 /** Registers all `/api/admin/*` endpoints used by the dashboard. */
 export function registerAdminRoutes(app: FastifyInstance): void {
   // ── Authentication ───────────────────────────────────────
@@ -122,6 +159,100 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     }
     return { ok: true }
   })
+
+  // ── SaaS users / wallet ─────────────────────────────────
+  app.get('/api/admin/users', { preHandler: requireAdmin }, async () => {
+    return { users: await listUsers() }
+  })
+
+  app.post('/api/admin/users/invite', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = inviteUserSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      const createdBy = (request.user as { sub?: string } | undefined)?.sub ?? 'admin'
+      const result = await createUserInvite({ ...body.data, createdBy })
+      const host = request.headers.host ?? ''
+      const origin =
+        typeof request.headers.origin === 'string'
+          ? request.headers.origin
+          : host
+            ? `http://${host}`
+            : ''
+      const inviteUrl = origin
+        ? `${origin}/accept-invite?token=${encodeURIComponent(result.token)}`
+        : `/accept-invite?token=${encodeURIComponent(result.token)}`
+      return reply.code(201).send({ ...result, inviteUrl })
+    } catch (err) {
+      return sendUserManagerError(reply, err)
+    }
+  })
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/users/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = updateUserSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      const user = await updateUser({ id: params.data.id, ...body.data })
+      if (!user) return reply.code(404).send({ error: 'user not found' })
+      return { user }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/users/:id/wallet',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = walletAdjustSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      try {
+        const createdBy = (request.user as { sub?: string } | undefined)?.sub ?? 'admin'
+        const transaction = await adjustWalletUsd({
+          userId: params.data.id,
+          amount: body.data.amount,
+          note: body.data.note ?? null,
+          createdBy,
+        })
+        return { transaction }
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message })
+      }
+    },
+  )
+
+  app.get<{ Params: { id: string }; Querystring: { page?: string; pageSize?: string } }>(
+    '/api/admin/users/:id/wallet',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const query = paginationQuerySchema.safeParse(request.query)
+      if (!params.success || !query.success) {
+        return reply.code(400).send({ error: 'invalid request' })
+      }
+      return listWalletTransactions(params.data.id, query.data.page, query.data.pageSize)
+    },
+  )
+
+  app.get<{ Params: { id: string }; Querystring: { page?: string; pageSize?: string } }>(
+    '/api/admin/users/:id/usage',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const query = paginationQuerySchema.safeParse(request.query)
+      if (!params.success || !query.success) {
+        return reply.code(400).send({ error: 'invalid request' })
+      }
+      return listUserUsage(params.data.id, query.data.page, query.data.pageSize)
+    },
+  )
 
   // ── API keys ─────────────────────────────────────────────
   app.get('/api/admin/keys', { preHandler: requireAdmin }, async () => {

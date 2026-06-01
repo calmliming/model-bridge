@@ -22,9 +22,47 @@ export const accounts = pgTable('accounts', {
   createdAt: epochMs('created_at'),
 })
 
-/** A platform API key issued to a user (yourself or a friend). */
+/** A customer user who owns API keys and a prepaid USD wallet. */
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  name: text('name').notNull(),
+  passwordHash: text('password_hash'),
+  status: text('status').notNull().default('active'), // active | disabled
+  balanceMicros: bigint('balance_micros', { mode: 'number' }).notNull().default(0),
+  acceptedAt: bigint('accepted_at', { mode: 'number' }),
+  lastLoginAt: bigint('last_login_at', { mode: 'number' }),
+  createdAt: epochMs('created_at'),
+})
+
+/** One-time invitation token for customer signup. */
+export const userInvites = pgTable('user_invites', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  acceptedAt: bigint('accepted_at', { mode: 'number' }),
+  createdBy: text('created_by'),
+  createdAt: epochMs('created_at'),
+})
+
+/** Immutable wallet ledger. Amounts are signed micro-USD values. */
+export const walletTransactions = pgTable('wallet_transactions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  type: text('type').notNull(), // credit | debit | usage | adjustment
+  amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
+  balanceAfterMicros: bigint('balance_after_micros', { mode: 'number' }).notNull(),
+  usageLogId: text('usage_log_id'),
+  note: text('note'),
+  createdBy: text('created_by'),
+  createdAt: epochMs('created_at'),
+})
+
+/** A platform API key issued to a user (yourself, a customer, or a friend). */
 export const apiKeys = pgTable('api_keys', {
   id: text('id').primaryKey(),
+  userId: text('user_id'),
   name: text('name').notNull(),
   ownerLabel: text('owner_label'), // friendly name of who holds the key
   keyHash: text('key_hash').notNull().unique(), // sha-256 of the secret
@@ -47,6 +85,7 @@ export const apiKeys = pgTable('api_keys', {
 export const usageLogs = pgTable('usage_logs', {
   id: text('id').primaryKey(),
   apiKeyId: text('api_key_id'),
+  userId: text('user_id'),
   accountId: text('account_id'),
   provider: text('provider').notNull(),
   model: text('model'),
