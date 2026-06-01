@@ -38,6 +38,16 @@ const schema = z.object({
   // Legacy SQLite path. Only consumed by scripts/migrate-sqlite-to-pg.ts
   // when importing an old database — runtime no longer reads it.
   DATABASE_PATH: z.string().optional(),
+  // 可选的 Redis 后端，用于跨实例共享状态（限流、并发门、粘性会话）。
+  // 不配置时这些状态存在进程内存里——单节点没问题，但无法在多副本间共享。
+  // 需要在负载均衡后跑多个实例时，配置这个。
+  REDIS_URL: z
+    .string()
+    .url()
+    .refine((v) => v.startsWith('redis://') || v.startsWith('rediss://'), {
+      message: 'must be a redis:// or rediss:// URL',
+    })
+    .optional(),
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),

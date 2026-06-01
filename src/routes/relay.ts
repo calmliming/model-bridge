@@ -571,7 +571,7 @@ async function executeRelay(
   }
 
   // Per-key request-rate limit (requests / minute).
-  if (apiKey.rateLimit != null && !checkRateLimit(apiKey.id, apiKey.rateLimit)) {
+  if (apiKey.rateLimit != null && !(await checkRateLimit(apiKey.id, apiKey.rateLimit))) {
     await reply.code(429).send({ error: 'rate limit exceeded for this API key' })
     return
   }
@@ -580,14 +580,14 @@ async function executeRelay(
   // streamed body) and release it once the response is fully sent. Streaming
   // hijacks the reply, so onResponse hooks can't be relied on — release here.
   const concurrencyLimit = apiKey.concurrencyLimit
-  if (concurrencyLimit != null && !acquireSlot(apiKey.id, concurrencyLimit)) {
+  if (concurrencyLimit != null && !(await acquireSlot(apiKey.id, concurrencyLimit))) {
     await reply.code(429).send({ error: 'too many concurrent requests for this API key' })
     return
   }
   try {
     await runRelayLoop(request, reply, provider, bodyWithMappedModel(body, parsed.model), parsed)
   } finally {
-    if (concurrencyLimit != null) releaseSlot(apiKey.id)
+    if (concurrencyLimit != null) await releaseSlot(apiKey.id)
   }
 }
 
@@ -659,7 +659,7 @@ async function runRelayLoop(
     if (failure.retryable && !lastAttempt) {
       if (failure.disable) {
         await disableAccount(account.id)
-        if (sessionKey) clearStickyAccount(sessionKey)
+        if (sessionKey) await clearStickyAccount(sessionKey)
       } else if (failure.penalty) {
         await penalizeAccount(account.id, failure.penalty, failure.resetAt)
       }
@@ -669,7 +669,7 @@ async function runRelayLoop(
 
     if (failure.disable) {
       await disableAccount(account.id)
-      if (sessionKey) clearStickyAccount(sessionKey)
+      if (sessionKey) await clearStickyAccount(sessionKey)
     } else if (failure.penalty) {
       await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
@@ -679,7 +679,7 @@ async function runRelayLoop(
       } else {
         await markAccountUsed(account.id)
         // Pin this conversation to the account so its prompt cache stays warm.
-        if (sessionKey) bindStickyAccount(sessionKey, account.id)
+        if (sessionKey) await bindStickyAccount(sessionKey, account.id)
       }
     }
 

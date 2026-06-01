@@ -48,7 +48,7 @@ export async function pickAccount(
   if (available.length === 0) return null
 
   if (sessionKey) {
-    const stickyId = getStickyAccountId(sessionKey, now)
+    const stickyId = await getStickyAccountId(sessionKey, now)
     if (stickyId) {
       const stuck = available.find((a) => a.id === stickyId)
       if (stuck) return stuck

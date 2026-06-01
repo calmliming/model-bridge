@@ -11,31 +11,31 @@ import {
 afterEach(() => resetStickyBindings())
 
 describe('sticky bindings', () => {
-  it('returns the bound account within its TTL', () => {
-    bindStickyAccount('s1', 'acc-a', 1_000)
-    expect(getStickyAccountId('s1', 2_000)).toBe('acc-a')
+  it('returns the bound account within its TTL', async () => {
+    await bindStickyAccount('s1', 'acc-a', 1_000)
+    expect(await getStickyAccountId('s1', 2_000)).toBe('acc-a')
   })
 
-  it('expires a binding after the TTL window', () => {
-    bindStickyAccount('s1', 'acc-a', 0)
+  it('expires a binding after the TTL window', async () => {
+    await bindStickyAccount('s1', 'acc-a', 0)
     // 30 min TTL — just past it.
-    expect(getStickyAccountId('s1', 30 * 60_000 + 1)).toBeNull()
+    expect(await getStickyAccountId('s1', 30 * 60_000 + 1)).toBeNull()
   })
 
-  it('rebinding refreshes the account and TTL', () => {
-    bindStickyAccount('s1', 'acc-a', 0)
-    bindStickyAccount('s1', 'acc-b', 10_000)
-    expect(getStickyAccountId('s1', 20_000)).toBe('acc-b')
+  it('rebinding refreshes the account and TTL', async () => {
+    await bindStickyAccount('s1', 'acc-a', 0)
+    await bindStickyAccount('s1', 'acc-b', 10_000)
+    expect(await getStickyAccountId('s1', 20_000)).toBe('acc-b')
   })
 
-  it('clearStickyAccount drops the binding', () => {
-    bindStickyAccount('s1', 'acc-a', 0)
-    clearStickyAccount('s1')
-    expect(getStickyAccountId('s1', 1)).toBeNull()
+  it('clearStickyAccount drops the binding', async () => {
+    await bindStickyAccount('s1', 'acc-a', 0)
+    await clearStickyAccount('s1')
+    expect(await getStickyAccountId('s1', 1)).toBeNull()
   })
 
-  it('returns null for an unknown session', () => {
-    expect(getStickyAccountId('nope')).toBeNull()
+  it('returns null for an unknown session', async () => {
+    expect(await getStickyAccountId('nope')).toBeNull()
   })
 })
 

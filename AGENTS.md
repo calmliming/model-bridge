@@ -3,7 +3,7 @@
 ## 仓库约定
 
 - 本仓库是 `model-bridge`，一个自托管 AI API 中转平台。
-- 后端代码在 `src/`，技术栈是 Node.js、TypeScript、Fastify、SQLite、Drizzle ORM。
+- 后端代码在 `src/`，技术栈是 Node.js、TypeScript、Fastify、PostgreSQL、Drizzle ORM。
 - 前端代码在 `web/src/`，技术栈是 Vue 3、Vite、Pinia、Vue Router、Naive UI。
 - 优先做小而聚焦的改动，遵循现有目录结构和代码风格。
 - 除非任务明确需要，不要重写无关代码、生成文件、锁文件或配置。
