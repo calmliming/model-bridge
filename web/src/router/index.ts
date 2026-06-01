@@ -12,7 +12,7 @@ export const router = createRouter({
     {
       path: '/user-login',
       name: 'user-login',
-      component: () => import('../views/UserLoginView.vue'),
+      redirect: { name: 'login' },
     },
     {
       path: '/accept-invite',
@@ -54,21 +54,21 @@ router.beforeEach((to) => {
   const requiredRole = to.matched.find((record) => record.meta.role)?.meta.role
   if (requiredRole === 'admin' || to.name === 'login') {
     auth.activateRole('admin')
-  } else if (requiredRole === 'user' || to.name === 'user-login') {
+  } else if (requiredRole === 'user') {
     auth.activateRole('user')
   }
   if (!auth.isAuthenticated) {
-    if (requiredRole === 'user') return { name: 'user-login' }
-    if (to.name !== 'login' && to.name !== 'user-login') return { name: 'login' }
+    if (requiredRole === 'user') return { name: 'login' }
+    if (to.name !== 'login') return { name: 'login' }
     return
   }
   if (requiredRole === 'admin' && !auth.isAdmin) {
     return { name: 'login' }
   }
   if (requiredRole === 'user' && !auth.isUser) {
-    return { name: 'user-login' }
+    return { name: 'login' }
   }
-  if ((to.name === 'login' || to.name === 'user-login') && auth.isAuthenticated) {
+  if (to.name === 'login' && auth.isAuthenticated) {
     if (auth.isUser) return { name: 'user-overview' }
     return { name: 'overview' }
   }

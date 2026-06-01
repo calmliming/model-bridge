@@ -9,23 +9,29 @@ const router = useRouter()
 const message = useMessage()
 const auth = useAuthStore()
 
-const username = ref('admin')
+const account = ref('')
 const password = ref('')
 const loading = ref(false)
 
 async function login() {
-  if (!username.value || !password.value) {
-    message.warning('请输入用户名和密码')
+  const accountValue = account.value.trim()
+  if (!accountValue || !password.value) {
+    message.warning('请输入账号和密码')
     return
   }
   loading.value = true
   try {
-    const { data } = await api.post('/admin/login', {
-      username: username.value,
+    const { data } = await api.post('/auth/login', {
+      account: accountValue,
       password: password.value,
     })
-    auth.setSession(data.token, data.username, 'admin')
-    void router.push({ name: 'overview' })
+    if (data.role === 'admin') {
+      auth.setSession(data.token, data.username, 'admin')
+      void router.push({ name: 'overview' })
+    } else {
+      auth.setSession(data.token, data.user.email, 'user')
+      void router.push({ name: 'user-overview' })
+    }
   } catch (e) {
     message.error(errMsg(e, '登录失败'))
   } finally {
@@ -48,8 +54,8 @@ async function login() {
       <section class="login-main">
         <div class="hero-copy">
           <div class="hero-kicker">AI API Gateway</div>
-          <h1>管理入口</h1>
-          <p>密钥、账户和用量统计集中在一个轻量控制台。</p>
+          <h1>统一登录</h1>
+          <p>管理员和受邀用户从同一个入口进入各自的控制台。</p>
         </div>
 
         <div class="preview-panel">
@@ -80,15 +86,15 @@ async function login() {
       <n-card class="login-card" :bordered="false" role="main">
         <div class="form-head">
           <div>
-            <div class="form-eyebrow">Admin Console</div>
+            <div class="form-eyebrow">Unified Console</div>
             <h2>欢迎回来</h2>
           </div>
           <span class="secure-badge">Secure</span>
         </div>
 
         <n-form label-placement="top" class="login-form">
-          <n-form-item label="用户名">
-            <n-input v-model:value="username" size="large" placeholder="admin" />
+          <n-form-item label="账号">
+            <n-input v-model:value="account" size="large" placeholder="请输入账号" />
           </n-form-item>
           <n-form-item label="密码">
             <n-input
@@ -104,11 +110,6 @@ async function login() {
             登录
           </n-button>
         </n-form>
-
-        <div class="login-footer">
-          <span>默认用户 admin</span>
-          <span>请使用部署时配置的管理员密码</span>
-        </div>
       </n-card>
     </div>
   </div>
@@ -421,15 +422,6 @@ async function login() {
   font-weight: 760;
 }
 
-.login-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 22px;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 12px;
-}
-
 @media (max-width: 900px) {
   .login-wrap {
     height: auto;
@@ -465,10 +457,6 @@ async function login() {
   .login-card :deep(.n-card__content) {
     min-height: auto;
     padding: 32px 26px 28px;
-  }
-
-  .login-footer {
-    flex-direction: column;
   }
 }
 

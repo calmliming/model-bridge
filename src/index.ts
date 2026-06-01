@@ -7,6 +7,7 @@ import { config } from './config'
 import { initDb } from './db/init'
 import { initPricing } from './usage/pricing'
 import { ensureAdmin } from './auth/admin'
+import { registerAuthRoutes } from './routes/auth'
 import { registerAdminRoutes } from './routes/admin'
 import { registerUserRoutes } from './routes/users'
 import { registerRelayRoutes } from './routes/relay'
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
 
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 
+  registerAuthRoutes(app)
   registerAdminRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
