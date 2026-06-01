@@ -111,6 +111,24 @@ async function invite() {
   }
 }
 
+async function resetInvite(row: UserRow) {
+  try {
+    const { data } = await api.post('/admin/users/invite', {
+      email: row.email,
+      name: row.name,
+    })
+    inviteResult.value = {
+      token: data.token,
+      inviteUrl: data.inviteUrl,
+      expiresAt: data.expiresAt,
+    }
+    message.success('已生成重置链接')
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '生成重置链接失败'))
+  }
+}
+
 async function updateStatus(row: UserRow) {
   try {
     await api.patch(`/admin/users/${row.id}`, {
@@ -203,13 +221,14 @@ const columns = computed<DataTableColumns<UserRow>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 270,
+    width: 330,
     render: (row) => h(NSpace, { size: 4, wrap: false }, {
       default: () => [
         h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
+        h(NButton, { size: 'small', quaternary: true, onClick: () => resetInvite(row) }, { default: () => '重置密码' }),
         h(NButton, { size: 'small', type: row.status === 'active' ? 'error' : 'success', quaternary: true, onClick: () => updateStatus(row) }, { default: () => (row.status === 'active' ? '禁用' : '启用') }),
       ],
     }),
@@ -264,8 +283,8 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal :show="!!inviteResult" preset="card" title="邀请链接" style="width: 560px" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
-      <n-alert type="warning" style="margin-bottom: 12px">链接只在这里显示一次。</n-alert>
+    <n-modal :show="!!inviteResult" preset="card" title="邀请 / 重置链接" style="width: 560px" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
+      <n-alert type="warning" style="margin-bottom: 12px">链接只在这里显示一次，用户打开后可设置新密码。</n-alert>
       <n-input :value="inviteResult?.inviteUrl ?? ''" readonly />
       <div class="subline">过期时间：{{ formatTime(inviteResult?.expiresAt) }}</div>
       <template #footer>

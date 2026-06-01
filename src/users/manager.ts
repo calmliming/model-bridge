@@ -154,9 +154,6 @@ export async function createUserInvite(input: {
       [email],
     )
     let userId = existing.rows[0]?.id as string | undefined
-    if (existing.rows[0]?.password_hash) {
-      throw new UserManagerError('user already exists', 409)
-    }
     if (userId) {
       await client.query('UPDATE users SET name = $1 WHERE id = $2', [name, userId])
     } else {
