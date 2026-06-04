@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
-import { NTag, useMessage } from 'naive-ui'
+import { NTag, NTooltip, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -41,8 +41,32 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
 
-function totalTokens(row: UsageLog): string {
-  return (row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens).toLocaleString('en-US')
+function totalTokens(row: UsageLog) {
+  const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+  const rows: [string, number][] = [
+    ['输入', row.inputTokens],
+    ['输出', row.outputTokens],
+    ['缓存写入', row.cacheCreateTokens],
+    ['缓存读取', row.cacheReadTokens],
+  ]
+  return h(
+    NTooltip,
+    { placement: 'left', trigger: 'hover' },
+    {
+      trigger: () => h('span', { class: 'token-total' }, total.toLocaleString('en-US')),
+      default: () =>
+        h(
+          'div',
+          { class: 'token-breakdown' },
+          rows.map(([label, value]) =>
+            h('div', { class: 'token-breakdown-row' }, [
+              h('span', { class: 'token-breakdown-label' }, label),
+              h('span', { class: 'token-breakdown-value' }, value.toLocaleString('en-US')),
+            ]),
+          ),
+        ),
+    },
+  )
 }
 
 async function load() {
@@ -94,13 +118,41 @@ onMounted(load)
     </n-tab-pane>
     <n-tab-pane name="wallet" tab="钱包">
       <n-card class="table-card" :bordered="false">
-        <n-data-table :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" />
+        <n-data-table :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
       </n-card>
     </n-tab-pane>
   </n-tabs>
 </template>
 
 <style scoped>
+:deep(.token-total) {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.token-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 150px;
+}
+
+.token-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.token-breakdown-label {
+  opacity: 0.75;
+}
+
+.token-breakdown-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 :deep(.amount) {
   color: #16a34a;
   font-weight: 700;
