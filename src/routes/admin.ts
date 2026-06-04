@@ -7,7 +7,8 @@ import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
-import { createAccount, deleteAccount, listAccounts, setAccountStatus, setAccountWeight } from '../accounts/manager'
+import { createAccount, deleteAccount, listAccounts, setAccountGroup, setAccountStatus, setAccountWeight } from '../accounts/manager'
+import { createGroup, deleteGroup, listGroups, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity, testAllAccountsConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -62,6 +63,7 @@ const createKeySchema = z.object({
   allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).optional(),
   allowedModels: z.array(z.string().trim().min(1)).optional(),
   modelMappings: z.record(z.string()).optional(),
+  accountGroupId: z.string().trim().min(1).nullable().optional(),
   rateLimit: z.number().int().positive().optional(),
   concurrencyLimit: z.number().int().positive().optional(),
   quotaLimit: z.number().positive().optional(),
@@ -76,6 +78,7 @@ const updateKeySchema = z
     allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).nullable().optional(),
     allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
     modelMappings: z.record(z.string()).nullable().optional(),
+    accountGroupId: z.string().trim().min(1).nullable().optional(),
     rateLimit: z.number().int().positive().nullable().optional(),
     concurrencyLimit: z.number().int().positive().nullable().optional(),
     quotaLimit: z.number().positive().nullable().optional(),
@@ -106,6 +109,19 @@ const accountUpdateSchema = z
   .object({
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
+    groupId: z.string().trim().min(1).nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const createGroupSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(500).nullable().optional(),
+})
+
+const updateGroupSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    description: z.string().trim().max(500).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -391,6 +407,42 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
+  // ── Account groups ───────────────────────────────────────
+  app.get('/api/admin/account-groups', { preHandler: requireAdmin }, async () => {
+    return { groups: await listGroups() }
+  })
+
+  app.post('/api/admin/account-groups', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = createGroupSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    return reply.code(201).send(await createGroup(body.data))
+  })
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/account-groups/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = updateGroupSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      await updateGroup(params.data.id, body.data)
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/account-groups/:id',
+    { preHandler: requireAdmin },
+    async (request) => {
+      await deleteGroup(request.params.id)
+      return { ok: true }
+    },
+  )
+
   // ── Upstream accounts ────────────────────────────────────
   app.get('/api/admin/accounts', { preHandler: requireAdmin }, async () => {
     return { accounts: await listAccounts() }
@@ -527,6 +579,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
       if (body.data.status) await setAccountStatus(request.params.id, body.data.status)
       if (body.data.weight !== undefined) await setAccountWeight(request.params.id, body.data.weight)
+      if ('groupId' in body.data) await setAccountGroup(request.params.id, body.data.groupId ?? null)
       return { ok: true }
     },
   )

@@ -15,6 +15,7 @@ interface ApiKey {
   allowedProviders: string[] | null
   allowedModels: string[] | null
   modelMappings: Record<string, string> | null
+  accountGroupId: string | null
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -24,11 +25,27 @@ interface ApiKey {
   createdAt: number
 }
 
+interface AccountGroup {
+  id: string
+  name: string
+  description: string | null
+  accountCount: number
+  createdAt: number
+}
+
 const message = useMessage()
 const dialog = useDialog()
 
 const keys = ref<ApiKey[]>([])
 const loading = ref(true)
+const groups = ref<AccountGroup[]>([])
+
+const groupSelectOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
+
+function groupName(id: string | null): string {
+  if (!id) return '默认池'
+  return groups.value.find((g) => g.id === id)?.name ?? '(已删除)'
+}
 
 const showCreate = ref(false)
 const creating = ref(false)
@@ -38,6 +55,7 @@ const form = ref({
   allowedProviders: [] as string[],
   allowedModels: [] as string[],
   modelMappings: [] as string[],
+  accountGroupId: null as string | null,
 })
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
@@ -59,6 +77,7 @@ const editForm = ref<{
   allowedProviders: string[]
   allowedModels: string[]
   modelMappings: string[]
+  accountGroupId: string | null
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -70,6 +89,7 @@ const editForm = ref<{
   allowedProviders: [],
   allowedModels: [],
   modelMappings: [],
+  accountGroupId: null,
   rateLimit: null,
   concurrencyLimit: null,
   quotaLimit: null,
@@ -143,6 +163,15 @@ async function load() {
   }
 }
 
+async function loadGroups() {
+  try {
+    const { data } = await api.get('/admin/account-groups')
+    groups.value = data.groups
+  } catch {
+    // 分组仅用于选择器的上下文，加载失败时静默忽略
+  }
+}
+
 async function create() {
   if (!form.value.name.trim()) {
     message.warning('请填写名称')
@@ -161,10 +190,18 @@ async function create() {
         ? form.value.allowedModels
         : undefined,
       modelMappings: modelMappings ?? undefined,
+      accountGroupId: form.value.accountGroupId ?? undefined,
     })
     showCreate.value = false
     newKey.value = data.key
-    form.value = { name: '', ownerLabel: '', allowedProviders: [], allowedModels: [], modelMappings: [] }
+    form.value = {
+      name: '',
+      ownerLabel: '',
+      allowedProviders: [],
+      allowedModels: [],
+      modelMappings: [],
+      accountGroupId: null,
+    }
     await load()
   } catch (e) {
     message.error(errMsg(e, '创建失败'))
@@ -191,6 +228,7 @@ function openEdit(row: ApiKey) {
     allowedProviders: row.allowedProviders ?? [],
     allowedModels: row.allowedModels ?? [],
     modelMappings: mappingEntriesFromObject(row.modelMappings),
+    accountGroupId: row.accountGroupId,
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
     quotaLimit: row.quotaLimit,
@@ -219,6 +257,7 @@ async function saveEdit() {
         ? editForm.value.allowedModels
         : null,
       modelMappings,
+      accountGroupId: editForm.value.accountGroupId,
       rateLimit: editForm.value.rateLimit,
       concurrencyLimit: editForm.value.concurrencyLimit,
       quotaLimit: editForm.value.quotaLimit,
@@ -554,6 +593,12 @@ function renderMappings(row: ApiKey) {
   return h(NSpace, { size: 4 }, { default: () => tags })
 }
 
+function renderGroup(row: ApiKey) {
+  return row.accountGroupId
+    ? h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) })
+    : h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' })
+}
+
 // Fixed USD→CNY rate for DeepSeek cost tooltip.
 const USD_TO_CNY = 7.28
 
@@ -616,6 +661,12 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     render: renderMappings,
   },
   {
+    title: '账号分组',
+    key: 'accountGroupId',
+    minWidth: 110,
+    render: renderGroup,
+  },
+  {
     title: '已用',
     key: 'quota',
     minWidth: 100,
@@ -669,7 +720,10 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
   },
 ])
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadGroups()
+})
 </script>
 
 <template>
@@ -684,7 +738,7 @@ onMounted(load)
         :data="keys"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1750"
+        :scroll-x="1880"
       />
     </n-card>
 
@@ -728,6 +782,14 @@ onMounted(load)
             tag
             :options="commonMappingOptions"
             placeholder="例如：gpt-public=gpt-5.4"
+          />
+        </n-form-item>
+        <n-form-item label="账号分组（留空 = 默认池）">
+          <n-select
+            v-model:value="form.accountGroupId"
+            clearable
+            :options="groupSelectOptions"
+            placeholder="默认池（仅调度未分组账号）"
           />
         </n-form-item>
       </n-form>
@@ -853,6 +915,14 @@ onMounted(load)
             tag
             :options="commonMappingOptions"
             placeholder="例如：gpt-public=gpt-5.4"
+          />
+        </n-form-item>
+        <n-form-item label="账号分组（留空 = 默认池）">
+          <n-select
+            v-model:value="editForm.accountGroupId"
+            clearable
+            :options="groupSelectOptions"
+            placeholder="默认池（仅调度未分组账号）"
           />
         </n-form-item>
         <n-form-item label="成本上限（USD，留空 = 不限）">

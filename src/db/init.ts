@@ -19,7 +19,15 @@ export async function initDb(): Promise<void> {
       proxy_url TEXT,
       weight BIGINT NOT NULL DEFAULT 1,
       last_used_at BIGINT,
+      group_id TEXT,
       metadata JSONB,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+
+    CREATE TABLE IF NOT EXISTS account_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
       created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
     );
 
@@ -160,6 +168,15 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS first_token_ms BIGINT;`)
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS group_id TEXT;`)
+  await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS account_group_id TEXT;`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_accounts_group_id ON accounts (group_id);`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS account_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+  );`)
   await pool.query(`CREATE TABLE IF NOT EXISTS payment_orders (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

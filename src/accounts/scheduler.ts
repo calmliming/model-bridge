@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, ne } from 'drizzle-orm'
+import { and, eq, inArray, isNull, lte, ne } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accounts } from '../db/schema'
 import { getStickyAccountId } from './session'
@@ -29,18 +29,27 @@ export async function clearExpiredAccountCooldowns(now = Date.now()): Promise<vo
  * stays on one upstream and keeps its prompt cache warm. If the bound account
  * is unavailable (cooldown / disabled / already tried), it transparently falls
  * back to LRU.
+ *
+ * `groupId` scopes the pool: a key bound to a group only reaches that group's
+ * accounts; an unbound key (null) only reaches ungrouped accounts (the default
+ * pool). Existing data is all-null, so unbound keys keep seeing every account.
  */
 export async function pickAccount(
   provider: string,
   exclude: string[] = [],
   sessionKey?: string | null,
+  groupId?: string | null,
 ) {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
   const rows = await db
     .select()
     .from(accounts)
-    .where(and(eq(accounts.provider, provider), ne(accounts.status, 'disabled')))
+    .where(and(
+      eq(accounts.provider, provider),
+      ne(accounts.status, 'disabled'),
+      groupId ? eq(accounts.groupId, groupId) : isNull(accounts.groupId),
+    ))
 
   const available = rows.filter(
     (a) => !exclude.includes(a.id) && (!a.cooldownUntil || a.cooldownUntil < now),

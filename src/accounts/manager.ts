@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
-import { accounts } from '../db/schema'
+import { accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
@@ -18,6 +18,8 @@ export interface CreateAccountInput {
   tokens: TokenSet
   /** Provider-specific data needed at relay time (e.g. Gemini's project id). */
   metadata?: Record<string, unknown> | null
+  /** Optional account group; null = default pool. */
+  groupId?: string | null
 }
 
 export interface AccountHealthSnapshot {
@@ -70,6 +72,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
+      groupId: input.groupId ?? null,
       metadata: input.metadata ?? null,
     })
   return { id }
@@ -88,16 +91,24 @@ export async function listAccounts() {
       cooldownUntil: accounts.cooldownUntil,
       weight: accounts.weight,
       lastUsedAt: accounts.lastUsedAt,
+      groupId: accounts.groupId,
+      groupName: accountGroups.name,
       metadata: accounts.metadata,
       createdAt: accounts.createdAt,
     })
     .from(accounts)
+    .leftJoin(accountGroups, eq(accounts.groupId, accountGroups.id))
     .orderBy(desc(accounts.createdAt))
   return rows.map(({ metadata, ...account }) => ({
     ...account,
     quota: accountQuotaFromMetadata(metadata),
     health: accountHealthFromMetadata(metadata),
   }))
+}
+
+/** Moves an account into a group, or back to the default pool when null. */
+export async function setAccountGroup(id: string, groupId: string | null): Promise<void> {
+  await db.update(accounts).set({ groupId }).where(eq(accounts.id, id))
 }
 
 export async function getAccount(id: string) {

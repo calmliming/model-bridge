@@ -23,6 +23,7 @@ export interface CreateApiKeyInput {
   allowedProviders?: string[] | null
   allowedModels?: string[] | null
   modelMappings?: ModelMappings | null
+  accountGroupId?: string | null
   rateLimit?: number | null
   concurrencyLimit?: number | null
   quotaLimit?: number | null
@@ -51,6 +52,7 @@ export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApi
       allowedProviders: input.allowedProviders ?? null,
       allowedModels: input.allowedModels ?? null,
       modelMappings: normalizeModelMappings(input.modelMappings),
+      accountGroupId: input.accountGroupId ?? null,
       rateLimit: input.rateLimit ?? null,
       concurrencyLimit: input.concurrencyLimit ?? null,
       quotaLimit: input.quotaLimit ?? null,
@@ -75,6 +77,7 @@ export async function listApiKeys() {
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
       modelMappings: apiKeys.modelMappings,
+      accountGroupId: apiKeys.accountGroupId,
       rateLimit: apiKeys.rateLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
       quotaLimit: apiKeys.quotaLimit,
@@ -107,6 +110,7 @@ export async function findApiKeyBySecret(secret: string) {
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
       modelMappings: apiKeys.modelMappings,
+      accountGroupId: apiKeys.accountGroupId,
       rateLimit: apiKeys.rateLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
       quotaLimit: apiKeys.quotaLimit,
@@ -148,6 +152,7 @@ export interface UpdateApiKeyPatch {
   allowedProviders?: string[] | null
   allowedModels?: string[] | null
   modelMappings?: ModelMappings | null
+  accountGroupId?: string | null
   rateLimit?: number | null
   concurrencyLimit?: number | null
   quotaLimit?: number | null
@@ -190,6 +195,7 @@ export async function listApiKeysForUser(userId: string) {
       allowedProviders: apiKeys.allowedProviders,
       allowedModels: apiKeys.allowedModels,
       modelMappings: apiKeys.modelMappings,
+      accountGroupId: apiKeys.accountGroupId,
       rateLimit: apiKeys.rateLimit,
       concurrencyLimit: apiKeys.concurrencyLimit,
       quotaLimit: apiKeys.quotaLimit,

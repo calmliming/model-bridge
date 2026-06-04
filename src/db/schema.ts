@@ -18,7 +18,16 @@ export const accounts = pgTable('accounts', {
   proxyUrl: text('proxy_url'),
   weight: bigint('weight', { mode: 'number' }).notNull().default(1),
   lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  groupId: text('group_id'), // null = 默认池（未分组）；非空时仅绑定该组的 Key 可调度
   metadata: jsonb('metadata'),
+  createdAt: epochMs('created_at'),
+})
+
+/** A named pool of upstream accounts. Keys bound to a group only schedule within it. */
+export const accountGroups = pgTable('account_groups', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
   createdAt: epochMs('created_at'),
 })
 
@@ -90,6 +99,7 @@ export const apiKeys = pgTable('api_keys', {
   allowedProviders: jsonb('allowed_providers').$type<string[]>(),
   allowedModels: jsonb('allowed_models').$type<string[]>(),
   modelMappings: jsonb('model_mappings').$type<Record<string, string>>(),
+  accountGroupId: text('account_group_id'), // null = 未绑定 → 默认池；非空时仅调度该组账号
   rateLimit: bigint('rate_limit', { mode: 'number' }), // requests per minute; null = unlimited
   concurrencyLimit: bigint('concurrency_limit', { mode: 'number' }), // max simultaneous in-flight requests; null = unlimited
   quotaLimit: doublePrecision('quota_limit'), // cost cap in USD; null = unlimited

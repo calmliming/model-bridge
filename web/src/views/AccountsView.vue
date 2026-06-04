@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NInputNumber, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NInputNumber, NSelect, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -35,9 +35,20 @@ interface Account {
   cooldownUntil: number | null
   weight: number
   lastUsedAt: number | null
+  groupId: string | null
+  groupName: string | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
   health: AccountHealthSnapshot | null
+}
+
+/** A named account pool (distinct from the per-provider display grouping below). */
+interface GroupInfo {
+  id: string
+  name: string
+  description: string | null
+  accountCount: number
+  createdAt: number
 }
 
 type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek'
@@ -60,6 +71,13 @@ const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
 const checkingAll = ref(false)
+
+// Account-pool grouping (feature), distinct from the per-provider display group.
+const groups = ref<GroupInfo[]>([])
+const groupSelectOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
+const showGroups = ref(false)
+const groupForm = ref({ name: '', description: '' })
+const savingGroup = ref(false)
 
 // Add-account modal state.
 const showAdd = ref(false)
@@ -340,6 +358,22 @@ function renderPriority(row: Account) {
   })
 }
 
+function renderGroupCell(row: Account) {
+  return h(NSelect, {
+    value: row.groupId,
+    options: groupSelectOptions.value,
+    clearable: true,
+    size: 'small',
+    placeholder: '默认池',
+    consistentMenuWidth: false,
+    class: 'group-select',
+    'aria-label': `${row.name} 分组`,
+    onUpdateValue: (value: string | null) => {
+      void setGroup(row, value ?? null)
+    },
+  })
+}
+
 async function load() {
   loading.value = true
   try {
@@ -350,6 +384,85 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadGroups() {
+  try {
+    const { data } = await api.get('/admin/account-groups')
+    groups.value = data.groups
+  } catch (e) {
+    message.error(errMsg(e, '加载分组失败'))
+  }
+}
+
+async function setGroup(row: Account, groupId: string | null) {
+  if ((row.groupId ?? null) === (groupId ?? null)) return
+  const previous = row.groupId
+  row.groupId = groupId
+  try {
+    await api.patch(`/admin/accounts/${row.id}`, { groupId })
+    await load()
+  } catch (e) {
+    row.groupId = previous
+    message.error(errMsg(e, '更新分组失败'))
+  }
+}
+
+async function createGroupSubmit() {
+  if (!groupForm.value.name.trim()) {
+    message.warning('请填写分组名称')
+    return
+  }
+  savingGroup.value = true
+  try {
+    await api.post('/admin/account-groups', {
+      name: groupForm.value.name.trim(),
+      description: groupForm.value.description.trim() || undefined,
+    })
+    groupForm.value = { name: '', description: '' }
+    message.success('分组已创建')
+    await loadGroups()
+  } catch (e) {
+    message.error(errMsg(e, '创建分组失败'))
+  } finally {
+    savingGroup.value = false
+  }
+}
+
+async function saveGroup(group: GroupInfo) {
+  if (!group.name.trim()) {
+    message.warning('分组名称不能为空')
+    return
+  }
+  try {
+    await api.patch(`/admin/account-groups/${group.id}`, {
+      name: group.name.trim(),
+      description: group.description?.trim() || null,
+    })
+    message.success('已保存')
+    await loadGroups()
+  } catch (e) {
+    message.error(errMsg(e, '保存分组失败'))
+  }
+}
+
+function confirmDeleteGroup(group: GroupInfo) {
+  dialog.warning({
+    title: '删除分组',
+    content: `确定删除分组「${group.name}」？组内账号与绑定该组的 Key 都会移回默认池。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        await api.delete(`/admin/account-groups/${group.id}`)
+        message.success('已删除')
+        await loadGroups()
+        await load()
+      } catch (e) {
+        message.error(errMsg(e))
+      }
+    },
+  })
 }
 
 function openAdd() {
@@ -606,6 +719,7 @@ function confirmDelete(row: Account) {
 
 const columns = computed<DataTableColumns<Account>>(() => [
   { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
+  { title: '分组', key: 'group', width: 140, render: renderGroupCell },
   {
     title: '状态',
     key: 'status',
@@ -685,6 +799,7 @@ function providerRank(provider: string): number {
 
 onMounted(() => {
   void load()
+  void loadGroups()
   refreshTimer = window.setInterval(() => void load(), 30_000)
 })
 
@@ -696,6 +811,7 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <div class="page-head">
+      <n-button secondary @click="showGroups = true">管理分组</n-button>
       <n-button secondary :loading="checkingAll" @click="checkAllHealth">健康检查</n-button>
       <n-button type="primary" @click="openAdd">添加账户</n-button>
     </div>
@@ -736,7 +852,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1370"
+        :scroll-x="1510"
       />
     </n-card>
 
@@ -903,6 +1019,28 @@ onBeforeUnmount(() => {
           </n-button>
         </n-space>
       </template>
+    </n-modal>
+
+    <n-modal v-model:show="showGroups" preset="card" title="管理账号分组" style="width: 580px">
+      <p class="group-hint">
+        账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
+      </p>
+      <div class="group-create">
+        <n-input v-model:value="groupForm.name" placeholder="新分组名称" />
+        <n-input v-model:value="groupForm.description" placeholder="备注（可选）" />
+        <n-button type="primary" :loading="savingGroup" @click="createGroupSubmit">新建</n-button>
+      </div>
+      <n-divider style="margin: 14px 0" />
+      <p v-if="!groups.length" class="group-empty">
+        还没有分组。新建后即可在账号行和 Key 表单里选择分组。
+      </p>
+      <div v-for="group in groups" :key="group.id" class="group-row">
+        <n-input v-model:value="group.name" size="small" placeholder="名称" />
+        <n-input v-model:value="group.description" size="small" placeholder="备注" />
+        <span class="group-count">{{ group.accountCount }} 账号</span>
+        <n-button size="small" quaternary @click="saveGroup(group)">保存</n-button>
+        <n-button size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</n-button>
+      </div>
     </n-modal>
   </div>
 </template>
@@ -1133,6 +1271,43 @@ onBeforeUnmount(() => {
 
 :deep(.priority-input) {
   width: 82px;
+}
+
+:deep(.group-select) {
+  min-width: 120px;
+}
+
+.group-hint,
+.group-empty {
+  margin: 0 0 12px;
+  color: rgba(15, 23, 42, 0.6);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.group-create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.group-create :deep(.n-input),
+.group-row :deep(.n-input) {
+  flex: 1;
+}
+
+.group-count {
+  flex: 0 0 auto;
+  color: rgba(15, 23, 42, 0.52);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

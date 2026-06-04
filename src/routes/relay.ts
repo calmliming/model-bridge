@@ -618,7 +618,7 @@ async function runRelayLoop(
   const tried: string[] = []
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const account = await pickAccount(provider.id, tried, sessionKey)
+    const account = await pickAccount(provider.id, tried, sessionKey, apiKey.accountGroupId ?? null)
     if (!account) {
       await reply.code(503).send({
         error: tried.length
