@@ -418,6 +418,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
           :data="summary?.byKey ?? []"
           :loading="loading"
           :bordered="false"
+          :scroll-x="680"
         />
       </n-card>
     </div>

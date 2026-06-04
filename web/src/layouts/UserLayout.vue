@@ -163,10 +163,12 @@ function logout() {
 .content {
   height: calc(100vh - 70px);
   height: calc(100dvh - 70px);
+  min-width: 0;
   padding: 26px 28px;
 }
 
 .content-inner {
+  width: 100%;
   min-width: 0;
 }
 </style>
