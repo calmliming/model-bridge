@@ -28,6 +28,10 @@ const services = [
     cwd: rootDir,
     command: npmCommand,
     args: [...npmArgsPrefix, 'run', '--silent', 'dev'],
+    // Frontend only starts once the API logs that it is listening.
+    readyPattern: /Server listening at/iu,
+    // Fallback so the frontend still boots if the ready log never appears.
+    readyTimeoutMs: 20000,
   },
   {
     name: 'frontend',
@@ -112,7 +116,7 @@ function formatLine(service, line) {
   return `${time} ${label} ${body}`
 }
 
-function pipeLines(service, stream, writer) {
+function pipeLines(service, stream, writer, onLine) {
   let pending = ''
 
   stream.on('data', (chunk) => {
@@ -121,12 +125,14 @@ function pipeLines(service, stream, writer) {
     pending = lines.pop() ?? ''
 
     for (const line of lines) {
+      if (onLine) onLine(line)
       const formatted = formatLine(service, line)
       if (formatted) writer.write(`${formatted}\n`)
     }
   })
 
   stream.on('end', () => {
+    if (onLine && pending) onLine(pending)
     const formatted = formatLine(service, pending)
     if (formatted) writer.write(`${formatted}\n`)
   })
@@ -141,7 +147,20 @@ function stopAll(signal = 'SIGTERM') {
   }
 }
 
-for (const service of services) {
+function startService(service) {
+  // Resolves once the service signals readiness (or immediately when no
+  // readyPattern is configured). Lets us start dependents in order.
+  let resolveReady
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve
+  })
+
+  const onLine = service.readyPattern
+    ? (line) => {
+        if (service.readyPattern.test(line)) resolveReady()
+      }
+    : null
+
   const child = spawn(service.command, service.args, {
     cwd: service.cwd,
     env: {
@@ -152,11 +171,13 @@ for (const service of services) {
   })
 
   children.set(service.name, child)
-  pipeLines(service, child.stdout, process.stdout)
-  pipeLines(service, child.stderr, process.stderr)
+  pipeLines(service, child.stdout, process.stdout, onLine)
+  pipeLines(service, child.stderr, process.stderr, onLine)
 
   child.on('exit', (code, signal) => {
     children.delete(service.name)
+    // Unblock the startup chain if the service dies before becoming ready.
+    resolveReady()
 
     const reason = signal ? `signal=${signal}` : `code=${code ?? 0}`
     const line = formatLine(service, color(`process exited (${reason})`, code ? ansi.red : ansi.dim))
@@ -167,6 +188,29 @@ for (const service of services) {
       if (code !== 0) process.exitCode = code ?? 1
     }
   })
+
+  if (service.readyPattern) {
+    const timeout = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const line = formatLine(
+          service,
+          color(`ready signal not seen in ${service.readyTimeoutMs}ms — starting next service anyway`, ansi.yellow),
+        )
+        if (line) process.stdout.write(`${line}\n`)
+        resolve()
+      }, service.readyTimeoutMs ?? 20000)
+      timer.unref?.()
+    })
+    return Promise.race([ready, timeout])
+  }
+
+  return ready
+}
+
+// Start services sequentially: each waits for the previous one to be ready.
+for (const service of services) {
+  if (shuttingDown) break
+  await startService(service)
 }
 
 process.on('SIGINT', () => stopAll('SIGINT'))
