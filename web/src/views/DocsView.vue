@@ -125,8 +125,8 @@ codex --profile model-bridge</code></pre>
               <p>浏览器回调到本机 `localhost:1455` 后，回到后台刷新检测账户。</p>
             </div>
             <div>
-              <strong>健康检查</strong>
-              <p>账户页可手动批量检查连通性；结果只记录最近状态，不会自动循环消耗额度。</p>
+              <strong>连通性测试</strong>
+              <p>账户页可对单个账户手动测试连通性并刷新配额；不会自动循环消耗额度。</p>
             </div>
           </div>
         </n-card>

@@ -19,13 +19,6 @@ interface AccountQuotaSnapshot {
   windows: AccountQuotaWindow[]
 }
 
-interface AccountHealthSnapshot {
-  status: 'healthy' | 'limited' | 'unhealthy'
-  checkedAt: number
-  latencyMs: number
-  message: string
-}
-
 interface Account {
   id: string
   provider: string
@@ -39,7 +32,6 @@ interface Account {
   groupName: string | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
-  health: AccountHealthSnapshot | null
 }
 
 /** A named account pool (distinct from the per-provider display grouping below). */
@@ -70,7 +62,6 @@ const loading = ref(true)
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
-const checkingAll = ref(false)
 
 // Account-pool grouping (feature), distinct from the per-provider display group.
 const groups = ref<GroupInfo[]>([])
@@ -120,12 +111,6 @@ const statusMeta: Record<string, { label: string; type: TagType }> = {
   rate_limited: { label: '限流冷却', type: 'warning' },
   error: { label: '异常', type: 'error' },
   disabled: { label: '已禁用', type: 'default' },
-}
-
-const healthMeta: Record<AccountHealthSnapshot['status'], { label: string; type: TagType }> = {
-  healthy: { label: '健康', type: 'success' },
-  limited: { label: '配额冷却', type: 'warning' },
-  unhealthy: { label: '异常', type: 'error' },
 }
 
 function isCoolingDown(row: Account) {
@@ -254,26 +239,6 @@ function renderStatus(row: Account) {
           ? h('span', { class: 'muted-cell' }, `至 ${formatShortTime(row.cooldownUntil)}`)
           : null,
       ],
-    },
-  )
-}
-
-function renderHealth(row: Account) {
-  const health = row.health
-  if (!health) return h('span', { class: 'muted-cell' }, '未检查')
-  const meta = healthMeta[health.status]
-  const tag = h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
-  const detail = `${health.message || meta.label}（${health.latencyMs}ms，${formatRelativePast(health.checkedAt)}）`
-  return h(
-    NTooltip,
-    { placement: 'top', trigger: 'hover' },
-    {
-      trigger: () =>
-        h('div', { class: 'health-cell' }, [
-          tag,
-          h('span', { class: 'muted-cell' }, formatRelativePast(health.checkedAt)),
-        ]),
-      default: () => detail,
     },
   )
 }
@@ -686,19 +651,6 @@ async function refreshQuota(row: Account) {
   }
 }
 
-async function checkAllHealth() {
-  checkingAll.value = true
-  try {
-    const { data } = await api.post('/admin/accounts/health/check', {})
-    message.success(`检查完成：健康 ${data.healthy}，冷却 ${data.limited}，异常 ${data.unhealthy}`)
-    await load()
-  } catch (e) {
-    message.error(errMsg(e, '批量健康检查失败'))
-  } finally {
-    checkingAll.value = false
-  }
-}
-
 function confirmDelete(row: Account) {
   dialog.warning({
     title: '删除账户',
@@ -726,7 +678,6 @@ const columns = computed<DataTableColumns<Account>>(() => [
     width: 110,
     render: renderStatus,
   },
-  { title: '健康', key: 'health', minWidth: 130, render: renderHealth },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
   { title: '优先级', key: 'weight', width: 110, render: renderPriority },
@@ -812,7 +763,6 @@ onBeforeUnmount(() => {
   <div>
     <div class="page-head">
       <n-button secondary @click="showGroups = true">管理分组</n-button>
-      <n-button secondary :loading="checkingAll" @click="checkAllHealth">健康检查</n-button>
       <n-button type="primary" @click="openAdd">添加账户</n-button>
     </div>
 
@@ -1105,13 +1055,6 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  white-space: nowrap;
-}
-
-:deep(.health-cell) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   white-space: nowrap;
 }
 

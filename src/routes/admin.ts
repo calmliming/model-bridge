@@ -9,7 +9,7 @@ import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey 
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountGroup, setAccountStatus, setAccountWeight } from '../accounts/manager'
 import { createGroup, deleteGroup, listGroups, updateGroup } from '../accounts/groups'
-import { AccountTestError, testAccountConnectivity, testAllAccountsConnectivity } from '../accounts/tester'
+import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
@@ -132,10 +132,6 @@ const importTokenSchema = z.object({
   refreshToken: z.string().optional(),
   expiresAt: z.number().int().positive().optional(),
 })
-
-const accountHealthCheckSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']).optional(),
-}).optional()
 
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -623,14 +619,6 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
     },
   )
-
-  app.post('/api/admin/accounts/health/check', { preHandler: requireAdmin }, async (request, reply) => {
-    const body = accountHealthCheckSchema.safeParse(request.body ?? {})
-    if (!body.success) {
-      return reply.code(400).send({ error: 'invalid request body' })
-    }
-    return await testAllAccountsConnectivity(body.data?.provider)
-  })
 
   app.delete<{ Params: { id: string } }>(
     '/api/admin/accounts/:id',
