@@ -1,30 +1,26 @@
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import type { MenuOption } from 'naive-ui'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-function link(to: string, label: string) {
-  return () => h(RouterLink, { to }, { default: () => label })
-}
-
-const menuOptions: MenuOption[] = [
-  { label: link('/app', '概览'), key: 'user-overview' },
-  { label: link('/app/keys', 'API Keys'), key: 'user-keys' },
-  { label: link('/app/usage', '用量流水'), key: 'user-usage' },
+const menu = [
+  { to: '/app', key: 'user-overview', label: '概览' },
+  { to: '/app/keys', key: 'user-keys', label: 'API Keys' },
+  { to: '/app/usage', key: 'user-usage', label: '用量流水' },
 ]
 
-const activeKey = computed(() => route.name as string)
-const pageTitle = computed(() => ({
+const titleMap: Record<string, string> = {
   'user-overview': '用户概览',
   'user-keys': 'API Keys',
   'user-usage': '用量流水',
-}[activeKey.value] ?? '用户中心')
-)
+}
+
+const activeKey = computed(() => route.name as string)
+const pageTitle = computed(() => titleMap[activeKey.value] ?? '用户中心')
 
 function logout() {
   auth.clear()
@@ -33,142 +29,53 @@ function logout() {
 </script>
 
 <template>
-  <n-layout class="user-layout" has-sider>
-    <n-layout-sider
-      bordered
-      class="user-sider"
-      :width="232"
-      content-style="height: 100%; display: flex; flex-direction: column;"
+  <div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-dark-950">
+    <aside
+      class="flex w-58 flex-shrink-0 flex-col border-r border-gray-200 bg-white/90 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/90"
+      style="width: 232px"
     >
-      <div class="brand">
-        <span class="brand-mark"><span /></span>
-        <div>
-          <strong>Model Bridge</strong>
-          <small>User Console</small>
+      <div class="flex items-center gap-3 px-5 py-5">
+        <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow">
+          <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
+        </span>
+        <div class="leading-tight">
+          <strong class="block text-[15px] font-bold text-gray-900 dark:text-white">Model Bridge</strong>
+          <small class="text-xs text-gray-400 dark:text-dark-400">User Console</small>
         </div>
       </div>
-      <n-menu class="side-menu" :value="activeKey" :options="menuOptions" :indent="18" />
-      <div class="sider-footer">
-        <strong>{{ auth.username }}</strong>
-        <span>钱包账户</span>
+
+      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-2">
+        <RouterLink
+          v-for="item in menu"
+          :key="item.key"
+          :to="item.to"
+          class="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+          :class="
+            activeKey === item.key
+              ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white'
+          "
+        >
+          {{ item.label }}
+        </RouterLink>
+      </nav>
+
+      <div class="m-4 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 dark:border-dark-700 dark:bg-dark-800/60">
+        <strong class="block text-[13px] text-gray-900 dark:text-white">{{ auth.username }}</strong>
+        <span class="text-xs text-gray-400 dark:text-dark-400">钱包账户</span>
       </div>
-    </n-layout-sider>
-    <n-layout class="main-layout">
-      <n-layout-header class="header">
-        <div class="header-title">{{ pageTitle }}</div>
-        <n-button secondary size="small" @click="logout">退出登录</n-button>
-      </n-layout-header>
-      <n-layout-content class="content" :native-scrollbar="false">
-        <div class="content-inner">
-          <router-view />
-        </div>
-      </n-layout-content>
-    </n-layout>
-  </n-layout>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header
+        class="flex h-[68px] flex-shrink-0 items-center justify-between border-b border-gray-200 bg-white/80 px-7 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/80"
+      >
+        <h1 class="text-lg font-bold text-gray-900 dark:text-white">{{ pageTitle }}</h1>
+        <button class="btn btn-secondary btn-sm" @click="logout">退出登录</button>
+      </header>
+      <main class="min-w-0 flex-1 overflow-y-auto p-7">
+        <router-view />
+      </main>
+    </div>
+  </div>
 </template>
-
-<style scoped>
-.user-layout {
-  height: 100vh;
-  height: 100dvh;
-  background: #f6f8fb;
-}
-
-.user-sider {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(18px);
-}
-
-.brand {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 22px 22px 20px;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: #0f172a;
-}
-
-.brand-mark span {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #22c55e, #38bdf8);
-  transform: rotate(45deg);
-}
-
-.brand strong,
-.brand small,
-.sider-footer strong,
-.sider-footer span {
-  display: block;
-}
-
-.brand strong {
-  color: #0f172a;
-  font-size: 17px;
-}
-
-.brand small,
-.sider-footer span {
-  color: rgba(15, 23, 42, 0.52);
-  font-size: 12px;
-}
-
-.side-menu {
-  flex: 1;
-}
-
-.side-menu :deep(.n-menu-item-content) {
-  margin: 3px 12px;
-  border-radius: 10px;
-}
-
-.sider-footer {
-  margin: 16px;
-  padding: 14px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 8px;
-  background: #f8fafc;
-}
-
-.main-layout {
-  min-width: 0;
-  background: transparent;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 70px;
-  padding: 0 28px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.74);
-  backdrop-filter: blur(18px);
-}
-
-.header-title {
-  color: #0f172a;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.content {
-  height: calc(100vh - 70px);
-  height: calc(100dvh - 70px);
-  min-width: 0;
-  padding: 26px 28px;
-}
-
-.content-inner {
-  width: 100%;
-  min-width: 0;
-}
-</style>

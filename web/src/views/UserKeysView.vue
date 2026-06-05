@@ -240,7 +240,7 @@ onMounted(load)
       <n-data-table :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1320" />
     </n-card>
 
-    <n-modal v-model:show="showCreate" preset="card" title="新建 API Key" style="width: 520px">
+    <n-modal v-model:show="showCreate" title="新建 API Key" :width="520">
       <n-form label-placement="top">
         <n-form-item label="名称">
           <n-input v-model:value="form.name" placeholder="例如：工作站" />
@@ -263,7 +263,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal :show="!!newKey" preset="card" title="API Key 已创建" style="width: 520px" @update:show="(shown: boolean) => { if (!shown) newKey = null }">
+    <n-modal :show="!!newKey" title="API Key 已创建" :width="520" @update:show="(shown: boolean) => { if (!shown) newKey = null }">
       <n-alert type="warning" style="margin-bottom: 12px">请立即复制并妥善保存。</n-alert>
       <n-input :value="newKey ?? ''" readonly />
       <template #footer>
@@ -273,7 +273,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showEdit" preset="card" title="编辑 API Key" style="width: 520px">
+    <n-modal v-model:show="showEdit" title="编辑 API Key" :width="520">
       <n-form label-placement="top">
         <n-form-item label="名称">
           <n-input v-model:value="editForm.name" />

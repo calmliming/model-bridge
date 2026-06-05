@@ -207,7 +207,7 @@ onMounted(load)
       <n-data-table :columns="columns" :data="codes" :loading="loading" :bordered="false" :scroll-x="1180" />
     </n-card>
 
-    <n-modal v-model:show="showGenerate" preset="card" title="生成兑换码" style="width: 460px">
+    <n-modal v-model:show="showGenerate" title="生成兑换码" :width="460">
       <n-form label-placement="top">
         <n-form-item label="生成数量（1–1000）">
           <n-input-number v-model:value="genForm.count" :min="1" :max="1000" style="width: 100%" />

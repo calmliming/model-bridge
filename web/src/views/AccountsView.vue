@@ -346,8 +346,9 @@ function renderGroupCell(row: Account) {
     consistentMenuWidth: false,
     class: 'group-select',
     'aria-label': `${row.name} 分组`,
-    onUpdateValue: (value: string[] | null) => {
-      void setGroups(row, value ?? [])
+    onUpdateValue: (value: string | number | (string | number)[] | null) => {
+      const groupIds = Array.isArray(value) ? value.map(String) : []
+      void setGroups(row, groupIds)
     },
   })
 }
@@ -823,7 +824,7 @@ onBeforeUnmount(() => {
       />
     </n-card>
 
-    <n-modal v-model:show="showAdd" preset="card" title="添加上游账户" style="width: 520px">
+    <n-modal v-model:show="showAdd" title="添加上游账户" :width="520">
       <div v-if="step === 'name'">
         <n-form label-placement="top">
           <n-form-item label="服务商">
@@ -988,7 +989,7 @@ onBeforeUnmount(() => {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showGroups" preset="card" title="管理账号分组" style="width: 640px">
+    <n-modal v-model:show="showGroups" title="管理账号分组" :width="640">
       <p class="group-hint">
         账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
         倍率作用于计费：绑定该组的 Key 按「成本价 × 倍率」扣费，1.0 为不加价，可低于 1 折价。

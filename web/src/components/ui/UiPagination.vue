@@ -1,0 +1,73 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    page?: number
+    pageSize?: number
+    itemCount?: number
+    disabled?: boolean
+  }>(),
+  { page: 1, pageSize: 10, itemCount: 0 },
+)
+
+const emit = defineEmits<{ (e: 'update:page', v: number): void }>()
+
+const pageCount = computed(() => Math.max(1, Math.ceil(props.itemCount / props.pageSize)))
+
+// Compact page window around the current page.
+const pages = computed(() => {
+  const total = pageCount.value
+  const cur = props.page
+  const out: (number | '...')[] = []
+  const add = (n: number | '...') => out.push(n)
+  if (total <= 7) {
+    for (let i = 1; i <= total; i++) add(i)
+  } else {
+    add(1)
+    if (cur > 3) add('...')
+    for (let i = Math.max(2, cur - 1); i <= Math.min(total - 1, cur + 1); i++) add(i)
+    if (cur < total - 2) add('...')
+    add(total)
+  }
+  return out
+})
+
+function go(p: number) {
+  if (props.disabled) return
+  if (p < 1 || p > pageCount.value || p === props.page) return
+  emit('update:page', p)
+}
+</script>
+
+<template>
+  <div class="flex items-center gap-1.5" :class="disabled && 'pointer-events-none opacity-50'">
+    <button class="pg-btn" :disabled="page <= 1" @click="go(page - 1)">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+      </svg>
+    </button>
+    <template v-for="(p, i) in pages" :key="i">
+      <span v-if="p === '...'" class="px-1 text-sm text-gray-400">…</span>
+      <button
+        v-else
+        class="pg-btn"
+        :class="p === page ? 'border-primary-500 bg-primary-500 text-white' : ''"
+        @click="go(p as number)"
+      >
+        {{ p }}
+      </button>
+    </template>
+    <button class="pg-btn" :disabled="page >= pageCount" @click="go(page + 1)">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+      </svg>
+    </button>
+  </div>
+</template>
+
+<style scoped>
+.pg-btn {
+  @apply flex h-8 min-w-[2rem] items-center justify-center rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-300 dark:hover:bg-dark-700;
+}
+</style>

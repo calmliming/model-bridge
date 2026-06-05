@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -131,7 +131,8 @@ async function register() {
         </div>
       </section>
 
-      <n-card class="login-card" :bordered="false" role="main">
+      <div class="login-card" role="main">
+        <div class="login-card-inner">
         <div class="form-head">
           <div>
             <div class="form-eyebrow">Unified Console</div>
@@ -195,7 +196,8 @@ async function register() {
             已有账号？<a @click="mode = 'login'">返回登录</a>
           </p>
         </n-form>
-      </n-card>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -434,7 +436,7 @@ async function register() {
   backdrop-filter: blur(22px);
 }
 
-.login-card :deep(.n-card__content) {
+.login-card-inner {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -496,32 +498,14 @@ async function register() {
   text-decoration: underline;
 }
 
-.login-form :deep(.n-form-item-label) {
+.login-form :deep(.field-label) {
   color: rgba(23, 32, 51, 0.72);
   font-weight: 600;
 }
 
-.login-form :deep(.n-input) {
-  --n-border-radius: 14px;
-  --n-border: 1px solid rgba(15, 23, 42, 0.1);
-  --n-border-hover: 1px solid rgba(20, 184, 166, 0.55);
-  --n-border-focus: 1px solid rgba(20, 184, 166, 0.7);
-  --n-box-shadow-focus: 0 0 0 3px rgba(20, 184, 166, 0.12);
-  --n-color: rgba(255, 255, 255, 0.72);
-}
-
-.login-form :deep(.n-button) {
-  --n-border-radius: 14px;
-  --n-color: #111827;
-  --n-color-hover: #0f172a;
-  --n-color-pressed: #020617;
-  --n-color-focus: #111827;
-  --n-border: 1px solid #111827;
-  --n-border-hover: 1px solid #0f172a;
-  --n-border-pressed: 1px solid #020617;
-  --n-border-focus: 1px solid #111827;
+.login-form :deep(.btn) {
   margin-top: 8px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 @media (max-width: 900px) {
@@ -556,7 +540,7 @@ async function register() {
     font-size: 46px;
   }
 
-  .login-card :deep(.n-card__content) {
+  .login-card-inner {
     min-height: auto;
     padding: 32px 26px 28px;
   }

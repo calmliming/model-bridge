@@ -751,9 +751,8 @@ onMounted(() => {
     <!-- create -->
     <n-modal
       v-model:show="showCreate"
-      preset="card"
       title="新建 API Key"
-      style="width: 520px"
+      :width="520"
     >
       <n-form label-placement="top">
         <n-form-item label="名称">
@@ -810,9 +809,8 @@ onMounted(() => {
     <!-- new-key reveal -->
     <n-modal
       :show="!!newKey"
-      preset="card"
       title="API Key 已创建"
-      style="width: 480px"
+      :width="480"
       @update:show="closeNewKeyModal"
     >
       <n-alert type="warning" style="margin-bottom: 12px">
@@ -829,9 +827,8 @@ onMounted(() => {
 
     <n-modal
       :show="!!manualCopy"
-      preset="card"
       title="请手动复制"
-      style="width: 480px"
+      :width="480"
       @update:show="(shown: boolean) => { if (!shown) manualCopy = null }"
     >
       <n-alert type="info" style="margin-bottom: 12px">
@@ -850,7 +847,7 @@ onMounted(() => {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showUse" preset="card" :title="`使用 ${useKeyName}`" style="width: 680px">
+    <n-modal v-model:show="showUse" :title="`使用 ${useKeyName}`" :width="680">
       <n-tabs type="line" animated>
         <n-tab-pane name="claude" tab="Claude Code">
           <pre><code>{{ snippets.claude }}</code></pre>
@@ -887,7 +884,7 @@ onMounted(() => {
     </n-modal>
 
     <!-- edit limits -->
-    <n-modal v-model:show="showEdit" preset="card" title="编辑 API Key" style="width: 520px">
+    <n-modal v-model:show="showEdit" title="编辑 API Key" :width="520">
       <n-form label-placement="top">
         <n-form-item label="名称">
           <n-input v-model:value="editForm.name" />

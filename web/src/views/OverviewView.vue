@@ -418,9 +418,8 @@ function openRequestInput(row: DashboardRecentLog) {
 
     <n-modal
       :show="!!selectedLog"
-      preset="card"
       title="请求输入"
-      style="width: min(760px, calc(100vw - 32px))"
+      width="min(760px, calc(100vw - 32px))"
       @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
     >
       <n-input

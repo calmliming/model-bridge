@@ -295,7 +295,7 @@ onMounted(load)
       </n-grid>
     </n-spin>
 
-    <n-modal v-model:show="showRecharge" preset="card" title="发起充值" style="width: 420px">
+    <n-modal v-model:show="showRecharge" title="发起充值" :width="420">
       <n-form label-placement="top">
         <n-form-item label="充值金额（USD）">
           <n-input-number v-model:value="rechargeAmount" :min="0.01" :precision="2" style="width: 100%" />
@@ -318,7 +318,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showRedeem" preset="card" title="兑换码充值" style="width: 420px">
+    <n-modal v-model:show="showRedeem" title="兑换码充值" :width="420">
       <n-form label-placement="top">
         <n-form-item label="兑换码">
           <n-input v-model:value="redeemInput" placeholder="输入兑换码" @keyup.enter="redeem" />
@@ -332,7 +332,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showStore" preset="card" title="套餐商店" style="width: 560px">
+    <n-modal v-model:show="showStore" title="套餐商店" :width="560">
       <p v-if="!storePlans.length" class="sub-empty">暂无可购买的套餐。</p>
       <div v-for="plan in storePlans" :key="plan.id" class="store-card">
         <div class="store-info">
@@ -355,7 +355,7 @@ onMounted(load)
     </n-modal>
 
     <!-- 支付二维码弹窗 -->
-    <n-modal v-model:show="showPaymentQr" preset="card" title="扫码支付" style="max-width: 480px">
+    <n-modal v-model:show="showPaymentQr" title="扫码支付" :width="480">
       <div v-if="currentPaymentOrder" style="text-align: center">
         <n-alert type="info" style="margin-bottom: 16px">
           请使用{{ providerLabels[currentPaymentOrder.provider] }}扫描下方二维码完成支付

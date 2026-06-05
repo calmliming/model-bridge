@@ -183,7 +183,7 @@ onMounted(load)
       <n-data-table :columns="columns" :data="plans" :loading="loading" :bordered="false" :scroll-x="1000" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editing ? '编辑套餐' : '新建套餐'" style="width: 480px">
+    <n-modal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
       <n-form label-placement="top">
         <n-form-item label="套餐名称">
           <n-input v-model:value="form.name" placeholder="如：Claude 月卡" />

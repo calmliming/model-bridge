@@ -345,7 +345,7 @@ onMounted(load)
       <n-data-table :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1260" />
     </n-card>
 
-    <n-modal v-model:show="showInvite" preset="card" title="邀请用户" style="width: 460px">
+    <n-modal v-model:show="showInvite" title="邀请用户" :width="460">
       <n-form label-placement="top">
         <n-form-item label="邮箱">
           <n-input v-model:value="inviteForm.email" placeholder="user@example.com" />
@@ -362,7 +362,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal :show="!!inviteResult" preset="card" title="邀请 / 重置链接" style="width: 560px" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
+    <n-modal :show="!!inviteResult" title="邀请 / 重置链接" :width="560" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
       <n-alert type="warning" style="margin-bottom: 12px">链接只在这里显示一次，用户打开后可设置新密码。</n-alert>
       <n-input :value="inviteResult?.inviteUrl ?? ''" readonly />
       <div class="subline">过期时间：{{ formatTime(inviteResult?.expiresAt) }}</div>
@@ -373,7 +373,7 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showAdjust" preset="card" :title="`调整余额：${selectedUser?.name ?? ''}`" style="width: 460px">
+    <n-modal v-model:show="showAdjust" :title="`调整余额：${selectedUser?.name ?? ''}`" :width="460">
       <n-form label-placement="top">
         <n-form-item label="金额（USD，可为负数）">
           <n-input-number v-model:value="adjustForm.amount" :step="1" style="width: 100%" />
@@ -390,15 +390,15 @@ onMounted(load)
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showWallet" preset="card" :title="`钱包流水：${selectedUser?.name ?? ''}`" style="width: 760px">
+    <n-modal v-model:show="showWallet" :title="`钱包流水：${selectedUser?.name ?? ''}`" :width="760">
       <n-data-table :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
     </n-modal>
 
-    <n-modal v-model:show="showUsage" preset="card" :title="`用量：${selectedUser?.name ?? ''}`" style="width: 860px">
+    <n-modal v-model:show="showUsage" :title="`用量：${selectedUser?.name ?? ''}`" :width="860">
       <n-data-table :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="780" />
     </n-modal>
 
-    <n-modal v-model:show="showSubs" preset="card" :title="`订阅：${selectedUser?.name ?? ''}`" style="width: 560px">
+    <n-modal v-model:show="showSubs" :title="`订阅：${selectedUser?.name ?? ''}`" :width="560">
       <div class="assign-row">
         <n-select
           v-model:value="assignPlanId"

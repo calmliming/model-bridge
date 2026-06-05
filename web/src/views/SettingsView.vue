@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -70,23 +70,22 @@ async function changePassword() {
 </script>
 
 <template>
-  <div>
-    <n-card class="settings-card surface-card" title="管理员账户" :bordered="false">
+  <div class="space-y-5">
+    <n-card class="max-w-xl" title="管理员账户">
       <n-form label-placement="top">
         <n-form-item label="当前用户">
           <n-input :value="auth.username ?? ''" readonly />
         </n-form-item>
         <n-form-item label="当前密码">
-          <n-input v-model:value="currentPassword" type="password" show-password-on="click" />
+          <n-input v-model:value="currentPassword" type="password" />
         </n-form-item>
         <n-form-item label="新密码">
-          <n-input v-model:value="newPassword" type="password" show-password-on="click" />
+          <n-input v-model:value="newPassword" type="password" />
         </n-form-item>
         <n-form-item label="确认新密码">
           <n-input
             v-model:value="confirmPassword"
             type="password"
-            show-password-on="click"
             @keyup.enter="changePassword"
           />
         </n-form-item>
@@ -94,41 +93,19 @@ async function changePassword() {
       </n-form>
     </n-card>
 
-    <n-card class="settings-card surface-card" title="用户注册" :bordered="false">
-      <div class="setting-row">
+    <n-card class="max-w-xl" title="用户注册">
+      <div class="flex items-center justify-between gap-5">
         <div>
-          <strong>开放用户自助注册</strong>
-          <p class="setting-hint">关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。</p>
+          <strong class="text-gray-900 dark:text-white">开放用户自助注册</strong>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。
+          </p>
         </div>
         <n-switch
           :value="registrationEnabled"
-          :loading="togglingRegistration"
           @update:value="toggleRegistration"
         />
       </div>
     </n-card>
   </div>
 </template>
-
-<style scoped>
-.settings-card {
-  max-width: 520px;
-}
-
-.settings-card + .settings-card {
-  margin-top: 18px;
-}
-
-.setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.setting-hint {
-  margin: 6px 0 0;
-  color: rgba(15, 23, 42, 0.52);
-  font-size: 13px;
-}
-</style>
