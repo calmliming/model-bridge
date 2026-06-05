@@ -673,7 +673,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   }
 
   .metric-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .model-usage-grid {
@@ -682,6 +682,20 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 
   .lower-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-head h2 {
+    font-size: 20px;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-card .metric-value {
+    font-size: 24px;
   }
 }
 </style>

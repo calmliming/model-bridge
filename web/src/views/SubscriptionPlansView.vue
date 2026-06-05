@@ -194,30 +194,30 @@ onMounted(load)
         <n-form-item label="绑定账号分组">
           <n-select v-model:value="form.groupId" :options="groupOptions" placeholder="订阅授予的调度分组" />
         </n-form-item>
-        <n-grid :cols="2" :x-gap="12">
-          <n-gi>
+        <n-grid :cols="2" :x-gap="12" :y-gap="2" responsive="screen">
+          <n-gi span="2 s:1">
             <n-form-item label="售价（USD，0=免费）">
               <n-input-number v-model:value="form.price" :min="0" :precision="2" style="width: 100%" />
             </n-form-item>
           </n-gi>
-          <n-gi>
+          <n-gi span="2 s:1">
             <n-form-item label="有效期（天）">
               <n-input-number v-model:value="form.validityDays" :min="1" :precision="0" style="width: 100%" />
             </n-form-item>
           </n-gi>
         </n-grid>
-        <n-grid :cols="3" :x-gap="10">
-          <n-gi>
+        <n-grid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
+          <n-gi span="3 s:1">
             <n-form-item label="日限额">
               <n-input-number v-model:value="form.dailyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
             </n-form-item>
           </n-gi>
-          <n-gi>
+          <n-gi span="3 s:1">
             <n-form-item label="周限额">
               <n-input-number v-model:value="form.weeklyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
             </n-form-item>
           </n-gi>
-          <n-gi>
+          <n-gi span="3 s:1">
             <n-form-item label="月限额">
               <n-input-number v-model:value="form.monthlyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
             </n-form-item>

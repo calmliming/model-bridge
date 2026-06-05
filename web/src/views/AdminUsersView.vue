@@ -427,6 +427,7 @@ onMounted(load)
 <style scoped>
 .assign-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 14px;
 }

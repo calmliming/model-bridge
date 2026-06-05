@@ -131,18 +131,18 @@
     @apply hover:-translate-y-0.5 hover:border-gray-200 hover:shadow-card-hover dark:hover:border-dark-600;
   }
   .card-body {
-    @apply p-5;
+    @apply p-4 sm:p-5;
   }
   .card-header {
-    @apply flex items-center justify-between gap-4 border-b border-gray-100 px-5 py-4 dark:border-dark-700;
+    @apply flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-dark-700 sm:gap-4 sm:px-5 sm:py-4;
   }
 
   /* ============ 页面头部 ============ */
   .page-head {
-    @apply mb-6 flex flex-wrap items-center justify-between gap-4;
+    @apply mb-5 flex flex-wrap items-center justify-between gap-3 sm:mb-6 sm:gap-4;
   }
   .page-title {
-    @apply text-2xl font-bold text-gray-900 dark:text-white;
+    @apply text-xl font-bold text-gray-900 dark:text-white sm:text-2xl;
   }
   .page-subtitle {
     @apply mt-1 text-sm text-gray-500 dark:text-dark-400;
@@ -216,16 +216,16 @@
     @apply flex max-h-[92vh] w-full flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-dark-700 dark:bg-dark-800;
   }
   .modal-header {
-    @apply flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-5 py-4 dark:border-dark-700;
+    @apply flex flex-shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3.5 dark:border-dark-700 sm:px-5 sm:py-4;
   }
   .modal-title {
-    @apply text-lg font-semibold text-gray-900 dark:text-white;
+    @apply text-base font-semibold text-gray-900 dark:text-white sm:text-lg;
   }
   .modal-body {
-    @apply flex-1 overflow-y-auto px-5 py-4;
+    @apply flex-1 overflow-y-auto px-4 py-4 sm:px-5;
   }
   .modal-footer {
-    @apply flex flex-shrink-0 items-center justify-end gap-3 border-t border-gray-200 px-5 py-4 dark:border-dark-700;
+    @apply flex flex-shrink-0 items-center justify-end gap-3 border-t border-gray-200 px-4 py-3.5 dark:border-dark-700 sm:px-5 sm:py-4;
   }
 
   /* 模态动画 */

@@ -277,17 +277,17 @@ onMounted(load)
       </n-card>
 
       <n-grid :cols="2" :x-gap="18" :y-gap="18" responsive="screen">
-        <n-gi>
+        <n-gi span="2 m:1">
           <n-card title="钱包流水" :bordered="false">
             <n-data-table :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
           </n-card>
         </n-gi>
-        <n-gi>
+        <n-gi span="2 m:1">
           <n-card title="近期用量" :bordered="false">
             <n-data-table :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
           </n-card>
         </n-gi>
-        <n-gi>
+        <n-gi span="2 m:1">
           <n-card title="充值订单" :bordered="false">
             <n-data-table :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
           </n-card>
