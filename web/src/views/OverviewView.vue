@@ -74,6 +74,10 @@ interface DashboardOverview {
     errorAccountCount: number
     requestCount: number
     requests24h: number
+    tokens24h: number
+    cost24h: number
+    success24h: number
+    avgLatencyMs24h: number
     tokens30d: number
     cost30d: number
   }
@@ -110,6 +114,10 @@ const emptyTotals: DashboardOverview['totals'] = {
   errorAccountCount: 0,
   requestCount: 0,
   requests24h: 0,
+  tokens24h: 0,
+  cost24h: 0,
+  success24h: 0,
+  avgLatencyMs24h: 0,
   tokens30d: 0,
   cost30d: 0,
 }
@@ -131,6 +139,12 @@ const providerColors: Record<string, string> = {
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
 const providerRows = computed(() => dashboard.value?.byProvider ?? [])
 
+const successRate24h = computed(() => {
+  const { requests24h, success24h } = totals.value
+  if (requests24h <= 0) return null
+  return (success24h / requests24h) * 100
+})
+
 const cards = computed(() => [
   {
     label: '可用账户',
@@ -149,6 +163,33 @@ const cards = computed(() => [
     value: formatNumber(totals.value.requests24h),
     hint: `累计 ${formatNumber(totals.value.requestCount)} 次`,
     tone: 'violet',
+  },
+  {
+    label: '24h 成功率',
+    value: successRate24h.value == null ? '—' : `${successRate24h.value.toFixed(1)}%`,
+    hint:
+      successRate24h.value == null
+        ? '暂无请求'
+        : `成功 ${formatNumber(totals.value.success24h)} · 失败 ${formatNumber(totals.value.requests24h - totals.value.success24h)}`,
+    tone: 'teal',
+  },
+  {
+    label: '24h 平均延迟',
+    value: totals.value.avgLatencyMs24h > 0 ? `${formatNumber(totals.value.avgLatencyMs24h)} ms` : '—',
+    hint: '基于近 24h 请求',
+    tone: 'cyan',
+  },
+  {
+    label: '24h Tokens',
+    value: formatNumber(totals.value.tokens24h),
+    hint: `费用 ${formatCost(totals.value.cost24h)}`,
+    tone: 'indigo',
+  },
+  {
+    label: '24h 费用',
+    value: formatCost(totals.value.cost24h),
+    hint: `${formatNumber(totals.value.tokens24h)} tokens`,
+    tone: 'rose',
   },
   {
     label: '30天成本',
@@ -469,6 +510,22 @@ function openRequestInput(row: DashboardRecentLog) {
 
 .stat-card.is-amber::after {
   background: #f59e0b;
+}
+
+.stat-card.is-teal::after {
+  background: #0d9488;
+}
+
+.stat-card.is-cyan::after {
+  background: #06b6d4;
+}
+
+.stat-card.is-indigo::after {
+  background: #6366f1;
+}
+
+.stat-card.is-rose::after {
+  background: #f43f5e;
 }
 
 .stat-label {

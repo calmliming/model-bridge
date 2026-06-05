@@ -6,6 +6,7 @@ import { requireUser } from '../middleware/userAuth'
 import {
   acceptInvite,
   listUserUsage,
+  userUsageSummary,
   UserManagerError,
   verifyUserCredentials,
 } from '../users/manager'
@@ -237,6 +238,10 @@ export function registerUserRoutes(app: FastifyInstance): void {
       return listUserUsage(request.currentUser!.id, query.data.page, query.data.pageSize)
     },
   )
+
+  app.get('/api/users/usage/summary', { preHandler: requireUser }, async (request) => {
+    return userUsageSummary(request.currentUser!.id)
+  })
 
   app.get('/api/users/keys', { preHandler: requireUser }, async (request) => {
     return { keys: await listApiKeysForUser(request.currentUser!.id) }

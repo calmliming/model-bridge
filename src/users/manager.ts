@@ -383,3 +383,51 @@ export async function listUserUsage(
     logs: logs.rows.map(asUsageLog),
   }
 }
+
+export interface UserUsageSummary {
+  requests24h: number
+  tokens24h: number
+  cost24h: number
+  requests30d: number
+  tokens30d: number
+  cost30d: number
+  requestsTotal: number
+  success30d: number
+}
+
+const USAGE_MS_PER_DAY = 86_400_000
+
+export async function userUsageSummary(userId: string): Promise<UserUsageSummary> {
+  const now = Date.now()
+  const since24h = now - USAGE_MS_PER_DAY
+  const since30d = now - 30 * USAGE_MS_PER_DAY
+  const tokenSum =
+    'input_tokens + output_tokens + cache_create_tokens + cache_read_tokens'
+  const { rows } = await pool.query<Record<string, unknown>>(
+    `SELECT
+       (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS requests24h,
+       (SELECT COALESCE(SUM(${tokenSum}), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS tokens24h,
+       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS cost24h,
+       (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS requests30d,
+       (SELECT COALESCE(SUM(${tokenSum}), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS tokens30d,
+       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS cost30d,
+       (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1) AS requestsTotal,
+       (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $3 AND status = 'success') AS success30d`,
+    [userId, since24h, since30d],
+  )
+  const r = rows[0] ?? {}
+  const num = (v: unknown): number => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return {
+    requests24h: num(r.requests24h),
+    tokens24h: num(r.tokens24h),
+    cost24h: num(r.cost24h),
+    requests30d: num(r.requests30d),
+    tokens30d: num(r.tokens30d),
+    cost30d: num(r.cost30d),
+    requestsTotal: num(r.requeststotal),
+    success30d: num(r.success30d),
+  }
+}

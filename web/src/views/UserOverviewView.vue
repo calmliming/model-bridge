@@ -51,6 +51,17 @@ interface Subscription {
   monthlyRemaining: number | null
 }
 
+interface UsageSummary {
+  requests24h: number
+  tokens24h: number
+  cost24h: number
+  requests30d: number
+  tokens30d: number
+  cost30d: number
+  requestsTotal: number
+  success30d: number
+}
+
 interface StorePlan {
   id: string
   name: string
@@ -82,8 +93,70 @@ const user = ref<UserMe | null>(null)
 const transactions = ref<WalletTransaction[]>([])
 const usageLogs = ref<UsageLog[]>([])
 const paymentOrders = ref<PaymentOrder[]>([])
+const summary = ref<UsageSummary | null>(null)
 
-const totalRecentCost = computed(() => usageLogs.value.reduce((sum, row) => sum + row.cost, 0))
+const emptySummary: UsageSummary = {
+  requests24h: 0,
+  tokens24h: 0,
+  cost24h: 0,
+  requests30d: 0,
+  tokens30d: 0,
+  cost30d: 0,
+  requestsTotal: 0,
+  success30d: 0,
+}
+
+const stat = computed(() => summary.value ?? emptySummary)
+
+const successRate30d = computed(() => {
+  const { requests30d, success30d } = stat.value
+  if (requests30d <= 0) return null
+  return (success30d / requests30d) * 100
+})
+
+const activeSubscriptions = computed(
+  () => subscriptions.value.filter((s) => s.status === 'active').length,
+)
+
+function formatNumber(n: number): string {
+  return Math.round(n).toLocaleString('en-US')
+}
+
+const metricCards = computed(() => [
+  {
+    label: '24h 请求',
+    value: formatNumber(stat.value.requests24h),
+    hint: `累计 ${formatNumber(stat.value.requestsTotal)} 次`,
+    tone: 'violet',
+  },
+  {
+    label: '24h Tokens',
+    value: formatNumber(stat.value.tokens24h),
+    hint: `费用 ${formatUsd(stat.value.cost24h)}`,
+    tone: 'indigo',
+  },
+  {
+    label: '24h 费用',
+    value: formatUsd(stat.value.cost24h),
+    hint: `${formatNumber(stat.value.tokens24h)} tokens`,
+    tone: 'rose',
+  },
+  {
+    label: '30天 费用',
+    value: formatUsd(stat.value.cost30d),
+    hint: `${formatNumber(stat.value.requests30d)} 次 · ${formatNumber(stat.value.tokens30d)} tokens`,
+    tone: 'amber',
+  },
+  {
+    label: '30天 成功率',
+    value: successRate30d.value == null ? '—' : `${successRate30d.value.toFixed(1)}%`,
+    hint:
+      successRate30d.value == null
+        ? '暂无请求'
+        : `成功 ${formatNumber(stat.value.success30d)} / ${formatNumber(stat.value.requests30d)}`,
+    tone: 'teal',
+  },
+])
 
 const providerLabels: Record<string, string> = {
   manual: '线下转账',
@@ -98,12 +171,13 @@ function formatUsd(value: number): string {
 async function load() {
   loading.value = true
   try {
-    const [walletRes, usageRes, ordersRes, providersRes, subsRes] = await Promise.all([
+    const [walletRes, usageRes, ordersRes, providersRes, subsRes, summaryRes] = await Promise.all([
       api.get('/users/wallet'),
       api.get('/users/usage', { params: { pageSize: 8 } }),
       api.get('/users/payment-orders', { params: { pageSize: 8 } }),
       api.get('/users/payment-providers'),
       api.get('/users/subscriptions'),
+      api.get('/users/usage/summary'),
     ])
     user.value = walletRes.data.user
     transactions.value = walletRes.data.transactions
@@ -111,6 +185,7 @@ async function load() {
     paymentOrders.value = ordersRes.data.orders
     availableProviders.value = providersRes.data.providers
     subscriptions.value = subsRes.data.subscriptions
+    summary.value = summaryRes.data
     if (availableProviders.value.length > 0) {
       selectedProvider.value = availableProviders.value[0]!
     }
@@ -240,21 +315,25 @@ onMounted(load)
   <div>
     <n-spin :show="loading">
       <div class="metric-grid">
-        <n-card class="metric-card" :bordered="false">
+        <n-card class="metric-card is-balance" :bordered="false">
           <span>钱包余额</span>
           <strong :class="{ danger: (user?.balance ?? 0) <= 0 }">{{ formatUsd(user?.balance ?? 0) }}</strong>
+          <small class="metric-hint">{{ activeSubscriptions }} 个生效订阅</small>
           <n-space :size="8">
             <n-button size="small" secondary type="primary" @click="showRecharge = true">充值</n-button>
             <n-button size="small" secondary @click="showRedeem = true">兑换码</n-button>
           </n-space>
         </n-card>
-        <n-card class="metric-card" :bordered="false">
-          <span>近期请求</span>
-          <strong>{{ usageLogs.length }}</strong>
-        </n-card>
-        <n-card class="metric-card" :bordered="false">
-          <span>近期成本</span>
-          <strong>{{ formatUsd(totalRecentCost) }}</strong>
+        <n-card
+          v-for="card in metricCards"
+          :key="card.label"
+          class="metric-card"
+          :class="`is-${card.tone}`"
+          :bordered="false"
+        >
+          <span>{{ card.label }}</span>
+          <strong>{{ loading ? '—' : card.value }}</strong>
+          <small class="metric-hint">{{ card.hint }}</small>
         </n-card>
       </div>
 
@@ -390,7 +469,45 @@ onMounted(load)
 }
 
 .metric-card {
+  position: relative;
+  overflow: hidden;
   border-radius: 8px;
+}
+
+.metric-card::after {
+  content: '';
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  right: -24px;
+  top: -24px;
+  border-radius: 999px;
+  background: #94a3b8;
+  opacity: 0.14;
+}
+
+.metric-card.is-balance::after {
+  background: #16a34a;
+}
+
+.metric-card.is-violet::after {
+  background: #8b5cf6;
+}
+
+.metric-card.is-indigo::after {
+  background: #6366f1;
+}
+
+.metric-card.is-rose::after {
+  background: #f43f5e;
+}
+
+.metric-card.is-amber::after {
+  background: #f59e0b;
+}
+
+.metric-card.is-teal::after {
+  background: #0d9488;
 }
 
 .metric-card span,
@@ -407,6 +524,13 @@ onMounted(load)
   margin-top: 8px;
   color: #0f172a;
   font-size: 28px;
+}
+
+.metric-hint {
+  display: block;
+  margin-top: 4px;
+  color: rgba(15, 23, 42, 0.42);
+  font-size: 12px;
 }
 
 .metric-card :deep(.n-button) {
@@ -468,7 +592,13 @@ onMounted(load)
   font-weight: 700;
 }
 
-@media (max-width: 780px) {
+@media (max-width: 980px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
   .metric-grid {
     grid-template-columns: 1fr;
   }
