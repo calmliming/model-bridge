@@ -226,6 +226,9 @@ interface RelayMeta {
   model: string
   requestInput: string | null
   startedAt: number
+  multiplier: number
+  billTo: 'subscription' | 'balance'
+  subscriptionId: string | null
 }
 
 interface UpstreamFailure {
@@ -692,6 +695,9 @@ async function runRelayLoop(
       model: parsed.model,
       requestInput: summarizeRequestInput(body),
       startedAt,
+      multiplier: apiKey.groupMultiplier ?? 1,
+      billTo: apiKey.billTo,
+      subscriptionId: apiKey.subscriptionId,
     }
     if (wantStream) {
       await sendStreaming(reply, upstream, meta, provider)
@@ -741,6 +747,9 @@ async function sendStreaming(
       accountId: meta.accountId,
       provider: meta.provider,
       model: meta.model,
+      multiplier: meta.multiplier,
+      billTo: meta.billTo,
+      subscriptionId: meta.subscriptionId,
       usage: emptyUsage(),
       status: 'error',
       latencyMs: Date.now() - meta.startedAt,
@@ -848,6 +857,9 @@ async function sendStreaming(
     accountId: meta.accountId,
     provider: meta.provider,
     model: meta.model,
+    multiplier: meta.multiplier,
+    billTo: meta.billTo,
+    subscriptionId: meta.subscriptionId,
     usage: parser.result(),
     status: upstream.ok && (!responsesProtocol || sawTerminal) ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
@@ -912,6 +924,9 @@ async function sendBuffered(
       accountId: meta.accountId,
       provider: meta.provider,
       model: meta.model,
+      multiplier: meta.multiplier,
+      billTo: meta.billTo,
+      subscriptionId: meta.subscriptionId,
       usage,
       status: upstream.ok ? 'success' : 'error',
       latencyMs: Date.now() - meta.startedAt,
@@ -942,6 +957,9 @@ async function sendBuffered(
     accountId: meta.accountId,
     provider: meta.provider,
     model: meta.model,
+    multiplier: meta.multiplier,
+    billTo: meta.billTo,
+    subscriptionId: meta.subscriptionId,
     usage,
     status: upstream.ok ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,

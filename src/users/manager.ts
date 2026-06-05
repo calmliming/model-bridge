@@ -71,6 +71,10 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex')
 }
 
+function hashPassword(password: string): string {
+  return bcrypt.hashSync(password, BCRYPT_ROUNDS)
+}
+
 function asUser(row: Record<string, unknown>): UserView {
   const balanceMicros = Number(row.balance_micros)
   return {
@@ -214,7 +218,7 @@ export async function acceptInvite(input: {
 
     const userId = row.user_id as string
     const name = input.name?.trim() || (row.name as string)
-    const passwordHash = bcrypt.hashSync(input.password, BCRYPT_ROUNDS)
+    const passwordHash = hashPassword(input.password)
     const now = Date.now()
     await client.query(
       `UPDATE users
@@ -233,6 +237,65 @@ export async function acceptInvite(input: {
     )
     await client.query('COMMIT')
     return asUser(updated.rows[0]!)
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * Self-service registration. Creates an active user with a password set, or
+ * adopts a pre-created invite-only row that never set a password. Rejects an
+ * email that already has a usable password. The `FOR UPDATE` row lock makes
+ * concurrent registrations of the same email safe.
+ */
+export async function registerUser(input: {
+  email: string
+  password: string
+  name?: string | null
+}): Promise<UserView> {
+  const email = normalizeEmail(input.email)
+  if (!email) throw new UserManagerError('email is required')
+  const name = input.name?.trim() || defaultName(email)
+  const passwordHash = hashPassword(input.password)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const existing = await client.query<Record<string, unknown>>(
+      'SELECT id, password_hash, status FROM users WHERE email = $1 FOR UPDATE',
+      [email],
+    )
+    const found = existing.rows[0]
+    if (found?.password_hash) {
+      throw new UserManagerError('该邮箱已被注册', 409)
+    }
+    const now = Date.now()
+    let userId = found?.id as string | undefined
+    if (userId) {
+      // An invite-only row exists but never set a password — adopt it.
+      if (found!.status === 'disabled') throw new UserManagerError('user is disabled', 403)
+      await client.query(
+        `UPDATE users SET name = $1, password_hash = $2, accepted_at = COALESCE(accepted_at, $3)
+         WHERE id = $4`,
+        [name, passwordHash, now, userId],
+      )
+    } else {
+      userId = generateId()
+      await client.query(
+        `INSERT INTO users (id, email, name, password_hash, status, balance_micros, accepted_at)
+         VALUES ($1, $2, $3, $4, 'active', 0, $5)`,
+        [userId, email, name, passwordHash, now],
+      )
+    }
+    const userRow = await client.query<Record<string, unknown>>(
+      `SELECT id, email, name, status, balance_micros, accepted_at, last_login_at, created_at
+       FROM users WHERE id = $1`,
+      [userId],
+    )
+    await client.query('COMMIT')
+    return asUser(userRow.rows[0]!)
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     throw err

@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
-import { accountGroups, accounts } from '../db/schema'
+import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
 import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 import { clearExpiredAccountCooldowns } from './scheduler'
+import { setAccountGroups as setAccountGroupMembers } from './groups'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
@@ -18,8 +19,8 @@ export interface CreateAccountInput {
   tokens: TokenSet
   /** Provider-specific data needed at relay time (e.g. Gemini's project id). */
   metadata?: Record<string, unknown> | null
-  /** Optional account group; null = default pool. */
-  groupId?: string | null
+  /** Optional groups this account joins; empty = default pool. */
+  groupIds?: string[] | null
 }
 
 function metadataObject(metadata: unknown): Record<string, unknown> {
@@ -51,9 +52,11 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
-      groupId: input.groupId ?? null,
       metadata: input.metadata ?? null,
     })
+  if (input.groupIds?.length) {
+    await setAccountGroupMembers(id, input.groupIds)
+  }
   return { id }
 }
 
@@ -70,23 +73,40 @@ export async function listAccounts() {
       cooldownUntil: accounts.cooldownUntil,
       weight: accounts.weight,
       lastUsedAt: accounts.lastUsedAt,
-      groupId: accounts.groupId,
-      groupName: accountGroups.name,
       metadata: accounts.metadata,
       createdAt: accounts.createdAt,
     })
     .from(accounts)
-    .leftJoin(accountGroups, eq(accounts.groupId, accountGroups.id))
     .orderBy(desc(accounts.createdAt))
+
+  // Each account's group memberships, with the effective in-group weight.
+  const memberRows = await db
+    .select({
+      accountId: accountGroupMembers.accountId,
+      groupId: accountGroupMembers.groupId,
+      groupName: accountGroups.name,
+      weight: accountGroupMembers.weight,
+    })
+    .from(accountGroupMembers)
+    .innerJoin(accountGroups, eq(accountGroups.id, accountGroupMembers.groupId))
+
+  const groupsByAccount = new Map<string, Array<{ id: string; name: string; weight: number | null }>>()
+  for (const m of memberRows) {
+    const list = groupsByAccount.get(m.accountId) ?? []
+    list.push({ id: m.groupId, name: m.groupName, weight: m.weight })
+    groupsByAccount.set(m.accountId, list)
+  }
+
   return rows.map(({ metadata, ...account }) => ({
     ...account,
+    groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
   }))
 }
 
-/** Moves an account into a group, or back to the default pool when null. */
-export async function setAccountGroup(id: string, groupId: string | null): Promise<void> {
-  await db.update(accounts).set({ groupId }).where(eq(accounts.id, id))
+/** Replaces the set of groups an account belongs to (null/empty = default pool). */
+export async function setAccountGroups(id: string, groupIds: string[]): Promise<void> {
+  await setAccountGroupMembers(id, groupIds)
 }
 
 export async function getAccount(id: string) {

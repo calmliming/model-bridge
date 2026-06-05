@@ -1,12 +1,23 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getAdminUsername, verifyAdminCredentials } from '../auth/admin'
-import { verifyUserCredentials, type UserView } from '../users/manager'
+import { registerUser, UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
+import { isRegistrationEnabled } from '../db/settings'
+import { checkRateLimit } from '../middleware/limits'
 
 const loginSchema = z.object({
   account: z.string().trim().min(1),
   password: z.string().min(1),
 })
+
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+  name: z.string().trim().min(1).max(60).optional(),
+})
+
+/** Max registration attempts per client IP per minute. */
+const REGISTER_RATE_LIMIT = 5
 
 function userSessionPayload(user: UserView) {
   return { sub: user.id, role: 'user', email: user.email, name: user.name }
@@ -33,5 +44,33 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
 
     return reply.code(401).send({ error: 'invalid account or password' })
+  })
+
+  // Public: the login page reads this to show/hide the registration entry.
+  app.get('/api/auth/registration-status', async () => {
+    return { enabled: await isRegistrationEnabled() }
+  })
+
+  app.post('/api/auth/register', async (request, reply) => {
+    if (!(await isRegistrationEnabled())) {
+      return reply.code(403).send({ error: '当前未开放注册' })
+    }
+    if (!(await checkRateLimit(`register:${request.ip}`, REGISTER_RATE_LIMIT))) {
+      return reply.code(429).send({ error: '注册过于频繁，请稍后再试' })
+    }
+    const body = registerSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      const user = await registerUser(body.data)
+      const token = app.jwt.sign(userSessionPayload(user), { expiresIn: '7d' })
+      return reply.code(201).send({ role: 'user', token, user })
+    } catch (err) {
+      if (err instanceof UserManagerError) {
+        return reply.code(err.statusCode).send({ error: err.message })
+      }
+      throw err
+    }
   })
 }

@@ -1,6 +1,6 @@
-import { and, eq, inArray, isNull, lte, ne } from 'drizzle-orm'
+import { and, eq, inArray, lte, ne, notExists, sql } from 'drizzle-orm'
 import { db } from '../db/index'
-import { accounts } from '../db/schema'
+import { accountGroupMembers, accounts } from '../db/schema'
 import { getStickyAccountId } from './session'
 
 /** How long an account stays in cooldown after a failure, by kind. */
@@ -42,14 +42,51 @@ export async function pickAccount(
 ) {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
-  const rows = await db
-    .select()
-    .from(accounts)
-    .where(and(
-      eq(accounts.provider, provider),
-      ne(accounts.status, 'disabled'),
-      groupId ? eq(accounts.groupId, groupId) : isNull(accounts.groupId),
-    ))
+
+  // A grouped key only reaches that group's members, and the scheduling weight
+  // is the per-membership override when set, else the account's base weight.
+  // An unbound key (default pool) only reaches accounts with no membership row.
+  const rows = groupId
+    ? await db
+        .select({
+          id: accounts.id,
+          status: accounts.status,
+          cooldownUntil: accounts.cooldownUntil,
+          lastUsedAt: accounts.lastUsedAt,
+          metadata: accounts.metadata,
+          oauthAccessToken: accounts.oauthAccessToken,
+          tokenExpiresAt: accounts.tokenExpiresAt,
+          effectiveWeight: sql<number>`COALESCE(${accountGroupMembers.weight}, ${accounts.weight})`,
+        })
+        .from(accounts)
+        .innerJoin(accountGroupMembers, eq(accountGroupMembers.accountId, accounts.id))
+        .where(and(
+          eq(accounts.provider, provider),
+          ne(accounts.status, 'disabled'),
+          eq(accountGroupMembers.groupId, groupId),
+        ))
+    : await db
+        .select({
+          id: accounts.id,
+          status: accounts.status,
+          cooldownUntil: accounts.cooldownUntil,
+          lastUsedAt: accounts.lastUsedAt,
+          metadata: accounts.metadata,
+          oauthAccessToken: accounts.oauthAccessToken,
+          tokenExpiresAt: accounts.tokenExpiresAt,
+          effectiveWeight: sql<number>`${accounts.weight}`,
+        })
+        .from(accounts)
+        .where(and(
+          eq(accounts.provider, provider),
+          ne(accounts.status, 'disabled'),
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(accountGroupMembers)
+              .where(eq(accountGroupMembers.accountId, accounts.id)),
+          ),
+        ))
 
   const available = rows.filter(
     (a) => !exclude.includes(a.id) && (!a.cooldownUntil || a.cooldownUntil < now),
@@ -65,7 +102,7 @@ export async function pickAccount(
   }
 
   available.sort((a, b) => {
-    const weightDiff = Math.max(1, b.weight ?? 1) - Math.max(1, a.weight ?? 1)
+    const weightDiff = Math.max(1, b.effectiveWeight ?? 1) - Math.max(1, a.effectiveWeight ?? 1)
     if (weightDiff !== 0) return weightDiff
     return (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0)
   })

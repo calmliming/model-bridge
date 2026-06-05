@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { api, errMsg } from '../api/client'
@@ -12,6 +12,23 @@ const auth = useAuthStore()
 const account = ref('')
 const password = ref('')
 const loading = ref(false)
+
+// Registration
+const mode = ref<'login' | 'register'>('login')
+const registrationEnabled = ref(false)
+const regEmail = ref('')
+const regPassword = ref('')
+const regConfirm = ref('')
+const regName = ref('')
+
+onMounted(async () => {
+  try {
+    const { data } = await api.get('/auth/registration-status')
+    registrationEnabled.value = !!data.enabled
+  } catch {
+    // 注册入口仅为可选展示，状态拉取失败时静默隐藏
+  }
+})
 
 async function login() {
   const accountValue = account.value.trim()
@@ -34,6 +51,37 @@ async function login() {
     }
   } catch (e) {
     message.error(errMsg(e, '登录失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function register() {
+  const email = regEmail.value.trim()
+  if (!email || !regPassword.value) {
+    message.warning('请输入邮箱和密码')
+    return
+  }
+  if (regPassword.value.length < 6) {
+    message.warning('密码至少 6 位')
+    return
+  }
+  if (regPassword.value !== regConfirm.value) {
+    message.warning('两次输入的密码不一致')
+    return
+  }
+  loading.value = true
+  try {
+    const { data } = await api.post('/auth/register', {
+      email,
+      password: regPassword.value,
+      name: regName.value.trim() || undefined,
+    })
+    auth.setSession(data.token, data.user.email, 'user')
+    message.success('注册成功')
+    void router.push({ name: 'user-overview' })
+  } catch (e) {
+    message.error(errMsg(e, '注册失败'))
   } finally {
     loading.value = false
   }
@@ -87,12 +135,12 @@ async function login() {
         <div class="form-head">
           <div>
             <div class="form-eyebrow">Unified Console</div>
-            <h2>欢迎回来</h2>
+            <h2>{{ mode === 'login' ? '欢迎回来' : '创建账号' }}</h2>
           </div>
           <span class="secure-badge">Secure</span>
         </div>
 
-        <n-form label-placement="top" class="login-form">
+        <n-form v-if="mode === 'login'" label-placement="top" class="login-form">
           <n-form-item label="账号">
             <n-input v-model:value="account" size="large" placeholder="请输入账号" />
           </n-form-item>
@@ -109,6 +157,43 @@ async function login() {
           <n-button type="primary" size="large" block :loading="loading" @click="login">
             登录
           </n-button>
+          <p v-if="registrationEnabled" class="form-switch">
+            还没有账号？<a @click="mode = 'register'">注册账号</a>
+          </p>
+        </n-form>
+
+        <n-form v-else label-placement="top" class="login-form">
+          <n-form-item label="邮箱">
+            <n-input v-model:value="regEmail" size="large" placeholder="请输入邮箱" />
+          </n-form-item>
+          <n-form-item label="昵称（可选）">
+            <n-input v-model:value="regName" size="large" placeholder="如何称呼你" />
+          </n-form-item>
+          <n-form-item label="密码">
+            <n-input
+              v-model:value="regPassword"
+              size="large"
+              type="password"
+              show-password-on="click"
+              placeholder="至少 6 位"
+            />
+          </n-form-item>
+          <n-form-item label="确认密码">
+            <n-input
+              v-model:value="regConfirm"
+              size="large"
+              type="password"
+              show-password-on="click"
+              placeholder="再次输入密码"
+              @keyup.enter="register"
+            />
+          </n-form-item>
+          <n-button type="primary" size="large" block :loading="loading" @click="register">
+            注册
+          </n-button>
+          <p class="form-switch">
+            已有账号？<a @click="mode = 'login'">返回登录</a>
+          </p>
         </n-form>
       </n-card>
     </div>
@@ -392,6 +477,23 @@ async function login() {
 
 .login-form {
   margin-top: 2px;
+}
+
+.form-switch {
+  margin: 16px 0 0;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.6);
+  font-size: 14px;
+}
+
+.form-switch a {
+  color: #0d9488;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.form-switch a:hover {
+  text-decoration: underline;
 }
 
 .login-form :deep(.n-form-item-label) {

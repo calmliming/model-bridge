@@ -65,6 +65,60 @@ const showUsage = ref(false)
 const usageLoading = ref(false)
 const usageRows = ref<UsageLog[]>([])
 
+const showSubs = ref(false)
+const subsLoading = ref(false)
+const subsRows = ref<Array<{
+  id: string
+  planName: string | null
+  groupName: string | null
+  status: string
+  expiresAt: number
+}>>([])
+const subPlans = ref<Array<{ id: string; name: string; groupName: string | null }>>([])
+const assignPlanId = ref<string | null>(null)
+const assigning = ref(false)
+const subPlanOptions = computed(() =>
+  subPlans.value.map((p) => ({ label: p.groupName ? `${p.name}（${p.groupName}）` : p.name, value: p.id })),
+)
+
+async function openSubscriptions(row: UserRow) {
+  selectedUser.value = row
+  showSubs.value = true
+  subsLoading.value = true
+  assignPlanId.value = null
+  try {
+    const [subsRes, plansRes] = await Promise.all([
+      api.get(`/admin/users/${row.id}/subscriptions`),
+      api.get('/admin/subscription-plans'),
+    ])
+    subsRows.value = subsRes.data.subscriptions
+    subPlans.value = plansRes.data.plans
+    assignPlanId.value = subPlans.value[0]?.id ?? null
+  } catch (e) {
+    message.error(errMsg(e, '加载订阅失败'))
+  } finally {
+    subsLoading.value = false
+  }
+}
+
+async function assignSubscription() {
+  if (!selectedUser.value || !assignPlanId.value) {
+    message.warning('请选择套餐')
+    return
+  }
+  assigning.value = true
+  try {
+    await api.post(`/admin/users/${selectedUser.value.id}/subscriptions`, { planId: assignPlanId.value })
+    message.success('已分配订阅')
+    const { data } = await api.get(`/admin/users/${selectedUser.value.id}/subscriptions`)
+    subsRows.value = data.subscriptions
+  } catch (e) {
+    message.error(errMsg(e, '分配失败'))
+  } finally {
+    assigning.value = false
+  }
+}
+
 function formatUsd(value: number): string {
   return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
@@ -245,13 +299,14 @@ const columns = computed<DataTableColumns<UserRow>>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 330,
+    width: 390,
     render: (row) => h(NSpace, { size: 4, wrap: false }, {
       default: () => [
         h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
+        h(NButton, { size: 'small', quaternary: true, onClick: () => openSubscriptions(row) }, { default: () => '订阅' }),
         h(NButton, { size: 'small', quaternary: true, onClick: () => resetInvite(row) }, { default: () => '重置密码' }),
         h(NButton, { size: 'small', type: row.status === 'active' ? 'error' : 'success', quaternary: true, onClick: () => updateStatus(row) }, { default: () => (row.status === 'active' ? '禁用' : '启用') }),
       ],
@@ -342,8 +397,65 @@ onMounted(load)
     <n-modal v-model:show="showUsage" preset="card" :title="`用量：${selectedUser?.name ?? ''}`" style="width: 860px">
       <n-data-table :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="780" />
     </n-modal>
+
+    <n-modal v-model:show="showSubs" preset="card" :title="`订阅：${selectedUser?.name ?? ''}`" style="width: 560px">
+      <div class="assign-row">
+        <n-select
+          v-model:value="assignPlanId"
+          :options="subPlanOptions"
+          placeholder="选择套餐分配"
+          style="flex: 1"
+        />
+        <n-button type="primary" :loading="assigning" @click="assignSubscription">分配</n-button>
+      </div>
+      <n-spin :show="subsLoading">
+        <p v-if="!subsRows.length" class="subs-empty">该用户暂无订阅。</p>
+        <div v-for="sub in subsRows" :key="sub.id" class="subs-row">
+          <div>
+            <strong>{{ sub.planName || '套餐' }}</strong>
+            <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
+          </div>
+          <n-tag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
+            {{ sub.status === 'active' ? '生效中' : '已过期' }}
+          </n-tag>
+        </div>
+      </n-spin>
+    </n-modal>
   </div>
 </template>
+
+<style scoped>
+.assign-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.subs-empty {
+  margin: 0;
+  color: rgba(15, 23, 42, 0.5);
+  font-size: 13px;
+}
+
+.subs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.subs-row:last-child {
+  border-bottom: none;
+}
+
+.subs-row .subtext {
+  display: block;
+  margin-top: 2px;
+  color: rgba(15, 23, 42, 0.5);
+  font-size: 12px;
+}
+</style>
 
 <style scoped>
 :deep(.token-total) {

@@ -4,6 +4,7 @@ import { db } from '../db/index'
 import { apiKeys } from '../db/schema'
 import { findApiKeyBySecret } from '../keys/manager'
 import { microsToUsd } from '../wallet/money'
+import { hasWindowHeadroom, resolveActiveSubscription } from '../subscriptions/manager'
 
 export interface AuthedApiKey {
   id: string
@@ -12,6 +13,7 @@ export interface AuthedApiKey {
   allowedModels: string[] | null
   modelMappings: Record<string, string> | null
   accountGroupId: string | null
+  groupMultiplier: number
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -19,6 +21,10 @@ export interface AuthedApiKey {
   userId: string | null
   userBalance: number | null
   userBalanceMicros: number | null
+  /** Which budget this request should bill to. */
+  billTo: 'subscription' | 'balance'
+  /** The subscription to charge when billTo === 'subscription'. */
+  subscriptionId: string | null
 }
 
 /**
@@ -68,6 +74,9 @@ export async function requireApiKey(
     reply.code(429).send({ error: 'API key quota exceeded' })
     return
   }
+  let billTo: 'subscription' | 'balance' = 'balance'
+  let subscriptionId: string | null = null
+
   if (record.userId) {
     if (!record.userStatus) {
       reply.code(401).send({ error: 'API key owner is unavailable' })
@@ -77,8 +86,23 @@ export async function requireApiKey(
       reply.code(401).send({ error: 'API key owner is disabled' })
       return
     }
+    // Billing decision: prefer an active subscription for the key's group when
+    // it still has window headroom; otherwise fall through to wallet balance.
+    // Block (402) only when neither budget can cover further usage.
     const balanceMicros = record.userBalanceMicros ?? 0
-    if (balanceMicros <= 0) {
+    let subscriptionUsable = false
+    if (record.accountGroupId) {
+      const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
+      if (sub) {
+        subscriptionId = sub.subscriptionId
+        subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
+      }
+    }
+    if (subscriptionUsable) {
+      billTo = 'subscription'
+    } else if (balanceMicros > 0) {
+      billTo = 'balance'
+    } else {
       reply.code(402).send({ error: 'insufficient balance' })
       return
     }
@@ -91,6 +115,7 @@ export async function requireApiKey(
     allowedModels: record.allowedModels ?? null,
     modelMappings: record.modelMappings ?? null,
     accountGroupId: record.accountGroupId ?? null,
+    groupMultiplier: record.groupMultiplier ?? 1,
     rateLimit: record.rateLimit ?? null,
     concurrencyLimit: record.concurrencyLimit ?? null,
     quotaLimit: record.quotaLimit ?? null,
@@ -98,6 +123,8 @@ export async function requireApiKey(
     userId: record.userId ?? null,
     userBalanceMicros: record.userId ? (record.userBalanceMicros ?? 0) : null,
     userBalance: record.userId ? microsToUsd(record.userBalanceMicros ?? 0) : null,
+    billTo,
+    subscriptionId,
   }
 }
 

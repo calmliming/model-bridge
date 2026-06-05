@@ -22,6 +22,27 @@
       "when": 1780446937615,
       "tag": "0002_zippy_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780590255366,
+      "tag": "0003_lucky_random",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780625161578,
+      "tag": "0004_ordinary_shatterstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780633087362,
+      "tag": "0005_left_hawkeye",
+      "breakpoints": true
     }
   ]
 }

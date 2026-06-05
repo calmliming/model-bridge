@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from '../db/index'
-import { apiKeys, users } from '../db/schema'
+import { apiKeys, accountGroups, users } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { normalizeModelMappings, type ModelMappings } from './modelMapping'
 
@@ -121,9 +121,11 @@ export async function findApiKeyBySecret(secret: string) {
       userStatus: users.status,
       userBalanceMicros: users.balanceMicros,
       userEmail: users.email,
+      groupMultiplier: accountGroups.rateMultiplier,
     })
     .from(apiKeys)
     .leftJoin(users, eq(apiKeys.userId, users.id))
+    .leftJoin(accountGroups, eq(apiKeys.accountGroupId, accountGroups.id))
     .where(eq(apiKeys.keyHash, hashKey(secret)))
   return row
 }

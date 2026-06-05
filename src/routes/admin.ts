@@ -7,12 +7,22 @@ import { oauthSessions } from '../db/schema'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
-import { createAccount, deleteAccount, listAccounts, setAccountGroup, setAccountStatus, setAccountWeight } from '../accounts/manager'
-import { createGroup, deleteGroup, listGroups, updateGroup } from '../accounts/groups'
+import { createAccount, deleteAccount, listAccounts, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
+import { createGroup, deleteGroup, listGroupMembers, listGroups, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
+import { isRegistrationEnabled, setRegistrationEnabled } from '../db/settings'
+import {
+  assignSubscription,
+  createPlan,
+  deletePlan,
+  listPlans,
+  listSubscriptionsForUser,
+  SubscriptionError,
+  updatePlan,
+} from '../subscriptions/manager'
 import {
   createUserInvite,
   listUserUsage,
@@ -27,6 +37,14 @@ import {
   listPaymentOrders,
   PaymentOrderError,
 } from '../payments/manager'
+import {
+  deleteRedeemCode,
+  exportRedeemCodes,
+  generateRedeemCodes,
+  listRedeemCodes,
+  RedeemError,
+  setRedeemCodeStatus,
+} from '../redeem/manager'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -109,21 +127,85 @@ const accountUpdateSchema = z
   .object({
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
-    groupId: z.string().trim().min(1).nullable().optional(),
+    groupIds: z.array(z.string().trim().min(1)).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
 const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).nullable().optional(),
+  rateMultiplier: z.number().positive().max(100).optional(),
 })
 
 const updateGroupSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     description: z.string().trim().max(500).nullable().optional(),
+    rateMultiplier: z.number().positive().max(100).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const memberWeightSchema = z.object({
+  accountId: z.string().trim().min(1),
+  weight: z.number().int().min(1).max(100).nullable(),
+})
+
+const generateRedeemCodesSchema = z.object({
+  count: z.number().int().min(1).max(1000),
+  valueUsd: z.number().positive(),
+  expiresAt: z.number().int().positive().nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+})
+
+const redeemCodesQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+  status: z.enum(['unused', 'used', 'disabled']).optional(),
+  batchId: z.string().trim().min(1).optional(),
+})
+
+const updateRedeemCodeSchema = z.object({
+  status: z.enum(['unused', 'disabled']),
+})
+
+const updateSettingsSchema = z
+  .object({
+    registrationEnabled: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const planFields = {
+  name: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(500).nullable().optional(),
+  groupId: z.string().trim().min(1),
+  price: z.number().min(0).optional(),
+  dailyLimitUsd: z.number().positive().nullable().optional(),
+  weeklyLimitUsd: z.number().positive().nullable().optional(),
+  monthlyLimitUsd: z.number().positive().nullable().optional(),
+  validityDays: z.number().int().positive().max(3650).optional(),
+  forSale: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+}
+const createPlanSchema = z.object(planFields)
+const updatePlanSchema = z
+  .object({
+    name: planFields.name.optional(),
+    description: planFields.description,
+    groupId: planFields.groupId.optional(),
+    price: planFields.price,
+    dailyLimitUsd: planFields.dailyLimitUsd,
+    weeklyLimitUsd: planFields.weeklyLimitUsd,
+    monthlyLimitUsd: planFields.monthlyLimitUsd,
+    validityDays: planFields.validityDays,
+    forSale: planFields.forSale,
+    sortOrder: planFields.sortOrder,
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const assignSubscriptionSchema = z.object({
+  planId: z.string().trim().min(1),
+  note: z.string().trim().max(500).nullable().optional(),
+})
 
 const importTokenSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']),
@@ -157,6 +239,12 @@ function sendUserManagerError(
   if (err instanceof PaymentOrderError) {
     return reply.code(err.statusCode).send({ error: err.message })
   }
+  if (err instanceof RedeemError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  if (err instanceof SubscriptionError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
   throw err
 }
 
@@ -188,6 +276,22 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'current password is incorrect' })
     }
     return { ok: true }
+  })
+
+  // ── Platform settings ───────────────────────────────────
+  app.get('/api/admin/settings', { preHandler: requireAdmin }, async () => {
+    return { registrationEnabled: await isRegistrationEnabled() }
+  })
+
+  app.patch('/api/admin/settings', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = updateSettingsSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    if (body.data.registrationEnabled !== undefined) {
+      await setRegistrationEnabled(body.data.registrationEnabled)
+    }
+    return { registrationEnabled: await isRegistrationEnabled() }
   })
 
   // ── SaaS users / wallet ─────────────────────────────────
@@ -439,6 +543,167 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/account-groups/:id/members',
+    { preHandler: requireAdmin },
+    async (request) => {
+      return { members: await listGroupMembers(request.params.id) }
+    },
+  )
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/account-groups/:id/members',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = memberWeightSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      await setMemberWeight(request.params.id, body.data.accountId, body.data.weight)
+      return { ok: true }
+    },
+  )
+
+  // ── Redeem codes ─────────────────────────────────────────
+  app.post('/api/admin/redeem-codes', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = generateRedeemCodesSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      const result = await generateRedeemCodes({
+        count: body.data.count,
+        valueUsd: body.data.valueUsd,
+        expiresAt: body.data.expiresAt ?? null,
+        note: body.data.note ?? null,
+        createdBy: 'admin',
+      })
+      return reply.code(201).send(result)
+    } catch (err) {
+      return sendUserManagerError(reply, err)
+    }
+  })
+
+  app.get('/api/admin/redeem-codes', { preHandler: requireAdmin }, async (request, reply) => {
+    const query = redeemCodesQuerySchema.safeParse(request.query)
+    if (!query.success) {
+      return reply.code(400).send({ error: 'invalid query' })
+    }
+    return listRedeemCodes(query.data)
+  })
+
+  app.get<{ Querystring: { batchId?: string } }>(
+    '/api/admin/redeem-codes/export',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const batchId = request.query.batchId?.trim()
+      if (!batchId) {
+        return reply.code(400).send({ error: 'batchId is required' })
+      }
+      return { codes: await exportRedeemCodes(batchId) }
+    },
+  )
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/redeem-codes/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = updateRedeemCodeSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      try {
+        await setRedeemCodeStatus(params.data.id, body.data.status)
+        return { ok: true }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/redeem-codes/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        await deleteRedeemCode(request.params.id)
+        return { ok: true }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  // ── Subscription plans ───────────────────────────────────
+  app.get('/api/admin/subscription-plans', { preHandler: requireAdmin }, async () => {
+    return { plans: await listPlans(false) }
+  })
+
+  app.post('/api/admin/subscription-plans', { preHandler: requireAdmin }, async (request, reply) => {
+    const body = createPlanSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      return reply.code(201).send(await createPlan(body.data))
+    } catch (err) {
+      return sendUserManagerError(reply, err)
+    }
+  })
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/admin/subscription-plans/:id',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = updatePlanSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      await updatePlan(request.params.id, body.data)
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/subscription-plans/:id',
+    { preHandler: requireAdmin },
+    async (request) => {
+      await deletePlan(request.params.id)
+      return { ok: true }
+    },
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/users/:id/subscriptions',
+    { preHandler: requireAdmin },
+    async (request) => {
+      return { subscriptions: await listSubscriptionsForUser(request.params.id) }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/users/:id/subscriptions',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = assignSubscriptionSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      try {
+        const result = await assignSubscription({
+          userId: request.params.id,
+          planId: body.data.planId,
+          assignedBy: 'admin',
+          note: body.data.note ?? null,
+        })
+        return reply.code(201).send(result)
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
   // ── Upstream accounts ────────────────────────────────────
   app.get('/api/admin/accounts', { preHandler: requireAdmin }, async () => {
     return { accounts: await listAccounts() }
@@ -575,7 +840,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
       if (body.data.status) await setAccountStatus(request.params.id, body.data.status)
       if (body.data.weight !== undefined) await setAccountWeight(request.params.id, body.data.weight)
-      if ('groupId' in body.data) await setAccountGroup(request.params.id, body.data.groupId ?? null)
+      if (body.data.groupIds !== undefined) await setAccountGroups(request.params.id, body.data.groupIds)
       return { ok: true }
     },
   )

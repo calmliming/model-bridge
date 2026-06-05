@@ -19,6 +19,12 @@ interface AccountQuotaSnapshot {
   windows: AccountQuotaWindow[]
 }
 
+interface AccountGroupRef {
+  id: string
+  name: string
+  weight: number | null
+}
+
 interface Account {
   id: string
   provider: string
@@ -28,8 +34,7 @@ interface Account {
   cooldownUntil: number | null
   weight: number
   lastUsedAt: number | null
-  groupId: string | null
-  groupName: string | null
+  groups: AccountGroupRef[]
   createdAt: number
   quota: AccountQuotaSnapshot | null
 }
@@ -39,6 +44,7 @@ interface GroupInfo {
   id: string
   name: string
   description: string | null
+  rateMultiplier: number
   accountCount: number
   createdAt: number
 }
@@ -65,9 +71,14 @@ const savingWeightId = ref<string | null>(null)
 
 // Account-pool grouping (feature), distinct from the per-provider display group.
 const groups = ref<GroupInfo[]>([])
-const groupSelectOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
+const groupSelectOptions = computed(() =>
+  groups.value.map((g) => ({
+    label: g.rateMultiplier === 1 ? g.name : `${g.name} ×${g.rateMultiplier}`,
+    value: g.id,
+  })),
+)
 const showGroups = ref(false)
-const groupForm = ref({ name: '', description: '' })
+const groupForm = ref({ name: '', description: '', rateMultiplier: 1 })
 const savingGroup = ref(false)
 
 // Add-account modal state.
@@ -325,16 +336,18 @@ function renderPriority(row: Account) {
 
 function renderGroupCell(row: Account) {
   return h(NSelect, {
-    value: row.groupId,
+    value: row.groups.map((g) => g.id),
     options: groupSelectOptions.value,
+    multiple: true,
     clearable: true,
     size: 'small',
     placeholder: '默认池',
+    maxTagCount: 'responsive',
     consistentMenuWidth: false,
     class: 'group-select',
     'aria-label': `${row.name} 分组`,
-    onUpdateValue: (value: string | null) => {
-      void setGroup(row, value ?? null)
+    onUpdateValue: (value: string[] | null) => {
+      void setGroups(row, value ?? [])
     },
   })
 }
@@ -360,15 +373,17 @@ async function loadGroups() {
   }
 }
 
-async function setGroup(row: Account, groupId: string | null) {
-  if ((row.groupId ?? null) === (groupId ?? null)) return
-  const previous = row.groupId
-  row.groupId = groupId
+async function setGroups(row: Account, groupIds: string[]) {
+  const previous = row.groups
+  row.groups = groupIds.map(
+    (id) => previous.find((g) => g.id === id) ?? { id, name: groups.value.find((g) => g.id === id)?.name ?? id, weight: null },
+  )
   try {
-    await api.patch(`/admin/accounts/${row.id}`, { groupId })
+    await api.patch(`/admin/accounts/${row.id}`, { groupIds })
     await load()
+    await loadGroups()
   } catch (e) {
-    row.groupId = previous
+    row.groups = previous
     message.error(errMsg(e, '更新分组失败'))
   }
 }
@@ -383,8 +398,9 @@ async function createGroupSubmit() {
     await api.post('/admin/account-groups', {
       name: groupForm.value.name.trim(),
       description: groupForm.value.description.trim() || undefined,
+      rateMultiplier: groupForm.value.rateMultiplier,
     })
-    groupForm.value = { name: '', description: '' }
+    groupForm.value = { name: '', description: '', rateMultiplier: 1 }
     message.success('分组已创建')
     await loadGroups()
   } catch (e) {
@@ -403,6 +419,7 @@ async function saveGroup(group: GroupInfo) {
     await api.patch(`/admin/account-groups/${group.id}`, {
       name: group.name.trim(),
       description: group.description?.trim() || null,
+      rateMultiplier: group.rateMultiplier,
     })
     message.success('已保存')
     await loadGroups()
@@ -971,13 +988,22 @@ onBeforeUnmount(() => {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showGroups" preset="card" title="管理账号分组" style="width: 580px">
+    <n-modal v-model:show="showGroups" preset="card" title="管理账号分组" style="width: 640px">
       <p class="group-hint">
         账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
+        倍率作用于计费：绑定该组的 Key 按「成本价 × 倍率」扣费，1.0 为不加价，可低于 1 折价。
       </p>
       <div class="group-create">
         <n-input v-model:value="groupForm.name" placeholder="新分组名称" />
         <n-input v-model:value="groupForm.description" placeholder="备注（可选）" />
+        <n-input-number
+          v-model:value="groupForm.rateMultiplier"
+          :min="0.01"
+          :step="0.1"
+          :precision="2"
+          placeholder="倍率"
+          style="width: 110px"
+        />
         <n-button type="primary" :loading="savingGroup" @click="createGroupSubmit">新建</n-button>
       </div>
       <n-divider style="margin: 14px 0" />
@@ -987,6 +1013,14 @@ onBeforeUnmount(() => {
       <div v-for="group in groups" :key="group.id" class="group-row">
         <n-input v-model:value="group.name" size="small" placeholder="名称" />
         <n-input v-model:value="group.description" size="small" placeholder="备注" />
+        <n-input-number
+          v-model:value="group.rateMultiplier"
+          size="small"
+          :min="0.01"
+          :step="0.1"
+          :precision="2"
+          style="width: 96px"
+        />
         <span class="group-count">{{ group.accountCount }} 账号</span>
         <n-button size="small" quaternary @click="saveGroup(group)">保存</n-button>
         <n-button size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</n-button>

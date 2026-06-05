@@ -14,3 +14,15 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .values({ key, value })
     .onConflictDoUpdate({ target: settings.key, set: { value } })
 }
+
+const REGISTRATION_ENABLED_KEY = 'registration_enabled'
+
+/** Whether self-service registration is open. Defaults to false (closed). */
+export async function isRegistrationEnabled(): Promise<boolean> {
+  return (await getSetting(REGISTRATION_ENABLED_KEY)) === 'true'
+}
+
+/** Opens or closes self-service registration. */
+export async function setRegistrationEnabled(enabled: boolean): Promise<void> {
+  await setSetting(REGISTRATION_ENABLED_KEY, enabled ? 'true' : 'false')
+}

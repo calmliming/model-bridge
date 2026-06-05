@@ -12,6 +12,14 @@ import {
 import { listWalletTransactions } from '../wallet/manager'
 import { createPaymentOrder, listPaymentOrdersForUser, PaymentOrderError } from '../payments/manager'
 import { getAvailableProviders } from '../payments/providers/index'
+import { redeemCode, RedeemError } from '../redeem/manager'
+import { checkRateLimit } from '../middleware/limits'
+import {
+  listPlans,
+  listUserSubscriptions,
+  purchaseSubscription,
+  SubscriptionError,
+} from '../subscriptions/manager'
 
 const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek'])
 
@@ -65,6 +73,17 @@ const createPaymentOrderSchema = z.object({
   provider: z.enum(['manual', 'alipay', 'wechat']).optional(),
 })
 
+const redeemSchema = z.object({
+  code: z.string().trim().min(1).max(100),
+})
+
+const purchaseSchema = z.object({
+  planId: z.string().trim().min(1),
+})
+
+/** Max redeem attempts per user per minute — guards against code enumeration. */
+const REDEEM_RATE_LIMIT = 10
+
 function userSessionPayload(user: { id: string; email: string; name: string }) {
   return { sub: user.id, role: 'user', email: user.email, name: user.name }
 }
@@ -74,6 +93,12 @@ function sendUserError(reply: { code: (statusCode: number) => { send: (body: unk
     return reply.code(err.statusCode).send({ error: err.message })
   }
   if (err instanceof PaymentOrderError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  if (err instanceof RedeemError) {
+    return reply.code(err.statusCode).send({ error: err.message })
+  }
+  if (err instanceof SubscriptionError) {
     return reply.code(err.statusCode).send({ error: err.message })
   }
   throw err
@@ -150,6 +175,44 @@ export function registerUserRoutes(app: FastifyInstance): void {
       return listPaymentOrdersForUser(request.currentUser!.id, query.data.page, query.data.pageSize)
     },
   )
+
+  app.post('/api/users/redeem', { preHandler: requireUser }, async (request, reply) => {
+    const body = redeemSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    const userId = request.currentUser!.id
+    if (!(await checkRateLimit(`redeem:${userId}`, REDEEM_RATE_LIMIT))) {
+      return reply.code(429).send({ error: '兑换尝试过于频繁，请稍后再试' })
+    }
+    try {
+      const result = await redeemCode(userId, body.data.code)
+      return { ok: true, ...result }
+    } catch (err) {
+      return sendUserError(reply, err)
+    }
+  })
+
+  app.get('/api/users/subscriptions', { preHandler: requireUser }, async (request) => {
+    return { subscriptions: await listUserSubscriptions(request.currentUser!.id) }
+  })
+
+  app.get('/api/users/subscription-plans', { preHandler: requireUser }, async () => {
+    return { plans: await listPlans(true) }
+  })
+
+  app.post('/api/users/subscriptions/purchase', { preHandler: requireUser }, async (request, reply) => {
+    const body = purchaseSchema.safeParse(request.body)
+    if (!body.success) {
+      return reply.code(400).send({ error: 'invalid request body' })
+    }
+    try {
+      const result = await purchaseSubscription(request.currentUser!.id, body.data.planId)
+      return reply.code(201).send({ ok: true, ...result })
+    } catch (err) {
+      return sendUserError(reply, err)
+    }
+  })
 
   app.get<{ Querystring: { page?: string; pageSize?: string } }>(
     '/api/users/wallet/transactions',

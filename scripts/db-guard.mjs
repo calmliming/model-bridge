@@ -56,5 +56,7 @@ if (looksProd) {
 }
 
 const args = ['drizzle-kit', subcommand, ...process.argv.slice(3)]
-const child = spawn('npx', args, { stdio: 'inherit' })
+// `npx` is `npx.cmd` on Windows and is only resolvable through the shell's
+// PATHEXT lookup, so spawn via the shell for cross-platform compatibility.
+const child = spawn('npx', args, { stdio: 'inherit', shell: true })
 child.on('exit', (code) => process.exit(code ?? 0))

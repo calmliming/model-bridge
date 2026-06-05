@@ -3,6 +3,7 @@ import { pool } from '../db/index'
 import { estimateCost } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
+import { incrementSubscriptionUsage } from '../subscriptions/manager'
 
 export interface UsageRecord {
   apiKeyId: string
@@ -15,11 +16,22 @@ export interface UsageRecord {
   status: string
   latencyMs: number
   firstTokenMs?: number | null
+  /** Group billing markup applied to the base list-price cost. Defaults to 1. */
+  multiplier?: number
+  /** Which budget this request bills to (decided at auth time). Defaults to balance. */
+  billTo?: 'subscription' | 'balance'
+  /** Subscription to charge when billTo === 'subscription'. */
+  subscriptionId?: string | null
 }
 
-/** Writes one usage-log row, bumps key quota, and debits the owning user wallet. */
+/** Writes one usage-log row, bumps key quota, and charges the chosen budget. */
 export async function recordUsage(record: UsageRecord): Promise<void> {
-  const cost = estimateCost(record.provider, record.model, record.usage)
+  const baseCost = estimateCost(record.provider, record.model, record.usage)
+  const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
+  const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
+  // Charge the subscription only when the gate selected it and a sub is present.
+  const billTo: 'subscription' | 'balance' =
+    record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
   const id = randomBytes(12).toString('hex')
   const client = await pool.connect()
   try {
@@ -28,8 +40,8 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
           input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
-          cost, status, latency_ms, first_token_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          cost, base_cost, bill_to, status, latency_ms, first_token_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         id,
         record.apiKeyId,
@@ -43,6 +55,8 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
         record.usage.cacheCreateTokens,
         record.usage.cacheReadTokens,
         cost,
+        baseCost,
+        billTo,
         record.status,
         record.latencyMs,
         record.firstTokenMs ?? null,
@@ -54,8 +68,13 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
         [cost, Date.now(), record.apiKeyId],
       )
     }
-    if (record.userId) {
-      await debitWalletForUsage(client, record.userId, id, cost)
+    if (cost > 0) {
+      if (billTo === 'subscription') {
+        // Subscription pays: accrue the rolling windows, leave the wallet alone.
+        await incrementSubscriptionUsage(client, record.subscriptionId!, cost)
+      } else if (record.userId) {
+        await debitWalletForUsage(client, record.userId, id, cost)
+      }
     }
     await client.query('COMMIT')
   } catch (err) {

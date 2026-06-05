@@ -29,6 +29,7 @@ interface AccountGroup {
   id: string
   name: string
   description: string | null
+  rateMultiplier: number
   accountCount: number
   createdAt: number
 }
@@ -40,7 +41,12 @@ const keys = ref<ApiKey[]>([])
 const loading = ref(true)
 const groups = ref<AccountGroup[]>([])
 
-const groupSelectOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
+const groupSelectOptions = computed(() =>
+  groups.value.map((g) => ({
+    label: g.rateMultiplier === 1 ? g.name : `${g.name} ×${g.rateMultiplier}`,
+    value: g.id,
+  })),
+)
 
 function groupName(id: string | null): string {
   if (!id) return '默认池'
