@@ -341,6 +341,15 @@ function logTokens(row: DashboardRecentLog): number {
   return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
 }
 
+function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number }[] {
+  return [
+    { label: '输入', value: row.inputTokens },
+    { label: '输出', value: row.outputTokens },
+    { label: '缓存创建', value: row.cacheCreateTokens },
+    { label: '缓存读取', value: row.cacheReadTokens },
+  ]
+}
+
 function openRequestInput(row: DashboardRecentLog) {
   selectedLog.value = row
 }
@@ -428,7 +437,17 @@ function openRequestInput(row: DashboardRecentLog) {
           </div>
           <div class="log-metric">
             <span>总计</span>
-            <strong>{{ formatNumber(logTokens(row)) }}</strong>
+            <n-tooltip trigger="hover" placement="top">
+              <template #trigger>
+                <strong class="log-total">{{ formatNumber(logTokens(row)) }}</strong>
+              </template>
+              <div class="token-breakdown">
+                <div v-for="item in tokenBreakdown(row)" :key="item.label" class="token-breakdown-row">
+                  <span>{{ item.label }}</span>
+                  <strong>{{ formatNumber(item.value) }}</strong>
+                </div>
+              </div>
+            </n-tooltip>
           </div>
           <div class="log-metric">
             <span>耗时</span>
@@ -747,6 +766,25 @@ function openRequestInput(row: DashboardRecentLog) {
   color: #0f172a;
   font-size: 12px;
   font-weight: 760;
+}
+
+.log-total {
+  cursor: help;
+  border-bottom: 1px dashed rgba(15, 23, 42, 0.32);
+}
+
+.token-breakdown {
+  display: grid;
+  gap: 4px;
+  min-width: 120px;
+}
+
+.token-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12px;
 }
 
 .log-pagination {
