@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import TurnstileWidget from '../components/TurnstileWidget.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -12,6 +13,10 @@ const auth = useAuthStore()
 const account = ref('')
 const password = ref('')
 const loading = ref(false)
+const turnstileSiteKey = ref<string | null>(null)
+const turnstileToken = ref('')
+const turnstileRef = ref<{ reset: () => void } | null>(null)
+const captchaMissing = computed(() => !!turnstileSiteKey.value && !turnstileToken.value)
 
 // Registration
 const mode = ref<'login' | 'register'>('login')
@@ -25,10 +30,23 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/auth/registration-status')
     registrationEnabled.value = !!data.enabled
+    turnstileSiteKey.value = typeof data.turnstileSiteKey === 'string' && data.turnstileSiteKey
+      ? data.turnstileSiteKey
+      : null
   } catch {
     // 注册入口仅为可选展示，状态拉取失败时静默隐藏
   }
 })
+
+function resetTurnstile() {
+  turnstileToken.value = ''
+  turnstileRef.value?.reset()
+}
+
+function setMode(next: 'login' | 'register') {
+  mode.value = next
+  resetTurnstile()
+}
 
 async function login() {
   const accountValue = account.value.trim()
@@ -36,11 +54,16 @@ async function login() {
     message.warning('请输入账号和密码')
     return
   }
+  if (captchaMissing.value) {
+    message.warning('请先完成人机验证')
+    return
+  }
   loading.value = true
   try {
     const { data } = await api.post('/auth/login', {
       account: accountValue,
       password: password.value,
+      turnstileToken: turnstileToken.value || undefined,
     })
     if (data.role === 'admin') {
       auth.setSession(data.token, data.username, 'admin')
@@ -50,6 +73,7 @@ async function login() {
       void router.push({ name: 'user-overview' })
     }
   } catch (e) {
+    resetTurnstile()
     message.error(errMsg(e, '登录失败'))
   } finally {
     loading.value = false
@@ -70,17 +94,23 @@ async function register() {
     message.warning('两次输入的密码不一致')
     return
   }
+  if (captchaMissing.value) {
+    message.warning('请先完成人机验证')
+    return
+  }
   loading.value = true
   try {
     const { data } = await api.post('/auth/register', {
       email,
       password: regPassword.value,
       name: regName.value.trim() || undefined,
+      turnstileToken: turnstileToken.value || undefined,
     })
     auth.setSession(data.token, data.user.email, 'user')
     message.success('注册成功')
     void router.push({ name: 'user-overview' })
   } catch (e) {
+    resetTurnstile()
     message.error(errMsg(e, '注册失败'))
   } finally {
     loading.value = false
@@ -155,11 +185,17 @@ async function register() {
               @keyup.enter="login"
             />
           </UiFormItem>
-          <UiButton type="primary" size="large" block :loading="loading" @click="login">
+          <TurnstileWidget
+            v-if="turnstileSiteKey"
+            ref="turnstileRef"
+            :site-key="turnstileSiteKey"
+            @update:token="turnstileToken = $event"
+          />
+          <UiButton type="primary" size="large" block :loading="loading" :disabled="captchaMissing" @click="login">
             登录
           </UiButton>
           <p v-if="registrationEnabled" class="form-switch">
-            还没有账号？<a @click="mode = 'register'">注册账号</a>
+            还没有账号？<a @click="setMode('register')">注册账号</a>
           </p>
         </UiForm>
 
@@ -189,11 +225,17 @@ async function register() {
               @keyup.enter="register"
             />
           </UiFormItem>
-          <UiButton type="primary" size="large" block :loading="loading" @click="register">
+          <TurnstileWidget
+            v-if="turnstileSiteKey"
+            ref="turnstileRef"
+            :site-key="turnstileSiteKey"
+            @update:token="turnstileToken = $event"
+          />
+          <UiButton type="primary" size="large" block :loading="loading" :disabled="captchaMissing" @click="register">
             注册
           </UiButton>
           <p class="form-switch">
-            已有账号？<a @click="mode = 'login'">返回登录</a>
+            已有账号？<a @click="setMode('login')">返回登录</a>
           </p>
         </UiForm>
         </div>

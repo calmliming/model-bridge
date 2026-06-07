@@ -16,6 +16,9 @@ const saving = ref(false)
 
 const registrationEnabled = ref(false)
 const togglingRegistration = ref(false)
+const turnstileEnabled = ref(false)
+const turnstileConfigured = ref(false)
+const securityHeadersEnabled = ref(false)
 
 type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 'failed'
 type TagType = 'default' | 'info' | 'success' | 'warning' | 'error' | 'primary'
@@ -117,6 +120,9 @@ async function loadSettings() {
   try {
     const { data } = await api.get('/admin/settings')
     registrationEnabled.value = !!data.registrationEnabled
+    turnstileEnabled.value = !!data.turnstileEnabled
+    turnstileConfigured.value = !!data.turnstileConfigured
+    securityHeadersEnabled.value = !!data.securityHeadersEnabled
   } catch (e) {
     message.error(errMsg(e, '加载设置失败'))
   }
@@ -127,6 +133,9 @@ async function toggleRegistration(value: boolean) {
   try {
     const { data } = await api.patch('/admin/settings', { registrationEnabled: value })
     registrationEnabled.value = !!data.registrationEnabled
+    turnstileEnabled.value = !!data.turnstileEnabled
+    turnstileConfigured.value = !!data.turnstileConfigured
+    securityHeadersEnabled.value = !!data.securityHeadersEnabled
     message.success(value ? '已开放注册' : '已关闭注册')
   } catch (e) {
     registrationEnabled.value = !value
@@ -411,6 +420,33 @@ function confirmSystemUpdate() {
           :value="registrationEnabled"
           @update:value="toggleRegistration"
         />
+      </div>
+    </UiCard>
+
+    <UiCard class="max-w-xl" title="安全加固">
+      <div class="space-y-4">
+        <div class="flex items-center justify-between gap-5">
+          <div>
+            <strong class="text-gray-900 dark:text-white">Turnstile 人机验证</strong>
+            <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+              配置站点密钥和服务端密钥后，登录与注册入口会强制校验。
+            </p>
+          </div>
+          <UiTag :type="turnstileEnabled ? 'success' : (turnstileConfigured ? 'warning' : 'default')">
+            {{ turnstileEnabled ? '已启用' : (turnstileConfigured ? '配置不完整' : '未配置') }}
+          </UiTag>
+        </div>
+        <div class="flex items-center justify-between gap-5">
+          <div>
+            <strong class="text-gray-900 dark:text-white">CSP / 安全响应头</strong>
+            <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+              默认发送 CSP、frame 防护、nosniff、referrer 与权限策略响应头。
+            </p>
+          </div>
+          <UiTag :type="securityHeadersEnabled ? 'success' : 'warning'">
+            {{ securityHeadersEnabled ? '已启用' : '已关闭' }}
+          </UiTag>
+        </div>
       </div>
     </UiCard>
   </div>

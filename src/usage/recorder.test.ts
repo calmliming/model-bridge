@@ -161,4 +161,15 @@ describe('recordUsage', () => {
     expect(mocks.debitWalletForUsage).toHaveBeenCalled()
     expect(mocks.incrementSubscriptionUsage).not.toHaveBeenCalled()
   })
+
+  it('returns false when persistence fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mocks.estimateCost.mockReturnValue(2)
+    mocks.query.mockRejectedValueOnce(new Error('database unavailable'))
+
+    await expect(recordUsage(baseRecord())).resolves.toBe(false)
+
+    expect(mocks.query).toHaveBeenCalledWith('ROLLBACK')
+    errorSpy.mockRestore()
+  })
 })

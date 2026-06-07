@@ -24,8 +24,13 @@ export interface UsageRecord {
   subscriptionId?: string | null
 }
 
-/** Writes one usage-log row, bumps key quota, and charges the chosen budget. */
-export async function recordUsage(record: UsageRecord): Promise<void> {
+/**
+ * Writes one usage-log row, bumps key quota, and charges the chosen budget.
+ * Returns false when persistence failed; streaming callers can only log that
+ * failure, while buffered relay paths may fail closed before sending upstream
+ * success responses to clients.
+ */
+export async function recordUsage(record: UsageRecord): Promise<boolean> {
   const baseCost = estimateCost(record.provider, record.model, record.usage)
   const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
   const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
@@ -77,10 +82,11 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       }
     }
     await client.query('COMMIT')
+    return true
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
-    // Usage logging must never break the relay response.
     console.error('[usage] failed to record usage:', (err as Error).message)
+    return false
   } finally {
     client.release()
   }

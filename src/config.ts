@@ -6,6 +6,14 @@ import { z } from 'zod'
 const ENV_PATH = '.env'
 const blankToUndefined = (value: unknown) =>
   typeof value === 'string' && value.trim() === '' ? undefined : value
+const envBoolean = (value: unknown) => {
+  const normalized = blankToUndefined(value)
+  if (typeof normalized !== 'string') return normalized
+  const lower = normalized.trim().toLowerCase()
+  if (['true', '1', 'yes', 'on'].includes(lower)) return true
+  if (['false', '0', 'no', 'off'].includes(lower)) return false
+  return normalized
+}
 
 // Load an existing .env file (if any) into process.env.
 loadDotenv()
@@ -58,6 +66,9 @@ const schema = z.object({
   ADMIN_PASSWORD: z.string().min(1).default('admin'),
   UPDATER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
   UPDATE_TOKEN: z.preprocess(blankToUndefined, z.string().min(16).optional()),
+  TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),
+  TURNSTILE_SECRET_KEY: z.preprocess(blankToUndefined, z.string().optional()),
+  SECURITY_HEADERS_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers

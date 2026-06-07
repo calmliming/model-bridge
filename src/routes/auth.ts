@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getAdminUsername, verifyAdminCredentials } from '../auth/admin'
+import { checkLoginRateLimit, getTurnstileSiteKey, verifyTurnstileToken } from '../auth/security'
 import { registerUser, UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
 import { isRegistrationEnabled } from '../db/settings'
 import { checkRateLimit } from '../middleware/limits'
@@ -8,12 +9,14 @@ import { checkRateLimit } from '../middleware/limits'
 const loginSchema = z.object({
   account: z.string().trim().min(1),
   password: z.string().min(1),
+  turnstileToken: z.string().optional(),
 })
 
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
   name: z.string().trim().min(1).max(60).optional(),
+  turnstileToken: z.string().optional(),
 })
 
 /** Max registration attempts per client IP per minute. */
@@ -31,6 +34,13 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
 
     const { account, password } = body.data
+    if (!(await checkLoginRateLimit(request.ip, account))) {
+      return reply.code(429).send({ error: '登录尝试过于频繁，请稍后再试' })
+    }
+    if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
+      return reply.code(400).send({ error: '人机验证失败，请重试' })
+    }
+
     if (await verifyAdminCredentials(account, password)) {
       const username = await getAdminUsername()
       const token = app.jwt.sign({ sub: username, role: 'admin' }, { expiresIn: '7d' })
@@ -48,7 +58,10 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   // Public: the login page reads this to show/hide the registration entry.
   app.get('/api/auth/registration-status', async () => {
-    return { enabled: await isRegistrationEnabled() }
+    return {
+      enabled: await isRegistrationEnabled(),
+      turnstileSiteKey: getTurnstileSiteKey(),
+    }
   })
 
   app.post('/api/auth/register', async (request, reply) => {
@@ -61,6 +74,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const body = registerSchema.safeParse(request.body)
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
+    }
+    if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
+      return reply.code(400).send({ error: '人机验证失败，请重试' })
     }
     try {
       const user = await registerUser(body.data)

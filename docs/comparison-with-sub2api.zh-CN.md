@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
 > 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)
-> 更新日期：2026-06-02
+> 更新日期：2026-06-07
 
 ## 一句话定位
 
@@ -10,7 +10,7 @@
 | **model-bridge**（本项目）| 自托管的多服务商 AI API 中转平台，偏「个人 / 小团队 / 小规模拼车」的轻量网关 |
 | **sub2api** | AI API 网关 + **拼车 SaaS 平台**，主打「订阅配额分发 + 内置计费收款」 |
 
-核心区别一句话：**sub2api 是更完整的商业化拼车 SaaS；model-bridge 已具备中转、管理后台、邀请用户、钱包、余额扣费、充值订单与支付宝/微信在线收款闭环，但在账号分组、登录安全加固、运维自动化上仍有差距，整体保持轻量自托管定位。**
+核心区别一句话：**sub2api 是更完整的商业化拼车 SaaS；model-bridge 已具备中转、管理后台、邀请用户、钱包、余额扣费、充值订单、支付宝/微信在线收款闭环、账号分组和基础登录安全加固，但在 2FA/TOTP、出站 URL allowlist/SSRF 与更完整运维回滚上仍有差距，整体保持轻量自托管定位。**
 
 ---
 
@@ -45,8 +45,8 @@
 | # | 功能 | sub2api | model-bridge | 状态 |
 |---|---|:---:|:---:|---|
 | 1 | **账号分组隔离**（账号编组 + Key 绑定组，调度限定组内）| ✅ | ✅ 已实现（账号分组 + Key 绑定 + 隔离式调度）| ✅ 已完成 · 实现见 [account-groups-plan](./account-groups-plan.zh-CN.md) |
-| 2 | **登录与接口安全加固**（2FA/TOTP、Turnstile 验证码、CSP 安全响应头、出站 URL allowlist/SSRF、计费失败熔断）| ✅ | ❌ | 待开发 · 高优先级 |
-| 3 | **Web 一键升级 + 回滚** | ✅ | ❌ 手动部署 | 待开发 · 运维体验 |
+| 2 | **登录与接口安全加固**（2FA/TOTP、Turnstile 验证码、CSP 安全响应头、出站 URL allowlist/SSRF、计费失败熔断）| ✅ | ⚠️ 已部分实现（Turnstile、登录限流、CSP/安全响应头、非流式计费失败 fail-closed）| 进行中 · 剩余 2FA/TOTP、出站 URL allowlist/SSRF、流式计费熔断 |
+| 3 | **Web 一键升级 + 回滚** | ✅ | ⚠️ 已实现检查 / 一键升级，回滚待扩展 | 进行中 · 运维体验 |
 | 4 | **内置在线收款**（支付宝 / 微信扫码）| ✅ | ✅ 已实现（扫码 + 异步回调 + RSA2/MD5 验签 + 幂等 + 自动入账）| ✅ 已完成（Alipay / WeChat）|
 | 5 | **Stripe / EasyPay 国际支付** | ✅ | ❌ | 低优先级 · 国内收款已覆盖 |
 | 6 | **用户自助注册 / 开放注册** | ✅ | ⚠️ 邀请制用户体系 | 可用但偏私域 |
@@ -73,8 +73,8 @@
 - 继续增强观测能力，例如首 Token 延迟、账号 quota 快照、按用户 / key / provider 的成本拆分。
 
 ### 追赶（优先级从高到低）
-1. **登录与接口安全加固** —— 管理员/用户 2FA(TOTP)、登录 Turnstile、CSP 等安全响应头、出站 URL allowlist 防 SSRF、计费失败熔断（fail-closed）。
-2. **Web 一键升级 + 回滚** —— 后台内检查更新 / 一键升级 / 回滚，减少手动部署。
+1. **登录与接口安全加固** —— ✅ 已落地 Turnstile、登录限流、CSP 等安全响应头、非流式计费失败 fail-closed；继续补管理员/用户 2FA(TOTP)、出站 URL allowlist 防 SSRF、流式计费失败熔断。
+2. **Web 一键升级 + 回滚** —— ✅ 已落地后台检查更新 / 一键升级；继续补回滚与更新审计。
 3. **Stripe / EasyPay 国际支付** —— 在已有支付宝/微信之上补海外收款（低优先级）。
 4. **开放注册 / 用户套餐** —— 如果要从私域邀请制走向公开 SaaS。
 5. ~~账号分组隔离~~ —— ✅ 已完成（账号编组 + Key 绑定组 + 隔离式调度，实现见 [account-groups-plan](./account-groups-plan.zh-CN.md)）。
@@ -88,6 +88,8 @@
 
 - **账号分组隔离已落地**：差异表第 1 项、策略「追赶」第 5 项标记为 ✅ 完成。上游账号可编入分组，API Key 可绑定到某个分组，调度时绑定组的 Key 只命中组内账号、未绑定的 Key 只用默认池（未分组账号）；存量数据全为 null，行为向后兼容。代码涉及 `src/db/schema.ts`、`src/accounts/{scheduler,manager,groups}.ts`、`src/keys/manager.ts`、`src/routes/admin.ts`、`web/src/views/{AccountsView,ApiKeysView}.vue`，迁移为 `0002_zippy_invaders.sql`。
 - **支付宝 / 微信在线收款已落地**：差异表第 4 项、策略「追赶」中的支付接入与回调审计标记为 ✅ 完成（扫码 + 异步回调 + RSA2/MD5 验签 + 幂等入账，代码见 `src/payments/`、`src/routes/payment-callback.ts`）。
+- **登录基础安全加固部分落地**：差异表第 2 项更新为 ⚠️ 进行中。新增 Turnstile 登录 / 注册校验、登录限流、默认 CSP / 安全响应头、设置页安全状态展示；用户付费 API Key 的非流式上游成功响应会先确认 usage / 扣费写入，失败则返回 503 并隐藏上游响应。剩余项为 2FA/TOTP、出站 URL allowlist/SSRF、流式计费失败熔断。
+- **Web 一键升级部分落地**：差异表第 3 项更新为 ⚠️ 进行中。已支持后台检查更新 / 启动更新 / 状态轮询，独立 updater 容器执行固定 Git + Docker Compose 流程；回滚与更新审计仍待扩展。
 - **新增对比维度并重排优先级**：补入账号分组隔离、登录与接口安全加固（2FA/TOTP、Turnstile、CSP 响应头、出站 URL allowlist/SSRF、计费熔断）、Stripe/EasyPay 国际支付；差异表与策略均按「剩余价值」重新排序，当前最高优先缺口为安全加固与 Web 一键升级。
 - **实施计划文档**：[account-groups-plan](./account-groups-plan.zh-CN.md) 既是账号分组的设计依据，也已对照实际落地完成。
 - 上一轮（首 Token 观测）：usage 日志新增 `first_token_ms`，流式 relay 在首次写出事件 / 数据时记录首 Token 延迟并入库，管理后台 Overview 最近请求展示「首 Token」指标。

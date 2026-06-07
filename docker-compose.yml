@@ -48,6 +48,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       UPDATER_URL: http://model-bridge-updater:3002
       UPDATE_TOKEN: ${UPDATE_TOKEN:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      SECURITY_HEADERS_ENABLED: ${SECURITY_HEADERS_ENABLED:-true}
     volumes:
       # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
       # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or

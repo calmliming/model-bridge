@@ -4,7 +4,9 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
+import { config } from '../config'
 import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
+import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
@@ -55,6 +57,7 @@ import {
 const loginSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
+  turnstileToken: z.string().optional(),
 })
 
 const changePasswordSchema = z.object({
@@ -262,6 +265,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
+    if (!(await checkLoginRateLimit(request.ip, body.data.username))) {
+      return reply.code(429).send({ error: '登录尝试过于频繁，请稍后再试' })
+    }
+    if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
+      return reply.code(400).send({ error: '人机验证失败，请重试' })
+    }
     if (!(await verifyAdminCredentials(body.data.username, body.data.password))) {
       return reply.code(401).send({ error: 'invalid username or password' })
     }
@@ -286,7 +295,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   // ── Platform settings ───────────────────────────────────
   app.get('/api/admin/settings', { preHandler: requireAdmin }, async () => {
-    return { registrationEnabled: await isRegistrationEnabled() }
+    return {
+      registrationEnabled: await isRegistrationEnabled(),
+      turnstileEnabled: turnstileEnabled(),
+      turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
+      securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
+    }
   })
 
   app.patch('/api/admin/settings', { preHandler: requireAdmin }, async (request, reply) => {
@@ -297,7 +311,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (body.data.registrationEnabled !== undefined) {
       await setRegistrationEnabled(body.data.registrationEnabled)
     }
-    return { registrationEnabled: await isRegistrationEnabled() }
+    return {
+      registrationEnabled: await isRegistrationEnabled(),
+      turnstileEnabled: turnstileEnabled(),
+      turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
+      securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
+    }
   })
 
   // ── System update ────────────────────────────────────────

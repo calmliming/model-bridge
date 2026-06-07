@@ -66,6 +66,13 @@ npm run dev
 Docker 部署会同时启动内部 `model-bridge-updater` 服务。登录后台后，可在**设置**
 页的「系统更新」卡片检查并升级到远端 `origin/main`。
 
+可选登录安全加固：
+
+- 配置 `TURNSTILE_SITE_KEY` 和 `TURNSTILE_SECRET_KEY` 后，登录 / 注册入口会强制
+  Cloudflare Turnstile 人机验证。
+- `SECURITY_HEADERS_ENABLED=true` 为默认值，会发送 CSP 和常见浏览器安全响应头。
+  只有在反向代理统一管理这些响应头时，才建议改成 `false`。
+
 停止 / 查看日志：
 
 ```bash

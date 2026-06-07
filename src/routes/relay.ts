@@ -918,7 +918,7 @@ async function sendBuffered(
       usage = converted.usage
       responseContentType = 'application/json'
     }
-    void recordUsage({
+    const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,
       userId: meta.userId,
       accountId: meta.accountId,
@@ -932,6 +932,10 @@ async function sendBuffered(
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
     })
+    if (!recorded && upstream.ok && meta.userId) {
+      await reply.code(503).send({ error: 'usage billing failed; response withheld' })
+      return
+    }
     await reply
       .code(upstream.status)
       .header('content-type', responseContentType)
@@ -951,7 +955,7 @@ async function sendBuffered(
   } catch {
     // Error responses aren't valid JSON — leave usage empty.
   }
-  void recordUsage({
+  const recorded = await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
     accountId: meta.accountId,
@@ -965,6 +969,10 @@ async function sendBuffered(
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
   })
+  if (!recorded && upstream.ok && meta.userId) {
+    await reply.code(503).send({ error: 'usage billing failed; response withheld' })
+    return
+  }
   await reply
     .code(upstream.status)
     .header('content-type', contentType)

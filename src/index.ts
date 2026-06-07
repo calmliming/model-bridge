@@ -12,6 +12,7 @@ import { registerAdminRoutes } from './routes/admin'
 import { registerUserRoutes } from './routes/users'
 import { registerRelayRoutes } from './routes/relay'
 import { registerPaymentCallbackRoutes } from './routes/payment-callback'
+import { registerSecurityHeaders } from './middleware/securityHeaders'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startOauthCallbackServer } from './oauthCallback'
 import { initPaymentProviders } from './payments/providers/index'
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   })
 
   await app.register(fastifyJwt, { secret: config.JWT_SECRET })
+  registerSecurityHeaders(app)
 
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 

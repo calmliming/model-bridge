@@ -73,6 +73,14 @@ Docker deploys also start the internal `model-bridge-updater` service. After
 logging in, use the **System update** card under **Settings** to check and
 upgrade to the latest `origin/main`.
 
+Optional login hardening:
+
+- Set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` to require Cloudflare
+  Turnstile on login/register.
+- `SECURITY_HEADERS_ENABLED=true` is the default and sends CSP plus common
+  browser security headers. Set it to `false` only if a reverse proxy owns
+  those headers.
+
 Stop and view logs:
 
 ```bash
