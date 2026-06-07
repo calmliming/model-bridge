@@ -76,6 +76,30 @@ const PROVIDER_COLOR: Record<string, string> = {
 
 const MODEL_COLOR = ['#2563eb', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4']
 
+const metricIconPaths: Record<string, string[]> = {
+  document: [
+    'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z',
+    'M14 3v5h5',
+    'M9 13h6',
+    'M9 17h4',
+  ],
+  cube: [
+    'm21 16-9 5-9-5V8l9-5 9 5v8Z',
+    'm3.3 7.4 8.7 5 8.7-5',
+    'M12 22V12',
+  ],
+  cache: [
+    'M5 8h14',
+    'M5 8a2 2 0 1 1 0-4h14a2 2 0 1 1 0 4',
+    'M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8',
+    'M10 12h4',
+  ],
+  dollar: [
+    'M12 2v20',
+    'M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6',
+  ],
+}
+
 async function load() {
   loading.value = true
   try {
@@ -132,15 +156,22 @@ const cards = computed(() => {
     cost: 0,
   }
   return [
-    { label: '请求数', value: formatNumber(t.requests), hint: '中转请求总数', tone: 'blue' },
+    { label: '请求数', value: formatNumber(t.requests), hint: '中转请求总数', tone: 'blue', icon: 'document' },
     {
       label: 'Token 总量',
       value: formatNumber(totalTokens(t)),
       hint: `输入 ${formatNumber(t.inputTokens)} · 输出 ${formatNumber(t.outputTokens)} · 缓存 ${formatNumber(t.cacheCreateTokens + t.cacheReadTokens)}`,
       tone: 'green',
+      icon: 'cube',
     },
-    { label: '缓存 Token', value: formatNumber(t.cacheCreateTokens + t.cacheReadTokens), hint: `写入 ${formatNumber(t.cacheCreateTokens)} · 读取 ${formatNumber(t.cacheReadTokens)}`, tone: 'violet' },
-    { label: '估算成本', value: formatCost(t.cost), hint: '按各服务商市价折算', tone: 'amber' },
+    {
+      label: '缓存 Token',
+      value: formatNumber(t.cacheCreateTokens + t.cacheReadTokens),
+      hint: `写入 ${formatNumber(t.cacheCreateTokens)} · 读取 ${formatNumber(t.cacheReadTokens)}`,
+      tone: 'violet',
+      icon: 'cache',
+    },
+    { label: '估算成本', value: formatCost(t.cost), hint: '按各服务商市价折算', tone: 'amber', icon: 'dollar' },
   ]
 })
 
@@ -321,9 +352,26 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 
     <div class="metric-grid">
       <UiCard v-for="c in cards" :key="c.label" class="metric-card" :class="`tone-${c.tone}`" :bordered="false">
-        <div class="metric-label">{{ c.label }}</div>
-        <div class="metric-value">{{ c.value }}</div>
-        <div class="metric-hint">{{ c.hint }}</div>
+        <div class="metric-content">
+          <div class="metric-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path
+                v-for="path in metricIconPaths[c.icon]"
+                :key="path"
+                :d="path"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <div class="metric-copy">
+            <div class="metric-label">{{ c.label }}</div>
+            <div class="metric-value">{{ c.value }}</div>
+            <div class="metric-hint">{{ c.hint }}</div>
+          </div>
+        </div>
       </UiCard>
     </div>
 
@@ -470,24 +518,50 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   overflow: hidden;
 }
 
-.metric-card::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  content: '';
-  background: #2563eb;
+.metric-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
 }
 
-.metric-card.tone-green::before {
-  background: #14b8a6;
+.metric-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 10px;
 }
 
-.metric-card.tone-violet::before {
-  background: #8b5cf6;
+.metric-icon svg {
+  width: 23px;
+  height: 23px;
 }
 
-.metric-card.tone-amber::before {
-  background: #f59e0b;
+.metric-copy {
+  min-width: 0;
+}
+
+.metric-card.tone-blue .metric-icon {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.metric-card.tone-green .metric-icon {
+  color: #0d9488;
+  background: rgba(20, 184, 166, 0.14);
+}
+
+.metric-card.tone-violet .metric-icon {
+  color: #7c3aed;
+  background: rgba(139, 92, 246, 0.14);
+}
+
+.metric-card.tone-amber .metric-icon {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.17);
 }
 
 .metric-card .metric-label {
@@ -496,17 +570,24 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 }
 
 .metric-card .metric-value {
-  margin-top: 10px;
+  margin-top: 6px;
+  overflow: hidden;
   color: #0f172a;
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 850;
   letter-spacing: 0;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric-card .metric-hint {
   margin-top: 4px;
+  overflow: hidden;
   color: rgba(15, 23, 42, 0.42);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-head {

@@ -414,6 +414,16 @@ function providerStyle(provider: string) {
   return { '--provider-color': providerColors[provider] ?? '#6366f1' }
 }
 
+function logStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    success: '成功',
+    rate_limited: '限流',
+    error: '错误',
+    failed: '失败',
+  }
+  return labels[status] ?? status
+}
+
 function logStatusType(status: string) {
   if (status === 'success') return 'success'
   if (status === 'rate_limited') return 'warning'
@@ -427,6 +437,24 @@ function latencyLabel(ms: number | null): string {
 
 function logTokens(row: DashboardRecentLog): number {
   return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+}
+
+function logCacheTokens(row: DashboardRecentLog): number {
+  return row.cacheCreateTokens + row.cacheReadTokens
+}
+
+function hasCacheTokens(row: DashboardRecentLog): boolean {
+  return logCacheTokens(row) > 0
+}
+
+function formatLogCost(cost: number): string {
+  return `$${cost.toFixed(6)}`
+}
+
+function costRateLabel(row: DashboardRecentLog): string {
+  const tokens = logTokens(row)
+  if (!tokens || row.cost <= 0) return '—'
+  return `${formatLogCost((row.cost / tokens) * 1_000_000)} / 1M`
 }
 
 function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number }[] {
@@ -514,8 +542,8 @@ function openRequestInput(row: DashboardRecentLog) {
     <UiCard class="surface-card panel-card" :bordered="false">
       <div class="panel-head">
         <div>
-          <h3>最近调用</h3>
-          <span>快速查看入口、模型、耗时和状态</span>
+          <h3>使用记录</h3>
+          <span>最近调用的 Key、账号、模型、Token、成本和耗时</span>
         </div>
         <div class="panel-actions">
           <UiButton size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</UiButton>
@@ -525,49 +553,124 @@ function openRequestInput(row: DashboardRecentLog) {
 
       <div v-if="recentLogs.length" class="log-list">
         <div v-for="row in recentLogs" :key="row.id" class="log-row">
-          <UiTag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
-            {{ row.status }}
-          </UiTag>
-          <div class="log-model">
+          <div class="log-status-cell">
+            <UiTag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
+              {{ logStatusLabel(row.status) }}
+            </UiTag>
+            <span class="request-type-badge">API</span>
+          </div>
+
+          <div class="log-identity-cell">
+            <div class="log-cell-label">API Key</div>
+            <strong>{{ row.apiKeyName || '-' }}</strong>
+            <span>账号 {{ row.accountName || '-' }}</span>
+          </div>
+
+          <div class="log-model-cell" :style="providerStyle(row.provider)">
+            <span class="provider-chip compact">{{ providerLabel(row.provider) }}</span>
             <strong>{{ row.model || '(unknown model)' }}</strong>
-            <span>{{ providerLabel(row.provider) }} · {{ row.accountName || '未知账号' }} · {{ row.apiKeyName || '未知 Key' }}</span>
           </div>
-          <div class="log-metric">
-            <span>输入</span>
-            <strong>{{ formatNumber(row.inputTokens) }}</strong>
-          </div>
-          <div class="log-metric">
-            <span>输出</span>
-            <strong>{{ formatNumber(row.outputTokens) }}</strong>
-          </div>
-          <div class="log-metric">
-            <span>总计</span>
-            <UiTooltip trigger="hover" placement="top">
-              <template #trigger>
-                <strong class="log-total">{{ formatNumber(logTokens(row)) }}</strong>
-              </template>
-              <div class="token-breakdown">
-                <div v-for="item in tokenBreakdown(row)" :key="item.label" class="token-breakdown-row">
-                  <span>{{ item.label }}</span>
-                  <strong>{{ formatNumber(item.value) }}</strong>
+
+          <div class="log-token-cell">
+            <div class="token-main-line">
+              <span class="token-chip token-input">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 5v14m0 0 6-6m-6 6-6-6" />
+                </svg>
+                {{ formatNumber(row.inputTokens) }}
+              </span>
+              <span class="token-chip token-output">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 19V5m0 0 6 6m-6-6-6 6" />
+                </svg>
+                {{ formatNumber(row.outputTokens) }}
+              </span>
+              <UiTooltip trigger="hover" placement="top">
+                <template #trigger>
+                  <button class="info-button" type="button" aria-label="Token 明细">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 17v-5" />
+                      <path d="M12 8h.01" />
+                      <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+                    </svg>
+                  </button>
+                </template>
+                <div class="token-breakdown">
+                  <div v-for="item in tokenBreakdown(row)" :key="item.label" class="token-breakdown-row">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ formatNumber(item.value) }}</strong>
+                  </div>
+                  <div class="token-breakdown-row total">
+                    <span>总计</span>
+                    <strong>{{ formatNumber(logTokens(row)) }}</strong>
+                  </div>
                 </div>
-              </div>
-            </UiTooltip>
+              </UiTooltip>
+            </div>
+            <div v-if="hasCacheTokens(row)" class="token-cache-line">
+              <span v-if="row.cacheReadTokens > 0" class="token-cache read">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 8h14M5 8a2 2 0 1 1 0-4h14a2 2 0 1 1 0 4M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4" />
+                </svg>
+                {{ formatNumber(row.cacheReadTokens) }}
+              </span>
+              <span v-if="row.cacheCreateTokens > 0" class="token-cache create">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
+                </svg>
+                {{ formatNumber(row.cacheCreateTokens) }}
+              </span>
+            </div>
+            <div v-else class="log-subtle">总计 {{ formatNumber(logTokens(row)) }}</div>
           </div>
-          <div class="log-metric">
-            <span>耗时</span>
-            <strong>{{ latencyLabel(row.latencyMs) }}</strong>
+
+          <div class="log-cost-cell">
+            <div class="log-cell-label">成本</div>
+            <div class="cost-line">
+              <strong>{{ formatLogCost(row.cost) }}</strong>
+              <UiTooltip trigger="hover" placement="top">
+                <template #trigger>
+                  <button class="info-button" type="button" aria-label="成本明细">
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M12 17v-5" />
+                      <path d="M12 8h.01" />
+                      <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
+                    </svg>
+                  </button>
+                </template>
+                <div class="token-breakdown">
+                  <div class="token-breakdown-row">
+                    <span>估算成本</span>
+                    <strong>{{ formatLogCost(row.cost) }}</strong>
+                  </div>
+                  <div class="token-breakdown-row">
+                    <span>估算单价</span>
+                    <strong>{{ costRateLabel(row) }}</strong>
+                  </div>
+                </div>
+              </UiTooltip>
+            </div>
+            <span>{{ costRateLabel(row) }}</span>
           </div>
-          <div class="log-metric">
-            <span>首 Token</span>
-            <strong>{{ latencyLabel(row.firstTokenMs) }}</strong>
+
+          <div class="log-duration-cell">
+            <div>
+              <span>首 Token</span>
+              <strong>{{ latencyLabel(row.firstTokenMs) }}</strong>
+            </div>
+            <div>
+              <span>耗时</span>
+              <strong>{{ latencyLabel(row.latencyMs) }}</strong>
+            </div>
           </div>
-          <div class="log-metric">
-            <span>成本</span>
-            <strong>{{ formatCost(row.cost) }}</strong>
+
+          <div class="log-time-cell">
+            <div class="log-cell-label">时间</div>
+            <strong>{{ formatTime(row.ts) }}</strong>
           </div>
-          <div class="log-time">{{ formatTime(row.ts) }}</div>
-          <UiButton size="small" secondary @click="openRequestInput(row)">查看</UiButton>
+
+          <UiButton class="log-action" size="small" secondary @click="openRequestInput(row)">查看</UiButton>
         </div>
         <div class="log-pagination">
           <UiPagination
@@ -827,12 +930,6 @@ function openRequestInput(row: DashboardRecentLog) {
   font-size: 13px;
 }
 
-.log-row {
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 14px;
-  background: #ffffff;
-}
-
 .account-row {
   display: flex;
   align-items: flex-start;
@@ -848,8 +945,7 @@ function openRequestInput(row: DashboardRecentLog) {
 }
 
 .account-main strong,
-.key-head strong,
-.log-model strong {
+.key-head strong {
   overflow: hidden;
   color: #0f172a;
   font-size: 14px;
@@ -861,8 +957,7 @@ function openRequestInput(row: DashboardRecentLog) {
 .account-main small,
 .key-head span,
 .key-foot,
-.log-model span,
-.log-meta {
+.log-subtle {
   color: rgba(15, 23, 42, 0.48);
   font-size: 12px;
 }
@@ -877,6 +972,10 @@ function openRequestInput(row: DashboardRecentLog) {
   font-weight: 800;
 }
 
+.provider-chip.compact {
+  padding: 2px 7px;
+}
+
 .key-row {
   display: grid;
   gap: 10px;
@@ -884,17 +983,13 @@ function openRequestInput(row: DashboardRecentLog) {
 }
 
 .key-head,
-.key-foot,
-.log-top,
-.log-main,
-.log-meta {
+.key-foot {
   display: flex;
   align-items: center;
 }
 
 .key-head,
-.key-foot,
-.log-top {
+.key-foot {
   justify-content: space-between;
   gap: 12px;
 }
@@ -905,58 +1000,197 @@ function openRequestInput(row: DashboardRecentLog) {
   min-width: 0;
 }
 
+.log-list {
+  min-width: 0;
+}
+
 .log-row {
   display: grid;
-  grid-template-columns: 88px minmax(180px, 1.4fr) repeat(6, minmax(72px, 0.6fr)) minmax(138px, 0.9fr) 64px;
+  grid-template-columns:
+    88px minmax(160px, 0.9fr) minmax(190px, 1.1fr) minmax(210px, 1fr)
+    minmax(140px, 0.72fr) minmax(132px, 0.68fr) minmax(148px, 0.75fr) 64px;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 14px;
+  background: #ffffff;
 }
 
-.log-status {
-  justify-self: start;
+.log-status-cell,
+.log-identity-cell,
+.log-model-cell,
+.log-token-cell,
+.log-cost-cell,
+.log-time-cell {
+  min-width: 0;
 }
 
-.log-model {
+.log-status-cell {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.request-type-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.1);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.log-cell-label,
+.log-duration-cell span,
+.log-cost-cell > span {
+  color: rgba(15, 23, 42, 0.48);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.log-identity-cell,
+.log-model-cell,
+.log-cost-cell,
+.log-time-cell {
   display: grid;
   gap: 4px;
-  min-width: 0;
 }
 
-.log-metric {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.log-metric span,
-.log-time {
-  color: rgba(15, 23, 42, 0.46);
-  font-size: 11px;
-}
-
-.log-metric strong,
-.log-time {
+.log-identity-cell strong,
+.log-model-cell strong,
+.log-time-cell strong {
   overflow: hidden;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 780;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.log-metric strong {
-  color: #0f172a;
+.log-identity-cell span {
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.48);
   font-size: 12px;
-  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.log-total {
+.token-main-line,
+.token-cache-line,
+.cost-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.token-main-line {
+  flex-wrap: wrap;
+}
+
+.token-chip,
+.token-cache {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.token-chip svg,
+.token-cache svg,
+.info-button svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.token-input {
+  color: #059669;
+}
+
+.token-output {
+  color: #7c3aed;
+}
+
+.token-cache-line {
+  margin-top: 4px;
+}
+
+.token-cache.read {
+  color: #0284c7;
+}
+
+.token-cache.create {
+  color: #d97706;
+}
+
+.info-button {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  color: rgba(15, 23, 42, 0.42);
+  background: rgba(15, 23, 42, 0.06);
   cursor: help;
-  border-bottom: 1px dashed rgba(15, 23, 42, 0.32);
+}
+
+.info-button:hover {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.cost-line strong {
+  overflow: hidden;
+  color: #16a34a;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-duration-cell {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.log-duration-cell div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.log-duration-cell strong {
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.7);
+  font-size: 12px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-action {
+  justify-self: end;
 }
 
 .token-breakdown {
   display: grid;
-  gap: 4px;
-  min-width: 120px;
+  gap: 5px;
+  min-width: 150px;
 }
 
 .token-breakdown-row {
@@ -965,6 +1199,11 @@ function openRequestInput(row: DashboardRecentLog) {
   justify-content: space-between;
   gap: 16px;
   font-size: 12px;
+}
+
+.token-breakdown-row.total {
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .log-pagination {
@@ -984,6 +1223,42 @@ function openRequestInput(row: DashboardRecentLog) {
   font-size: 13px;
 }
 
+@media (min-width: 981px) {
+  .log-list {
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .log-row {
+    min-width: 1120px;
+  }
+}
+
+@media (max-width: 980px) {
+  .log-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: flex-start;
+  }
+
+  .log-status-cell {
+    grid-column: 1;
+  }
+
+  .log-action {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .log-identity-cell,
+  .log-model-cell,
+  .log-token-cell,
+  .log-cost-cell,
+  .log-duration-cell,
+  .log-time-cell {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 720px) {
   .key-head,
   .key-foot {
@@ -991,15 +1266,14 @@ function openRequestInput(row: DashboardRecentLog) {
     flex-direction: column;
   }
 
-  .log-row {
-    grid-template-columns: minmax(0, 1fr) 64px;
+  .panel-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
-  .log-status,
-  .log-model,
-  .log-metric,
-  .log-time {
-    grid-column: 1;
+  .panel-actions {
+    justify-content: space-between;
+    width: 100%;
   }
 }
 </style>
