@@ -142,21 +142,37 @@ async function dockerCompose(args) {
   })
 }
 
+async function packageVersionAt(ref) {
+  try {
+    const raw = await git(['show', `${ref}:package.json`])
+    const parsed = JSON.parse(raw)
+    return typeof parsed.version === 'string' && parsed.version.trim()
+      ? parsed.version.trim()
+      : null
+  } catch {
+    return null
+  }
+}
+
 async function inspectRepository({ log = false } = {}) {
   const dirtyOutput = await git(['status', '--porcelain', '--untracked-files=no'], { log })
   const dirty = dirtyOutput.trim().length > 0
   await git(['fetch', UPDATE_REMOTE, UPDATE_BRANCH], { timeoutMs: FETCH_TIMEOUT_MS, log })
 
-  const [currentFull, latestFull, currentCommit, latestCommit] = await Promise.all([
+  const [currentFull, latestFull, currentCommit, latestCommit, currentVersion, latestVersion] = await Promise.all([
     git(['rev-parse', 'HEAD']),
     git(['rev-parse', 'FETCH_HEAD']),
     git(['rev-parse', '--short', 'HEAD']),
     git(['rev-parse', '--short', 'FETCH_HEAD']),
+    packageVersionAt('HEAD'),
+    packageVersionAt('FETCH_HEAD'),
   ])
 
   return {
     currentCommit,
     latestCommit,
+    currentVersion,
+    latestVersion,
     currentCommitFull: currentFull,
     latestCommitFull: latestFull,
     hasUpdate: currentFull !== latestFull,
@@ -187,6 +203,8 @@ async function runUpdate(operationId) {
     Object.assign(task, {
       currentCommit: info.currentCommit,
       latestCommit: info.latestCommit,
+      currentVersion: info.currentVersion,
+      latestVersion: info.latestVersion,
       branch: info.branch,
       remote: info.remote,
       dirty: info.dirty,

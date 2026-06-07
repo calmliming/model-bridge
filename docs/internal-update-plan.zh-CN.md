@@ -45,10 +45,12 @@ model-bridge 当前是 Node.js + Vue + Docker Compose 部署，容器中运行�
 
 ### 版本来源
 
-v1 跟随 `origin/main`：
+v1 跟随 `origin/main`，展示版本号来自 `package.json` 的 `version` 字段：
 
-- 当前版本：服务器部署目录当前 `HEAD` commit。
-- 最新版本：`origin/main` 最新 commit。
+- 当前版本：服务器部署目录当前 `HEAD:package.json` 的 `version`。
+- 最新版本：本次 fetch 得到的 `FETCH_HEAD:package.json` 的 `version`。
+- 当前提交：服务器部署目录当前 `HEAD` commit。
+- 最新提交：本次 fetch 得到的远端分支 commit。
 - 有更新：`HEAD` 与 `origin/main` 不一致。
 
 这样不改变现有提交和打包习惯。开发者平时正常 commit/push 到 `main`；服务器后台检测到远端 main 更新后即可一键更新。
@@ -116,6 +118,8 @@ GET /api/admin/system/check-updates
 
 ```json
 {
+  "currentVersion": "0.1.0",
+  "latestVersion": "0.1.1",
   "currentCommit": "575ee37",
   "latestCommit": "e5c0414",
   "hasUpdate": true,
@@ -130,6 +134,8 @@ GET /api/admin/system/check-updates
 
 | 字段 | 说明 |
 |---|---|
+| `currentVersion` | 当前部署目录 `package.json` 的版本号 |
+| `latestVersion` | 本次 fetch 得到的远端分支版本号 |
 | `currentCommit` | 当前部署目录的短 commit |
 | `latestCommit` | 本次 fetch 得到的远端分支短 commit |
 | `hasUpdate` | 当前 commit 是否落后远端 |
@@ -225,8 +231,9 @@ updater 只允许执行写死的命令序列：
 
 ### 默认展示
 
-- 当前版本：当前短 commit；
-- 最新版本：远端短 commit；
+- 当前版本：当前 `package.json` 版本号；
+- 最新版本：远端 `package.json` 版本号；
+- 当前 / 最新提交：短 commit 辅助追踪；
 - 状态标签：已是最新 / 有新版本 / 工作区有改动 / updater 不可用；
 - 操作按钮：刷新、立即更新。
 

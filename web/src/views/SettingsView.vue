@@ -23,6 +23,8 @@ type TagType = 'default' | 'info' | 'success' | 'warning' | 'error' | 'primary'
 interface UpdateCheck {
   currentCommit: string | null
   latestCommit: string | null
+  currentVersion: string | null
+  latestVersion: string | null
   hasUpdate: boolean
   branch: string
   remote: string
@@ -40,6 +42,10 @@ interface UpdateTask {
   logTail: string
   message?: string | null
   error?: string | null
+  currentCommit?: string | null
+  latestCommit?: string | null
+  currentVersion?: string | null
+  latestVersion?: string | null
   updaterAvailable?: boolean
   warning?: string
 }
@@ -164,6 +170,11 @@ function formatTime(value?: number | null): string {
   return value ? new Date(value).toLocaleString() : '-'
 }
 
+function formatVersion(version?: string | null): string {
+  if (!version) return '-'
+  return version.startsWith('v') ? version : `v${version}`
+}
+
 function stopStatusPolling() {
   if (statusTimer !== undefined) {
     window.clearInterval(statusTimer)
@@ -188,6 +199,10 @@ function applyUpdateTask(next: UpdateTask) {
     logTail: next.logTail ?? '',
     message: next.message ?? null,
     error: next.error ?? null,
+    currentCommit: next.currentCommit ?? null,
+    latestCommit: next.latestCommit ?? null,
+    currentVersion: next.currentVersion ?? null,
+    latestVersion: next.latestVersion ?? null,
     updaterAvailable: next.updaterAvailable,
     warning: next.warning,
   }
@@ -298,19 +313,23 @@ function confirmSystemUpdate() {
       <div class="update-version-grid mt-4">
         <div class="update-version-item">
           <span>当前版本</span>
-          <strong>{{ updateCheck?.currentCommit || '-' }}</strong>
+          <strong>{{ formatVersion(updateCheck?.currentVersion) }}</strong>
+          <small>{{ updateCheck?.currentCommit || '-' }}</small>
         </div>
         <div class="update-version-item">
           <span>最新版本</span>
-          <strong>{{ updateCheck?.latestCommit || '-' }}</strong>
+          <strong>{{ formatVersion(updateCheck?.latestVersion) }}</strong>
+          <small>{{ updateCheck?.latestCommit || '-' }}</small>
         </div>
         <div class="update-version-item">
           <span>远端分支</span>
           <strong>{{ updateCheck ? `${updateCheck.remote}/${updateCheck.branch}` : '-' }}</strong>
+          <small>发布源</small>
         </div>
         <div class="update-version-item">
           <span>检查时间</span>
           <strong>{{ formatTime(updateCheck?.checkedAt) }}</strong>
+          <small>按提交判断更新</small>
         </div>
       </div>
 
@@ -444,8 +463,23 @@ function confirmSystemUpdate() {
   font-size: 13px;
 }
 
+.update-version-item small {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(107 114 128);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+
 :global(.dark) .update-version-item strong {
   color: white;
+}
+
+:global(.dark) .update-version-item small {
+  color: rgb(156 163 175);
 }
 
 .update-task {

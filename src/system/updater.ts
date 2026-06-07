@@ -5,6 +5,8 @@ export type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 
 export interface UpdateCheck {
   currentCommit: string | null
   latestCommit: string | null
+  currentVersion: string | null
+  latestVersion: string | null
   hasUpdate: boolean
   branch: string
   remote: string
@@ -22,6 +24,10 @@ export interface UpdateTask {
   logTail: string
   message?: string | null
   error?: string | null
+  currentCommit?: string | null
+  latestCommit?: string | null
+  currentVersion?: string | null
+  latestVersion?: string | null
   updaterAvailable?: boolean
   warning?: string
 }
@@ -44,6 +50,8 @@ function unavailableCheck(warning: string): UpdateCheck {
   return {
     currentCommit: null,
     latestCommit: null,
+    currentVersion: null,
+    latestVersion: null,
     hasUpdate: false,
     branch: 'main',
     remote: 'origin',
