@@ -1007,10 +1007,10 @@ function openRequestInput(row: DashboardRecentLog) {
 .log-row {
   display: grid;
   grid-template-columns:
-    88px minmax(160px, 0.9fr) minmax(190px, 1.1fr) minmax(210px, 1fr)
-    minmax(140px, 0.72fr) minmax(132px, 0.68fr) minmax(148px, 0.75fr) 64px;
+    76px minmax(0, 0.95fr) minmax(0, 1.05fr) minmax(0, 1.2fr)
+    minmax(0, 0.8fr) minmax(0, 0.82fr) minmax(0, 0.8fr) auto;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 12px;
   border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 14px;
@@ -1048,9 +1048,12 @@ function openRequestInput(row: DashboardRecentLog) {
 .log-cell-label,
 .log-duration-cell span,
 .log-cost-cell > span {
+  overflow: hidden;
   color: rgba(15, 23, 42, 0.48);
   font-size: 11px;
   font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .log-identity-cell,
@@ -1124,6 +1127,7 @@ function openRequestInput(row: DashboardRecentLog) {
 }
 
 .token-cache-line {
+  flex-wrap: wrap;
   margin-top: 4px;
 }
 
@@ -1223,18 +1227,7 @@ function openRequestInput(row: DashboardRecentLog) {
   font-size: 13px;
 }
 
-@media (min-width: 981px) {
-  .log-list {
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-
-  .log-row {
-    min-width: 1120px;
-  }
-}
-
-@media (max-width: 980px) {
+@media (max-width: 1279px) {
   .log-row {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: flex-start;
