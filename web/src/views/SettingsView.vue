@@ -308,7 +308,7 @@ function confirmSystemUpdate() {
 
 <template>
   <div class="space-y-5">
-    <UiCard class="max-w-3xl" title="系统更新">
+    <UiCard id="system-update" class="max-w-3xl scroll-mt-6" title="系统更新">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <strong class="text-gray-900 dark:text-white">系统版本</strong>

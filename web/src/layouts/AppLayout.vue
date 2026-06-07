@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import SystemVersionBadge from '../components/SystemVersionBadge.vue'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -65,9 +66,9 @@ function logout() {
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow">
           <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
         </span>
-        <div class="leading-tight">
+        <div class="min-w-0 leading-tight">
           <strong class="block text-base font-bold text-gray-900 dark:text-white">Model Bridge</strong>
-          <small class="text-xs text-gray-400 dark:text-dark-400">AI API Gateway</small>
+          <SystemVersionBadge class="mt-1" />
         </div>
         <button
           class="ml-auto rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 lg:hidden"

@@ -53,6 +53,7 @@ import {
   startSystemUpdate,
   UpdaterError,
 } from '../system/updater'
+import { getSystemVersionInfo } from '../system/version'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -320,6 +321,10 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   })
 
   // ── System update ────────────────────────────────────────
+  app.get('/api/admin/system/version', { preHandler: requireAdmin }, async () => {
+    return getSystemVersionInfo()
+  })
+
   app.get('/api/admin/system/check-updates', { preHandler: requireAdmin }, async () => {
     return checkSystemUpdates()
   })
