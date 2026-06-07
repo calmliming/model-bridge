@@ -150,6 +150,50 @@ const providerColors: Record<string, string> = {
   deepseek: '#6366f1',
 }
 
+const statIconPaths: Record<string, string[]> = {
+  key: [
+    'M15.5 7.5a4.5 4.5 0 1 0-3.2 7.7l-1.8 1.8H8.5v2H6.5v2H3.5v-3.1l5.3-5.3a4.5 4.5 0 0 0 6.7-5.1Z',
+    'M14.6 7.4h.01',
+  ],
+  server: [
+    'M4 6.5h16v5H4z',
+    'M4 14.5h16v5H4z',
+    'M8 9h.01',
+    'M8 17h.01',
+    'M12 9h4',
+    'M12 17h4',
+  ],
+  chart: [
+    'M5 19V9',
+    'M12 19V5',
+    'M19 19v-8',
+    'M4 19h16',
+  ],
+  users: [
+    'M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2',
+    'M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
+    'M21 21v-2a4 4 0 0 0-3-3.87',
+    'M16 3.13a4 4 0 0 1 0 7.75',
+  ],
+  cube: [
+    'm21 16-9 5-9-5V8l9-5 9 5v8Z',
+    'm3.3 7.4 8.7 5 8.7-5',
+    'M12 22V12',
+  ],
+  database: [
+    'M12 5c4.4 0 8 1.57 8 3.5S16.4 12 12 12s-8-1.57-8-3.5S7.6 5 12 5Z',
+    'M4 8.5v7c0 1.93 3.6 3.5 8 3.5s8-1.57 8-3.5v-7',
+    'M4 12c0 1.93 3.6 3.5 8 3.5s8-1.57 8-3.5',
+  ],
+  zap: [
+    'm13 2-9 12h7l-1 8 9-12h-7l1-8Z',
+  ],
+  clock: [
+    'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
+    'M12 7v5l3 2',
+  ],
+}
+
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
 const providerRows = computed(() => dashboard.value?.byProvider ?? [])
 
@@ -165,42 +209,49 @@ const cards = computed(() => [
     value: formatNumber(totals.value.keyCount),
     hint: `${formatNumber(totals.value.enabledKeyCount)} 个启用`,
     tone: 'blue',
+    icon: 'key',
   },
   {
     label: '服务账号',
     value: formatNumber(totals.value.accountCount),
     hint: `${formatNumber(totals.value.activeAccountCount)} 正常 · ${formatNumber(totals.value.errorAccountCount)} 异常`,
     tone: 'green',
+    icon: 'server',
   },
   {
     label: '24h 请求',
     value: formatNumber(totals.value.requests24h),
     hint: `累计 ${formatNumber(totals.value.requestCount)} 次`,
     tone: 'violet',
+    icon: 'chart',
   },
   {
     label: '用户',
     value: `+${formatNumber(totals.value.newUsers24h)}`,
     hint: `总计 ${formatNumber(totals.value.totalUsers)} · 24h 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
     tone: 'cyan',
+    icon: 'users',
   },
   {
     label: '24h Tokens',
     value: formatTokens(totals.value.tokens24h),
     hint: `费用 ${formatCost(totals.value.cost24h)}`,
     tone: 'amber',
+    icon: 'cube',
   },
   {
     label: '累计 Tokens',
     value: formatTokens(totals.value.totalTokens),
     hint: `累计费用 ${formatCost(totals.value.totalCost)}`,
     tone: 'indigo',
+    icon: 'database',
   },
   {
     label: '性能',
     value: `${formatRate(totals.value.rpm5m)} RPM`,
     hint: `${formatRate(totals.value.tpm5m)} TPM · 近 5 分钟`,
     tone: 'teal',
+    icon: 'zap',
   },
   {
     label: '平均响应',
@@ -210,6 +261,7 @@ const cards = computed(() => [
         ? '暂无 24h 请求'
         : `24h 成功率 ${successRate24h.value.toFixed(1)}%`,
     tone: 'rose',
+    icon: 'clock',
   },
 ])
 
@@ -396,9 +448,26 @@ function openRequestInput(row: DashboardRecentLog) {
     <UiGrid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <UiGi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
         <UiCard class="stat-card surface-card" :class="`is-${card.tone}`" :bordered="false">
-          <div class="stat-label">{{ card.label }}</div>
-          <div class="stat-value">{{ loading ? '—' : card.value }}</div>
-          <div class="stat-hint">{{ card.hint }}</div>
+          <div class="stat-content">
+            <div class="stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path
+                  v-for="path in statIconPaths[card.icon]"
+                  :key="path"
+                  :d="path"
+                  stroke="currentColor"
+                  stroke-width="2.35"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <div class="stat-copy">
+              <div class="stat-label">{{ card.label }}</div>
+              <div class="stat-value">{{ loading ? '—' : card.value }}</div>
+              <div class="stat-hint">{{ card.hint }}</div>
+            </div>
+          </div>
         </UiCard>
       </UiGi>
     </UiGrid>
@@ -583,21 +652,96 @@ function openRequestInput(row: DashboardRecentLog) {
   background: #f43f5e;
 }
 
+.stat-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 92px;
+}
+
+.stat-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border-radius: 14px;
+}
+
+.stat-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.stat-copy {
+  min-width: 0;
+}
+
 .stat-label {
   color: rgba(15, 23, 42, 0.58);
   font-size: 13px;
+  font-weight: 760;
 }
 
 .stat-value {
-  margin: 8px 0 2px;
+  margin: 6px 0 2px;
+  overflow: hidden;
   color: #0f172a;
-  font-size: 34px;
+  font-size: clamp(26px, 2.2vw, 34px);
   font-weight: 820;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stat-hint {
+  overflow: hidden;
   color: rgba(15, 23, 42, 0.42);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stat-card.is-green .stat-icon {
+  color: #0d9488;
+  background: rgba(20, 184, 166, 0.14);
+}
+
+.stat-card.is-blue .stat-icon {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.13);
+}
+
+.stat-card.is-violet .stat-icon {
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.14);
+}
+
+.stat-card.is-amber .stat-icon {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.17);
+}
+
+.stat-card.is-teal .stat-icon {
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.14);
+}
+
+.stat-card.is-cyan .stat-icon {
+  color: #0891b2;
+  background: rgba(6, 182, 212, 0.14);
+}
+
+.stat-card.is-indigo .stat-icon {
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.stat-card.is-rose .stat-icon {
+  color: #e11d48;
+  background: rgba(244, 63, 94, 0.14);
 }
 
 .panel-card {
