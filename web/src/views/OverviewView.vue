@@ -58,6 +58,16 @@ interface DashboardRecentLog {
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
+  baseCost: number
+  billTo: string
+  inputCost: number
+  outputCost: number
+  cacheCreateCost: number
+  cacheReadCost: number
+  inputPrice: number | null
+  outputPrice: number | null
+  cacheCreatePrice: number | null
+  cacheReadPrice: number | null
   apiKeyName: string | null
   accountName: string | null
   requestInput: string | null
@@ -457,6 +467,32 @@ function costRateLabel(row: DashboardRecentLog): string {
   return `${formatLogCost((row.cost / tokens) * 1_000_000)} / 1M`
 }
 
+function formatTokenPrice(price: number | null): string {
+  if (price == null) return '—'
+  return `$${price.toFixed(price < 1 ? 4 : 2)} / 1M Token`
+}
+
+function costMultiplier(row: DashboardRecentLog): string {
+  if (!row.baseCost || row.baseCost <= 0) return '1x'
+  const multiplier = row.cost / row.baseCost
+  return `${multiplier.toFixed(multiplier < 0.01 ? 4 : 3).replace(/0+$/, '').replace(/\.$/, '')}x`
+}
+
+function billingLabel(row: DashboardRecentLog): string {
+  if (row.billTo === 'subscription') return 'Subscription'
+  return 'Balance'
+}
+
+function costBreakdown(row: DashboardRecentLog): { label: string; value: string; tone?: string }[] {
+  const rows = [
+    { label: '输入费用', value: formatLogCost(row.inputCost) },
+    { label: '输出费用', value: formatLogCost(row.outputCost) },
+  ]
+  if (row.cacheCreateCost > 0) rows.push({ label: '缓存写入费用', value: formatLogCost(row.cacheCreateCost) })
+  if (row.cacheReadCost > 0) rows.push({ label: '缓存读取费用', value: formatLogCost(row.cacheReadCost) })
+  return rows
+}
+
 function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number }[] {
   return [
     { label: '输入', value: row.inputTokens },
@@ -543,7 +579,7 @@ function openRequestInput(row: DashboardRecentLog) {
       <div class="panel-head">
         <div>
           <h3>使用记录</h3>
-          <span>最近调用的 Key、账号、模型、Token、成本和耗时</span>
+          <span>最近调用的 Key、账号、模型、Token、费用和耗时</span>
         </div>
         <div class="panel-actions">
           <UiButton size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</UiButton>
@@ -626,12 +662,12 @@ function openRequestInput(row: DashboardRecentLog) {
           </div>
 
           <div class="log-cost-cell">
-            <div class="log-cell-label">成本</div>
+            <div class="log-cell-label">费用</div>
             <div class="cost-line">
               <strong>{{ formatLogCost(row.cost) }}</strong>
               <UiTooltip trigger="hover" placement="top">
                 <template #trigger>
-                  <button class="info-button" type="button" aria-label="成本明细">
+                  <button class="info-button" type="button" aria-label="费用明细">
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <path d="M12 17v-5" />
                       <path d="M12 8h.01" />
@@ -639,14 +675,49 @@ function openRequestInput(row: DashboardRecentLog) {
                     </svg>
                   </button>
                 </template>
-                <div class="token-breakdown">
-                  <div class="token-breakdown-row">
-                    <span>估算成本</span>
-                    <strong>{{ formatLogCost(row.cost) }}</strong>
+                <div class="cost-breakdown">
+                  <div class="cost-breakdown-title">费用明细</div>
+                  <div v-for="item in costBreakdown(row)" :key="item.label" class="cost-breakdown-row">
+                    <span>{{ item.label }}</span>
+                    <strong>{{ item.value }}</strong>
                   </div>
-                  <div class="token-breakdown-row">
-                    <span>估算单价</span>
-                    <strong>{{ costRateLabel(row) }}</strong>
+                  <div class="cost-breakdown-row price">
+                    <span>输入单价</span>
+                    <strong>{{ formatTokenPrice(row.inputPrice) }}</strong>
+                  </div>
+                  <div class="cost-breakdown-row price">
+                    <span>输出单价</span>
+                    <strong>{{ formatTokenPrice(row.outputPrice) }}</strong>
+                  </div>
+                  <div v-if="row.cacheCreatePrice && row.cacheCreatePrice > 0" class="cost-breakdown-row price">
+                    <span>缓存写入单价</span>
+                    <strong>{{ formatTokenPrice(row.cacheCreatePrice) }}</strong>
+                  </div>
+                  <div v-if="row.cacheReadPrice && row.cacheReadPrice > 0" class="cost-breakdown-row price">
+                    <span>缓存读取单价</span>
+                    <strong>{{ formatTokenPrice(row.cacheReadPrice) }}</strong>
+                  </div>
+                  <div class="cost-breakdown-divider" />
+                  <div class="cost-breakdown-row">
+                    <span>服务档位</span>
+                    <strong class="accent-cyan">Standard</strong>
+                  </div>
+                  <div class="cost-breakdown-row">
+                    <span>倍率</span>
+                    <strong class="accent-blue">{{ costMultiplier(row) }}</strong>
+                  </div>
+                  <div class="cost-breakdown-row">
+                    <span>原始</span>
+                    <strong>{{ formatLogCost(row.baseCost) }}</strong>
+                  </div>
+                  <div class="cost-breakdown-divider" />
+                  <div class="cost-breakdown-row">
+                    <span>预算</span>
+                    <strong>{{ billingLabel(row) }}</strong>
+                  </div>
+                  <div class="cost-breakdown-row total">
+                    <span>计费</span>
+                    <strong>{{ formatLogCost(row.cost) }}</strong>
                   </div>
                 </div>
               </UiTooltip>
@@ -1208,6 +1279,60 @@ function openRequestInput(row: DashboardRecentLog) {
 .token-breakdown-row.total {
   padding-top: 5px;
   border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.cost-breakdown {
+  display: grid;
+  gap: 7px;
+  min-width: 260px;
+  color: #f8fafc;
+}
+
+.cost-breakdown-title {
+  margin-bottom: 2px;
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.cost-breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.cost-breakdown-row strong {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.cost-breakdown-row.price strong {
+  color: #67e8f9;
+}
+
+.cost-breakdown-row.total strong {
+  color: #4ade80;
+  font-size: 13px;
+}
+
+.cost-breakdown-row .accent-cyan {
+  color: #67e8f9;
+}
+
+.cost-breakdown-row .accent-blue {
+  color: #60a5fa;
+}
+
+.cost-breakdown-divider {
+  height: 1px;
+  margin: 3px 0;
+  background: rgba(148, 163, 184, 0.28);
 }
 
 .log-pagination {

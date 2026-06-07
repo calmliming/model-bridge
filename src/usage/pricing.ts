@@ -168,7 +168,7 @@ export async function initPricing(): Promise<void> {
  * (exact match, then prefix/substring match for "claude-opus-4-7" → "opus"
  * style aliases), and falls back to built-in tiers.
  */
-function resolvePrice(provider: string, model: string): TierPrice | null {
+export function resolvePrice(provider: string, model: string): TierPrice | null {
   if (!loaded) return builtinPrice(provider, model)
 
   // 1) exact match

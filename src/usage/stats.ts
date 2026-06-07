@@ -1,5 +1,6 @@
 import { pool } from '../db/index'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
+import { resolvePrice } from './pricing'
 
 export interface DailyStat {
   day: string // YYYY-MM-DD (UTC)
@@ -75,6 +76,16 @@ export interface DashboardRecentLog {
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
+  baseCost: number
+  billTo: string
+  inputCost: number
+  outputCost: number
+  cacheCreateCost: number
+  cacheReadCost: number
+  inputPrice: number | null
+  outputPrice: number | null
+  cacheCreatePrice: number | null
+  cacheReadPrice: number | null
   apiKeyName: string | null
   accountName: string | null
   requestInput: string | null
@@ -200,20 +211,45 @@ function asKey(row: Record<string, unknown>): KeyStat {
   }
 }
 
+function roundUsd(n: number): number {
+  return Math.round(n * 1e6) / 1e6
+}
+
 function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog {
+  const provider = row.provider as string
+  const model = (row.model as string | null) ?? null
+  const price = resolvePrice(provider, model ?? '')
+  const inputTokens = toNum(row.inputtokens)
+  const outputTokens = toNum(row.outputtokens)
+  const cacheCreateTokens = toNum(row.cachecreatetokens)
+  const cacheReadTokens = toNum(row.cachereadtokens)
+  const cost = toNum(row.cost)
+  const rawBaseCost = toNum(row.basecost)
+  const baseCost = rawBaseCost > 0 ? rawBaseCost : cost
+
   return {
     id: row.id as string,
     ts: toNum(row.ts),
-    provider: row.provider as string,
-    model: (row.model as string | null) ?? null,
+    provider,
+    model,
     status: row.status as string,
     latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
     firstTokenMs: row.firsttokenms == null ? null : toNum(row.firsttokenms),
-    inputTokens: toNum(row.inputtokens),
-    outputTokens: toNum(row.outputtokens),
-    cacheCreateTokens: toNum(row.cachecreatetokens),
-    cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
+    inputTokens,
+    outputTokens,
+    cacheCreateTokens,
+    cacheReadTokens,
+    cost,
+    baseCost,
+    billTo: (row.billto as string | null) ?? 'balance',
+    inputCost: price ? roundUsd((inputTokens * price.input) / 1_000_000) : 0,
+    outputCost: price ? roundUsd((outputTokens * price.output) / 1_000_000) : 0,
+    cacheCreateCost: price ? roundUsd((cacheCreateTokens * price.cacheWrite) / 1_000_000) : 0,
+    cacheReadCost: price ? roundUsd((cacheReadTokens * price.cacheRead) / 1_000_000) : 0,
+    inputPrice: price?.input ?? null,
+    outputPrice: price?.output ?? null,
+    cacheCreatePrice: price?.cacheWrite ?? null,
+    cacheReadPrice: price?.cacheRead ?? null,
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
     requestInput: (row.requestinput as string | null) ?? null,
@@ -461,6 +497,8 @@ export async function dashboardRecentLogs(
               usage_logs.cache_create_tokens AS cacheCreateTokens,
               usage_logs.cache_read_tokens AS cacheReadTokens,
               usage_logs.cost AS cost,
+              usage_logs.base_cost AS baseCost,
+              usage_logs.bill_to AS billTo,
               usage_logs.request_input AS requestInput,
               api_keys.name AS apiKeyName,
               accounts.name AS accountName
