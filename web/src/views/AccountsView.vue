@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
-import { NButton, NInputNumber, NSelect, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiInputNumber, UiSelect, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
+import { useDialog } from '../composables/useDialog'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -213,14 +215,14 @@ function renderAccount(row: Account) {
 function renderStatus(row: Account) {
   const status = effectiveStatus(row)
   const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
-  const tag = h(NTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
+  const tag = h(UiTag, { size: 'small', type: meta.type, bordered: false }, { default: () => meta.label })
   const cooldownText = `限流至 ${formatShortTime(row.cooldownUntil)}`
 
   if (status === 'rate_limited' && isCoolingDown(row)) {
     return h('div', { class: 'status-cell' }, [
       tag,
       h(
-        NTooltip,
+        UiTooltip,
         { placement: 'top', trigger: 'hover' },
         {
           trigger: () =>
@@ -241,7 +243,7 @@ function renderStatus(row: Account) {
   }
 
   return h(
-    NSpace,
+    UiSpace,
     { size: 6, vertical: true },
     {
       default: () => [
@@ -275,7 +277,7 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
     [
       updatedAt ? h('span', { class: 'quota-updated' }, formatRelativePast(updatedAt)) : null,
       h(
-        NButton,
+        UiButton,
         {
           size: 'tiny',
           quaternary: true,
@@ -318,7 +320,7 @@ function renderQuota(row: Account) {
 }
 
 function renderPriority(row: Account) {
-  return h(NInputNumber, {
+  return h(UiInputNumber, {
     value: row.weight,
     min: 1,
     max: 100,
@@ -335,7 +337,7 @@ function renderPriority(row: Account) {
 }
 
 function renderGroupCell(row: Account) {
-  return h(NSelect, {
+  return h(UiSelect, {
     value: row.groups.map((g) => g.id),
     options: groupSelectOptions.value,
     multiple: true,
@@ -687,7 +689,7 @@ function confirmDelete(row: Account) {
   })
 }
 
-const columns = computed<DataTableColumns<Account>>(() => [
+const columns = computed<TableColumn<Account>[]>(() => [
   { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
   { title: '分组', key: 'group', width: 140, render: renderGroupCell },
   {
@@ -705,7 +707,7 @@ const columns = computed<DataTableColumns<Account>>(() => [
     key: 'toggle',
     width: 86,
     render: (row) =>
-      h(NSwitch, {
+      h(UiSwitch, {
         value: row.status !== 'disabled',
         size: 'small',
         onUpdateValue: () => toggle(row),
@@ -717,12 +719,12 @@ const columns = computed<DataTableColumns<Account>>(() => [
     width: 130,
     render: (row) =>
       h(
-        NSpace,
+        UiSpace,
         { size: 4 },
         {
           default: () => [
             h(
-              NButton,
+              UiButton,
               {
                 size: 'small',
                 quaternary: true,
@@ -732,7 +734,7 @@ const columns = computed<DataTableColumns<Account>>(() => [
               { default: () => '测试' },
             ),
             h(
-              NButton,
+              UiButton,
               { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
               { default: () => '删除' },
             ),
@@ -780,12 +782,12 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <div class="page-head">
-      <n-button secondary @click="showGroups = true">管理分组</n-button>
-      <n-button type="primary" @click="openAdd">添加账户</n-button>
+      <UiButton secondary @click="showGroups = true">管理分组</UiButton>
+      <UiButton type="primary" @click="openAdd">添加账户</UiButton>
     </div>
 
     <div v-if="accountGroups.length" class="account-groups">
-      <n-card
+      <UiCard
         v-for="group in accountGroups"
         :key="group.provider"
         class="table-card account-group-card"
@@ -793,9 +795,9 @@ onBeforeUnmount(() => {
       >
         <div class="account-group-head">
           <div class="account-group-title">
-            <n-tag size="small" :type="providerType(group.provider)" :bordered="false">
+            <UiTag size="small" :type="providerType(group.provider)" :bordered="false">
               {{ providerName(group.provider) }}
-            </n-tag>
+            </UiTag>
             <strong>{{ group.accounts.length }} 个账户</strong>
           </div>
           <div class="account-group-meta">
@@ -804,105 +806,105 @@ onBeforeUnmount(() => {
             <span>禁用 {{ group.disabledCount }}</span>
           </div>
         </div>
-        <n-data-table
+        <UiDataTable
           :columns="columns"
           :data="group.accounts"
           :loading="loading"
           :bordered="false"
           :scroll-x="1370"
         />
-      </n-card>
+      </UiCard>
     </div>
 
-    <n-card v-else class="table-card" :bordered="false">
-      <n-data-table
+    <UiCard v-else class="table-card" :bordered="false">
+      <UiDataTable
         :columns="columns"
         :data="accounts"
         :loading="loading"
         :bordered="false"
         :scroll-x="1510"
       />
-    </n-card>
+    </UiCard>
 
-    <n-modal v-model:show="showAdd" title="添加上游账户" :width="520">
+    <UiModal v-model:show="showAdd" title="添加上游账户" :width="520">
       <div v-if="step === 'name'">
-        <n-form label-placement="top">
-          <n-form-item label="服务商">
-            <n-radio-group v-model:value="form.provider">
-              <n-radio-button value="claude">Claude</n-radio-button>
-              <n-radio-button value="openai">OpenAI</n-radio-button>
-              <n-radio-button value="gemini">Gemini</n-radio-button>
-              <n-radio-button value="deepseek">DeepSeek</n-radio-button>
-            </n-radio-group>
-          </n-form-item>
-          <n-form-item label="账户名称">
-            <n-input
+        <UiForm label-placement="top">
+          <UiFormItem label="服务商">
+            <UiRadioGroup v-model:value="form.provider">
+              <UiRadioButton value="claude">Claude</UiRadioButton>
+              <UiRadioButton value="openai">OpenAI</UiRadioButton>
+              <UiRadioButton value="gemini">Gemini</UiRadioButton>
+              <UiRadioButton value="deepseek">DeepSeek</UiRadioButton>
+            </UiRadioGroup>
+          </UiFormItem>
+          <UiFormItem label="账户名称">
+            <UiInput
               v-model:value="form.name"
               :placeholder="`例如：我的 ${providerLabel[form.provider]}`"
             />
-          </n-form-item>
-          <n-form-item v-if="form.provider === 'deepseek'" label="API Key">
-            <n-input
+          </UiFormItem>
+          <UiFormItem v-if="form.provider === 'deepseek'" label="API Key">
+            <UiInput
               v-model:value="deepseekApiKey"
               placeholder="sk-..."
               type="password"
               show-password-on="click"
             />
-          </n-form-item>
-        </n-form>
-        <n-text v-if="form.provider !== 'deepseek'" depth="3" style="font-size: 13px">
+          </UiFormItem>
+        </UiForm>
+        <UiText v-if="form.provider !== 'deepseek'" depth="3" style="font-size: 13px">
           下一步会生成 {{ authorizeHost[form.provider] }} 的授权链接；
           你需要用拥有该订阅的账号登录并授权。
-        </n-text>
-        <n-text v-else depth="3" style="font-size: 13px">
+        </UiText>
+        <UiText v-else depth="3" style="font-size: 13px">
           在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。
-        </n-text>
+        </UiText>
       </div>
 
       <div v-else>
-        <n-text strong>第 1 步</n-text>
-        <n-text depth="3">　用拥有 {{ providerLabel[form.provider] }} 订阅的账号打开下面的链接并完成授权：</n-text>
-        <n-input
+        <UiText strong>第 1 步</UiText>
+        <UiText depth="3">　用拥有 {{ providerLabel[form.provider] }} 订阅的账号打开下面的链接并完成授权：</UiText>
+        <UiInput
           :value="authorizeUrl"
           readonly
           type="textarea"
           :autosize="{ minRows: 2, maxRows: 5 }"
           style="margin: 10px 0"
         />
-        <n-button ghost type="primary" size="small" @click="openAuthorizeUrl">
+        <UiButton ghost type="primary" size="small" @click="openAuthorizeUrl">
           在浏览器中打开 ↗
-        </n-button>
-        <n-divider style="margin: 16px 0" />
-        <n-text strong>第 2 步</n-text>
+        </UiButton>
+        <UiDivider style="margin: 16px 0" />
+        <UiText strong>第 2 步</UiText>
         <template v-if="oauthMode === 'paste'">
-          <n-text depth="3">　授权后页面会显示一段 Authorization Code，复制并粘贴到这里：</n-text>
-          <n-input
+          <UiText depth="3">　授权后页面会显示一段 Authorization Code，复制并粘贴到这里：</UiText>
+          <UiInput
             v-model:value="pasteCode"
             placeholder="粘贴 Authorization Code"
             style="margin-top: 10px"
           />
         </template>
         <template v-else>
-          <n-text depth="3">
+          <UiText depth="3">
             　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 1455 端口（如本地部署），授权会自动完成。
-          </n-text>
-          <n-text depth="3" style="display: block; margin-top: 6px; font-size: 12px">
+          </UiText>
+          <UiText depth="3" style="display: block; margin-top: 6px; font-size: 12px">
             （回调由本机 1455 端口处理；浏览器必须能访问运行 model-bridge 那台机器的 localhost:1455）
-          </n-text>
-          <n-divider style="margin: 18px 0">远程部署 / 手动完成</n-divider>
+          </UiText>
+          <UiDivider style="margin: 18px 0">远程部署 / 手动完成</UiDivider>
 
-          <n-text depth="3" style="font-size: 13px">
+          <UiText depth="3" style="font-size: 13px">
             如果服务器不在本地，浏览器跳转到 localhost 后页面会打不开。<strong>复制浏览器地址栏中的完整 URL</strong>，粘贴到下面：
-          </n-text>
-          <n-input
+          </UiText>
+          <UiInput
             v-model:value="pasteCallbackUrl"
             placeholder="http://localhost:1455/auth/callback?code=...&state=..."
             style="margin-top: 8px"
           />
-          <n-text depth="3" style="display: block; margin-top: 4px; font-size: 12px">
+          <UiText depth="3" style="display: block; margin-top: 4px; font-size: 12px">
             支持粘贴完整 URL，系统会自动提取 code 和 state
-          </n-text>
-          <n-button
+          </UiText>
+          <UiButton
             type="primary"
             size="small"
             :loading="busy"
@@ -911,37 +913,37 @@ onBeforeUnmount(() => {
             @click="finishPasteCallback"
           >
             粘贴 URL 完成授权
-          </n-button>
+          </UiButton>
 
-          <n-divider style="margin: 18px 0">直接导入 Token</n-divider>
+          <UiDivider style="margin: 18px 0">直接导入 Token</UiDivider>
 
-          <n-button
+          <UiButton
             size="small"
             quaternary
             @click="showImportToken = !showImportToken"
             style="margin-bottom: 8px"
           >
             {{ showImportToken ? '收起' : '展开' }} Token 手动导入
-          </n-button>
+          </UiButton>
           <template v-if="showImportToken">
-            <n-text depth="3" style="font-size: 12px">
+            <UiText depth="3" style="font-size: 12px">
               适合已有 Access Token / Refresh Token 的场景，跳过 OAuth 授权流程。
-            </n-text>
-            <n-input
+            </UiText>
+            <UiInput
               v-model:value="importAccessToken"
               placeholder="Access Token（必填）"
               type="textarea"
               :autosize="{ minRows: 2, maxRows: 4 }"
               style="margin-top: 8px"
             />
-            <n-input
+            <UiInput
               v-model:value="importRefreshToken"
               placeholder="Refresh Token（可选）"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 3 }"
               style="margin-top: 8px"
             />
-            <n-button
+            <UiButton
               type="primary"
               size="small"
               :loading="busy"
@@ -950,54 +952,54 @@ onBeforeUnmount(() => {
               @click="finishImportToken"
             >
               导入 Token
-            </n-button>
+            </UiButton>
           </template>
         </template>
       </div>
 
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showAdd = false">取消</n-button>
-          <n-button
+        <UiSpace justify="end">
+          <UiButton @click="showAdd = false">取消</UiButton>
+          <UiButton
             v-if="step === 'name' && form.provider === 'deepseek'"
             type="primary"
             :loading="busy"
             @click="finishDeepseekImport"
           >
             添加账户
-          </n-button>
-          <n-button
+          </UiButton>
+          <UiButton
             v-else-if="step === 'name'"
             type="primary"
             :loading="busy"
             @click="startOAuth"
           >
             生成授权链接
-          </n-button>
-          <n-button
+          </UiButton>
+          <UiButton
             v-else-if="oauthMode === 'paste'"
             type="primary"
             :loading="busy"
             @click="finishPaste"
           >
             完成授权
-          </n-button>
-          <n-button v-else type="primary" :loading="busy" @click="finishCallback">
+          </UiButton>
+          <UiButton v-else type="primary" :loading="busy" @click="finishCallback">
             我已完成授权
-          </n-button>
-        </n-space>
+          </UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showGroups" title="管理账号分组" :width="640">
+    <UiModal v-model:show="showGroups" title="管理账号分组" :width="640">
       <p class="group-hint">
         账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
         倍率作用于计费：绑定该组的 Key 按「成本价 × 倍率」扣费，1.0 为不加价，可低于 1 折价。
       </p>
       <div class="group-create">
-        <n-input v-model:value="groupForm.name" placeholder="新分组名称" />
-        <n-input v-model:value="groupForm.description" placeholder="备注（可选）" />
-        <n-input-number
+        <UiInput v-model:value="groupForm.name" placeholder="新分组名称" />
+        <UiInput v-model:value="groupForm.description" placeholder="备注（可选）" />
+        <UiInputNumber
           v-model:value="groupForm.rateMultiplier"
           :min="0.01"
           :step="0.1"
@@ -1005,16 +1007,16 @@ onBeforeUnmount(() => {
           placeholder="倍率"
           style="width: 110px"
         />
-        <n-button type="primary" :loading="savingGroup" @click="createGroupSubmit">新建</n-button>
+        <UiButton type="primary" :loading="savingGroup" @click="createGroupSubmit">新建</UiButton>
       </div>
-      <n-divider style="margin: 14px 0" />
+      <UiDivider style="margin: 14px 0" />
       <p v-if="!groups.length" class="group-empty">
         还没有分组。新建后即可在账号行和 Key 表单里选择分组。
       </p>
       <div v-for="group in groups" :key="group.id" class="group-row">
-        <n-input v-model:value="group.name" size="small" placeholder="名称" />
-        <n-input v-model:value="group.description" size="small" placeholder="备注" />
-        <n-input-number
+        <UiInput v-model:value="group.name" size="small" placeholder="名称" />
+        <UiInput v-model:value="group.description" size="small" placeholder="备注" />
+        <UiInputNumber
           v-model:value="group.rateMultiplier"
           size="small"
           :min="0.01"
@@ -1023,10 +1025,10 @@ onBeforeUnmount(() => {
           style="width: 96px"
         />
         <span class="group-count">{{ group.accountCount }} 账号</span>
-        <n-button size="small" quaternary @click="saveGroup(group)">保存</n-button>
-        <n-button size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</n-button>
+        <UiButton size="small" quaternary @click="saveGroup(group)">保存</UiButton>
+        <UiButton size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</UiButton>
       </div>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 
@@ -1230,8 +1232,8 @@ onBeforeUnmount(() => {
 }
 
 :deep(.quota-refresh) {
-  --n-width: 22px;
-  --n-height: 22px;
+  width: 22px;
+  height: 22px;
   color: rgba(15, 23, 42, 0.52);
   font-size: 13px;
 }
@@ -1276,8 +1278,8 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-.group-create :deep(.n-input),
-.group-row :deep(.n-input) {
+.group-create :deep(.input),
+.group-row :deep(.input) {
   flex: 1;
 }
 

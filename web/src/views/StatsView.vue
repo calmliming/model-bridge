@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
-import { NTag, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiTag } from '../components/ui'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
 
@@ -256,7 +257,7 @@ const modelTotalTokens = computed(() =>
   (summary.value?.byModel ?? []).reduce((sum, row) => sum + row.tokens, 0),
 )
 
-const modelColumns = computed<DataTableColumns<ModelStat>>(() => [
+const modelColumns = computed<TableColumn<ModelStat>[]>(() => [
   {
     title: '模型',
     key: 'model',
@@ -264,7 +265,7 @@ const modelColumns = computed<DataTableColumns<ModelStat>>(() => [
     render: (row) =>
       h('div', { class: 'model-name-cell' }, [
         h('strong', null, row.model),
-        h(NTag, { size: 'small', bordered: false, type: 'info' }, { default: () => modelFamily(row.model) }),
+        h(UiTag, { size: 'small', bordered: false, type: 'info' }, { default: () => modelFamily(row.model) }),
       ]),
   },
   { title: 'Token', key: 'tokens', minWidth: 110, render: (row) => compactNumber(row.tokens) },
@@ -277,7 +278,7 @@ const modelColumns = computed<DataTableColumns<ModelStat>>(() => [
 
 const topModelRows = computed(() => (summary.value?.byModel ?? []).slice(0, 6))
 
-const keyColumns: DataTableColumns<KeyStat> = [
+const keyColumns: TableColumn<KeyStat>[] = [
   { title: '名称', key: 'name' },
   {
     title: '持有者',
@@ -311,22 +312,22 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
         <h2>用量统计</h2>
         <p>按 token、模型、服务商和 API Key 查看中转消耗。</p>
       </div>
-      <n-radio-group v-model:value="range" size="small">
-        <n-radio-button :value="1">{{ rangeLabel(1) }}</n-radio-button>
-        <n-radio-button :value="7">{{ rangeLabel(7) }}</n-radio-button>
-        <n-radio-button :value="30">{{ rangeLabel(30) }}</n-radio-button>
-      </n-radio-group>
+      <UiRadioGroup v-model:value="range" size="small">
+        <UiRadioButton :value="1">{{ rangeLabel(1) }}</UiRadioButton>
+        <UiRadioButton :value="7">{{ rangeLabel(7) }}</UiRadioButton>
+        <UiRadioButton :value="30">{{ rangeLabel(30) }}</UiRadioButton>
+      </UiRadioGroup>
     </div>
 
     <div class="metric-grid">
-      <n-card v-for="c in cards" :key="c.label" class="metric-card" :class="`tone-${c.tone}`" :bordered="false">
+      <UiCard v-for="c in cards" :key="c.label" class="metric-card" :class="`tone-${c.tone}`" :bordered="false">
         <div class="metric-label">{{ c.label }}</div>
         <div class="metric-value">{{ c.value }}</div>
         <div class="metric-hint">{{ c.hint }}</div>
-      </n-card>
+      </UiCard>
     </div>
 
-    <n-card class="panel-card trend-card" :bordered="false">
+    <UiCard class="panel-card trend-card" :bordered="false">
       <div class="section-head">
         <div>
           <h3>Token 走势</h3>
@@ -334,9 +335,9 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
         </div>
       </div>
       <EChart :option="dailyOption" height="320px" />
-    </n-card>
+    </UiCard>
 
-    <n-card class="panel-card model-usage-card" :bordered="false">
+    <UiCard class="panel-card model-usage-card" :bordered="false">
       <div class="section-head">
         <div>
           <h3>模型使用情况</h3>
@@ -378,10 +379,10 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
               </div>
             </div>
           </div>
-          <n-text v-else depth="3" style="font-size: 13px">暂无数据</n-text>
+          <UiText v-else depth="3" style="font-size: 13px">暂无数据</UiText>
         </div>
         <div class="model-table-wrap">
-          <n-data-table
+          <UiDataTable
             :columns="modelColumns"
             :data="summary?.byModel ?? []"
             :loading="loading"
@@ -390,10 +391,10 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
           />
         </div>
       </div>
-    </n-card>
+    </UiCard>
 
     <div class="lower-grid">
-        <n-card class="panel-card" :bordered="false">
+        <UiCard class="panel-card" :bordered="false">
           <div class="section-head compact">
             <div>
               <h3>按服务商</h3>
@@ -401,26 +402,26 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
             </div>
           </div>
           <EChart :option="providerOption" height="220px" />
-          <n-text v-if="!summary?.byProvider.length" depth="3" style="font-size: 13px">
+          <UiText v-if="!summary?.byProvider.length" depth="3" style="font-size: 13px">
             暂无数据
-          </n-text>
-        </n-card>
+          </UiText>
+        </UiCard>
 
-      <n-card class="panel-card" :bordered="false">
+      <UiCard class="panel-card" :bordered="false">
         <div class="section-head compact">
           <div>
             <h3>按 API Key</h3>
             <p>查看每个 Key 的请求、token 和成本。</p>
           </div>
         </div>
-        <n-data-table
+        <UiDataTable
           :columns="keyColumns"
           :data="summary?.byKey ?? []"
           :loading="loading"
           :bordered="false"
           :scroll-x="680"
         />
-      </n-card>
+      </UiCard>
     </div>
   </div>
 </template>

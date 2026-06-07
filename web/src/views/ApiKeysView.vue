@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
+import { useDialog } from '../composables/useDialog'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -527,7 +529,7 @@ function renderKeyPrefix(row: ApiKey) {
   return h('div', { class: 'key-prefix-cell' }, [
       h('code', null, `${row.keyPrefix}…`),
       h(
-        NButton,
+        UiButton,
         { size: 'tiny', quaternary: true, class: 'inline-action', onClick: () => copyApiKey(row) },
         { default: () => '复制' },
       ),
@@ -537,16 +539,16 @@ function renderKeyPrefix(row: ApiKey) {
 function renderProviders(row: ApiKey) {
   const list = row.allowedProviders
   if (!list || list.length === 0) {
-    return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
+    return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
   }
   return h(
-    NSpace,
+    UiSpace,
     { size: 4 },
     {
       default: () =>
         list.map((p) =>
           h(
-            NTag,
+            UiTag,
             { size: 'small', type: providerTagType[p] ?? 'default', bordered: false },
             { default: () => providerLabel[p] ?? p },
           ),
@@ -558,25 +560,25 @@ function renderProviders(row: ApiKey) {
 function renderModels(row: ApiKey) {
   const list = row.allowedModels
   if (!list || list.length === 0) {
-    return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
+    return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
   }
   const visible = list.slice(0, 2)
   const tags = visible.map((model) =>
-    h(NTag, { size: 'small', bordered: false }, { default: () => model }),
+    h(UiTag, { size: 'small', bordered: false }, { default: () => model }),
   )
   if (list.length > visible.length) {
     tags.push(
       h(
-        NTooltip,
+        UiTooltip,
         null,
         {
-          trigger: () => h(NTag, { size: 'small', bordered: false }, { default: () => `+${list.length - visible.length}` }),
+          trigger: () => h(UiTag, { size: 'small', bordered: false }, { default: () => `+${list.length - visible.length}` }),
           default: () => list.slice(visible.length).join(', '),
         },
       ),
     )
   }
-  return h(NSpace, { size: 4 }, { default: () => tags })
+  return h(UiSpace, { size: 4 }, { default: () => tags })
 }
 
 function renderMappings(row: ApiKey) {
@@ -586,23 +588,23 @@ function renderMappings(row: ApiKey) {
   }
   const visible = entries.slice(0, 1)
   const tags = visible.map(([from, to]) =>
-    h(NTag, { size: 'small', bordered: false }, { default: () => `${from}→${to}` }),
+    h(UiTag, { size: 'small', bordered: false }, { default: () => `${from}→${to}` }),
   )
   if (entries.length > visible.length) {
     tags.push(
-      h(NTooltip, null, {
-        trigger: () => h(NTag, { size: 'small', bordered: false }, { default: () => `+${entries.length - visible.length}` }),
+      h(UiTooltip, null, {
+        trigger: () => h(UiTag, { size: 'small', bordered: false }, { default: () => `+${entries.length - visible.length}` }),
         default: () => entries.slice(visible.length).map(([from, to]) => `${from}→${to}`).join(', '),
       }),
     )
   }
-  return h(NSpace, { size: 4 }, { default: () => tags })
+  return h(UiSpace, { size: 4 }, { default: () => tags })
 }
 
 function renderGroup(row: ApiKey) {
   return row.accountGroupId
-    ? h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) })
-    : h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' })
+    ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) })
+    : h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' })
 }
 
 // Fixed USD→CNY rate for DeepSeek cost tooltip.
@@ -613,7 +615,7 @@ function renderUsage(row: ApiKey) {
   const hasDeepSeek = !row.allowedProviders || row.allowedProviders.includes('deepseek')
   if (!hasDeepSeek) return span
   const cny = (row.quotaUsed * USD_TO_CNY).toFixed(4)
-  return h(NTooltip, null, {
+  return h(UiTooltip, null, {
     trigger: () => span,
     default: () => `≈ ¥${cny}`,
   })
@@ -639,7 +641,7 @@ function renderTime(value: number | null) {
   return value ? h('span', { class: 'plain-cell' }, formatTime(value)) : h('span', { class: 'muted-cell' }, '—')
 }
 
-const columns = computed<DataTableColumns<ApiKey>>(() => [
+const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '名称', key: 'name', minWidth: 140, render: renderKeyInfo },
   { title: '持有者', key: 'ownerLabel', minWidth: 100, render: renderOwner },
   {
@@ -693,7 +695,7 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     title: '状态',
     key: 'enabled',
     width: 76,
-    render: (row) => h(NSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
+    render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
   },
   {
     title: '操作',
@@ -701,22 +703,22 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
     width: 172,
     render: (row) =>
       h(
-        NSpace,
+        UiSpace,
         { size: 4, wrap: false },
         {
           default: () => [
             h(
-              NButton,
+              UiButton,
               { size: 'small', quaternary: true, onClick: () => openUse(row) },
               { default: () => '使用' },
             ),
             h(
-              NButton,
+              UiButton,
               { size: 'small', quaternary: true, onClick: () => openEdit(row) },
               { default: () => '编辑' },
             ),
             h(
-              NButton,
+              UiButton,
               { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
               { default: () => '删除' },
             ),
@@ -735,42 +737,42 @@ onMounted(() => {
 <template>
   <div>
     <div class="page-head">
-      <n-button type="primary" @click="showCreate = true">新建 Key</n-button>
+      <UiButton type="primary" @click="showCreate = true">新建 Key</UiButton>
     </div>
 
-    <n-card class="table-card" :bordered="false">
-      <n-data-table
+    <UiCard class="table-card" :bordered="false">
+      <UiDataTable
         :columns="columns"
         :data="keys"
         :loading="loading"
         :bordered="false"
         :scroll-x="1880"
       />
-    </n-card>
+    </UiCard>
 
     <!-- create -->
-    <n-modal
+    <UiModal
       v-model:show="showCreate"
       title="新建 API Key"
       :width="520"
     >
-      <n-form label-placement="top">
-        <n-form-item label="名称">
-          <n-input v-model:value="form.name" placeholder="例如：我的笔记本" />
-        </n-form-item>
-        <n-form-item label="持有者（可选）">
-          <n-input v-model:value="form.ownerLabel" placeholder="例如：张三" />
-        </n-form-item>
-        <n-form-item label="允许的服务商（留空 = 不限）">
-          <n-select
+      <UiForm label-placement="top">
+        <UiFormItem label="名称">
+          <UiInput v-model:value="form.name" placeholder="例如：我的笔记本" />
+        </UiFormItem>
+        <UiFormItem label="持有者（可选）">
+          <UiInput v-model:value="form.ownerLabel" placeholder="例如：张三" />
+        </UiFormItem>
+        <UiFormItem label="允许的服务商（留空 = 不限）">
+          <UiSelect
             v-model:value="form.allowedProviders"
             multiple
             :options="providerOptions"
             placeholder="不限"
           />
-        </n-form-item>
-        <n-form-item label="允许的模型（留空 = 不限）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="允许的模型（留空 = 不限）">
+          <UiSelect
             v-model:value="form.allowedModels"
             multiple
             filterable
@@ -778,9 +780,9 @@ onMounted(() => {
             :options="commonModelOptions"
             placeholder="例如：gpt-*、claude-sonnet-*"
           />
-        </n-form-item>
-        <n-form-item label="模型映射（客户端=上游，留空 = 不映射）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
+          <UiSelect
             v-model:value="form.modelMappings"
             multiple
             filterable
@@ -788,120 +790,120 @@ onMounted(() => {
             :options="commonMappingOptions"
             placeholder="例如：gpt-public=gpt-5.4"
           />
-        </n-form-item>
-        <n-form-item label="账号分组（留空 = 默认池）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="账号分组（留空 = 默认池）">
+          <UiSelect
             v-model:value="form.accountGroupId"
             clearable
             :options="groupSelectOptions"
             placeholder="默认池（仅调度未分组账号）"
           />
-        </n-form-item>
-      </n-form>
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showCreate = false">取消</n-button>
-          <n-button type="primary" :loading="creating" @click="create">创建</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showCreate = false">取消</UiButton>
+          <UiButton type="primary" :loading="creating" @click="create">创建</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
     <!-- new-key reveal -->
-    <n-modal
+    <UiModal
       :show="!!newKey"
       title="API Key 已创建"
       :width="480"
       @update:show="closeNewKeyModal"
     >
-      <n-alert type="warning" style="margin-bottom: 12px">
+      <UiAlert type="warning" style="margin-bottom: 12px">
         请立即复制并妥善保存，此密钥只会显示这一次。
-      </n-alert>
-      <n-input :value="newKey ?? ''" readonly />
+      </UiAlert>
+      <UiInput :value="newKey ?? ''" readonly />
       <template #footer>
-        <n-space justify="end">
-          <n-button secondary @click="openUseNewKey">查看接入方式</n-button>
-          <n-button type="primary" @click="copyAndClose">复制并关闭</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton secondary @click="openUseNewKey">查看接入方式</UiButton>
+          <UiButton type="primary" @click="copyAndClose">复制并关闭</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal
+    <UiModal
       :show="!!manualCopy"
       title="请手动复制"
       :width="480"
       @update:show="(shown: boolean) => { if (!shown) manualCopy = null }"
     >
-      <n-alert type="info" style="margin-bottom: 12px">
+      <UiAlert type="info" style="margin-bottom: 12px">
         当前页面不在安全上下文（HTTPS 或 localhost），浏览器禁止自动写入剪贴板。请手动选中下方内容复制。
-      </n-alert>
-      <n-input
+      </UiAlert>
+      <UiInput
         :value="manualCopy?.text ?? ''"
         type="textarea"
         readonly
         :autosize="{ minRows: 2, maxRows: 4 }"
       />
       <template #footer>
-        <n-space justify="end">
-          <n-button type="primary" @click="manualCopy = null">关闭</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton type="primary" @click="manualCopy = null">关闭</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showUse" :title="`使用 ${useKeyName}`" :width="680">
-      <n-tabs type="line" animated>
-        <n-tab-pane name="claude" tab="Claude Code">
+    <UiModal v-model:show="showUse" :title="`使用 ${useKeyName}`" :width="680">
+      <UiTabs type="line" animated>
+        <UiTabPane name="claude" tab="Claude Code">
           <pre><code>{{ snippets.claude }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.claude)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="deepseek" tab="DeepSeek (Claude Code)">
+          <UiButton size="small" secondary @click="copyKey(snippets.claude)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="deepseek" tab="DeepSeek (Claude Code)">
           <pre><code>{{ snippets.deepseek }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.deepseek)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="codex" tab="Codex CLI">
+          <UiButton size="small" secondary @click="copyKey(snippets.deepseek)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="codex" tab="Codex CLI">
           <pre><code>{{ snippets.codex }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.codex)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="codex-deepseek" tab="Codex CLI (DeepSeek)">
+          <UiButton size="small" secondary @click="copyKey(snippets.codex)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="codex-deepseek" tab="Codex CLI (DeepSeek)">
           <pre><code>{{ snippets.codexDeepseek }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.codexDeepseek)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="gemini" tab="Gemini / 自定义客户端">
+          <UiButton size="small" secondary @click="copyKey(snippets.codexDeepseek)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="gemini" tab="Gemini / 自定义客户端">
           <pre><code>{{ snippets.gemini }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.gemini)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="openai" tab="OpenAI 兼容">
+          <UiButton size="small" secondary @click="copyKey(snippets.gemini)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="openai" tab="OpenAI 兼容">
           <pre><code>{{ snippets.openaiCompat }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.openaiCompat)">复制</n-button>
-        </n-tab-pane>
-        <n-tab-pane name="deepseek-openai" tab="DeepSeek (OpenAI)">
+          <UiButton size="small" secondary @click="copyKey(snippets.openaiCompat)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="deepseek-openai" tab="DeepSeek (OpenAI)">
           <pre><code>{{ snippets.deepseekOpenai }}</code></pre>
-          <n-button size="small" secondary @click="copyKey(snippets.deepseekOpenai)">复制</n-button>
-        </n-tab-pane>
-      </n-tabs>
-      <n-alert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
+          <UiButton size="small" secondary @click="copyKey(snippets.deepseekOpenai)">复制</UiButton>
+        </UiTabPane>
+      </UiTabs>
+      <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
         已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。
-      </n-alert>
-    </n-modal>
+      </UiAlert>
+    </UiModal>
 
     <!-- edit limits -->
-    <n-modal v-model:show="showEdit" title="编辑 API Key" :width="520">
-      <n-form label-placement="top">
-        <n-form-item label="名称">
-          <n-input v-model:value="editForm.name" />
-        </n-form-item>
-        <n-form-item label="持有者">
-          <n-input v-model:value="editForm.ownerLabel" placeholder="可留空" />
-        </n-form-item>
-        <n-form-item label="允许的服务商（留空 = 不限）">
-          <n-select
+    <UiModal v-model:show="showEdit" title="编辑 API Key" :width="520">
+      <UiForm label-placement="top">
+        <UiFormItem label="名称">
+          <UiInput v-model:value="editForm.name" />
+        </UiFormItem>
+        <UiFormItem label="持有者">
+          <UiInput v-model:value="editForm.ownerLabel" placeholder="可留空" />
+        </UiFormItem>
+        <UiFormItem label="允许的服务商（留空 = 不限）">
+          <UiSelect
             v-model:value="editForm.allowedProviders"
             multiple
             :options="providerOptions"
             placeholder="不限"
           />
-        </n-form-item>
-        <n-form-item label="允许的模型（留空 = 不限）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="允许的模型（留空 = 不限）">
+          <UiSelect
             v-model:value="editForm.allowedModels"
             multiple
             filterable
@@ -909,9 +911,9 @@ onMounted(() => {
             :options="commonModelOptions"
             placeholder="例如：gpt-*、claude-sonnet-*"
           />
-        </n-form-item>
-        <n-form-item label="模型映射（客户端=上游，留空 = 不映射）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
+          <UiSelect
             v-model:value="editForm.modelMappings"
             multiple
             filterable
@@ -919,56 +921,56 @@ onMounted(() => {
             :options="commonMappingOptions"
             placeholder="例如：gpt-public=gpt-5.4"
           />
-        </n-form-item>
-        <n-form-item label="账号分组（留空 = 默认池）">
-          <n-select
+        </UiFormItem>
+        <UiFormItem label="账号分组（留空 = 默认池）">
+          <UiSelect
             v-model:value="editForm.accountGroupId"
             clearable
             :options="groupSelectOptions"
             placeholder="默认池（仅调度未分组账号）"
           />
-        </n-form-item>
-        <n-form-item label="成本上限（USD，留空 = 不限）">
-          <n-input-number
+        </UiFormItem>
+        <UiFormItem label="成本上限（USD，留空 = 不限）">
+          <UiInputNumber
             v-model:value="editForm.quotaLimit"
             :min="0"
             :step="1"
             placeholder="例如：10"
             style="width: 100%"
           />
-        </n-form-item>
-        <n-form-item label="速率上限（次/分钟，留空 = 不限）">
-          <n-input-number
+        </UiFormItem>
+        <UiFormItem label="速率上限（次/分钟，留空 = 不限）">
+          <UiInputNumber
             v-model:value="editForm.rateLimit"
             :min="1"
             :step="10"
             placeholder="例如：60"
             style="width: 100%"
           />
-        </n-form-item>
-        <n-form-item label="并发上限（同时进行的请求数，留空 = 不限）">
-          <n-input-number
+        </UiFormItem>
+        <UiFormItem label="并发上限（同时进行的请求数，留空 = 不限）">
+          <UiInputNumber
             v-model:value="editForm.concurrencyLimit"
             :min="1"
             :step="1"
             placeholder="例如：5"
             style="width: 100%"
           />
-        </n-form-item>
-        <n-form-item label="过期时间（留空 = 永久）">
-          <n-date-picker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="启用">
-          <n-switch v-model:value="editForm.enabled" />
-        </n-form-item>
-      </n-form>
+        </UiFormItem>
+        <UiFormItem label="过期时间（留空 = 永久）">
+          <UiDatePicker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="启用">
+          <UiSwitch v-model:value="editForm.enabled" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="editing" @click="saveEdit">保存</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showEdit = false">取消</UiButton>
+          <UiButton type="primary" :loading="editing" @click="saveEdit">保存</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 

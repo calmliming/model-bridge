@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -36,7 +36,7 @@ async function login() {
 
 <template>
   <div class="login-wrap">
-    <n-card class="login-card" :bordered="false">
+    <UiCard class="login-card" :bordered="false">
       <div class="brand">
         <span class="brand-mark"><span /></span>
         <div>
@@ -44,12 +44,12 @@ async function login() {
           <small>User Console</small>
         </div>
       </div>
-      <n-form label-placement="top">
-        <n-form-item label="邮箱">
-          <n-input v-model:value="email" size="large" placeholder="user@example.com" />
-        </n-form-item>
-        <n-form-item label="密码">
-          <n-input
+      <UiForm label-placement="top">
+        <UiFormItem label="邮箱">
+          <UiInput v-model:value="email" size="large" placeholder="user@example.com" />
+        </UiFormItem>
+        <UiFormItem label="密码">
+          <UiInput
             v-model:value="password"
             size="large"
             type="password"
@@ -57,13 +57,13 @@ async function login() {
             placeholder="请输入密码"
             @keyup.enter="login"
           />
-        </n-form-item>
-        <n-button type="primary" size="large" block :loading="loading" @click="login">登录</n-button>
-      </n-form>
+        </UiFormItem>
+        <UiButton type="primary" size="large" block :loading="loading" @click="login">登录</UiButton>
+      </UiForm>
       <div class="links">
         <RouterLink to="/login">管理员入口</RouterLink>
       </div>
-    </n-card>
+    </UiCard>
   </div>
 </template>
 

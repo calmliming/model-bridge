@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// n-form is primarily a layout/label container in this app (label-placement="top").
+// Form is primarily a layout/label container in this app (label-placement="top").
 defineProps<{ labelPlacement?: string }>()
 </script>
 

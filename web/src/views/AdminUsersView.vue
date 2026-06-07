@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NTag, NTooltip, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiSpace, UiTag, UiTooltip } from '../components/ui'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -132,7 +133,7 @@ function formatTokens(row: UsageLog) {
     ['缓存读取', row.cacheReadTokens],
   ]
   return h(
-    NTooltip,
+    UiTooltip,
     { placement: 'left', trigger: 'hover' },
     {
       trigger: () => h('span', { class: 'token-total' }, total.toLocaleString('en-US')),
@@ -278,16 +279,16 @@ async function copyInvite() {
 
 function renderStatus(row: UserRow) {
   if (!row.acceptedAt) {
-    return h(NTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '待接受' })
+    return h(UiTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '待接受' })
   }
   return h(
-    NTag,
+    UiTag,
     { size: 'small', bordered: false, type: row.status === 'active' ? 'success' : 'error' },
     { default: () => (row.status === 'active' ? '启用' : '禁用') },
   )
 }
 
-const columns = computed<DataTableColumns<UserRow>>(() => [
+const columns = computed<TableColumn<UserRow>[]>(() => [
   { title: '用户', key: 'user', minWidth: 210, render: (row) => h('div', [h('strong', row.name), h('span', { class: 'subtext' }, row.email)]) },
   { title: '余额', key: 'balance', minWidth: 96, render: (row) => h('span', { class: row.balance <= 0 ? 'danger' : 'amount' }, formatUsd(row.balance)) },
   { title: 'Keys', key: 'keyCount', width: 72 },
@@ -300,21 +301,21 @@ const columns = computed<DataTableColumns<UserRow>>(() => [
     title: '操作',
     key: 'actions',
     width: 390,
-    render: (row) => h(NSpace, { size: 4, wrap: false }, {
+    render: (row) => h(UiSpace, { size: 4, wrap: false }, {
       default: () => [
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openSubscriptions(row) }, { default: () => '订阅' }),
-        h(NButton, { size: 'small', quaternary: true, onClick: () => resetInvite(row) }, { default: () => '重置密码' }),
-        h(NButton, { size: 'small', type: row.status === 'active' ? 'error' : 'success', quaternary: true, onClick: () => updateStatus(row) }, { default: () => (row.status === 'active' ? '禁用' : '启用') }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openSubscriptions(row) }, { default: () => '订阅' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => resetInvite(row) }, { default: () => '重置密码' }),
+        h(UiButton, { size: 'small', type: row.status === 'active' ? 'error' : 'success', quaternary: true, onClick: () => updateStatus(row) }, { default: () => (row.status === 'active' ? '禁用' : '启用') }),
       ],
     }),
   },
 ])
 
-const walletColumns: DataTableColumns<WalletTransaction> = [
+const walletColumns: TableColumn<WalletTransaction>[] = [
   { title: '时间', key: 'createdAt', minWidth: 150, render: (row) => formatTime(row.createdAt) },
   { title: '类型', key: 'type', width: 90 },
   { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
@@ -322,7 +323,7 @@ const walletColumns: DataTableColumns<WalletTransaction> = [
   { title: '备注', key: 'note', minWidth: 180, render: (row) => row.note || '—' },
 ]
 
-const usageColumns: DataTableColumns<UsageLog> = [
+const usageColumns: TableColumn<UsageLog>[] = [
   { title: '时间', key: 'ts', minWidth: 150, render: (row) => formatTime(row.ts) },
   { title: 'Key', key: 'apiKeyName', minWidth: 120, render: (row) => row.apiKeyName || '—' },
   { title: '服务商', key: 'provider', width: 90 },
@@ -338,89 +339,89 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <n-button type="primary" @click="showInvite = true">邀请用户</n-button>
+      <UiButton type="primary" @click="showInvite = true">邀请用户</UiButton>
     </div>
 
-    <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1260" />
-    </n-card>
+    <UiCard class="table-card" :bordered="false">
+      <UiDataTable :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1260" />
+    </UiCard>
 
-    <n-modal v-model:show="showInvite" title="邀请用户" :width="460">
-      <n-form label-placement="top">
-        <n-form-item label="邮箱">
-          <n-input v-model:value="inviteForm.email" placeholder="user@example.com" />
-        </n-form-item>
-        <n-form-item label="名称">
-          <n-input v-model:value="inviteForm.name" placeholder="可留空" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showInvite" title="邀请用户" :width="460">
+      <UiForm label-placement="top">
+        <UiFormItem label="邮箱">
+          <UiInput v-model:value="inviteForm.email" placeholder="user@example.com" />
+        </UiFormItem>
+        <UiFormItem label="名称">
+          <UiInput v-model:value="inviteForm.name" placeholder="可留空" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showInvite = false">取消</n-button>
-          <n-button type="primary" :loading="inviting" @click="invite">生成邀请</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showInvite = false">取消</UiButton>
+          <UiButton type="primary" :loading="inviting" @click="invite">生成邀请</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal :show="!!inviteResult" title="邀请 / 重置链接" :width="560" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
-      <n-alert type="warning" style="margin-bottom: 12px">链接只在这里显示一次，用户打开后可设置新密码。</n-alert>
-      <n-input :value="inviteResult?.inviteUrl ?? ''" readonly />
+    <UiModal :show="!!inviteResult" title="邀请 / 重置链接" :width="560" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
+      <UiAlert type="warning" style="margin-bottom: 12px">链接只在这里显示一次，用户打开后可设置新密码。</UiAlert>
+      <UiInput :value="inviteResult?.inviteUrl ?? ''" readonly />
       <div class="subline">过期时间：{{ formatTime(inviteResult?.expiresAt) }}</div>
       <template #footer>
-        <n-space justify="end">
-          <n-button type="primary" @click="copyInvite">复制链接</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton type="primary" @click="copyInvite">复制链接</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showAdjust" :title="`调整余额：${selectedUser?.name ?? ''}`" :width="460">
-      <n-form label-placement="top">
-        <n-form-item label="金额（USD，可为负数）">
-          <n-input-number v-model:value="adjustForm.amount" :step="1" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="备注">
-          <n-input v-model:value="adjustForm.note" placeholder="可留空" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showAdjust" :title="`调整余额：${selectedUser?.name ?? ''}`" :width="460">
+      <UiForm label-placement="top">
+        <UiFormItem label="金额（USD，可为负数）">
+          <UiInputNumber v-model:value="adjustForm.amount" :step="1" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="备注">
+          <UiInput v-model:value="adjustForm.note" placeholder="可留空" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showAdjust = false">取消</n-button>
-          <n-button type="primary" :loading="adjusting" @click="adjustWallet">保存</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showAdjust = false">取消</UiButton>
+          <UiButton type="primary" :loading="adjusting" @click="adjustWallet">保存</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showWallet" :title="`钱包流水：${selectedUser?.name ?? ''}`" :width="760">
-      <n-data-table :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
-    </n-modal>
+    <UiModal v-model:show="showWallet" :title="`钱包流水：${selectedUser?.name ?? ''}`" :width="760">
+      <UiDataTable :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
+    </UiModal>
 
-    <n-modal v-model:show="showUsage" :title="`用量：${selectedUser?.name ?? ''}`" :width="860">
-      <n-data-table :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="780" />
-    </n-modal>
+    <UiModal v-model:show="showUsage" :title="`用量：${selectedUser?.name ?? ''}`" :width="860">
+      <UiDataTable :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="780" />
+    </UiModal>
 
-    <n-modal v-model:show="showSubs" :title="`订阅：${selectedUser?.name ?? ''}`" :width="560">
+    <UiModal v-model:show="showSubs" :title="`订阅：${selectedUser?.name ?? ''}`" :width="560">
       <div class="assign-row">
-        <n-select
+        <UiSelect
           v-model:value="assignPlanId"
           :options="subPlanOptions"
           placeholder="选择套餐分配"
           style="flex: 1"
         />
-        <n-button type="primary" :loading="assigning" @click="assignSubscription">分配</n-button>
+        <UiButton type="primary" :loading="assigning" @click="assignSubscription">分配</UiButton>
       </div>
-      <n-spin :show="subsLoading">
+      <UiSpin :show="subsLoading">
         <p v-if="!subsRows.length" class="subs-empty">该用户暂无订阅。</p>
         <div v-for="sub in subsRows" :key="sub.id" class="subs-row">
           <div>
             <strong>{{ sub.planName || '套餐' }}</strong>
             <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
           </div>
-          <n-tag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
+          <UiTag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
             {{ sub.status === 'active' ? '生效中' : '已过期' }}
-          </n-tag>
+          </UiTag>
         </div>
-      </n-spin>
-    </n-modal>
+      </UiSpin>
+    </UiModal>
   </div>
 </template>
 

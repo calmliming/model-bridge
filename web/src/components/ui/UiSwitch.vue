@@ -21,7 +21,7 @@ function toggle() {
   const next = !current.value
   emit('update:value', next)
   emit('update:modelValue', next)
-  // Naive render-function usage passes `onUpdateValue`; mirror it.
+  // Render-function usage passes `onUpdateValue`; mirror it.
   emit('updateValue', next)
 }
 </script>

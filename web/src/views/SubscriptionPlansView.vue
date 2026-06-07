@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiSpace, UiTag } from '../components/ui'
+import { useDialog } from '../composables/useDialog'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 
 interface Plan {
@@ -147,7 +149,7 @@ function confirmDelete(plan: Plan) {
 }
 
 // SUB_PLANS_COLUMNS_MARKER
-const columns: DataTableColumns<Plan> = [
+const columns: TableColumn<Plan>[] = [
   { title: '名称', key: 'name', minWidth: 140, render: (row) => h('div', [h('strong', row.name), row.description ? h('div', { class: 'subtext' }, row.description) : null]) },
   { title: '分组', key: 'groupName', width: 120, render: (row) => row.groupName || '(已删除)' },
   { title: '售价', key: 'price', width: 90, render: (row) => (row.price > 0 ? `$${row.price.toFixed(2)}` : '免费') },
@@ -155,16 +157,16 @@ const columns: DataTableColumns<Plan> = [
   { title: '周限额', key: 'weeklyLimitUsd', width: 90, render: (row) => formatUsd(row.weeklyLimitUsd) },
   { title: '月限额', key: 'monthlyLimitUsd', width: 90, render: (row) => formatUsd(row.monthlyLimitUsd) },
   { title: '有效期', key: 'validityDays', width: 90, render: (row) => `${row.validityDays} 天` },
-  { title: '上架', key: 'forSale', width: 80, render: (row) => h(NTag, { size: 'small', type: row.forSale ? 'success' : 'default', bordered: false }, { default: () => (row.forSale ? '售卖中' : '未上架') }) },
+  { title: '上架', key: 'forSale', width: 80, render: (row) => h(UiTag, { size: 'small', type: row.forSale ? 'success' : 'default', bordered: false }, { default: () => (row.forSale ? '售卖中' : '未上架') }) },
   {
     title: '操作',
     key: 'actions',
     width: 130,
     render: (row) =>
-      h(NSpace, { size: 4, wrap: false }, {
+      h(UiSpace, { size: 4, wrap: false }, {
         default: () => [
-          h(NButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+          h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
+          h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
         ],
       }),
   },
@@ -176,64 +178,64 @@ onMounted(load)
 <template>
   <div>
     <div class="toolbar">
-      <n-button type="primary" @click="openCreate">新建套餐</n-button>
-      <n-button secondary :loading="loading" @click="load">刷新</n-button>
+      <UiButton type="primary" @click="openCreate">新建套餐</UiButton>
+      <UiButton secondary :loading="loading" @click="load">刷新</UiButton>
     </div>
-    <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="plans" :loading="loading" :bordered="false" :scroll-x="1000" />
-    </n-card>
+    <UiCard class="table-card" :bordered="false">
+      <UiDataTable :columns="columns" :data="plans" :loading="loading" :bordered="false" :scroll-x="1000" />
+    </UiCard>
 
-    <n-modal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
-      <n-form label-placement="top">
-        <n-form-item label="套餐名称">
-          <n-input v-model:value="form.name" placeholder="如：Claude 月卡" />
-        </n-form-item>
-        <n-form-item label="说明（可选）">
-          <n-input v-model:value="form.description" placeholder="给用户看的套餐说明" />
-        </n-form-item>
-        <n-form-item label="绑定账号分组">
-          <n-select v-model:value="form.groupId" :options="groupOptions" placeholder="订阅授予的调度分组" />
-        </n-form-item>
-        <n-grid :cols="2" :x-gap="12" :y-gap="2" responsive="screen">
-          <n-gi span="2 s:1">
-            <n-form-item label="售价（USD，0=免费）">
-              <n-input-number v-model:value="form.price" :min="0" :precision="2" style="width: 100%" />
-            </n-form-item>
-          </n-gi>
-          <n-gi span="2 s:1">
-            <n-form-item label="有效期（天）">
-              <n-input-number v-model:value="form.validityDays" :min="1" :precision="0" style="width: 100%" />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-        <n-grid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
-          <n-gi span="3 s:1">
-            <n-form-item label="日限额">
-              <n-input-number v-model:value="form.dailyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
-            </n-form-item>
-          </n-gi>
-          <n-gi span="3 s:1">
-            <n-form-item label="周限额">
-              <n-input-number v-model:value="form.weeklyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
-            </n-form-item>
-          </n-gi>
-          <n-gi span="3 s:1">
-            <n-form-item label="月限额">
-              <n-input-number v-model:value="form.monthlyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
-            </n-form-item>
-          </n-gi>
-        </n-grid>
-        <n-form-item>
-          <n-checkbox v-model:checked="form.forSale">在用户套餐商店上架售卖</n-checkbox>
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
+      <UiForm label-placement="top">
+        <UiFormItem label="套餐名称">
+          <UiInput v-model:value="form.name" placeholder="如：Claude 月卡" />
+        </UiFormItem>
+        <UiFormItem label="说明（可选）">
+          <UiInput v-model:value="form.description" placeholder="给用户看的套餐说明" />
+        </UiFormItem>
+        <UiFormItem label="绑定账号分组">
+          <UiSelect v-model:value="form.groupId" :options="groupOptions" placeholder="订阅授予的调度分组" />
+        </UiFormItem>
+        <UiGrid :cols="2" :x-gap="12" :y-gap="2" responsive="screen">
+          <UiGi span="2 s:1">
+            <UiFormItem label="售价（USD，0=免费）">
+              <UiInputNumber v-model:value="form.price" :min="0" :precision="2" style="width: 100%" />
+            </UiFormItem>
+          </UiGi>
+          <UiGi span="2 s:1">
+            <UiFormItem label="有效期（天）">
+              <UiInputNumber v-model:value="form.validityDays" :min="1" :precision="0" style="width: 100%" />
+            </UiFormItem>
+          </UiGi>
+        </UiGrid>
+        <UiGrid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
+          <UiGi span="3 s:1">
+            <UiFormItem label="日限额">
+              <UiInputNumber v-model:value="form.dailyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
+            </UiFormItem>
+          </UiGi>
+          <UiGi span="3 s:1">
+            <UiFormItem label="周限额">
+              <UiInputNumber v-model:value="form.weeklyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
+            </UiFormItem>
+          </UiGi>
+          <UiGi span="3 s:1">
+            <UiFormItem label="月限额">
+              <UiInputNumber v-model:value="form.monthlyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
+            </UiFormItem>
+          </UiGi>
+        </UiGrid>
+        <UiFormItem>
+          <UiCheckbox v-model:checked="form.forSale">在用户套餐商店上架售卖</UiCheckbox>
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showEdit = false">取消</UiButton>
+          <UiButton type="primary" :loading="saving" @click="save">保存</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 

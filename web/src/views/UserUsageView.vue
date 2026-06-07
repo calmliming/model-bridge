@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
-import { NTag, NTooltip, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiTag, UiTooltip } from '../components/ui'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -50,7 +51,7 @@ function totalTokens(row: UsageLog) {
     ['缓存读取', row.cacheReadTokens],
   ]
   return h(
-    NTooltip,
+    UiTooltip,
     { placement: 'left', trigger: 'hover' },
     {
       trigger: () => h('span', { class: 'token-total' }, total.toLocaleString('en-US')),
@@ -87,7 +88,7 @@ async function load() {
   }
 }
 
-const usageColumns: DataTableColumns<UsageLog> = [
+const usageColumns: TableColumn<UsageLog>[] = [
   { title: '时间', key: 'ts', minWidth: 150, render: (row) => formatTime(row.ts) },
   { title: 'Key', key: 'apiKeyName', minWidth: 130, render: (row) => row.apiKeyName || '—' },
   { title: '服务商', key: 'provider', width: 90 },
@@ -95,10 +96,10 @@ const usageColumns: DataTableColumns<UsageLog> = [
   { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
   { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
   { title: '延迟', key: 'latencyMs', width: 90, render: (row) => row.latencyMs == null ? '—' : `${row.latencyMs}ms` },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(NTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
+  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
 ]
 
-const walletColumns: DataTableColumns<WalletTransaction> = [
+const walletColumns: TableColumn<WalletTransaction>[] = [
   { title: '时间', key: 'createdAt', minWidth: 150, render: (row) => formatTime(row.createdAt) },
   { title: '类型', key: 'type', width: 90 },
   { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
@@ -110,18 +111,18 @@ onMounted(load)
 </script>
 
 <template>
-  <n-tabs type="line" animated>
-    <n-tab-pane name="usage" tab="用量">
-      <n-card class="table-card" :bordered="false">
-        <n-data-table :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="940" />
-      </n-card>
-    </n-tab-pane>
-    <n-tab-pane name="wallet" tab="钱包">
-      <n-card class="table-card" :bordered="false">
-        <n-data-table :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
-      </n-card>
-    </n-tab-pane>
-  </n-tabs>
+  <UiTabs type="line" animated>
+    <UiTabPane name="usage" tab="用量">
+      <UiCard class="table-card" :bordered="false">
+        <UiDataTable :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="940" />
+      </UiCard>
+    </UiTabPane>
+    <UiTabPane name="wallet" tab="钱包">
+      <UiCard class="table-card" :bordered="false">
+        <UiDataTable :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
+      </UiCard>
+    </UiTabPane>
+  </UiTabs>
 </template>
 
 <style scoped>

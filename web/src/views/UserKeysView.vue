@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiSpace, UiSwitch, UiTag } from '../components/ui'
+import { useDialog } from '../composables/useDialog'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -205,13 +207,13 @@ async function copyKey(row: ApiKey) {
   }
 }
 
-const columns = computed<DataTableColumns<ApiKey>>(() => [
+const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '名称', key: 'name', minWidth: 150, render: (row) => h('strong', { class: 'key-name' }, row.name) },
   { title: '密钥', key: 'prefix', minWidth: 150, render: (row) => h('code', `${row.keyPrefix}...`) },
   { title: '服务商', key: 'providers', minWidth: 150, render: (row) => {
     const list = row.allowedProviders
-    if (!list?.length) return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
-    return h(NSpace, { size: 4 }, { default: () => list.map((p) => h(NTag, { size: 'small', bordered: false }, { default: () => providerLabel[p] ?? p })) })
+    if (!list?.length) return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
+    return h(UiSpace, { size: 4 }, { default: () => list.map((p) => h(UiTag, { size: 'small', bordered: false }, { default: () => providerLabel[p] ?? p })) })
   } },
   { title: '已用', key: 'quotaUsed', width: 100, render: (row) => formatUsd(row.quotaUsed) },
   { title: '上限', key: 'quotaLimit', width: 100, render: (row) => row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) },
@@ -219,11 +221,11 @@ const columns = computed<DataTableColumns<ApiKey>>(() => [
   { title: '并发', key: 'concurrencyLimit', width: 80, render: (row) => row.concurrencyLimit == null ? '不限' : row.concurrencyLimit },
   { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => formatTime(row.expiresAt) },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => formatTime(row.lastUsedAt) },
-  { title: '状态', key: 'enabled', width: 76, render: (row) => h(NSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }) },
-  { title: '操作', key: 'actions', width: 160, render: (row) => h(NSpace, { size: 4, wrap: false }, { default: () => [
-    h(NButton, { size: 'small', quaternary: true, onClick: () => copyKey(row) }, { default: () => '复制' }),
-    h(NButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-    h(NButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+  { title: '状态', key: 'enabled', width: 76, render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }) },
+  { title: '操作', key: 'actions', width: 160, render: (row) => h(UiSpace, { size: 4, wrap: false }, { default: () => [
+    h(UiButton, { size: 'small', quaternary: true, onClick: () => copyKey(row) }, { default: () => '复制' }),
+    h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
+    h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
   ] }) },
 ])
 
@@ -233,83 +235,83 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <n-button type="primary" @click="showCreate = true">新建 Key</n-button>
+      <UiButton type="primary" @click="showCreate = true">新建 Key</UiButton>
     </div>
 
-    <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1320" />
-    </n-card>
+    <UiCard class="table-card" :bordered="false">
+      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1320" />
+    </UiCard>
 
-    <n-modal v-model:show="showCreate" title="新建 API Key" :width="520">
-      <n-form label-placement="top">
-        <n-form-item label="名称">
-          <n-input v-model:value="form.name" placeholder="例如：工作站" />
-        </n-form-item>
-        <n-form-item label="允许的服务商（留空 = 不限）">
-          <n-select v-model:value="form.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </n-form-item>
-        <n-form-item label="允许的模型（留空 = 不限）">
-          <n-select v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*" />
-        </n-form-item>
-        <n-form-item label="模型映射">
-          <n-select v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">
+      <UiForm label-placement="top">
+        <UiFormItem label="名称">
+          <UiInput v-model:value="form.name" placeholder="例如：工作站" />
+        </UiFormItem>
+        <UiFormItem label="允许的服务商（留空 = 不限）">
+          <UiSelect v-model:value="form.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
+        </UiFormItem>
+        <UiFormItem label="允许的模型（留空 = 不限）">
+          <UiSelect v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*" />
+        </UiFormItem>
+        <UiFormItem label="模型映射">
+          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showCreate = false">取消</n-button>
-          <n-button type="primary" :loading="creating" @click="create">创建</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showCreate = false">取消</UiButton>
+          <UiButton type="primary" :loading="creating" @click="create">创建</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal :show="!!newKey" title="API Key 已创建" :width="520" @update:show="(shown: boolean) => { if (!shown) newKey = null }">
-      <n-alert type="warning" style="margin-bottom: 12px">请立即复制并妥善保存。</n-alert>
-      <n-input :value="newKey ?? ''" readonly />
+    <UiModal :show="!!newKey" title="API Key 已创建" :width="520" @update:show="(shown: boolean) => { if (!shown) newKey = null }">
+      <UiAlert type="warning" style="margin-bottom: 12px">请立即复制并妥善保存。</UiAlert>
+      <UiInput :value="newKey ?? ''" readonly />
       <template #footer>
-        <n-space justify="end">
-          <n-button type="primary" @click="copyText(newKey ?? '')">复制</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton type="primary" @click="copyText(newKey ?? '')">复制</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showEdit" title="编辑 API Key" :width="520">
-      <n-form label-placement="top">
-        <n-form-item label="名称">
-          <n-input v-model:value="editForm.name" />
-        </n-form-item>
-        <n-form-item label="允许的服务商">
-          <n-select v-model:value="editForm.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </n-form-item>
-        <n-form-item label="允许的模型">
-          <n-select v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="不限" />
-        </n-form-item>
-        <n-form-item label="模型映射">
-          <n-select v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
-        </n-form-item>
-        <n-form-item label="成本上限（USD）">
-          <n-input-number v-model:value="editForm.quotaLimit" :min="0" :step="1" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="速率上限（次/分钟）">
-          <n-input-number v-model:value="editForm.rateLimit" :min="1" :step="10" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="并发上限">
-          <n-input-number v-model:value="editForm.concurrencyLimit" :min="1" :step="1" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="过期时间">
-          <n-date-picker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="启用">
-          <n-switch v-model:value="editForm.enabled" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showEdit" title="编辑 API Key" :width="520">
+      <UiForm label-placement="top">
+        <UiFormItem label="名称">
+          <UiInput v-model:value="editForm.name" />
+        </UiFormItem>
+        <UiFormItem label="允许的服务商">
+          <UiSelect v-model:value="editForm.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
+        </UiFormItem>
+        <UiFormItem label="允许的模型">
+          <UiSelect v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="不限" />
+        </UiFormItem>
+        <UiFormItem label="模型映射">
+          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
+        </UiFormItem>
+        <UiFormItem label="成本上限（USD）">
+          <UiInputNumber v-model:value="editForm.quotaLimit" :min="0" :step="1" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="速率上限（次/分钟）">
+          <UiInputNumber v-model:value="editForm.rateLimit" :min="1" :step="10" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="并发上限">
+          <UiInputNumber v-model:value="editForm.concurrencyLimit" :min="1" :step="1" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="过期时间">
+          <UiDatePicker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="启用">
+          <UiSwitch v-model:value="editForm.enabled" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" @click="saveEdit">保存</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showEdit = false">取消</UiButton>
+          <UiButton type="primary" @click="saveEdit">保存</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 

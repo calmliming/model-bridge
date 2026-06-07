@@ -12,10 +12,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "useDefineForClassFields": true,
-    "forceConsistentCasingInFileNames": true,
-    "paths": {
-      "naive-ui": ["./src/shims/naive-ui.ts"]
-    }
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src"]
 }

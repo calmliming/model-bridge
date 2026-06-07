@@ -71,29 +71,29 @@ async function changePassword() {
 
 <template>
   <div class="space-y-5">
-    <n-card class="max-w-xl" title="管理员账户">
-      <n-form label-placement="top">
-        <n-form-item label="当前用户">
-          <n-input :value="auth.username ?? ''" readonly />
-        </n-form-item>
-        <n-form-item label="当前密码">
-          <n-input v-model:value="currentPassword" type="password" />
-        </n-form-item>
-        <n-form-item label="新密码">
-          <n-input v-model:value="newPassword" type="password" />
-        </n-form-item>
-        <n-form-item label="确认新密码">
-          <n-input
+    <UiCard class="max-w-xl" title="管理员账户">
+      <UiForm label-placement="top">
+        <UiFormItem label="当前用户">
+          <UiInput :value="auth.username ?? ''" readonly />
+        </UiFormItem>
+        <UiFormItem label="当前密码">
+          <UiInput v-model:value="currentPassword" type="password" />
+        </UiFormItem>
+        <UiFormItem label="新密码">
+          <UiInput v-model:value="newPassword" type="password" />
+        </UiFormItem>
+        <UiFormItem label="确认新密码">
+          <UiInput
             v-model:value="confirmPassword"
             type="password"
             @keyup.enter="changePassword"
           />
-        </n-form-item>
-        <n-button type="primary" :loading="saving" @click="changePassword">更新密码</n-button>
-      </n-form>
-    </n-card>
+        </UiFormItem>
+        <UiButton type="primary" :loading="saving" @click="changePassword">更新密码</UiButton>
+      </UiForm>
+    </UiCard>
 
-    <n-card class="max-w-xl" title="用户注册">
+    <UiCard class="max-w-xl" title="用户注册">
       <div class="flex items-center justify-between gap-5">
         <div>
           <strong class="text-gray-900 dark:text-white">开放用户自助注册</strong>
@@ -101,11 +101,11 @@ async function changePassword() {
             关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。
           </p>
         </div>
-        <n-switch
+        <UiSwitch
           :value="registrationEnabled"
           @update:value="toggleRegistration"
         />
       </div>
-    </n-card>
+    </UiCard>
   </div>
 </template>

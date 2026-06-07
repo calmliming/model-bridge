@@ -25,7 +25,7 @@ const emit = defineEmits<{
   (e: 'keyup', ev: KeyboardEvent): void
 }>()
 
-// Support both Naive-style v-model:value and standard v-model.
+// Support both v-model:value and standard v-model.
 const current = computed(() => props.value ?? props.modelValue ?? '')
 
 function onInput(e: Event) {

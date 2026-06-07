@@ -2,7 +2,7 @@ import { reactive, type VNodeChild } from 'vue'
 
 export interface DialogOptions {
   title?: string
-  /** Either plain text or a render function (mirrors Naive's content slot). */
+  /** Either plain text or a render function for custom dialog body content. */
   content?: string | (() => VNodeChild)
   positiveText?: string
   negativeText?: string
@@ -58,7 +58,7 @@ export function cancel(id: number): void {
   dismiss(id)
 }
 
-/** Mirrors Naive UI's `useDialog()` API surface used across the app. */
+/** Provides the app-wide confirmation dialog API used across views. */
 export function useDialog() {
   return {
     warning: (opts: DialogOptions) => open('warning', opts),

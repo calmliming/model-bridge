@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { NTag, useMessage } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiTag } from '../components/ui'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -285,7 +286,7 @@ function remainLabel(sub: Subscription): string {
   return parts.length ? parts.join(' · ') : '额度不限'
 }
 
-const walletColumns: DataTableColumns<WalletTransaction> = [
+const walletColumns: TableColumn<WalletTransaction>[] = [
   { title: '时间', key: 'createdAt', minWidth: 140, render: (row) => formatTime(row.createdAt) },
   { title: '类型', key: 'type', width: 90 },
   { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
@@ -293,18 +294,18 @@ const walletColumns: DataTableColumns<WalletTransaction> = [
   { title: '备注', key: 'note', minWidth: 160, render: (row) => row.note || '—' },
 ]
 
-const usageColumns: DataTableColumns<UsageLog> = [
+const usageColumns: TableColumn<UsageLog>[] = [
   { title: '时间', key: 'ts', minWidth: 140, render: (row) => formatTime(row.ts) },
   { title: '服务商', key: 'provider', width: 90 },
   { title: '模型', key: 'model', minWidth: 160, render: (row) => row.model || '—' },
   { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(NTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
+  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
 ]
 
-const paymentColumns: DataTableColumns<PaymentOrder> = [
+const paymentColumns: TableColumn<PaymentOrder>[] = [
   { title: '时间', key: 'createdAt', minWidth: 140, render: (row) => formatTime(row.createdAt) },
   { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: 'amount' }, formatUsd(row.amount)) },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(NTag, { size: 'small', bordered: false, type: row.status === 'paid' ? 'success' : row.status === 'pending' ? 'warning' : 'default' }, { default: () => row.status }) },
+  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'paid' ? 'success' : row.status === 'pending' ? 'warning' : 'default' }, { default: () => row.status }) },
   { title: '入账时间', key: 'paidAt', minWidth: 140, render: (row) => row.paidAt ? formatTime(row.paidAt) : '—' },
 ]
 
@@ -313,18 +314,18 @@ onMounted(load)
 
 <template>
   <div>
-    <n-spin :show="loading">
+    <UiSpin :show="loading">
       <div class="metric-grid">
-        <n-card class="metric-card is-balance" :bordered="false">
+        <UiCard class="metric-card is-balance" :bordered="false">
           <span>钱包余额</span>
           <strong :class="{ danger: (user?.balance ?? 0) <= 0 }">{{ formatUsd(user?.balance ?? 0) }}</strong>
           <small class="metric-hint">{{ activeSubscriptions }} 个生效订阅</small>
-          <n-space :size="8">
-            <n-button size="small" secondary type="primary" @click="showRecharge = true">充值</n-button>
-            <n-button size="small" secondary @click="showRedeem = true">兑换码</n-button>
-          </n-space>
-        </n-card>
-        <n-card
+          <UiSpace :size="8">
+            <UiButton size="small" secondary type="primary" @click="showRecharge = true">充值</UiButton>
+            <UiButton size="small" secondary @click="showRedeem = true">兑换码</UiButton>
+          </UiSpace>
+        </UiCard>
+        <UiCard
           v-for="card in metricCards"
           :key="card.label"
           class="metric-card"
@@ -334,12 +335,12 @@ onMounted(load)
           <span>{{ card.label }}</span>
           <strong>{{ loading ? '—' : card.value }}</strong>
           <small class="metric-hint">{{ card.hint }}</small>
-        </n-card>
+        </UiCard>
       </div>
 
-      <n-card title="我的订阅" :bordered="false" style="margin-bottom: 18px">
+      <UiCard title="我的订阅" :bordered="false" style="margin-bottom: 18px">
         <template #header-extra>
-          <n-button size="small" secondary type="primary" @click="openStore">套餐商店</n-button>
+          <UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton>
         </template>
         <p v-if="!subscriptions.length" class="sub-empty">
           暂无订阅。可在「套餐商店」用余额开通，或联系管理员分配。
@@ -349,69 +350,69 @@ onMounted(load)
             <strong>{{ sub.planName || '套餐' }}</strong>
             <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
           </div>
-          <n-tag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
+          <UiTag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
             {{ sub.status === 'active' ? remainLabel(sub) : '已过期' }}
-          </n-tag>
+          </UiTag>
         </div>
-      </n-card>
+      </UiCard>
 
-      <n-grid :cols="2" :x-gap="18" :y-gap="18" responsive="screen">
-        <n-gi span="2 m:1">
-          <n-card title="钱包流水" :bordered="false">
-            <n-data-table :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
-          </n-card>
-        </n-gi>
-        <n-gi span="2 m:1">
-          <n-card title="近期用量" :bordered="false">
-            <n-data-table :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
-          </n-card>
-        </n-gi>
-        <n-gi span="2 m:1">
-          <n-card title="充值订单" :bordered="false">
-            <n-data-table :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
-          </n-card>
-        </n-gi>
-      </n-grid>
-    </n-spin>
+      <UiGrid :cols="2" :x-gap="18" :y-gap="18" responsive="screen">
+        <UiGi span="2 m:1">
+          <UiCard title="钱包流水" :bordered="false">
+            <UiDataTable :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
+          </UiCard>
+        </UiGi>
+        <UiGi span="2 m:1">
+          <UiCard title="近期用量" :bordered="false">
+            <UiDataTable :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
+          </UiCard>
+        </UiGi>
+        <UiGi span="2 m:1">
+          <UiCard title="充值订单" :bordered="false">
+            <UiDataTable :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
+          </UiCard>
+        </UiGi>
+      </UiGrid>
+    </UiSpin>
 
-    <n-modal v-model:show="showRecharge" title="发起充值" :width="420">
-      <n-form label-placement="top">
-        <n-form-item label="充值金额（USD）">
-          <n-input-number v-model:value="rechargeAmount" :min="0.01" :precision="2" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="支付方式">
-          <n-radio-group v-model:value="selectedProvider">
-            <n-space vertical>
-              <n-radio v-for="p in availableProviders" :key="p" :value="p">
+    <UiModal v-model:show="showRecharge" title="发起充值" :width="420">
+      <UiForm label-placement="top">
+        <UiFormItem label="充值金额（USD）">
+          <UiInputNumber v-model:value="rechargeAmount" :min="0.01" :precision="2" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="支付方式">
+          <UiRadioGroup v-model:value="selectedProvider">
+            <UiSpace vertical>
+              <UiRadio v-for="p in availableProviders" :key="p" :value="p">
                 {{ providerLabels[p] }}
-              </n-radio>
-            </n-space>
-          </n-radio-group>
-        </n-form-item>
-      </n-form>
+              </UiRadio>
+            </UiSpace>
+          </UiRadioGroup>
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showRecharge = false">取消</n-button>
-          <n-button type="primary" :loading="creatingOrder" @click="createRechargeOrder">创建订单</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showRecharge = false">取消</UiButton>
+          <UiButton type="primary" :loading="creatingOrder" @click="createRechargeOrder">创建订单</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showRedeem" title="兑换码充值" :width="420">
-      <n-form label-placement="top">
-        <n-form-item label="兑换码">
-          <n-input v-model:value="redeemInput" placeholder="输入兑换码" @keyup.enter="redeem" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showRedeem" title="兑换码充值" :width="420">
+      <UiForm label-placement="top">
+        <UiFormItem label="兑换码">
+          <UiInput v-model:value="redeemInput" placeholder="输入兑换码" @keyup.enter="redeem" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showRedeem = false">取消</n-button>
-          <n-button type="primary" :loading="redeeming" @click="redeem">兑换</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showRedeem = false">取消</UiButton>
+          <UiButton type="primary" :loading="redeeming" @click="redeem">兑换</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
 
-    <n-modal v-model:show="showStore" title="套餐商店" :width="560">
+    <UiModal v-model:show="showStore" title="套餐商店" :width="560">
       <p v-if="!storePlans.length" class="sub-empty">暂无可购买的套餐。</p>
       <div v-for="plan in storePlans" :key="plan.id" class="store-card">
         <div class="store-info">
@@ -421,24 +422,24 @@ onMounted(load)
         </div>
         <div class="store-buy">
           <strong class="store-price">{{ plan.price > 0 ? `$${plan.price.toFixed(2)}` : '免费' }}</strong>
-          <n-button
+          <UiButton
             size="small"
             type="primary"
             :loading="purchasingId === plan.id"
             @click="purchase(plan)"
           >
             {{ plan.price > 0 ? '余额购买' : '领取' }}
-          </n-button>
+          </UiButton>
         </div>
       </div>
-    </n-modal>
+    </UiModal>
 
     <!-- 支付二维码弹窗 -->
-    <n-modal v-model:show="showPaymentQr" title="扫码支付" :width="480">
+    <UiModal v-model:show="showPaymentQr" title="扫码支付" :width="480">
       <div v-if="currentPaymentOrder" style="text-align: center">
-        <n-alert type="info" style="margin-bottom: 16px">
+        <UiAlert type="info" style="margin-bottom: 16px">
           请使用{{ providerLabels[currentPaymentOrder.provider] }}扫描下方二维码完成支付
-        </n-alert>
+        </UiAlert>
         <div style="display: flex; justify-content: center; margin: 24px 0">
           <img
             v-if="currentPaymentOrder.paymentUrl"
@@ -447,16 +448,16 @@ onMounted(load)
             style="width: 240px; height: 240px; border: 1px solid #e5e7eb; border-radius: 8px"
           >
         </div>
-        <n-text depth="3" style="font-size: 14px">
+        <UiText depth="3" style="font-size: 14px">
           订单金额: {{ formatUsd(currentPaymentOrder.amount) }}
-        </n-text>
-        <n-divider />
-        <n-space justify="center">
-          <n-button @click="showPaymentQr = false">关闭</n-button>
-          <n-button type="primary" @click="load">刷新状态</n-button>
-        </n-space>
+        </UiText>
+        <UiDivider />
+        <UiSpace justify="center">
+          <UiButton @click="showPaymentQr = false">关闭</UiButton>
+          <UiButton type="primary" @click="load">刷新状态</UiButton>
+        </UiSpace>
       </div>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 
@@ -533,7 +534,7 @@ onMounted(load)
   font-size: 12px;
 }
 
-.metric-card :deep(.n-button) {
+.metric-card :deep(.btn) {
   margin-top: 12px;
 }
 

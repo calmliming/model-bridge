@@ -1,7 +1,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 
 /**
- * Tracks the active Naive-UI-style screen breakpoint.
+ * Tracks the active screen breakpoint.
  * Breakpoints (min-width): s=640, m=1024, l=1280, xl=1536, 2xl=1920.
  */
 export type Breakpoint = 'xs' | 's' | 'm' | 'l' | 'xl' | '2xl'
@@ -25,7 +25,7 @@ export function bpFromWidth(w: number): Breakpoint {
 const ORDER: Breakpoint[] = ['xs', 's', 'm', 'l', 'xl', '2xl']
 
 /**
- * Resolves a Naive-style span string ("12 l:4 m:6") against the current breakpoint,
+ * Resolves a responsive span string ("12 l:4 m:6") against the current breakpoint,
  * picking the value for the largest breakpoint that is <= current.
  */
 export function resolveSpan(spanStr: string | number, current: Breakpoint): number {

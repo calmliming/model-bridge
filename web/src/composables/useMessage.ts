@@ -28,7 +28,7 @@ export function remove(id: number): void {
   if (idx !== -1) state.toasts.splice(idx, 1)
 }
 
-/** Mirrors Naive UI's `useMessage()` API surface used across the app. */
+/** Provides the app-wide toast API used across views. */
 export function useMessage() {
   return {
     success: (content: string, duration?: number) => push('success', content, duration),

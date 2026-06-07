@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue'
-import {
-  NButton,
-  NInputNumber,
-  NSpace,
-  NTag,
-  useDialog,
-  useMessage,
-} from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import { UiButton, UiInputNumber, UiSpace, UiTag } from '../components/ui'
+import { useDialog } from '../composables/useDialog'
+import { useMessage } from '../composables/useMessage'
+import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 
@@ -160,14 +155,14 @@ function confirmDelete(row: RedeemCode) {
 }
 
 // REDEEM_VIEW_COLUMNS_MARKER
-const columns: DataTableColumns<RedeemCode> = [
+const columns: TableColumn<RedeemCode>[] = [
   { title: '时间', key: 'createdAt', minWidth: 145, render: (row) => formatTime(row.createdAt) },
   { title: '面额', key: 'value', width: 100, render: (row) => h('strong', { class: 'amount' }, formatUsd(row.value)) },
   {
     title: '状态',
     key: 'status',
     width: 100,
-    render: (row) => h(NTag, { size: 'small', type: statusType[row.status], bordered: false }, { default: () => statusLabel[row.status] }),
+    render: (row) => h(UiTag, { size: 'small', type: statusType[row.status], bordered: false }, { default: () => statusLabel[row.status] }),
   },
   { title: '批次', key: 'batchId', minWidth: 150, render: (row) => h('span', { class: 'mono' }, row.batchId || '—') },
   { title: '有效期', key: 'expiresAt', minWidth: 145, render: (row) => (row.expiresAt ? formatTime(row.expiresAt) : '永久') },
@@ -178,16 +173,16 @@ const columns: DataTableColumns<RedeemCode> = [
     key: 'actions',
     width: 200,
     render: (row) =>
-      h(NSpace, { size: 4, wrap: false }, {
+      h(UiSpace, { size: 4, wrap: false }, {
         default: () => [
           row.batchId
-            ? h(NButton, { size: 'small', quaternary: true, onClick: () => exportBatch(row.batchId!) }, { default: () => '导出批次' })
+            ? h(UiButton, { size: 'small', quaternary: true, onClick: () => exportBatch(row.batchId!) }, { default: () => '导出批次' })
             : null,
           row.status !== 'used'
-            ? h(NButton, { size: 'small', quaternary: true, onClick: () => toggleStatus(row) }, { default: () => (row.status === 'disabled' ? '启用' : '禁用') })
+            ? h(UiButton, { size: 'small', quaternary: true, onClick: () => toggleStatus(row) }, { default: () => (row.status === 'disabled' ? '启用' : '禁用') })
             : null,
           row.status !== 'used'
-            ? h(NButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' })
+            ? h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' })
             : null,
         ],
       }),
@@ -200,35 +195,35 @@ onMounted(load)
 <template>
   <div>
     <div class="toolbar">
-      <n-button type="primary" @click="showGenerate = true">生成兑换码</n-button>
-      <n-button secondary :loading="loading" @click="load">刷新</n-button>
+      <UiButton type="primary" @click="showGenerate = true">生成兑换码</UiButton>
+      <UiButton secondary :loading="loading" @click="load">刷新</UiButton>
     </div>
-    <n-card class="table-card" :bordered="false">
-      <n-data-table :columns="columns" :data="codes" :loading="loading" :bordered="false" :scroll-x="1180" />
-    </n-card>
+    <UiCard class="table-card" :bordered="false">
+      <UiDataTable :columns="columns" :data="codes" :loading="loading" :bordered="false" :scroll-x="1180" />
+    </UiCard>
 
-    <n-modal v-model:show="showGenerate" title="生成兑换码" :width="460">
-      <n-form label-placement="top">
-        <n-form-item label="生成数量（1–1000）">
-          <n-input-number v-model:value="genForm.count" :min="1" :max="1000" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="单张面额（USD）">
-          <n-input-number v-model:value="genForm.valueUsd" :min="0.01" :step="1" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="有效天数（留空 = 永久）">
-          <n-input-number v-model:value="genForm.validityDays" :min="1" placeholder="永久有效" style="width: 100%" />
-        </n-form-item>
-        <n-form-item label="备注（可选）">
-          <n-input v-model:value="genForm.note" placeholder="例如：双十一活动" />
-        </n-form-item>
-      </n-form>
+    <UiModal v-model:show="showGenerate" title="生成兑换码" :width="460">
+      <UiForm label-placement="top">
+        <UiFormItem label="生成数量（1–1000）">
+          <UiInputNumber v-model:value="genForm.count" :min="1" :max="1000" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="单张面额（USD）">
+          <UiInputNumber v-model:value="genForm.valueUsd" :min="0.01" :step="1" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="有效天数（留空 = 永久）">
+          <UiInputNumber v-model:value="genForm.validityDays" :min="1" placeholder="永久有效" style="width: 100%" />
+        </UiFormItem>
+        <UiFormItem label="备注（可选）">
+          <UiInput v-model:value="genForm.note" placeholder="例如：双十一活动" />
+        </UiFormItem>
+      </UiForm>
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showGenerate = false">取消</n-button>
-          <n-button type="primary" :loading="generating" @click="submitGenerate">生成</n-button>
-        </n-space>
+        <UiSpace justify="end">
+          <UiButton @click="showGenerate = false">取消</UiButton>
+          <UiButton type="primary" :loading="generating" @click="submitGenerate">生成</UiButton>
+        </UiSpace>
       </template>
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -43,28 +43,28 @@ async function accept() {
 
 <template>
   <div class="accept-wrap">
-    <n-card class="accept-card" :bordered="false">
+    <UiCard class="accept-card" :bordered="false">
       <div class="head">
         <strong>接受邀请</strong>
         <span>Model Bridge</span>
       </div>
-      <n-alert v-if="!token" type="error" style="margin-bottom: 14px">邀请链接缺少 token。</n-alert>
-      <n-form label-placement="top">
-        <n-form-item label="名称">
-          <n-input v-model:value="name" placeholder="可稍后修改" />
-        </n-form-item>
-        <n-form-item label="密码">
-          <n-input
+      <UiAlert v-if="!token" type="error" style="margin-bottom: 14px">邀请链接缺少 token。</UiAlert>
+      <UiForm label-placement="top">
+        <UiFormItem label="名称">
+          <UiInput v-model:value="name" placeholder="可稍后修改" />
+        </UiFormItem>
+        <UiFormItem label="密码">
+          <UiInput
             v-model:value="password"
             type="password"
             show-password-on="click"
             placeholder="至少 6 位"
             @keyup.enter="accept"
           />
-        </n-form-item>
-        <n-button type="primary" block :loading="loading" :disabled="!token" @click="accept">创建账户</n-button>
-      </n-form>
-    </n-card>
+        </UiFormItem>
+        <UiButton type="primary" block :loading="loading" :disabled="!token" @click="accept">创建账户</UiButton>
+      </UiForm>
+    </UiCard>
   </div>
 </template>
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage } from '../composables/useMessage'
 import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
@@ -357,32 +357,32 @@ function openRequestInput(row: DashboardRecentLog) {
 
 <template>
   <div class="dashboard-page">
-    <n-grid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <n-gi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
-        <n-card class="stat-card surface-card" :class="`is-${card.tone}`" :bordered="false">
+    <UiGrid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+      <UiGi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
+        <UiCard class="stat-card surface-card" :class="`is-${card.tone}`" :bordered="false">
           <div class="stat-label">{{ card.label }}</div>
           <div class="stat-value">{{ loading ? '—' : card.value }}</div>
           <div class="stat-hint">{{ card.hint }}</div>
-        </n-card>
-      </n-gi>
-    </n-grid>
+        </UiCard>
+      </UiGi>
+    </UiGrid>
 
-    <n-grid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <n-gi span="12 l:8">
-        <n-card class="surface-card panel-card" :bordered="false">
+    <UiGrid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
+      <UiGi span="12 l:8">
+        <UiCard class="surface-card panel-card" :bordered="false">
           <div class="panel-head">
             <div>
               <h3>流量趋势</h3>
               <span>近 14 天请求与 Token 走势</span>
             </div>
-            <n-button size="small" quaternary @click="load">刷新</n-button>
+            <UiButton size="small" quaternary @click="load">刷新</UiButton>
           </div>
           <EChart :option="dailyOption" height="282px" />
-        </n-card>
-      </n-gi>
+        </UiCard>
+      </UiGi>
 
-      <n-gi span="12 l:4">
-        <n-card class="surface-card panel-card" :bordered="false">
+      <UiGi span="12 l:4">
+        <UiCard class="surface-card panel-card" :bordered="false">
           <div class="panel-head">
             <div>
               <h3>服务商占比</h3>
@@ -402,27 +402,27 @@ function openRequestInput(row: DashboardRecentLog) {
               <strong>{{ formatNumber(row.tokens) }}</strong>
             </div>
           </div>
-        </n-card>
-      </n-gi>
-    </n-grid>
+        </UiCard>
+      </UiGi>
+    </UiGrid>
 
-    <n-card class="surface-card panel-card" :bordered="false">
+    <UiCard class="surface-card panel-card" :bordered="false">
       <div class="panel-head">
         <div>
           <h3>最近调用</h3>
           <span>快速查看入口、模型、耗时和状态</span>
         </div>
         <div class="panel-actions">
-          <n-button size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</n-button>
+          <UiButton size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</UiButton>
           <router-link class="panel-link" to="/stats">详细统计</router-link>
         </div>
       </div>
 
       <div v-if="recentLogs.length" class="log-list">
         <div v-for="row in recentLogs" :key="row.id" class="log-row">
-          <n-tag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
+          <UiTag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
             {{ row.status }}
-          </n-tag>
+          </UiTag>
           <div class="log-model">
             <strong>{{ row.model || '(unknown model)' }}</strong>
             <span>{{ providerLabel(row.provider) }} · {{ row.accountName || '未知账号' }} · {{ row.apiKeyName || '未知 Key' }}</span>
@@ -437,7 +437,7 @@ function openRequestInput(row: DashboardRecentLog) {
           </div>
           <div class="log-metric">
             <span>总计</span>
-            <n-tooltip trigger="hover" placement="top">
+            <UiTooltip trigger="hover" placement="top">
               <template #trigger>
                 <strong class="log-total">{{ formatNumber(logTokens(row)) }}</strong>
               </template>
@@ -447,7 +447,7 @@ function openRequestInput(row: DashboardRecentLog) {
                   <strong>{{ formatNumber(item.value) }}</strong>
                 </div>
               </div>
-            </n-tooltip>
+            </UiTooltip>
           </div>
           <div class="log-metric">
             <span>耗时</span>
@@ -462,10 +462,10 @@ function openRequestInput(row: DashboardRecentLog) {
             <strong>{{ formatCost(row.cost) }}</strong>
           </div>
           <div class="log-time">{{ formatTime(row.ts) }}</div>
-          <n-button size="small" secondary @click="openRequestInput(row)">查看</n-button>
+          <UiButton size="small" secondary @click="openRequestInput(row)">查看</UiButton>
         </div>
         <div class="log-pagination">
-          <n-pagination
+          <UiPagination
             v-model:page="recentPage"
             :page-size="RECENT_PAGE_SIZE"
             :item-count="recentTotal"
@@ -474,21 +474,21 @@ function openRequestInput(row: DashboardRecentLog) {
         </div>
       </div>
       <div v-else class="empty-state">{{ recentLoading ? '加载中...' : '暂无请求记录' }}</div>
-    </n-card>
+    </UiCard>
 
-    <n-modal
+    <UiModal
       :show="!!selectedLog"
       title="请求输入"
       width="min(760px, calc(100vw - 32px))"
       @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
     >
-      <n-input
+      <UiInput
         :value="selectedLog?.requestInput || '未记录输入内容'"
         type="textarea"
         readonly
         :autosize="{ minRows: 12, maxRows: 22 }"
       />
-    </n-modal>
+    </UiModal>
   </div>
 </template>
 

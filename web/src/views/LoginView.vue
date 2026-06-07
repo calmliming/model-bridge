@@ -141,12 +141,12 @@ async function register() {
           <span class="secure-badge">Secure</span>
         </div>
 
-        <n-form v-if="mode === 'login'" label-placement="top" class="login-form">
-          <n-form-item label="账号">
-            <n-input v-model:value="account" size="large" placeholder="请输入账号" />
-          </n-form-item>
-          <n-form-item label="密码">
-            <n-input
+        <UiForm v-if="mode === 'login'" label-placement="top" class="login-form">
+          <UiFormItem label="账号">
+            <UiInput v-model:value="account" size="large" placeholder="请输入账号" />
+          </UiFormItem>
+          <UiFormItem label="密码">
+            <UiInput
               v-model:value="password"
               size="large"
               type="password"
@@ -154,33 +154,33 @@ async function register() {
               placeholder="请输入密码"
               @keyup.enter="login"
             />
-          </n-form-item>
-          <n-button type="primary" size="large" block :loading="loading" @click="login">
+          </UiFormItem>
+          <UiButton type="primary" size="large" block :loading="loading" @click="login">
             登录
-          </n-button>
+          </UiButton>
           <p v-if="registrationEnabled" class="form-switch">
             还没有账号？<a @click="mode = 'register'">注册账号</a>
           </p>
-        </n-form>
+        </UiForm>
 
-        <n-form v-else label-placement="top" class="login-form">
-          <n-form-item label="邮箱">
-            <n-input v-model:value="regEmail" size="large" placeholder="请输入邮箱" />
-          </n-form-item>
-          <n-form-item label="昵称（可选）">
-            <n-input v-model:value="regName" size="large" placeholder="如何称呼你" />
-          </n-form-item>
-          <n-form-item label="密码">
-            <n-input
+        <UiForm v-else label-placement="top" class="login-form">
+          <UiFormItem label="邮箱">
+            <UiInput v-model:value="regEmail" size="large" placeholder="请输入邮箱" />
+          </UiFormItem>
+          <UiFormItem label="昵称（可选）">
+            <UiInput v-model:value="regName" size="large" placeholder="如何称呼你" />
+          </UiFormItem>
+          <UiFormItem label="密码">
+            <UiInput
               v-model:value="regPassword"
               size="large"
               type="password"
               show-password-on="click"
               placeholder="至少 6 位"
             />
-          </n-form-item>
-          <n-form-item label="确认密码">
-            <n-input
+          </UiFormItem>
+          <UiFormItem label="确认密码">
+            <UiInput
               v-model:value="regConfirm"
               size="large"
               type="password"
@@ -188,14 +188,14 @@ async function register() {
               placeholder="再次输入密码"
               @keyup.enter="register"
             />
-          </n-form-item>
-          <n-button type="primary" size="large" block :loading="loading" @click="register">
+          </UiFormItem>
+          <UiButton type="primary" size="large" block :loading="loading" @click="register">
             注册
-          </n-button>
+          </UiButton>
           <p class="form-switch">
             已有账号？<a @click="mode = 'login'">返回登录</a>
           </p>
-        </n-form>
+        </UiForm>
         </div>
       </div>
     </div>
