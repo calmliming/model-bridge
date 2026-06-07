@@ -34,14 +34,60 @@ const titleMap: Record<string, string> = {
   settings: '系统设置',
 }
 
+const subtitleMap: Record<string, string> = {
+  overview: '欢迎回来！这里是系统运行概览。',
+  accounts: '管理上游服务账号、可用状态和调度能力。',
+  keys: '管理中转入口、额度和访问范围。',
+  users: '查看用户钱包、余额和用量入口。',
+  payments: '跟踪充值订单和支付入账状态。',
+  'redeem-codes': '生成和管理余额兑换码。',
+  'subscription-plans': '维护可售套餐和订阅额度。',
+  stats: '按模型、服务商和 API Key 分析消耗。',
+  docs: '查看客户端接入说明和示例。',
+  settings: '调整系统配置和安全选项。',
+}
+
 const activeKey = computed(() => route.name as string)
 const pageTitle = computed(() => titleMap[activeKey.value] ?? '控制台')
+const pageSubtitle = computed(() => subtitleMap[activeKey.value] ?? '管理 Model Bridge 的运行状态。')
+const displayName = computed(() => auth.username ?? 'admin')
+const avatarInitials = computed(() => {
+  const value = displayName.value.trim()
+  return (value.slice(0, 2) || 'MB').toUpperCase()
+})
 
 const sidebarOpen = ref(false)
-watch(() => route.fullPath, () => { sidebarOpen.value = false })
+const profileOpen = ref(false)
+const notificationsOpen = ref(false)
+const languageOpen = ref(false)
+watch(() => route.fullPath, () => {
+  sidebarOpen.value = false
+  profileOpen.value = false
+  notificationsOpen.value = false
+  languageOpen.value = false
+})
+
+function toggleNotifications() {
+  notificationsOpen.value = !notificationsOpen.value
+  languageOpen.value = false
+  profileOpen.value = false
+}
+
+function toggleLanguage() {
+  languageOpen.value = !languageOpen.value
+  notificationsOpen.value = false
+  profileOpen.value = false
+}
+
+function toggleProfile() {
+  profileOpen.value = !profileOpen.value
+  notificationsOpen.value = false
+  languageOpen.value = false
+}
 
 function logout() {
   auth.clear()
+  profileOpen.value = false
   void router.push({ name: 'login' })
 }
 </script>
@@ -112,9 +158,9 @@ function logout() {
     <!-- Main -->
     <div class="flex min-w-0 flex-1 flex-col">
       <header
-        class="flex h-16 flex-shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white/80 px-4 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/80 sm:h-[68px] sm:px-7"
+        class="relative z-[100] flex min-h-[68px] flex-shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white/85 px-4 py-2.5 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/80 sm:px-7"
       >
-        <div class="flex min-w-0 items-center gap-2">
+        <div class="flex min-w-0 items-center gap-3">
           <button
             class="-ml-1 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-800 lg:hidden"
             aria-label="打开菜单"
@@ -124,15 +170,96 @@ function logout() {
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <h1 class="truncate text-base font-bold text-gray-900 dark:text-white sm:text-lg">{{ pageTitle }}</h1>
+          <div class="min-w-0">
+            <h1 class="truncate text-lg font-extrabold tracking-normal text-gray-950 dark:text-white sm:text-xl">
+              {{ pageTitle }}
+            </h1>
+            <p class="mt-0.5 truncate text-xs font-medium text-gray-500 dark:text-dark-400">
+              {{ pageSubtitle }}
+            </p>
+          </div>
         </div>
         <div class="flex flex-shrink-0 items-center gap-2 sm:gap-3">
-          <span
-            class="hidden max-w-[40vw] truncate rounded-full border border-gray-200 bg-white/70 px-3 py-1 text-[13px] text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-gray-300 sm:inline-block"
-          >
-            {{ auth.username }}
-          </span>
-          <button class="btn btn-secondary btn-sm" @click="logout">退出登录</button>
+          <div class="relative hidden sm:block">
+            <button
+              class="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white"
+              aria-label="通知"
+              type="button"
+              @click="toggleNotifications"
+            >
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 21h4" />
+              </svg>
+            </button>
+            <div
+              v-if="notificationsOpen"
+              class="absolute right-0 top-full z-[1000] mt-2 w-56 rounded-xl border border-gray-200 bg-white p-4 text-sm font-medium text-gray-500 shadow-xl dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300"
+            >
+              暂无通知
+            </div>
+          </div>
+          <div class="relative hidden md:block">
+            <button
+              class="flex items-center gap-2 rounded-xl px-2 py-1 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800"
+              type="button"
+              aria-label="语言"
+              @click="toggleLanguage"
+            >
+              <span class="relative inline-flex h-3.5 w-5 overflow-hidden rounded-sm bg-red-500">
+                <span class="absolute left-1 top-1 h-1 w-1 rounded-full bg-yellow-300" />
+              </span>
+              <span>ZH</span>
+              <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            <div
+              v-if="languageOpen"
+              class="absolute right-0 top-full z-[1000] mt-2 w-40 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-dark-700 dark:bg-dark-800"
+            >
+              <button
+                class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 dark:text-dark-200"
+                type="button"
+                @click="languageOpen = false"
+              >
+                <span>简体中文</span>
+                <span class="text-primary-500">ZH</span>
+              </button>
+            </div>
+          </div>
+          <div class="relative">
+            <button
+              class="flex items-center gap-2 rounded-xl px-1.5 py-1 transition hover:bg-gray-100 dark:hover:bg-dark-800 sm:px-2"
+              type="button"
+              @click="toggleProfile"
+            >
+              <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary-500 text-xs font-bold text-white shadow-sm">
+                {{ avatarInitials }}
+              </span>
+              <span class="hidden min-w-0 text-left md:block">
+                <strong class="block max-w-[180px] truncate text-[13px] font-bold text-gray-900 dark:text-white">
+                  {{ displayName }}
+                </strong>
+                <span class="block text-[11px] font-medium text-gray-500 dark:text-dark-400">Admin</span>
+              </span>
+              <svg class="hidden h-5 w-5 flex-shrink-0 text-gray-400 md:block" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            <div
+              v-if="profileOpen"
+              class="absolute right-0 top-full z-[1000] mt-1.5 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-dark-700 dark:bg-dark-800"
+            >
+              <button
+                class="block w-full px-3 py-2 text-left text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-white"
+                type="button"
+                @click="logout"
+              >
+                退出登录
+              </button>
+            </div>
+          </div>
         </div>
       </header>
       <main class="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7">
