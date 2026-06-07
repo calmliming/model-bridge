@@ -4,6 +4,8 @@ import { config as loadDotenv } from 'dotenv'
 import { z } from 'zod'
 
 const ENV_PATH = '.env'
+const blankToUndefined = (value: unknown) =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value
 
 // Load an existing .env file (if any) into process.env.
 loadDotenv()
@@ -54,6 +56,8 @@ const schema = z.object({
   JWT_SECRET: z.string().min(16, 'must be at least 16 characters'),
   ADMIN_USERNAME: z.string().min(1).default('admin'),
   ADMIN_PASSWORD: z.string().min(1).default('admin'),
+  UPDATER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+  UPDATE_TOKEN: z.preprocess(blankToUndefined, z.string().min(16).optional()),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers

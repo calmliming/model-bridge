@@ -46,6 +46,9 @@ ENCRYPTION_KEY=$(openssl rand -hex 32)
 JWT_SECRET=$(openssl rand -hex 32)
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin
+
+# Internal updater token used only between model-bridge and model-bridge-updater.
+UPDATE_TOKEN=$(openssl rand -hex 32)
 EOF
   chmod 600 .env
   echo "  → edit ADMIN_PASSWORD in .env before exposing the dashboard"
@@ -64,6 +67,14 @@ PG_DATABASE=model_bridge
 DATABASE_URL=postgres://model_bridge:${PG_PASSWORD}@postgres:5432/model_bridge
 EOF
     echo "  → if you had a SQLite database under ./data/, run ./migrate-to-pg.sh to import it"
+  fi
+  if ! grep -q '^UPDATE_TOKEN=' .env; then
+    echo "  → .env is missing UPDATE_TOKEN, appending one now"
+    cat >> .env <<EOF
+
+# Internal updater token used only between model-bridge and model-bridge-updater.
+UPDATE_TOKEN=$(openssl rand -hex 32)
+EOF
   fi
 fi
 

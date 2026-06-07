@@ -20,7 +20,9 @@ services:
       retries: 10
 
   model-bridge:
-    build: .
+    build:
+      context: .
+      target: runtime
     image: model-bridge:latest
     container_name: model-bridge
     restart: unless-stopped
@@ -42,6 +44,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      UPDATER_URL: http://model-bridge-updater:3002
+      UPDATE_TOKEN: ${UPDATE_TOKEN:-}
     volumes:
       # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
       # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or
@@ -49,3 +53,23 @@ services:
       # service. Read-write because SQLite WAL mode needs to create
       # sidecar -shm/-wal files even when opened readonly.
       - ./data:/app/data
+
+  model-bridge-updater:
+    build:
+      context: .
+      target: updater
+    image: model-bridge-updater:latest
+    container_name: model-bridge-updater
+    restart: unless-stopped
+    environment:
+      UPDATE_TOKEN: ${UPDATE_TOKEN:-}
+      REPO_DIR: /repo
+      UPDATER_PORT: 3002
+      UPDATE_REMOTE: ${UPDATE_REMOTE:-origin}
+      UPDATE_BRANCH: ${UPDATE_BRANCH:-main}
+      UPDATE_SERVICE: model-bridge
+    volumes:
+      # Internal updater needs the host repository and Docker socket to run
+      # the fixed git + docker compose update flow. It is not exposed publicly.
+      - ./:/repo
+      - /var/run/docker.sock:/var/run/docker.sock

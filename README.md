@@ -59,7 +59,8 @@ the password under **Settings** immediately.
 ./install.sh
 ```
 
-`install.sh` generates a `.env` with random `ENCRYPTION_KEY` / `JWT_SECRET`,
+`install.sh` generates a `.env` with random `ENCRYPTION_KEY` / `JWT_SECRET` /
+`UPDATE_TOKEN`,
 then `docker compose up -d --build`. Once it finishes:
 
 - Dashboard: <http://localhost:3001>
@@ -67,6 +68,10 @@ then `docker compose up -d --build`. Once it finishes:
   OpenAI / Google sign-in)
 - Default admin: `admin / admin` — change it under **Settings** before
   exposing the dashboard
+
+Docker deploys also start the internal `model-bridge-updater` service. After
+logging in, use the **System update** card under **Settings** to check and
+upgrade to the latest `origin/main`.
 
 Stop and view logs:
 
@@ -303,6 +308,10 @@ Docker Compose maps `3001:3000` (external 3001 → container 3000).
 Access the dashboard at `http://<server-ip>:3001`.
 
 ### Updating a deployed instance
+
+Docker Compose deploys can check and upgrade from **Settings → System update**
+in the dashboard. If the updater is unavailable, or you need to handle local
+production changes manually, run:
 
 ```bash
 cd ~/model-bridge

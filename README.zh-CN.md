@@ -56,12 +56,15 @@ npm run dev
 ./install.sh
 ```
 
-`install.sh` 会生成带随机 `ENCRYPTION_KEY` / `JWT_SECRET` 的 `.env`，然后
+`install.sh` 会生成带随机 `ENCRYPTION_KEY` / `JWT_SECRET` / `UPDATE_TOKEN` 的 `.env`，然后
 `docker compose up -d --build`。完成后：
 
 - 管理后台：<http://localhost:3001>
 - OAuth 回调监听：`localhost:1455`（OpenAI / Google 登录时浏览器需访问此端口）
 - 默认管理员：`admin / admin` —— 暴露后台前请在**设置**里改掉
+
+Docker 部署会同时启动内部 `model-bridge-updater` 服务。登录后台后，可在**设置**
+页的「系统更新」卡片检查并升级到远端 `origin/main`。
 
 停止 / 查看日志：
 
@@ -278,6 +281,9 @@ Docker Compose 的端口映射为 `3001:3000`（外部 3001 → 容器内 3000�
 管理后台通过 `http://<服务器IP>:3001` 访问。
 
 ### 代码更新后重新部署
+
+Docker Compose 部署可直接在后台**设置 → 系统更新**里检查并升级。若更新服务不可用，
+或需要手动处理生产目录改动，也可以在服务器上执行：
 
 ```bash
 cd ~/model-bridge

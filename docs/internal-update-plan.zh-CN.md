@@ -1,8 +1,8 @@
 # 内部更新 · 实施计划
 
-> 状态：规划中。
+> 状态：✅ 已实现（2026-06-07）。
 > 关联：[与 sub2api 的差异化对比](./comparison-with-sub2api.zh-CN.md) 第 3 项「Web 一键升级 + 回滚」。
-> 更新日期：2026-06-05
+> 更新日期：2026-06-07
 
 ## 一、背景与目标
 
@@ -87,9 +87,9 @@ updater 的标准流程如下：
 2. 确认当前没有正在执行的更新任务。
 3. 在仓库目录执行 `git status --porcelain`，只要存在 tracked 改动就返回失败。
 4. 执行 `git fetch origin main`。
-5. 读取当前 `HEAD` 和 `origin/main`。
+5. 读取当前 `HEAD` 和本次 fetch 得到的 `FETCH_HEAD`。
 6. 如果两者一致，返回 `already_up_to_date`。
-7. 执行 `git reset --hard origin/main`。
+7. 执行 `git reset --hard FETCH_HEAD`。
 8. 执行 `docker compose up -d --build model-bridge`。
 9. 记录任务状态、开始时间、结束时间、错误原因和日志尾部。
 10. 前端轮询 `/health`，服务恢复后提示刷新页面。
@@ -131,7 +131,7 @@ GET /api/admin/system/check-updates
 | 字段 | 说明 |
 |---|---|
 | `currentCommit` | 当前部署目录的短 commit |
-| `latestCommit` | `origin/main` 的短 commit |
+| `latestCommit` | 本次 fetch 得到的远端分支短 commit |
 | `hasUpdate` | 当前 commit 是否落后远端 |
 | `branch` | 固定为 `main` |
 | `remote` | 固定为 `origin` |
@@ -213,8 +213,8 @@ updater 只允许执行写死的命令序列：
 - `git status --porcelain`
 - `git fetch origin main`
 - `git rev-parse HEAD`
-- `git rev-parse origin/main`
-- `git reset --hard origin/main`
+- `git rev-parse FETCH_HEAD`
+- `git reset --hard FETCH_HEAD`
 - `docker compose up -d --build model-bridge`
 
 不得从请求体读取命令、路径、分支或服务名直接拼接执行。未来如果需要可配置分支，也应只从环境变量读取，并做严格格式校验。

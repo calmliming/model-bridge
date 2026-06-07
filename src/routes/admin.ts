@@ -45,6 +45,12 @@ import {
   RedeemError,
   setRedeemCodeStatus,
 } from '../redeem/manager'
+import {
+  checkSystemUpdates,
+  getSystemUpdateStatus,
+  startSystemUpdate,
+  UpdaterError,
+} from '../system/updater'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -292,6 +298,26 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       await setRegistrationEnabled(body.data.registrationEnabled)
     }
     return { registrationEnabled: await isRegistrationEnabled() }
+  })
+
+  // ── System update ────────────────────────────────────────
+  app.get('/api/admin/system/check-updates', { preHandler: requireAdmin }, async () => {
+    return checkSystemUpdates()
+  })
+
+  app.post('/api/admin/system/update', { preHandler: requireAdmin }, async (_request, reply) => {
+    try {
+      return reply.code(202).send(await startSystemUpdate())
+    } catch (err) {
+      if (err instanceof UpdaterError) {
+        return reply.code(err.statusCode).send({ error: err.message })
+      }
+      throw err
+    }
+  })
+
+  app.get('/api/admin/system/update-status', { preHandler: requireAdmin }, async () => {
+    return getSystemUpdateStatus()
   })
 
   // ── SaaS users / wallet ─────────────────────────────────

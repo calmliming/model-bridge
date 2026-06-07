@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMessage } from '../composables/useMessage'
+import { useDialog } from '../composables/useDialog'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const message = useMessage()
+const dialog = useDialog()
 const auth = useAuthStore()
 
 const currentPassword = ref('')
@@ -15,14 +17,104 @@ const saving = ref(false)
 const registrationEnabled = ref(false)
 const togglingRegistration = ref(false)
 
-onMounted(async () => {
+type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 'failed'
+type TagType = 'default' | 'info' | 'success' | 'warning' | 'error' | 'primary'
+
+interface UpdateCheck {
+  currentCommit: string | null
+  latestCommit: string | null
+  hasUpdate: boolean
+  branch: string
+  remote: string
+  dirty: boolean
+  checkedAt: number
+  updaterAvailable: boolean
+  warning?: string
+}
+
+interface UpdateTask {
+  operationId: string | null
+  status: UpdateTaskStatus
+  startedAt: number | null
+  finishedAt: number | null
+  logTail: string
+  message?: string | null
+  error?: string | null
+  updaterAvailable?: boolean
+  warning?: string
+}
+
+const updateCheck = ref<UpdateCheck | null>(null)
+const checkingUpdates = ref(false)
+const startingUpdate = ref(false)
+const healthChecking = ref(false)
+const updateTask = ref<UpdateTask>({
+  operationId: null,
+  status: 'idle',
+  startedAt: null,
+  finishedAt: null,
+  logTail: '',
+})
+
+let statusTimer: number | undefined
+let statusInitialized = false
+
+const updateBusy = computed(() => updateTask.value.status === 'checking' || updateTask.value.status === 'updating')
+
+const versionState = computed<{ label: string; type: TagType }>(() => {
+  const check = updateCheck.value
+  if (!check) return { label: '未检查', type: 'default' }
+  if (check.warning || check.updaterAvailable === false) return { label: '更新服务不可用', type: 'error' }
+  if (check.dirty) return { label: '工作区有改动', type: 'warning' }
+  if (check.hasUpdate) return { label: '有新版本', type: 'warning' }
+  return { label: '已是最新', type: 'success' }
+})
+
+const taskState = computed<{ label: string; type: TagType }>(() => {
+  switch (updateTask.value.status) {
+    case 'checking':
+      return { label: '检查中', type: 'info' }
+    case 'updating':
+      return { label: '更新中', type: 'warning' }
+    case 'succeeded':
+      return { label: '已完成', type: 'success' }
+    case 'failed':
+      return { label: '失败', type: 'error' }
+    default:
+      return { label: '空闲', type: 'default' }
+  }
+})
+
+const updateActionDisabled = computed(() => {
+  const check = updateCheck.value
+  return (
+    !check ||
+    check.updaterAvailable === false ||
+    check.dirty ||
+    !check.hasUpdate ||
+    updateBusy.value ||
+    checkingUpdates.value
+  )
+})
+
+onMounted(() => {
+  void loadSettings()
+  void refreshUpdateInfo()
+  void loadUpdateStatus(false)
+})
+
+onUnmounted(() => {
+  stopStatusPolling()
+})
+
+async function loadSettings() {
   try {
     const { data } = await api.get('/admin/settings')
     registrationEnabled.value = !!data.registrationEnabled
   } catch (e) {
     message.error(errMsg(e, '加载设置失败'))
   }
-})
+}
 
 async function toggleRegistration(value: boolean) {
   togglingRegistration.value = true
@@ -67,10 +159,205 @@ async function changePassword() {
     saving.value = false
   }
 }
+
+function formatTime(value?: number | null): string {
+  return value ? new Date(value).toLocaleString() : '-'
+}
+
+function stopStatusPolling() {
+  if (statusTimer !== undefined) {
+    window.clearInterval(statusTimer)
+    statusTimer = undefined
+  }
+}
+
+function ensureStatusPolling() {
+  if (statusTimer !== undefined) return
+  statusTimer = window.setInterval(() => {
+    void loadUpdateStatus(true)
+  }, 2500)
+}
+
+function applyUpdateTask(next: UpdateTask) {
+  const previous = updateTask.value
+  updateTask.value = {
+    operationId: next.operationId ?? null,
+    status: next.status ?? 'idle',
+    startedAt: next.startedAt ?? null,
+    finishedAt: next.finishedAt ?? null,
+    logTail: next.logTail ?? '',
+    message: next.message ?? null,
+    error: next.error ?? null,
+    updaterAvailable: next.updaterAvailable,
+    warning: next.warning,
+  }
+
+  if (updateBusy.value) {
+    ensureStatusPolling()
+  } else {
+    stopStatusPolling()
+  }
+
+  const shouldNotify = statusInitialized && !!updateTask.value.operationId
+  statusInitialized = true
+
+  if (shouldNotify && previous.status !== 'succeeded' && updateTask.value.status === 'succeeded') {
+    message.success('系统更新完成，正在确认服务状态')
+    void waitForHealth()
+    void refreshUpdateInfo()
+  }
+  if (shouldNotify && previous.status !== 'failed' && updateTask.value.status === 'failed') {
+    message.error(updateTask.value.error || '系统更新失败')
+  }
+}
+
+async function refreshUpdateInfo(showToast = false) {
+  checkingUpdates.value = true
+  try {
+    const { data } = await api.get('/admin/system/check-updates')
+    updateCheck.value = data
+    if (showToast) message.success('版本信息已刷新')
+  } catch (e) {
+    message.error(errMsg(e, '检查版本失败'))
+  } finally {
+    checkingUpdates.value = false
+  }
+}
+
+async function loadUpdateStatus(silent = true) {
+  try {
+    const { data } = await api.get('/admin/system/update-status')
+    applyUpdateTask(data)
+  } catch (e) {
+    if (!silent) message.error(errMsg(e, '加载更新状态失败'))
+  }
+}
+
+async function waitForHealth() {
+  if (healthChecking.value) return
+  healthChecking.value = true
+  const deadline = Date.now() + 60000
+  try {
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch('/health', { cache: 'no-store' })
+        if (res.ok) {
+          message.success('服务已恢复，可以刷新页面')
+          return
+        }
+      } catch {
+        // Service may be restarting.
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 2000))
+    }
+    message.warning('更新已完成，服务恢复状态请稍后刷新确认')
+  } finally {
+    healthChecking.value = false
+  }
+}
+
+async function startUpdate() {
+  startingUpdate.value = true
+  try {
+    const { data } = await api.post('/admin/system/update')
+    applyUpdateTask(data)
+    message.success('更新任务已启动')
+  } catch (e) {
+    message.error(errMsg(e, '启动更新失败'))
+  } finally {
+    startingUpdate.value = false
+  }
+}
+
+function confirmSystemUpdate() {
+  const check = updateCheck.value
+  if (!check?.hasUpdate || updateActionDisabled.value) return
+  dialog.warning({
+    title: '确认系统更新',
+    content: `将从 ${check.remote}/${check.branch} 拉取最新代码，并重建重启 model-bridge 服务。`,
+    positiveText: '立即更新',
+    negativeText: '取消',
+    onPositiveClick: startUpdate,
+  })
+}
 </script>
 
 <template>
   <div class="space-y-5">
+    <UiCard class="max-w-3xl" title="系统更新">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <strong class="text-gray-900 dark:text-white">系统版本</strong>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            Docker Compose 部署可在这里检查并升级到远端 main。
+          </p>
+        </div>
+        <UiTag :type="versionState.type">{{ versionState.label }}</UiTag>
+      </div>
+
+      <div class="update-version-grid mt-4">
+        <div class="update-version-item">
+          <span>当前版本</span>
+          <strong>{{ updateCheck?.currentCommit || '-' }}</strong>
+        </div>
+        <div class="update-version-item">
+          <span>最新版本</span>
+          <strong>{{ updateCheck?.latestCommit || '-' }}</strong>
+        </div>
+        <div class="update-version-item">
+          <span>远端分支</span>
+          <strong>{{ updateCheck ? `${updateCheck.remote}/${updateCheck.branch}` : '-' }}</strong>
+        </div>
+        <div class="update-version-item">
+          <span>检查时间</span>
+          <strong>{{ formatTime(updateCheck?.checkedAt) }}</strong>
+        </div>
+      </div>
+
+      <UiAlert v-if="updateCheck?.warning" class="mt-4" type="error">
+        {{ updateCheck.warning }}
+      </UiAlert>
+      <UiAlert v-else-if="updateCheck?.dirty" class="mt-4" type="warning">
+        生产目录存在 tracked 改动，已阻止自动更新。
+      </UiAlert>
+
+      <div class="mt-4 flex flex-wrap justify-end gap-3">
+        <UiButton secondary :loading="checkingUpdates" @click="refreshUpdateInfo(true)">刷新</UiButton>
+        <UiButton
+          type="primary"
+          :loading="startingUpdate || updateBusy"
+          :disabled="updateActionDisabled"
+          @click="confirmSystemUpdate"
+        >
+          立即更新
+        </UiButton>
+      </div>
+
+      <div v-if="updateTask.operationId || updateTask.status !== 'idle'" class="update-task mt-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <strong class="text-gray-900 dark:text-white">更新任务</strong>
+            <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+              {{ updateTask.operationId || '-' }}
+            </p>
+          </div>
+          <UiTag :type="taskState.type">{{ taskState.label }}</UiTag>
+        </div>
+        <div class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <span class="text-gray-500 dark:text-dark-400">开始时间</span>
+            <p class="mt-1 text-gray-900 dark:text-white">{{ formatTime(updateTask.startedAt) }}</p>
+          </div>
+          <div>
+            <span class="text-gray-500 dark:text-dark-400">结束时间</span>
+            <p class="mt-1 text-gray-900 dark:text-white">{{ formatTime(updateTask.finishedAt) }}</p>
+          </div>
+        </div>
+        <UiAlert v-if="updateTask.error" class="mt-3" type="error">{{ updateTask.error }}</UiAlert>
+        <pre v-if="updateTask.logTail" class="system-update-log mt-3">{{ updateTask.logTail }}</pre>
+      </div>
+    </UiCard>
+
     <UiCard class="max-w-xl" title="管理员账户">
       <UiForm label-placement="top">
         <UiFormItem label="当前用户">
@@ -109,3 +396,77 @@ async function changePassword() {
     </UiCard>
   </div>
 </template>
+
+<style scoped>
+.update-version-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .update-version-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .update-version-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.update-version-item {
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid rgb(229 231 235);
+  padding: 12px;
+}
+
+:global(.dark) .update-version-item {
+  border-color: rgb(55 65 81);
+}
+
+.update-version-item span {
+  display: block;
+  color: rgb(107 114 128);
+  font-size: 12px;
+}
+
+.update-version-item strong {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgb(17 24 39);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+:global(.dark) .update-version-item strong {
+  color: white;
+}
+
+.update-task {
+  border-top: 1px solid rgb(243 244 246);
+  padding-top: 16px;
+}
+
+:global(.dark) .update-task {
+  border-color: rgb(55 65 81);
+}
+
+.system-update-log {
+  max-height: 240px;
+  overflow: auto;
+  border-radius: 12px;
+  background: rgb(17 24 39);
+  padding: 12px;
+  color: rgb(243 244 246);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+</style>

@@ -19,7 +19,18 @@ COPY package.json package-lock.json ./
 # at runtime; `pg` ships pure JS, no native build step required.
 RUN npm ci --omit=dev --no-audit --no-fund
 
-# ── Stage 3: slim runtime image ─────────────────────────────────
+# ── Stage 3: internal system updater ─────────────────────────────
+FROM docker:27-cli AS updater
+WORKDIR /app
+RUN apk add --no-cache git nodejs
+
+COPY scripts ./scripts
+
+EXPOSE 3002
+
+CMD ["node", "scripts/updater.mjs"]
+
+# ── Stage 4: slim runtime image ─────────────────────────────────
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
