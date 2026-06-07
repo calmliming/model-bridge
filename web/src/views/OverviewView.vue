@@ -72,12 +72,19 @@ interface DashboardOverview {
     coolingAccountCount: number
     disabledAccountCount: number
     errorAccountCount: number
+    totalUsers: number
+    activeUsers24h: number
+    newUsers24h: number
     requestCount: number
+    totalTokens: number
+    totalCost: number
     requests24h: number
     tokens24h: number
     cost24h: number
     success24h: number
     avgLatencyMs24h: number
+    rpm5m: number
+    tpm5m: number
     tokens30d: number
     cost30d: number
   }
@@ -112,12 +119,19 @@ const emptyTotals: DashboardOverview['totals'] = {
   coolingAccountCount: 0,
   disabledAccountCount: 0,
   errorAccountCount: 0,
+  totalUsers: 0,
+  activeUsers24h: 0,
+  newUsers24h: 0,
   requestCount: 0,
+  totalTokens: 0,
+  totalCost: 0,
   requests24h: 0,
   tokens24h: 0,
   cost24h: 0,
   success24h: 0,
   avgLatencyMs24h: 0,
+  rpm5m: 0,
+  tpm5m: 0,
   tokens30d: 0,
   cost30d: 0,
 }
@@ -147,16 +161,16 @@ const successRate24h = computed(() => {
 
 const cards = computed(() => [
   {
-    label: '可用账户',
-    value: `${totals.value.activeAccountCount}/${totals.value.accountCount}`,
-    hint: `${totals.value.coolingAccountCount} 个冷却 · ${totals.value.disabledAccountCount} 个禁用`,
-    tone: 'green',
+    label: 'API Keys',
+    value: formatNumber(totals.value.keyCount),
+    hint: `${formatNumber(totals.value.enabledKeyCount)} 个启用`,
+    tone: 'blue',
   },
   {
-    label: 'API Keys',
-    value: `${totals.value.enabledKeyCount}/${totals.value.keyCount}`,
-    hint: '启用 / 全部',
-    tone: 'blue',
+    label: '服务账号',
+    value: formatNumber(totals.value.accountCount),
+    hint: `${formatNumber(totals.value.activeAccountCount)} 正常 · ${formatNumber(totals.value.errorAccountCount)} 异常`,
+    tone: 'green',
   },
   {
     label: '24h 请求',
@@ -165,37 +179,37 @@ const cards = computed(() => [
     tone: 'violet',
   },
   {
-    label: '24h 成功率',
-    value: successRate24h.value == null ? '—' : `${successRate24h.value.toFixed(1)}%`,
-    hint:
-      successRate24h.value == null
-        ? '暂无请求'
-        : `成功 ${formatNumber(totals.value.success24h)} · 失败 ${formatNumber(totals.value.requests24h - totals.value.success24h)}`,
-    tone: 'teal',
-  },
-  {
-    label: '24h 平均延迟',
-    value: totals.value.avgLatencyMs24h > 0 ? `${formatNumber(totals.value.avgLatencyMs24h)} ms` : '—',
-    hint: '基于近 24h 请求',
+    label: '用户',
+    value: `+${formatNumber(totals.value.newUsers24h)}`,
+    hint: `总计 ${formatNumber(totals.value.totalUsers)} · 24h 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
     tone: 'cyan',
   },
   {
     label: '24h Tokens',
-    value: formatNumber(totals.value.tokens24h),
+    value: formatTokens(totals.value.tokens24h),
     hint: `费用 ${formatCost(totals.value.cost24h)}`,
+    tone: 'amber',
+  },
+  {
+    label: '累计 Tokens',
+    value: formatTokens(totals.value.totalTokens),
+    hint: `累计费用 ${formatCost(totals.value.totalCost)}`,
     tone: 'indigo',
   },
   {
-    label: '24h 费用',
-    value: formatCost(totals.value.cost24h),
-    hint: `${formatNumber(totals.value.tokens24h)} tokens`,
-    tone: 'rose',
+    label: '性能',
+    value: `${formatRate(totals.value.rpm5m)} RPM`,
+    hint: `${formatRate(totals.value.tpm5m)} TPM · 近 5 分钟`,
+    tone: 'teal',
   },
   {
-    label: '30天成本',
-    value: formatCost(totals.value.cost30d),
-    hint: `${formatNumber(totals.value.tokens30d)} tokens`,
-    tone: 'amber',
+    label: '平均响应',
+    value: formatDuration(totals.value.avgLatencyMs24h),
+    hint:
+      successRate24h.value == null
+        ? '暂无 24h 请求'
+        : `24h 成功率 ${successRate24h.value.toFixed(1)}%`,
+    tone: 'rose',
   },
 ])
 
@@ -314,8 +328,30 @@ function formatNumber(n: number): string {
   return Math.round(n).toLocaleString('en-US')
 }
 
+function formatTokens(n: number): string {
+  const value = Number.isFinite(n) ? n : 0
+  const abs = Math.abs(value)
+  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`
+  return Math.round(value).toLocaleString('en-US')
+}
+
+function formatRate(n: number): string {
+  const value = Number.isFinite(n) ? n : 0
+  const abs = Math.abs(value)
+  if (abs > 0 && abs < 10) return value.toFixed(1).replace(/\.0$/, '')
+  return formatTokens(value)
+}
+
 function formatCost(c: number): string {
   return `$${c.toFixed(c < 1 ? 4 : 2)}`
+}
+
+function formatDuration(ms: number): string {
+  if (!ms || ms <= 0) return '—'
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
+  return `${formatNumber(ms)} ms`
 }
 
 function providerLabel(provider: string): string {

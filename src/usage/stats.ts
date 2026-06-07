@@ -89,12 +89,19 @@ export interface DashboardOverview {
     coolingAccountCount: number
     disabledAccountCount: number
     errorAccountCount: number
+    totalUsers: number
+    activeUsers24h: number
+    newUsers24h: number
     requestCount: number
+    totalTokens: number
+    totalCost: number
     requests24h: number
     tokens24h: number
     cost24h: number
     success24h: number
     avgLatencyMs24h: number
+    rpm5m: number
+    tpm5m: number
     tokens30d: number
     cost30d: number
   }
@@ -354,6 +361,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
   const since24h = now - MS_PER_DAY
+  const since5m = now - 5 * 60_000
   const since30d = now - 30 * MS_PER_DAY
 
   const totalsRes = await pool.query<Record<string, unknown>>(
@@ -370,7 +378,13 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
             AND cooldown_until > $2) AS coolingAccountCount,
        (SELECT COUNT(*) FROM accounts WHERE status = 'disabled') AS disabledAccountCount,
        (SELECT COUNT(*) FROM accounts WHERE status = 'error') AS errorAccountCount,
+       (SELECT COUNT(*) FROM users) AS totalUsers,
+       (SELECT COUNT(DISTINCT user_id) FROM usage_logs WHERE ts >= $3 AND user_id IS NOT NULL) AS activeUsers24h,
+       (SELECT COUNT(*) FROM users WHERE created_at >= $3) AS newUsers24h,
        (SELECT COUNT(*) FROM usage_logs) AS requestCount,
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0)
+          FROM usage_logs) AS totalTokens,
+       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs) AS totalCost,
        (SELECT COUNT(*) FROM usage_logs WHERE ts >= $3) AS requests24h,
        (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0)
           FROM usage_logs WHERE ts >= $3) AS tokens24h,
@@ -378,11 +392,14 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
        (SELECT COUNT(*) FROM usage_logs WHERE ts >= $3 AND status = 'success') AS success24h,
        (SELECT COALESCE(AVG(latency_ms), 0)
           FROM usage_logs WHERE ts >= $3 AND latency_ms IS NOT NULL) AS avgLatencyMs24h,
+       (SELECT COUNT(*) / 5.0 FROM usage_logs WHERE ts >= $4) AS rpm5m,
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0) / 5.0
+          FROM usage_logs WHERE ts >= $4) AS tpm5m,
        (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens), 0)
-          FROM usage_logs WHERE ts >= $4) AS tokens30d,
+          FROM usage_logs WHERE ts >= $5) AS tokens30d,
        (SELECT COALESCE(SUM(cost), 0)
           FROM usage_logs WHERE ts >= $5) AS cost30d`,
-    [now, now, since24h, since30d, since30d],
+    [now, now, since24h, since5m, since30d],
   )
   const t = totalsRes.rows[0] ?? {}
   const totals: DashboardOverview['totals'] = {
@@ -393,12 +410,19 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     coolingAccountCount: toNum(t.coolingaccountcount),
     disabledAccountCount: toNum(t.disabledaccountcount),
     errorAccountCount: toNum(t.erroraccountcount),
+    totalUsers: toNum(t.totalusers),
+    activeUsers24h: toNum(t.activeusers24h),
+    newUsers24h: toNum(t.newusers24h),
     requestCount: toNum(t.requestcount),
+    totalTokens: toNum(t.totaltokens),
+    totalCost: toNum(t.totalcost),
     requests24h: toNum(t.requests24h),
     tokens24h: toNum(t.tokens24h),
     cost24h: toNum(t.cost24h),
     success24h: toNum(t.success24h),
     avgLatencyMs24h: Math.round(toNum(t.avglatencyms24h)),
+    rpm5m: toNum(t.rpm5m),
+    tpm5m: toNum(t.tpm5m),
     tokens30d: toNum(t.tokens30d),
     cost30d: toNum(t.cost30d),
   }
