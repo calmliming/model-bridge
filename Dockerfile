@@ -28,6 +28,7 @@ COPY scripts ./scripts
 
 EXPOSE 3002
 
+ENTRYPOINT []
 CMD ["node", "scripts/updater.mjs"]
 
 # ── Stage 4: slim runtime image ─────────────────────────────────
