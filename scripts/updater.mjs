@@ -223,7 +223,7 @@ async function runUpdate(operationId) {
 
     task.status = 'updating'
     await git(['reset', '--hard', 'FETCH_HEAD'], { timeoutMs: FETCH_TIMEOUT_MS, log: true })
-    await dockerCompose(['up', '-d', '--build', UPDATE_SERVICE])
+    await dockerCompose(['up', '-d', '--build', '--no-deps', UPDATE_SERVICE])
 
     task.status = 'succeeded'
     task.finishedAt = Date.now()

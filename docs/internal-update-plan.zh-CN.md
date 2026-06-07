@@ -92,14 +92,14 @@ updater 的标准流程如下：
 5. 读取当前 `HEAD` 和本次 fetch 得到的 `FETCH_HEAD`。
 6. 如果两者一致，返回 `already_up_to_date`。
 7. 执行 `git reset --hard FETCH_HEAD`。
-8. 执行 `docker compose up -d --build model-bridge`。
+8. 执行 `docker compose up -d --build --no-deps model-bridge`。
 9. 记录任务状态、开始时间、结束时间、错误原因和日志尾部。
 10. 前端轮询 `/health`，服务恢复后提示刷新页面。
 
 推荐只重建 `model-bridge` 服务，不重启 PostgreSQL：
 
 ```bash
-docker compose up -d --build model-bridge
+docker compose up -d --build --no-deps model-bridge
 ```
 
 PostgreSQL 数据位于 `./data/pg/`，该流程不会删除数据库和账户数据。
@@ -175,7 +175,7 @@ GET /api/admin/system/update-status
   "status": "succeeded",
   "startedAt": 1780660800000,
   "finishedAt": 1780660860000,
-  "logTail": "docker compose up -d --build model-bridge\n..."
+  "logTail": "docker compose up -d --build --no-deps model-bridge\n..."
 }
 ```
 
@@ -221,7 +221,7 @@ updater 只允许执行写死的命令序列：
 - `git rev-parse HEAD`
 - `git rev-parse FETCH_HEAD`
 - `git reset --hard FETCH_HEAD`
-- `docker compose up -d --build model-bridge`
+- `docker compose up -d --build --no-deps model-bridge`
 
 不得从请求体读取命令、路径、分支或服务名直接拼接执行。未来如果需要可配置分支，也应只从环境变量读取，并做严格格式校验。
 
