@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { UiButton, UiInputNumber, UiSelect, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
@@ -80,8 +80,24 @@ const groupSelectOptions = computed(() =>
   })),
 )
 const showGroups = ref(false)
-const groupForm = ref({ name: '', description: '', rateMultiplier: 1 })
+const groupViewMode = ref<'list' | 'create' | 'edit'>('list')
+const editingGroup = ref<GroupInfo | null>(null)
+const groupForm = ref<{ name: string; description: string; rateMultiplier: number | null }>({
+  name: '',
+  description: '',
+  rateMultiplier: 1,
+})
 const savingGroup = ref(false)
+const loadingGroups = ref(false)
+const isGroupEditor = computed(() => groupViewMode.value !== 'list')
+const groupModalTitle = computed(() => {
+  if (groupViewMode.value === 'create') return '新建账号分组'
+  if (groupViewMode.value === 'edit') return '编辑账号分组'
+  return '管理账号分组'
+})
+const groupModalWidth = computed(() => (isGroupEditor.value ? 520 : 760))
+const groupedAccountTotal = computed(() => groups.value.reduce((sum, group) => sum + group.accountCount, 0))
+const groupSubmitLabel = computed(() => (groupViewMode.value === 'edit' ? '保存' : '创建'))
 
 // Add-account modal state.
 const showAdd = ref(false)
@@ -180,6 +196,18 @@ function providerName(provider: string) {
 
 function providerType(provider: string): TagType {
   return providerTagType[provider as Provider] ?? 'default'
+}
+
+function formatRateMultiplier(value: number | null | undefined) {
+  const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 1
+  return `${normalized.toFixed(4).replace(/\.?0+$/, '')}x`
+}
+
+function rateMultiplierType(value: number | null | undefined): TagType {
+  const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 1
+  if (normalized < 1) return 'success'
+  if (normalized > 1) return 'warning'
+  return 'default'
 }
 
 function quotaStatus(window: AccountQuotaWindow) {
@@ -368,11 +396,14 @@ async function load() {
 }
 
 async function loadGroups() {
+  loadingGroups.value = true
   try {
     const { data } = await api.get('/admin/account-groups')
     groups.value = data.groups
   } catch (e) {
     message.error(errMsg(e, '加载分组失败'))
+  } finally {
+    loadingGroups.value = false
   }
 }
 
@@ -391,43 +422,75 @@ async function setGroups(row: Account, groupIds: string[]) {
   }
 }
 
-async function createGroupSubmit() {
+function resetGroupEditor() {
+  groupViewMode.value = 'list'
+  editingGroup.value = null
+  groupForm.value = { name: '', description: '', rateMultiplier: 1 }
+}
+
+function openGroups() {
+  resetGroupEditor()
+  showGroups.value = true
+  void loadGroups()
+}
+
+function openCreateGroup() {
+  groupViewMode.value = 'create'
+  editingGroup.value = null
+  groupForm.value = { name: '', description: '', rateMultiplier: 1 }
+}
+
+function openEditGroup(group: GroupInfo) {
+  groupViewMode.value = 'edit'
+  editingGroup.value = group
+  groupForm.value = {
+    name: group.name,
+    description: group.description ?? '',
+    rateMultiplier: group.rateMultiplier,
+  }
+}
+
+function closeGroupEditor() {
+  resetGroupEditor()
+}
+
+async function submitGroupForm() {
   if (!groupForm.value.name.trim()) {
     message.warning('请填写分组名称')
     return
   }
-  savingGroup.value = true
-  try {
-    await api.post('/admin/account-groups', {
-      name: groupForm.value.name.trim(),
-      description: groupForm.value.description.trim() || undefined,
-      rateMultiplier: groupForm.value.rateMultiplier,
-    })
-    groupForm.value = { name: '', description: '', rateMultiplier: 1 }
-    message.success('分组已创建')
-    await loadGroups()
-  } catch (e) {
-    message.error(errMsg(e, '创建分组失败'))
-  } finally {
-    savingGroup.value = false
-  }
-}
-
-async function saveGroup(group: GroupInfo) {
-  if (!group.name.trim()) {
-    message.warning('分组名称不能为空')
+  const multiplier = groupForm.value.rateMultiplier
+  if (multiplier == null || !Number.isFinite(multiplier) || multiplier <= 0) {
+    message.warning('请填写有效倍率')
     return
   }
+
+  savingGroup.value = true
   try {
-    await api.patch(`/admin/account-groups/${group.id}`, {
-      name: group.name.trim(),
-      description: group.description?.trim() || null,
-      rateMultiplier: group.rateMultiplier,
-    })
-    message.success('已保存')
+    const payload = {
+      name: groupForm.value.name.trim(),
+      description: groupForm.value.description.trim(),
+      rateMultiplier: multiplier,
+    }
+    if (groupViewMode.value === 'edit' && editingGroup.value) {
+      await api.patch(`/admin/account-groups/${editingGroup.value.id}`, {
+        ...payload,
+        description: payload.description || null,
+      })
+      message.success('分组已更新')
+    } else {
+      await api.post('/admin/account-groups', {
+        ...payload,
+        description: payload.description || undefined,
+      })
+      message.success('分组已创建')
+    }
+    resetGroupEditor()
     await loadGroups()
   } catch (e) {
-    message.error(errMsg(e, '保存分组失败'))
+    message.error(errMsg(e, groupViewMode.value === 'edit' ? '保存分组失败' : '创建分组失败'))
+  } finally {
+    savingGroup.value = false
   }
 }
 
@@ -774,6 +837,10 @@ onMounted(() => {
   refreshTimer = window.setInterval(() => void load(), 30_000)
 })
 
+watch(showGroups, (open) => {
+  if (!open) resetGroupEditor()
+})
+
 onBeforeUnmount(() => {
   if (refreshTimer != null) window.clearInterval(refreshTimer)
 })
@@ -782,7 +849,7 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <div class="page-head">
-      <UiButton secondary @click="showGroups = true">管理分组</UiButton>
+      <UiButton secondary @click="openGroups">管理分组</UiButton>
       <UiButton type="primary" @click="openAdd">添加账户</UiButton>
     </div>
 
@@ -991,43 +1058,116 @@ onBeforeUnmount(() => {
       </template>
     </UiModal>
 
-    <UiModal v-model:show="showGroups" title="管理账号分组" :width="640">
-      <p class="group-hint">
-        账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
-        倍率作用于计费：绑定该组的 Key 按「成本价 × 倍率」扣费，1.0 为不加价，可低于 1 折价。
-      </p>
-      <div class="group-create">
-        <UiInput v-model:value="groupForm.name" placeholder="新分组名称" />
-        <UiInput v-model:value="groupForm.description" placeholder="备注（可选）" />
-        <UiInputNumber
-          v-model:value="groupForm.rateMultiplier"
-          :min="0.01"
-          :step="0.1"
-          :precision="2"
-          placeholder="倍率"
-          style="width: 110px"
-        />
-        <UiButton type="primary" :loading="savingGroup" @click="createGroupSubmit">新建</UiButton>
+    <UiModal v-model:show="showGroups" :title="groupModalTitle" :width="groupModalWidth">
+      <div v-if="!isGroupEditor" class="groups-manager">
+        <div class="groups-toolbar">
+          <div class="groups-toolbar-copy">
+            <p class="group-hint">
+              账号入组后只会被「绑定到该组的 Key」调度；未分组账号属于默认池，供未绑定分组的 Key 使用。
+              倍率作用于计费：绑定该组的 Key 按「官方原始费用 × 倍率」扣费，1.0 为原价，可低于 1 折价。
+            </p>
+            <p class="groups-summary">
+              {{ groups.length }} 个分组 · {{ groupedAccountTotal }} 个账号已入组
+            </p>
+          </div>
+          <div class="groups-toolbar-actions">
+            <UiButton size="small" secondary :loading="loadingGroups" @click="loadGroups">刷新</UiButton>
+            <UiButton size="small" type="primary" @click="openCreateGroup">新建分组</UiButton>
+          </div>
+        </div>
+
+        <div v-if="loadingGroups && !groups.length" class="group-empty-card">
+          <span class="spinner group-loading-spinner" />
+          <p>正在加载分组...</p>
+        </div>
+        <div v-else-if="!groups.length" class="group-empty-card">
+          <strong>还没有分组</strong>
+          <p>新建后即可在账号行和 Key 表单里选择分组。</p>
+          <UiButton size="small" type="primary" @click="openCreateGroup">新建分组</UiButton>
+        </div>
+        <div v-else class="group-list">
+          <div v-for="group in groups" :key="group.id" class="group-item">
+            <div class="group-main">
+              <div class="group-title-row">
+                <strong class="group-name">{{ group.name }}</strong>
+                <UiTag size="small" :type="rateMultiplierType(group.rateMultiplier)" :bordered="false">
+                  {{ formatRateMultiplier(group.rateMultiplier) }}
+                </UiTag>
+              </div>
+              <p class="group-description">{{ group.description || '暂无备注' }}</p>
+              <span class="group-created">创建 {{ formatTime(group.createdAt) }}</span>
+            </div>
+            <div class="group-metrics" aria-label="分组统计">
+              <div class="group-metric">
+                <span>账号</span>
+                <strong>{{ group.accountCount }}</strong>
+              </div>
+              <div class="group-metric">
+                <span>计费</span>
+                <strong>{{ formatRateMultiplier(group.rateMultiplier) }}</strong>
+              </div>
+            </div>
+            <div class="group-actions">
+              <UiButton size="small" quaternary @click="openEditGroup(group)">编辑</UiButton>
+              <UiButton size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</UiButton>
+            </div>
+          </div>
+        </div>
       </div>
-      <UiDivider style="margin: 14px 0" />
-      <p v-if="!groups.length" class="group-empty">
-        还没有分组。新建后即可在账号行和 Key 表单里选择分组。
-      </p>
-      <div v-for="group in groups" :key="group.id" class="group-row">
-        <UiInput v-model:value="group.name" size="small" placeholder="名称" />
-        <UiInput v-model:value="group.description" size="small" placeholder="备注" />
-        <UiInputNumber
-          v-model:value="group.rateMultiplier"
-          size="small"
-          :min="0.01"
-          :step="0.1"
-          :precision="2"
-          style="width: 96px"
-        />
-        <span class="group-count">{{ group.accountCount }} 账号</span>
-        <UiButton size="small" quaternary @click="saveGroup(group)">保存</UiButton>
-        <UiButton size="small" type="error" quaternary @click="confirmDeleteGroup(group)">删除</UiButton>
+
+      <div v-else class="group-form">
+        <div class="group-form-field">
+          <label class="field-label">分组名称</label>
+          <UiInput
+            v-model:value="groupForm.name"
+            placeholder="例如：Claude 优先池"
+            @keyup.enter="submitGroupForm"
+          />
+        </div>
+        <div class="group-form-field">
+          <label class="field-label">备注</label>
+          <UiInput
+            v-model:value="groupForm.description"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 5 }"
+            placeholder="可选，用于说明这个分组的用途"
+          />
+        </div>
+        <div class="group-form-field">
+          <label class="field-label">计费倍率</label>
+          <UiInputNumber
+            v-model:value="groupForm.rateMultiplier"
+            :min="0.0001"
+            :step="0.005"
+            placeholder="1"
+            style="width: 100%"
+          />
+          <p class="field-hint">绑定该组的 Key 按官方原始费用乘以该倍率扣费，1.0 为原价。</p>
+        </div>
+        <div class="group-preview">
+          <div>
+            <span>列表展示</span>
+            <strong>{{ groupForm.name.trim() || '未命名分组' }}</strong>
+          </div>
+          <UiTag size="small" :type="rateMultiplierType(groupForm.rateMultiplier)" :bordered="false">
+            {{ formatRateMultiplier(groupForm.rateMultiplier) }}
+          </UiTag>
+        </div>
       </div>
+
+      <template #footer>
+        <UiSpace justify="end">
+          <template v-if="isGroupEditor">
+            <UiButton @click="closeGroupEditor">返回列表</UiButton>
+            <UiButton type="primary" :loading="savingGroup" @click="submitGroupForm">
+              {{ groupSubmitLabel }}
+            </UiButton>
+          </template>
+          <template v-else>
+            <UiButton @click="showGroups = false">关闭</UiButton>
+          </template>
+        </UiSpace>
+      </template>
     </UiModal>
   </div>
 </template>
@@ -1257,37 +1397,238 @@ onBeforeUnmount(() => {
   min-width: 120px;
 }
 
-.group-hint,
-.group-empty {
-  margin: 0 0 12px;
+.groups-manager {
+  display: grid;
+  gap: 14px;
+}
+
+.groups-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.groups-toolbar-copy {
+  min-width: 0;
+}
+
+.groups-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.group-hint {
+  margin: 0;
   color: rgba(15, 23, 42, 0.6);
   font-size: 13px;
   line-height: 1.5;
 }
 
-.group-create {
+.groups-summary {
+  margin: 7px 0 0;
+  color: rgba(15, 23, 42, 0.45);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.group-list {
+  display: grid;
+  gap: 10px;
+}
+
+.group-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.group-main {
+  min-width: 0;
+}
+
+.group-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
-.group-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+.group-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.group-create :deep(.input),
-.group-row :deep(.input) {
-  flex: 1;
+.group-description {
+  margin: 5px 0 0;
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.58);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.group-count {
-  flex: 0 0 auto;
+.group-created {
+  display: block;
+  margin-top: 4px;
   color: rgba(15, 23, 42, 0.52);
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.group-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.group-metric {
+  display: grid;
+  gap: 2px;
+  min-width: 66px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  text-align: right;
+}
+
+.group-metric span,
+.group-preview span {
+  color: rgba(15, 23, 42, 0.48);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.group-metric strong,
+.group-preview strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
   white-space: nowrap;
+}
+
+.group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.group-empty-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 30px 18px;
+  border: 1px dashed rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  color: rgba(15, 23, 42, 0.56);
+  font-size: 13px;
+  text-align: center;
+}
+
+.group-empty-card strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.group-empty-card p {
+  margin: 0;
+}
+
+.group-loading-spinner {
+  width: 18px;
+  height: 18px;
+  color: #2563eb;
+}
+
+.group-form {
+  display: grid;
+  gap: 16px;
+}
+
+.group-form-field {
+  display: grid;
+  gap: 6px;
+}
+
+.group-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.74);
+}
+
+.group-preview > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.group-preview strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.dark) .group-hint {
+  color: rgba(226, 232, 240, 0.62);
+}
+
+:global(.dark) .groups-summary,
+:global(.dark) .group-created {
+  color: rgba(226, 232, 240, 0.45);
+}
+
+:global(.dark) .group-item,
+:global(.dark) .group-preview {
+  border-color: rgba(71, 85, 105, 0.5);
+  background: rgba(30, 41, 59, 0.52);
+}
+
+:global(.dark) .group-name,
+:global(.dark) .group-metric strong,
+:global(.dark) .group-preview strong,
+:global(.dark) .group-empty-card strong {
+  color: #f8fafc;
+}
+
+:global(.dark) .group-description,
+:global(.dark) .group-empty-card {
+  color: rgba(226, 232, 240, 0.58);
+}
+
+:global(.dark) .group-metric {
+  background: rgba(15, 23, 42, 0.52);
+}
+
+:global(.dark) .group-metric span,
+:global(.dark) .group-preview span {
+  color: rgba(226, 232, 240, 0.46);
+}
+
+:global(.dark) .group-empty-card {
+  border-color: rgba(71, 85, 105, 0.58);
 }
 
 @media (max-width: 720px) {
@@ -1298,6 +1639,30 @@ onBeforeUnmount(() => {
 
   .account-group-meta {
     justify-content: flex-start;
+  }
+
+  .groups-toolbar,
+  .group-item {
+    grid-template-columns: 1fr;
+  }
+
+  .groups-toolbar {
+    display: grid;
+  }
+
+  .groups-toolbar-actions,
+  .group-metrics,
+  .group-actions {
+    justify-content: flex-start;
+  }
+
+  .group-metrics {
+    flex-wrap: wrap;
+  }
+
+  .group-metric {
+    min-width: 78px;
+    text-align: left;
   }
 }
 </style>
