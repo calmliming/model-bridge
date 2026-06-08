@@ -467,6 +467,15 @@ function isTokenRevoked(text: string): boolean {
   }
 }
 
+function isWorkspaceDeactivated(text: string): boolean {
+  try {
+    const body = JSON.parse(text) as { detail?: { code?: string } }
+    return body.detail?.code === 'deactivated_workspace'
+  } catch {
+    return false
+  }
+}
+
 async function classifyUpstreamFailure(
   provider: string,
   response: Response,
@@ -478,6 +487,13 @@ async function classifyUpstreamFailure(
   if (response.status === 401) {
     const text = await readErrorText(response)
     if (isTokenRevoked(text)) {
+      return { penalty: null, retryable: true, disable: true }
+    }
+    return { penalty: 'error', retryable: true }
+  }
+  if (response.status === 402) {
+    const text = await readErrorText(response)
+    if (isWorkspaceDeactivated(text)) {
       return { penalty: null, retryable: true, disable: true }
     }
     return { penalty: 'error', retryable: true }
