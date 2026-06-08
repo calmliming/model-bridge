@@ -75,16 +75,16 @@ beforeEach(() => {
 })
 
 describe('requireApiKey', () => {
-  it('allows legacy keys without a user wallet', async () => {
+  it('rejects keys without an owner user', async () => {
     const request = fakeRequest()
     const reply = fakeReply()
     mocks.findApiKeyBySecret.mockResolvedValue(apiKeyRecord())
 
     await requireApiKey(request, reply)
 
-    expect(reply.statusCode).toBe(200)
-    expect(request.apiKey?.userId).toBeNull()
-    expect(mocks.update).toHaveBeenCalled()
+    expect(reply.statusCode).toBe(401)
+    expect(reply.payload).toEqual({ error: 'API key owner is unavailable' })
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 
   it('rejects disabled wallet users', async () => {

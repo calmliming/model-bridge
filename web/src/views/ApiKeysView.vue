@@ -10,6 +10,9 @@ import { buildCcSwitchUrl, ccSwitchProviderName, launchCcSwitch, targetsForProvi
 
 interface ApiKey {
   id: string
+  userId: string | null
+  userEmail: string | null
+  userName: string | null
   name: string
   ownerLabel: string | null
   keyPrefix: string
@@ -28,6 +31,14 @@ interface ApiKey {
   createdAt: number
 }
 
+interface UserRow {
+  id: string
+  email: string
+  name: string
+  status: 'active' | 'disabled'
+  isAdmin: boolean
+}
+
 interface AccountGroup {
   id: string
   name: string
@@ -43,6 +54,9 @@ const dialog = useDialog()
 const keys = ref<ApiKey[]>([])
 const loading = ref(true)
 const groups = ref<AccountGroup[]>([])
+const users = ref<UserRow[]>([])
+
+const adminUserId = computed(() => users.value.find((u) => u.isAdmin)?.id ?? null)
 
 const groupSelectOptions = computed(() =>
   groups.value.map((g) => ({
@@ -51,14 +65,33 @@ const groupSelectOptions = computed(() =>
   })),
 )
 
+const userSelectOptions = computed(() =>
+  users.value
+    .filter((u) => u.status === 'active')
+    .map((u) => ({
+      label: `${u.name}${u.isAdmin ? ' (Admin)' : ''} · ${u.email}`,
+      value: u.id,
+    })),
+)
+
 function groupName(id: string | null): string {
   if (!id) return '默认池'
   return groups.value.find((g) => g.id === id)?.name ?? '(已删除)'
 }
 
+function defaultUserId(): string | null {
+  return adminUserId.value ?? users.value.find((u) => u.status === 'active')?.id ?? null
+}
+
+function openCreate() {
+  form.value.userId = form.value.userId ?? defaultUserId()
+  showCreate.value = true
+}
+
 const showCreate = ref(false)
 const creating = ref(false)
 const form = ref({
+  userId: null as string | null,
   name: '',
   ownerLabel: '',
   allowedProviders: [] as string[],
@@ -80,6 +113,7 @@ const showEdit = ref(false)
 const editing = ref(false)
 const editId = ref<string | null>(null)
 const editForm = ref<{
+  userId: string | null
   name: string
   ownerLabel: string
   enabled: boolean
@@ -92,6 +126,7 @@ const editForm = ref<{
   quotaLimit: number | null
   expiresAt: number | null
 }>({
+  userId: null,
   name: '',
   ownerLabel: '',
   enabled: true,
@@ -187,7 +222,21 @@ async function loadGroups() {
   }
 }
 
+async function loadUsers() {
+  try {
+    const { data } = await api.get('/admin/users')
+    users.value = data.users
+    form.value.userId = form.value.userId ?? defaultUserId()
+  } catch (e) {
+    message.error(errMsg(e, '加载用户失败'))
+  }
+}
+
 async function create() {
+  if (!form.value.userId) {
+    message.warning('请选择归属用户')
+    return
+  }
   if (!form.value.name.trim()) {
     message.warning('请填写名称')
     return
@@ -196,6 +245,7 @@ async function create() {
   try {
     const modelMappings = parseMappingEntries(form.value.modelMappings)
     const { data } = await api.post('/admin/keys', {
+      userId: form.value.userId,
       name: form.value.name.trim(),
       ownerLabel: form.value.ownerLabel.trim() || undefined,
       allowedProviders: form.value.allowedProviders.length
@@ -210,6 +260,7 @@ async function create() {
     showCreate.value = false
     newKey.value = data.key
     form.value = {
+      userId: defaultUserId(),
       name: '',
       ownerLabel: '',
       allowedProviders: [],
@@ -237,6 +288,7 @@ async function toggle(row: ApiKey) {
 function openEdit(row: ApiKey) {
   editId.value = row.id
   editForm.value = {
+    userId: row.userId ?? defaultUserId(),
     name: row.name,
     ownerLabel: row.ownerLabel ?? '',
     enabled: row.enabled,
@@ -254,6 +306,10 @@ function openEdit(row: ApiKey) {
 
 async function saveEdit() {
   if (!editId.value) return
+  if (!editForm.value.userId) {
+    message.warning('请选择归属用户')
+    return
+  }
   if (!editForm.value.name.trim()) {
     message.warning('名称不能为空')
     return
@@ -262,6 +318,7 @@ async function saveEdit() {
   try {
     const modelMappings = parseMappingEntries(editForm.value.modelMappings)
     await api.patch(`/admin/keys/${editId.value}`, {
+      userId: editForm.value.userId,
       name: editForm.value.name.trim(),
       ownerLabel: editForm.value.ownerLabel.trim() || null,
       enabled: editForm.value.enabled,
@@ -553,9 +610,13 @@ function renderKeyInfo(row: ApiKey) {
 }
 
 function renderOwner(row: ApiKey) {
-  return row.ownerLabel
-    ? h('span', { class: 'plain-cell' }, row.ownerLabel)
-    : h('span', { class: 'muted-cell' }, '—')
+  if (!row.userId) {
+    return h(UiTag, { size: 'small', type: 'error', bordered: false }, { default: () => '未绑定' })
+  }
+  return h('div', { class: 'owner-cell' }, [
+    h('span', { class: 'plain-cell' }, row.userName || row.ownerLabel || row.userEmail || row.userId),
+    row.userEmail ? h('span', { class: 'muted-cell' }, row.userEmail) : null,
+  ])
 }
 
 function renderKeyPrefix(row: ApiKey) {
@@ -676,7 +737,7 @@ function renderTime(value: number | null) {
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '名称', key: 'name', minWidth: 140, render: renderKeyInfo },
-  { title: '持有者', key: 'ownerLabel', minWidth: 100, render: renderOwner },
+  { title: '归属用户', key: 'owner', minWidth: 190, render: renderOwner },
   {
     title: '密钥',
     key: 'keyPrefix',
@@ -769,13 +830,14 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
 onMounted(() => {
   void load()
   void loadGroups()
+  void loadUsers()
 })
 </script>
 
 <template>
   <div>
     <div class="page-head">
-      <UiButton type="primary" @click="showCreate = true">新建 Key</UiButton>
+      <UiButton type="primary" @click="openCreate">新建 Key</UiButton>
     </div>
 
     <UiCard class="table-card" :bordered="false">
@@ -795,11 +857,19 @@ onMounted(() => {
       :width="520"
     >
       <UiForm label-placement="top">
+        <UiFormItem label="归属用户">
+          <UiSelect
+            v-model:value="form.userId"
+            filterable
+            :options="userSelectOptions"
+            placeholder="选择扣费用户"
+          />
+        </UiFormItem>
         <UiFormItem label="名称">
           <UiInput v-model:value="form.name" placeholder="例如：我的笔记本" />
         </UiFormItem>
-        <UiFormItem label="持有者（可选）">
-          <UiInput v-model:value="form.ownerLabel" placeholder="例如：张三" />
+        <UiFormItem label="显示名称（可选）">
+          <UiInput v-model:value="form.ownerLabel" placeholder="默认使用归属用户名称" />
         </UiFormItem>
         <UiFormItem label="允许的服务商（留空 = 不限）">
           <UiSelect
@@ -950,11 +1020,19 @@ onMounted(() => {
     <!-- edit limits -->
     <UiModal v-model:show="showEdit" title="编辑 API Key" :width="520">
       <UiForm label-placement="top">
+        <UiFormItem label="归属用户">
+          <UiSelect
+            v-model:value="editForm.userId"
+            filterable
+            :options="userSelectOptions"
+            placeholder="选择扣费用户"
+          />
+        </UiFormItem>
         <UiFormItem label="名称">
           <UiInput v-model:value="editForm.name" />
         </UiFormItem>
-        <UiFormItem label="持有者">
-          <UiInput v-model:value="editForm.ownerLabel" placeholder="可留空" />
+        <UiFormItem label="显示名称（可选）">
+          <UiInput v-model:value="editForm.ownerLabel" placeholder="默认使用归属用户名称" />
         </UiFormItem>
         <UiFormItem label="允许的服务商（留空 = 不限）">
           <UiSelect
@@ -1076,6 +1154,13 @@ pre code {
 
 :deep(.muted-cell) {
   color: rgba(15, 23, 42, 0.52);
+}
+
+:deep(.owner-cell) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 :deep(.key-prefix-cell) {

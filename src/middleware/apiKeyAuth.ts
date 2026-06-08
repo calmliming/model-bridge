@@ -77,35 +77,33 @@ export async function requireApiKey(
   let billTo: 'subscription' | 'balance' = 'balance'
   let subscriptionId: string | null = null
 
-  if (record.userId) {
-    if (!record.userStatus) {
-      reply.code(401).send({ error: 'API key owner is unavailable' })
-      return
+  if (!record.userId || !record.userStatus) {
+    reply.code(401).send({ error: 'API key owner is unavailable' })
+    return
+  }
+  if (record.userStatus !== 'active') {
+    reply.code(401).send({ error: 'API key owner is disabled' })
+    return
+  }
+  // Billing decision: prefer an active subscription for the key's group when
+  // it still has window headroom; otherwise fall through to wallet balance.
+  // Block (402) only when neither budget can cover further usage.
+  const balanceMicros = record.userBalanceMicros ?? 0
+  let subscriptionUsable = false
+  if (record.accountGroupId) {
+    const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
+    if (sub) {
+      subscriptionId = sub.subscriptionId
+      subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
     }
-    if (record.userStatus !== 'active') {
-      reply.code(401).send({ error: 'API key owner is disabled' })
-      return
-    }
-    // Billing decision: prefer an active subscription for the key's group when
-    // it still has window headroom; otherwise fall through to wallet balance.
-    // Block (402) only when neither budget can cover further usage.
-    const balanceMicros = record.userBalanceMicros ?? 0
-    let subscriptionUsable = false
-    if (record.accountGroupId) {
-      const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
-      if (sub) {
-        subscriptionId = sub.subscriptionId
-        subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
-      }
-    }
-    if (subscriptionUsable) {
-      billTo = 'subscription'
-    } else if (balanceMicros > 0) {
-      billTo = 'balance'
-    } else {
-      reply.code(402).send({ error: 'insufficient balance' })
-      return
-    }
+  }
+  if (subscriptionUsable) {
+    billTo = 'subscription'
+  } else if (balanceMicros > 0) {
+    billTo = 'balance'
+  } else {
+    reply.code(402).send({ error: 'insufficient balance' })
+    return
   }
   await db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, record.id))
   request.apiKey = {
@@ -120,9 +118,9 @@ export async function requireApiKey(
     concurrencyLimit: record.concurrencyLimit ?? null,
     quotaLimit: record.quotaLimit ?? null,
     quotaUsed: record.quotaUsed,
-    userId: record.userId ?? null,
-    userBalanceMicros: record.userId ? (record.userBalanceMicros ?? 0) : null,
-    userBalance: record.userId ? microsToUsd(record.userBalanceMicros ?? 0) : null,
+    userId: record.userId,
+    userBalanceMicros: record.userBalanceMicros ?? 0,
+    userBalance: microsToUsd(record.userBalanceMicros ?? 0),
     billTo,
     subscriptionId,
   }

@@ -148,6 +148,7 @@ export async function setApiKeyEnabled(id: string, enabled: boolean): Promise<vo
 }
 
 export interface UpdateApiKeyPatch {
+  userId?: string | null
   enabled?: boolean
   name?: string
   ownerLabel?: string | null

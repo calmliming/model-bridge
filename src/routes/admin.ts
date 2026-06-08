@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
 import { config } from '../config'
-import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
+import { changeAdminPassword, getAdminUserId, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
@@ -42,6 +42,7 @@ import {
 } from '../subscriptions/manager'
 import {
   createUserInvite,
+  getUserById,
   listUserUsage,
   listUsers,
   updateUser,
@@ -101,6 +102,7 @@ const walletAdjustSchema = z.object({
 })
 
 const createKeySchema = z.object({
+  userId: z.string().trim().min(1).nullable().optional(),
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
   allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])).optional(),
@@ -115,6 +117,7 @@ const createKeySchema = z.object({
 
 const updateKeySchema = z
   .object({
+    userId: z.string().trim().min(1).nullable().optional(),
     enabled: z.boolean().optional(),
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
@@ -572,8 +575,18 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
     }
+    const ownerId = body.data.userId ?? (await getAdminUserId())
+    if (!ownerId) {
+      return reply.code(500).send({ error: 'admin user is not initialized' })
+    }
+    const owner = await getUserById(ownerId)
+    if (!owner || owner.status !== 'active') {
+      return reply.code(400).send({ error: 'key owner user not found or disabled' })
+    }
     return reply.code(201).send(await createApiKey({
       ...body.data,
+      userId: ownerId,
+      ownerLabel: body.data.ownerLabel?.trim() || owner.name,
       modelMappings: normalizeModelMappings(body.data.modelMappings),
     }))
   })
@@ -602,8 +615,25 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
+      let owner: Awaited<ReturnType<typeof getUserById>> = null
+      const patch = { ...body.data }
+      if ('userId' in body.data) {
+        const ownerId = body.data.userId ?? (await getAdminUserId())
+        if (!ownerId) {
+          return reply.code(500).send({ error: 'admin user is not initialized' })
+        }
+        owner = await getUserById(ownerId)
+        if (!owner || owner.status !== 'active') {
+          return reply.code(400).send({ error: 'key owner user not found or disabled' })
+        }
+        patch.userId = ownerId
+      }
       await updateApiKey(request.params.id, {
-        ...body.data,
+        ...patch,
+        ownerLabel:
+          body.data.ownerLabel !== undefined
+            ? body.data.ownerLabel
+            : owner?.name,
         modelMappings:
           'modelMappings' in body.data
             ? normalizeModelMappings(body.data.modelMappings)

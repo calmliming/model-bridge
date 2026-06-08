@@ -32,6 +32,7 @@ export interface UserListRow extends UserView {
   keyCount: number
   requestCount: number
   totalCost: number
+  isAdmin: boolean
 }
 
 export interface InviteResult {
@@ -97,6 +98,7 @@ function asUserListRow(row: Record<string, unknown>): UserListRow {
     keyCount: Number(row.key_count ?? 0),
     requestCount: Number(row.request_count ?? 0),
     totalCost: Number(row.total_cost ?? 0),
+    isAdmin: row.is_admin === true,
   }
 }
 
@@ -131,6 +133,7 @@ export async function listUsers(): Promise<UserListRow[]> {
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT u.id, u.email, u.name, u.status, u.balance_micros, u.accepted_at,
             u.last_login_at, u.created_at,
+            (u.id = (SELECT value FROM settings WHERE key = 'admin.user_id')) AS is_admin,
             (SELECT COUNT(*) FROM api_keys k WHERE k.user_id = u.id) AS key_count,
             (SELECT COUNT(*) FROM usage_logs l WHERE l.user_id = u.id) AS request_count,
             (SELECT COALESCE(SUM(l.cost), 0) FROM usage_logs l WHERE l.user_id = u.id) AS total_cost

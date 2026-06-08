@@ -18,6 +18,7 @@ interface UserRow {
   keyCount: number
   requestCount: number
   totalCost: number
+  isAdmin: boolean
 }
 
 interface WalletTransaction {
@@ -289,7 +290,20 @@ function renderStatus(row: UserRow) {
 }
 
 const columns = computed<TableColumn<UserRow>[]>(() => [
-  { title: '用户', key: 'user', minWidth: 210, render: (row) => h('div', [h('strong', row.name), h('span', { class: 'subtext' }, row.email)]) },
+  {
+    title: '用户',
+    key: 'user',
+    minWidth: 210,
+    render: (row) => h('div', [
+      h('div', { class: 'user-title' }, [
+        h('strong', row.name),
+        row.isAdmin
+          ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => 'Admin' })
+          : null,
+      ]),
+      h('span', { class: 'subtext' }, row.email),
+    ]),
+  },
   { title: '余额', key: 'balance', minWidth: 96, render: (row) => h('span', { class: row.balance <= 0 ? 'danger' : 'amount' }, formatUsd(row.balance)) },
   { title: 'Keys', key: 'keyCount', width: 72 },
   { title: '请求', key: 'requestCount', width: 80, render: (row) => row.requestCount.toLocaleString('en-US') },
@@ -492,6 +506,12 @@ onMounted(load)
   display: block;
   color: #0f172a;
   font-size: 14px;
+}
+
+.user-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 :deep(.subtext) {
