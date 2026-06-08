@@ -163,7 +163,9 @@ function resetAndClose() {
       "refreshToken": "optional",
       "expiresAt": 1234567890000,
       "weight": 10,
-      "groupIds": ["group-id-1"]
+      "concurrencyLimit": 2,
+      "groupIds": ["group-id-1"],
+      "notes": "团队号，晚高峰限并发"
     }
   ]
 }</pre>
@@ -187,7 +189,7 @@ function resetAndClose() {
             • 自动识别 <code>type: "codex"</code> 字段<br>
             • 使用 <code>email</code> 作为账号名称<br>
             • 自动从 JWT 解析过期时间<br>
-            • 可选添加 <code>name</code>、<code>weight</code>、<code>groupIds</code> 字段
+            • 可选添加 <code>name</code>、<code>weight</code>、<code>concurrencyLimit</code>、<code>groupIds</code>、<code>notes</code> 字段
           </p>
 
           <p class="import-note">
@@ -198,7 +200,9 @@ function resetAndClose() {
             • refreshToken: 刷新令牌（可选）<br>
             • expiresAt: 过期时间戳，毫秒（可选）<br>
             • weight: 优先级 1-100（可选，默认 1）<br>
-            • groupIds: 分组 ID 数组（可选）
+            • concurrencyLimit: 账号级并发上限 1-1000（可选，留空不限）<br>
+            • groupIds: 分组 ID 数组（可选）<br>
+            • notes: 运维备注（可选）
           </p>
         </div>
 

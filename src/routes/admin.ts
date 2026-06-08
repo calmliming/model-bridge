@@ -9,7 +9,17 @@ import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '.
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
-import { createAccount, deleteAccount, listAccounts, setAccountAutopause, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
+import {
+  createAccount,
+  deleteAccount,
+  listAccounts,
+  setAccountAutopause,
+  setAccountConcurrencyLimit,
+  setAccountGroups,
+  setAccountNotes,
+  setAccountStatus,
+  setAccountWeight,
+} from '../accounts/manager'
 import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
@@ -142,7 +152,9 @@ const accountUpdateSchema = z
   .object({
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
+    concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
     groupIds: z.array(z.string().trim().min(1)).optional(),
+    notes: z.string().trim().max(1000).nullable().optional(),
     // 0 = disable early auto-pause; 1-100 = own threshold; null = inherit global
     autopausePercent: z.number().int().min(0).max(100).nullable().optional(),
   })
@@ -235,6 +247,8 @@ const importTokenSchema = z.object({
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
   expiresAt: z.number().int().positive().optional(),
+  concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
 })
 
 // Standard format: model-bridge native format
@@ -245,7 +259,9 @@ const batchImportAccountSchema = z.object({
   refreshToken: z.string().optional(),
   expiresAt: z.number().int().positive().optional(),
   weight: z.number().int().min(1).max(100).optional(),
+  concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
   groupIds: z.array(z.string()).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
 })
 
 // Codex format: compatibility with Codex session exports
@@ -260,7 +276,9 @@ const codexAccountSchema = z.object({
   // Optional fields for naming and grouping
   name: z.string().optional(),
   weight: z.number().int().min(1).max(100).optional(),
+  concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
   groupIds: z.array(z.string()).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
 })
 
 const batchImportSchema = z.object({
@@ -935,7 +953,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      const { provider, name, accessToken, refreshToken, expiresAt } = body.data
+      const { provider, name, accessToken, refreshToken, expiresAt, concurrencyLimit, notes } = body.data
       const created = await createAccount({
         provider,
         name,
@@ -944,6 +962,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           refreshToken: refreshToken ?? '',
           expiresAt: expiresAt ?? 0,
         },
+        concurrencyLimit: concurrencyLimit ?? null,
+        notes: notes ?? null,
         metadata: null,
       })
       return reply.code(201).send({ id: created.id, name, provider })
@@ -977,7 +997,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         let refreshToken: string
         let expiresAt: number
         let weight: number | undefined
+        let concurrencyLimit: number | null | undefined
         let groupIds: string[]
+        let notes: string | null | undefined
 
         if ('type' in raw && raw.type === 'codex') {
           // Codex format: derive provider from token_source, name from email
@@ -986,7 +1008,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           accessToken = raw.access_token
           refreshToken = raw.refresh_token ?? ''
           weight = raw.weight
+          concurrencyLimit = raw.concurrencyLimit
           groupIds = raw.groupIds ?? []
+          notes = raw.notes
 
           // Parse JWT exp from access_token
           expiresAt = 0
@@ -996,14 +1020,26 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           } catch { /* ignore parse errors */ }
         } else {
           // Standard format — discriminated by absence of `type`
-          const std = raw as { provider: string; name: string; accessToken: string; refreshToken?: string; expiresAt?: number; weight?: number; groupIds?: string[] }
+          const std = raw as {
+            provider: string
+            name: string
+            accessToken: string
+            refreshToken?: string
+            expiresAt?: number
+            weight?: number
+            concurrencyLimit?: number | null
+            groupIds?: string[]
+            notes?: string | null
+          }
           provider = std.provider
           name = std.name
           accessToken = std.accessToken
           refreshToken = std.refreshToken ?? ''
           expiresAt = std.expiresAt ?? 0
           weight = std.weight
+          concurrencyLimit = std.concurrencyLimit
           groupIds = std.groupIds ?? []
+          notes = std.notes
         }
 
         try {
@@ -1013,6 +1049,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
             tokens: { accessToken, refreshToken, expiresAt },
             metadata: null,
             groupIds,
+            concurrencyLimit: concurrencyLimit ?? null,
+            notes: notes ?? null,
           })
 
           if (weight !== undefined) {
@@ -1052,7 +1090,11 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
       if (body.data.status) await setAccountStatus(request.params.id, body.data.status)
       if (body.data.weight !== undefined) await setAccountWeight(request.params.id, body.data.weight)
+      if (body.data.concurrencyLimit !== undefined) {
+        await setAccountConcurrencyLimit(request.params.id, body.data.concurrencyLimit)
+      }
       if (body.data.groupIds !== undefined) await setAccountGroups(request.params.id, body.data.groupIds)
+      if (body.data.notes !== undefined) await setAccountNotes(request.params.id, body.data.notes)
       if (body.data.autopausePercent !== undefined) {
         await setAccountAutopause(request.params.id, body.data.autopausePercent)
       }

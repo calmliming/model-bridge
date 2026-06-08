@@ -56,6 +56,7 @@ export async function pickAccount(
           metadata: accounts.metadata,
           oauthAccessToken: accounts.oauthAccessToken,
           tokenExpiresAt: accounts.tokenExpiresAt,
+          concurrencyLimit: accounts.concurrencyLimit,
           effectiveWeight: sql<number>`COALESCE(${accountGroupMembers.weight}, ${accounts.weight})`,
         })
         .from(accounts)
@@ -74,6 +75,7 @@ export async function pickAccount(
           metadata: accounts.metadata,
           oauthAccessToken: accounts.oauthAccessToken,
           tokenExpiresAt: accounts.tokenExpiresAt,
+          concurrencyLimit: accounts.concurrencyLimit,
           effectiveWeight: sql<number>`${accounts.weight}`,
         })
         .from(accounts)

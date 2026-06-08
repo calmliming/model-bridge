@@ -1,7 +1,7 @@
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
-import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
+import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
 import { getQuotaAutopausePercent } from '../db/settings'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
@@ -745,12 +745,19 @@ async function runRelayLoop(
     }
     tried.push(account.id)
 
+    const accountLimit = account.concurrencyLimit
+    const accountSlotKey = accountConcurrencyKey(account.id)
+    if (accountLimit != null && !(await acquireSlot(accountSlotKey, accountLimit))) {
+      continue
+    }
+
     let token: string
     try {
       token = await ensureFreshToken(account)
     } catch (err) {
       request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
       await penalizeAccount(account.id, 'error')
+      if (accountLimit != null) await releaseSlot(accountSlotKey)
       continue
     }
 
@@ -765,66 +772,72 @@ async function runRelayLoop(
     } catch (err) {
       request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
       await penalizeAccount(account.id, 'error')
+      if (accountLimit != null) await releaseSlot(accountSlotKey)
       continue
     }
-    const quota = extractAccountQuota(provider.id, upstream.headers)
-    if (quota) await updateAccountQuota(account.id, quota)
 
-    const failure = await classifyUpstreamFailure(provider.id, upstream)
-    const lastAttempt = attempt === MAX_ATTEMPTS - 1
+    try {
+      const quota = extractAccountQuota(provider.id, upstream.headers)
+      if (quota) await updateAccountQuota(account.id, quota)
 
-    if (failure.retryable && !lastAttempt) {
+      const failure = await classifyUpstreamFailure(provider.id, upstream)
+      const lastAttempt = attempt === MAX_ATTEMPTS - 1
+
+      if (failure.retryable && !lastAttempt) {
+        if (failure.disable) {
+          await disableAccount(account.id)
+          if (sessionKey) await clearStickyAccount(sessionKey)
+        } else if (failure.penalty) {
+          await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+        }
+        await upstream.body?.cancel().catch(() => {})
+        continue
+      }
+
       if (failure.disable) {
         await disableAccount(account.id)
         if (sessionKey) await clearStickyAccount(sessionKey)
       } else if (failure.penalty) {
         await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+      } else if (upstream.ok) {
+        // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
+        // the configured threshold, until the breaching window resets. Only costs
+        // a settings lookup when the upstream actually reported a quota snapshot.
+        let quotaCooldown: number | null = null
+        if (quota) {
+          const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+          quotaCooldown = quotaPauseUntil(quota, threshold)
+        }
+        if (quotaCooldown) {
+          await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
+        } else {
+          await markAccountUsed(account.id)
+          // Pin this conversation to the account so its prompt cache stays warm.
+          if (sessionKey) await bindStickyAccount(sessionKey, account.id)
+        }
       }
-      await upstream.body?.cancel().catch(() => {})
-      continue
-    }
 
-    if (failure.disable) {
-      await disableAccount(account.id)
-      if (sessionKey) await clearStickyAccount(sessionKey)
-    } else if (failure.penalty) {
-      await penalizeAccount(account.id, failure.penalty, failure.resetAt)
-    } else if (upstream.ok) {
-      // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
-      // the configured threshold, until the breaching window resets. Only costs
-      // a settings lookup when the upstream actually reported a quota snapshot.
-      let quotaCooldown: number | null = null
-      if (quota) {
-        const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
-        quotaCooldown = quotaPauseUntil(quota, threshold)
+      const meta: RelayMeta = {
+        apiKeyId: apiKey.id,
+        userId: apiKey.userId,
+        accountId: account.id,
+        provider: provider.id,
+        model: parsed.model,
+        requestInput: summarizeRequestInput(body),
+        startedAt,
+        multiplier: apiKey.groupMultiplier ?? 1,
+        billTo: apiKey.billTo,
+        subscriptionId: apiKey.subscriptionId,
       }
-      if (quotaCooldown) {
-        await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
+      if (wantStream) {
+        await sendStreaming(reply, upstream, meta, provider)
       } else {
-        await markAccountUsed(account.id)
-        // Pin this conversation to the account so its prompt cache stays warm.
-        if (sessionKey) await bindStickyAccount(sessionKey, account.id)
+        await sendBuffered(reply, upstream, meta, provider)
       }
+      return
+    } finally {
+      if (accountLimit != null) await releaseSlot(accountSlotKey)
     }
-
-    const meta: RelayMeta = {
-      apiKeyId: apiKey.id,
-      userId: apiKey.userId,
-      accountId: account.id,
-      provider: provider.id,
-      model: parsed.model,
-      requestInput: summarizeRequestInput(body),
-      startedAt,
-      multiplier: apiKey.groupMultiplier ?? 1,
-      billTo: apiKey.billTo,
-      subscriptionId: apiKey.subscriptionId,
-    }
-    if (wantStream) {
-      await sendStreaming(reply, upstream, meta, provider)
-    } else {
-      await sendBuffered(reply, upstream, meta, provider)
-    }
-    return
   }
 
   await reply.code(503).send({ error: `all ${provider.id} accounts failed` })

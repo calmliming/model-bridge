@@ -5,6 +5,7 @@ import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
+import { currentConcurrency } from '../middleware/limits'
 import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 import { clearExpiredAccountCooldowns } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
@@ -21,12 +22,23 @@ export interface CreateAccountInput {
   metadata?: Record<string, unknown> | null
   /** Optional groups this account joins; empty = default pool. */
   groupIds?: string[] | null
+  /** Max simultaneous in-flight requests for this upstream account; null = unlimited. */
+  concurrencyLimit?: number | null
+  /** Admin-only operational note. Never sent upstream. */
+  notes?: string | null
 }
 
 function metadataObject(metadata: unknown): Record<string, unknown> {
   return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? { ...(metadata as Record<string, unknown>) }
     : {}
+}
+
+export const accountConcurrencyKey = (accountId: string): string => `account:${accountId}`
+
+function normalizeConcurrencyLimit(value: number | null | undefined): number | null {
+  if (value == null || !Number.isFinite(value)) return null
+  return Math.max(1, Math.min(1000, Math.trunc(value)))
 }
 
 function decryptAccountSecret(value: string): string {
@@ -52,6 +64,8 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
+      concurrencyLimit: normalizeConcurrencyLimit(input.concurrencyLimit),
+      notes: input.notes?.trim() || null,
       metadata: input.metadata ?? null,
     })
   if (input.groupIds?.length) {
@@ -72,7 +86,9 @@ export async function listAccounts() {
       tokenExpiresAt: accounts.tokenExpiresAt,
       cooldownUntil: accounts.cooldownUntil,
       weight: accounts.weight,
+      concurrencyLimit: accounts.concurrencyLimit,
       lastUsedAt: accounts.lastUsedAt,
+      notes: accounts.notes,
       metadata: accounts.metadata,
       createdAt: accounts.createdAt,
     })
@@ -97,12 +113,13 @@ export async function listAccounts() {
     groupsByAccount.set(m.accountId, list)
   }
 
-  return rows.map(({ metadata, ...account }) => ({
+  return Promise.all(rows.map(async ({ metadata, ...account }) => ({
     ...account,
+    currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
     autopausePercent: accountAutopausePercent(metadata),
-  }))
+  })))
 }
 
 /** Replaces the set of groups an account belongs to (null/empty = default pool). */
@@ -154,6 +171,20 @@ export async function setAccountAutopause(id: string, percent: number | null): P
     metadata.autopausePercent = Math.max(0, Math.min(100, Math.trunc(percent)))
   }
   await db.update(accounts).set({ metadata }).where(eq(accounts.id, id))
+}
+
+/** Sets a per-account in-flight request cap. Null clears the cap. */
+export async function setAccountConcurrencyLimit(id: string, limit: number | null): Promise<void> {
+  await db.update(accounts)
+    .set({ concurrencyLimit: normalizeConcurrencyLimit(limit) })
+    .where(eq(accounts.id, id))
+}
+
+/** Updates an admin-only operational note for the account. */
+export async function setAccountNotes(id: string, notes: string | null): Promise<void> {
+  await db.update(accounts)
+    .set({ notes: notes?.trim() || null })
+    .where(eq(accounts.id, id))
 }
 
 /** Updates the scheduler priority. Higher weight accounts are tried first. */

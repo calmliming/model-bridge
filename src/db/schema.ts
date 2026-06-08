@@ -17,8 +17,10 @@ export const accounts = pgTable('accounts', {
   cooldownUntil: bigint('cooldown_until', { mode: 'number' }), // epoch ms; skip account until then
   proxyUrl: text('proxy_url'),
   weight: bigint('weight', { mode: 'number' }).notNull().default(1),
+  concurrencyLimit: bigint('concurrency_limit', { mode: 'number' }), // max simultaneous in-flight requests; null = unlimited
   lastUsedAt: bigint('last_used_at', { mode: 'number' }),
   groupId: text('group_id'), // null = 默认池（未分组）；非空时仅绑定该组的 Key 可调度
+  notes: text('notes'),
   metadata: jsonb('metadata'),
   createdAt: epochMs('created_at'),
 })

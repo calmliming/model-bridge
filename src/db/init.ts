@@ -18,8 +18,10 @@ export async function initDb(): Promise<void> {
       cooldown_until BIGINT,
       proxy_url TEXT,
       weight BIGINT NOT NULL DEFAULT 1,
+      concurrency_limit BIGINT,
       last_used_at BIGINT,
       group_id TEXT,
+      notes TEXT,
       metadata JSONB,
       created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
     );
@@ -224,6 +226,8 @@ export async function initDb(): Promise<void> {
   // Forward-compatible column additions for existing databases.
   // PostgreSQL 9.6+ supports IF NOT EXISTS on ADD COLUMN, so this is idempotent.
   await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS weight BIGINT NOT NULL DEFAULT 1;`)
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS notes TEXT;`)
   await pool.query(`ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS account_name TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_secret_encrypted TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_models JSONB;`)

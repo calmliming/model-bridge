@@ -7,14 +7,18 @@
       "refreshToken": "optional-refresh-token",
       "expiresAt": 1735689600000,
       "weight": 10,
-      "groupIds": []
+      "concurrencyLimit": 2,
+      "groupIds": [],
+      "notes": "Claude Max 主账号，晚高峰限并发"
     },
     {
       "provider": "openai",
       "name": "OpenAI Account 1",
       "accessToken": "sk-proj-xxx",
       "weight": 5,
-      "groupIds": ["group-id-example"]
+      "concurrencyLimit": 3,
+      "groupIds": ["group-id-example"],
+      "notes": "Codex 账号池成员"
     },
     {
       "provider": "gemini",
@@ -26,13 +30,15 @@
     {
       "provider": "deepseek",
       "name": "DeepSeek API Key 1",
-      "accessToken": "sk-xxx"
+      "accessToken": "sk-xxx",
+      "notes": "按量 API Key，默认不限并发"
     },
     {
       "provider": "xiaomi",
       "name": "Xiaomi MiMo API Key 1",
       "accessToken": "sk-xxx",
-      "weight": 8
+      "weight": 8,
+      "concurrencyLimit": 5
     }
   ]
 }

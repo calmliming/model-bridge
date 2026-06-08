@@ -36,8 +36,11 @@ interface Account {
   tokenExpiresAt: number | null
   cooldownUntil: number | null
   weight: number
+  concurrencyLimit: number | null
+  currentConcurrency: number
   lastUsedAt: number | null
   groups: AccountGroupRef[]
+  notes: string | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
   // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
@@ -73,6 +76,8 @@ const loading = ref(true)
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
+const savingConcurrencyId = ref<string | null>(null)
+const savingNotesId = ref<string | null>(null)
 const savingAutopauseId = ref<string | null>(null)
 const globalAutopausePercent = ref(100)
 
@@ -382,6 +387,46 @@ function renderPriority(row: Account) {
     'aria-label': `${row.name} 优先级`,
     onUpdateValue: (value: number | null) => {
       void updateWeight(row, value)
+    },
+  })
+}
+
+function renderConcurrency(row: Account) {
+  return h('div', { class: 'concurrency-cell' }, [
+    h(UiInputNumber, {
+      value: row.concurrencyLimit,
+      min: 1,
+      max: 1000,
+      precision: 0,
+      size: 'small',
+      placeholder: '不限',
+      disabled: savingConcurrencyId.value === row.id,
+      class: 'concurrency-input',
+      title: '该上游账号同时在途请求数上限，清空表示不限。',
+      'aria-label': `${row.name} 账号并发上限`,
+      onUpdateValue: (value: number | null) => {
+        void updateConcurrency(row, value)
+      },
+    }),
+    h('span', { class: 'muted-cell concurrency-now' }, `当前 ${row.currentConcurrency ?? 0}`),
+  ])
+}
+
+function renderNotes(row: Account) {
+  return h('input', {
+    class: 'input notes-input',
+    value: row.notes ?? '',
+    placeholder: '备注',
+    disabled: savingNotesId.value === row.id,
+    title: row.notes ?? '',
+    'aria-label': `${row.name} 备注`,
+    onChange: (event: Event) => {
+      void updateNotes(row, (event.target as HTMLInputElement).value)
+    },
+    onKeyup: (event: KeyboardEvent) => {
+      if (event.key === 'Enter') {
+        ;(event.target as HTMLInputElement).blur()
+      }
     },
   })
 }
@@ -748,6 +793,41 @@ async function updateWeight(row: Account, value: number | null) {
   }
 }
 
+async function updateConcurrency(row: Account, value: number | null) {
+  const next = value == null ? null : Math.max(1, Math.min(1000, Math.trunc(value)))
+  if (next === row.concurrencyLimit) return
+
+  const previous = row.concurrencyLimit
+  row.concurrencyLimit = next
+  savingConcurrencyId.value = row.id
+  try {
+    await api.patch(`/admin/accounts/${row.id}`, { concurrencyLimit: next })
+  } catch (e) {
+    row.concurrencyLimit = previous
+    message.error(errMsg(e, '更新账号并发失败'))
+  } finally {
+    if (savingConcurrencyId.value === row.id) savingConcurrencyId.value = null
+  }
+}
+
+async function updateNotes(row: Account, value: string) {
+  const next = value.trim()
+  const normalized = next || null
+  if (normalized === (row.notes ?? null)) return
+
+  const previous = row.notes
+  row.notes = normalized
+  savingNotesId.value = row.id
+  try {
+    await api.patch(`/admin/accounts/${row.id}`, { notes: normalized })
+  } catch (e) {
+    row.notes = previous
+    message.error(errMsg(e, '更新备注失败'))
+  } finally {
+    if (savingNotesId.value === row.id) savingNotesId.value = null
+  }
+}
+
 async function updateAutopause(row: Account, value: number | null) {
   // null = clear override (inherit global); 0-100 = explicit per-account threshold.
   const next = value == null ? null : Math.max(0, Math.min(100, Math.trunc(value)))
@@ -831,7 +911,9 @@ const columns = computed<TableColumn<Account>[]>(() => [
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
   { title: '停调阈值', key: 'autopause', width: 116, render: renderAutopause },
+  { title: '并发', key: 'concurrencyLimit', width: 132, render: renderConcurrency },
   { title: '优先级', key: 'weight', width: 110, render: renderPriority },
+  { title: '备注', key: 'notes', minWidth: 170, render: renderNotes },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 150, render: (row) => formatTime(row.lastUsedAt) },
   {
     title: '调度',
@@ -959,7 +1041,7 @@ onBeforeUnmount(() => {
           :data="group.accounts"
           :loading="loading"
           :bordered="false"
-          :scroll-x="1486"
+          :scroll-x="1788"
         />
       </UiCard>
     </div>
@@ -970,7 +1052,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1626"
+        :scroll-x="1928"
       />
     </UiCard>
 
@@ -1480,8 +1562,29 @@ onBeforeUnmount(() => {
   width: 82px;
 }
 
+:deep(.concurrency-cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+:deep(.concurrency-input) {
+  width: 74px;
+}
+
+:deep(.concurrency-now) {
+  white-space: nowrap;
+}
+
 :deep(.autopause-input) {
   width: 88px;
+}
+
+:deep(.notes-input) {
+  width: 150px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 :deep(.group-select) {
