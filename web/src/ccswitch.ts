@@ -50,7 +50,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code · DeepSeek',
     vendor: 'DeepSeek',
-    endpoint: (origin) => `${origin}/api/deepseek`,
+    endpoint: (origin) => origin,
     models: {
       model: 'deepseek-v4-pro',
       sonnetModel: 'deepseek-v4-pro',
@@ -64,7 +64,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI',
     vendor: 'OpenAI',
-    endpoint: (origin) => `${origin}/v1`,
+    endpoint: (origin) => origin,
     provider: 'openai',
   },
   {
@@ -72,7 +72,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · DeepSeek',
     vendor: 'DeepSeek',
-    endpoint: (origin) => `${origin}/api/deepseek/v1`,
+    endpoint: (origin) => origin,
     models: { model: 'deepseek-v4-pro' },
     provider: 'deepseek',
   },

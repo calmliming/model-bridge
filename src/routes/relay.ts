@@ -494,17 +494,46 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.get('/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply),
   )
+  app.get('/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply),
+  )
   app.get('/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
   app.get('/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
 
-  // Clean provider-native aliases for custom domains:
-  // - OpenAI/Codex: base_url = https://api.example.com/v1
-  // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com
-  // - Gemini:       base URL = https://api.example.com
-  app.post('/v1/messages', { preHandler: requireApiKey }, claudeHandler)
-  app.post('/v1/responses', { preHandler: requireApiKey }, openaiHandler)
-  app.post('/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
+  // Clean provider-native aliases so one bare base URL serves every provider:
+  // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com  (+ /v1/messages)
+  // - OpenAI/Codex: base_url           = https://api.example.com  (+ /responses)
+  // - Gemini:       base URL           = https://api.example.com  (+ /v1beta/...)
+  // DeepSeek shares these paths and is selected by model name (deepseek-*),
+  // so it needs no separate prefix — see dispatchByModel.
+  const messagesHandler = dispatchByModel(PROVIDERS.claude!, PROVIDERS.deepseek!)
+  const responsesHandler = dispatchByModel(PROVIDERS.openai!, PROVIDERS['deepseek-responses']!)
+  const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, PROVIDERS['deepseek-chat']!)
+  app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
+  app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
+  app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
+  // Codex appends `/responses` to its base_url; OpenAI-compatible clients hit
+  // `/chat/completions`. Register the un-prefixed forms too so the base URL can
+  // be the bare domain (no trailing /v1).
+  app.post('/responses', { preHandler: requireApiKey }, responsesHandler)
+  app.post('/chat/completions', { preHandler: requireApiKey }, chatHandler)
   app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+}
+
+/**
+ * Clean-endpoint dispatch: route by the (mapping-applied) model name so a
+ * single bare base URL serves every provider. `deepseek-*` models go to the
+ * DeepSeek backend; everything else uses the path's default provider. This is a
+ * cheap in-memory check (no extra upstream round-trip), so it adds no latency.
+ */
+function dispatchByModel(defaultHandler: ProviderHandler, deepseekHandler: ProviderHandler) {
+  return (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const raw = typeof body.model === 'string' ? body.model : ''
+    const mapped = mapRequestedModel(raw, request.apiKey!.modelMappings)
+    const isDeepseek = /^deepseek/i.test(raw) || /^deepseek/i.test(mapped)
+    return executeRelay(request, reply, isDeepseek ? deepseekHandler : defaultHandler)
+  }
 }
 
 function sendOpenAIStyleModelList(
