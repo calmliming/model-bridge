@@ -42,7 +42,7 @@ export interface ChatCompletionsRequest {
 }
 
 /**
- * Codex defaults to model names like `gpt-5-codex` which MiMo does not
+ * Codex defaults to model names like `gpt-5.5` which MiMo does not
  * recognise. Rewrite anything that doesn't already look like a MiMo model
  * to `mimo-v2.5-pro` (the coding/agentic flagship). Anything starting with
  * `mimo-` is passed through, so users can set `model="mimo-v2.5"` for the

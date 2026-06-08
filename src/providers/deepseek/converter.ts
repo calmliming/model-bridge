@@ -42,7 +42,7 @@ export interface ChatCompletionsRequest {
 }
 
 /**
- * Codex defaults to model names like `gpt-5-codex` which DeepSeek does not
+ * Codex defaults to model names like `gpt-5.5` which DeepSeek does not
  * recognise. Rewrite anything that doesn't already look like a DeepSeek model
  * to `deepseek-v4-pro` (the highest-quality V4 model). Anything starting
  * with `deepseek-` is passed through, so users can set

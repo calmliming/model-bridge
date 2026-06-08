@@ -8,7 +8,7 @@ describe('xiaomi mapModel', () => {
   })
 
   it('rewrites unknown / Codex model names to the flagship', () => {
-    expect(mapModel('gpt-5-codex')).toBe('mimo-v2.5-pro')
+    expect(mapModel('gpt-5.5')).toBe('mimo-v2.5-pro')
     expect(mapModel('')).toBe('mimo-v2.5-pro')
     expect(mapModel(undefined)).toBe('mimo-v2.5-pro')
   })

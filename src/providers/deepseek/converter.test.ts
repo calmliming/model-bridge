@@ -4,7 +4,7 @@ import { mapModel, responsesToChatCompletions } from './converter'
 
 describe('mapModel', () => {
   it('rewrites non-deepseek model names to deepseek-v4-pro', () => {
-    expect(mapModel('gpt-5-codex')).toBe('deepseek-v4-pro')
+    expect(mapModel('gpt-5.5')).toBe('deepseek-v4-pro')
     expect(mapModel('gpt-4o')).toBe('deepseek-v4-pro')
     expect(mapModel('o3-mini')).toBe('deepseek-v4-pro')
   })
@@ -24,7 +24,7 @@ describe('mapModel', () => {
 
 describe('responsesToChatCompletions', () => {
   it('converts string input to a single user message', () => {
-    const out = responsesToChatCompletions({ model: 'gpt-5-codex', input: 'hi', stream: true })
+    const out = responsesToChatCompletions({ model: 'gpt-5.5', input: 'hi', stream: true })
     expect(out.model).toBe('deepseek-v4-pro')
     expect(out.stream).toBe(true)
     expect(out.messages).toEqual([{ role: 'user', content: 'hi' }])
@@ -32,7 +32,7 @@ describe('responsesToChatCompletions', () => {
 
   it('injects instructions as a leading system message', () => {
     const out = responsesToChatCompletions({
-      model: 'gpt-5-codex',
+      model: 'gpt-5.5',
       instructions: 'be brief',
       input: 'hi',
     })
@@ -113,7 +113,7 @@ describe('responsesToChatCompletions', () => {
 
   it('drops Responses-only top-level fields', () => {
     const out = responsesToChatCompletions({
-      model: 'gpt-5-codex',
+      model: 'gpt-5.5',
       input: 'hi',
       store: false,
       parallel_tool_calls: true,
