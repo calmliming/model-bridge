@@ -340,8 +340,6 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   <div class="stats-page">
     <div class="stats-head">
       <div>
-        <h2>用量统计</h2>
-        <p>按 token、模型、服务商和 API Key 查看中转消耗。</p>
       </div>
       <UiRadioGroup v-model:value="range" size="small">
         <UiRadioButton :value="1">{{ rangeLabel(1) }}</UiRadioButton>
