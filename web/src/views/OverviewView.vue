@@ -461,12 +461,6 @@ function formatLogCost(cost: number): string {
   return `$${cost.toFixed(6)}`
 }
 
-function costRateLabel(row: DashboardRecentLog): string {
-  const tokens = logTokens(row)
-  if (!tokens || row.cost <= 0) return '—'
-  return `${formatLogCost((row.cost / tokens) * 1_000_000)} / 1M`
-}
-
 function formatTokenPrice(price: number | null): string {
   if (price == null) return '—'
   return `$${price.toFixed(price < 1 ? 4 : 2)} / 1M Token`
@@ -722,7 +716,6 @@ function openRequestInput(row: DashboardRecentLog) {
                 </div>
               </UiTooltip>
             </div>
-            <span>{{ costRateLabel(row) }}</span>
           </div>
 
           <div class="log-duration-cell">
