@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, updateApiKey } from '../keys/manager'
 import { normalizeModelMappings } from '../keys/modelMapping'
+import { groupExists, listGroups } from '../accounts/groups'
 import { requireUser } from '../middleware/userAuth'
 import {
   acceptInvite,
@@ -40,6 +41,7 @@ const createKeySchema = z.object({
   allowedProviders: z.array(providerSchema).optional(),
   allowedModels: z.array(z.string().trim().min(1)).optional(),
   modelMappings: z.record(z.string()).optional(),
+  accountGroupId: z.string().min(1).nullable().optional(),
   rateLimit: z.number().int().positive().optional(),
   concurrencyLimit: z.number().int().positive().optional(),
   quotaLimit: z.number().positive().optional(),
@@ -53,6 +55,7 @@ const updateKeySchema = z
     allowedProviders: z.array(providerSchema).nullable().optional(),
     allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
     modelMappings: z.record(z.string()).nullable().optional(),
+    accountGroupId: z.string().min(1).nullable().optional(),
     rateLimit: z.number().int().positive().nullable().optional(),
     concurrencyLimit: z.number().int().positive().nullable().optional(),
     quotaLimit: z.number().positive().nullable().optional(),
@@ -243,6 +246,14 @@ export function registerUserRoutes(app: FastifyInstance): void {
     return userUsageSummary(request.currentUser!.id)
   })
 
+  // Read-only group list so users can bind a key to a group (but not manage groups).
+  app.get('/api/users/account-groups', { preHandler: requireUser }, async () => {
+    const groups = await listGroups()
+    return {
+      groups: groups.map((g) => ({ id: g.id, name: g.name, rateMultiplier: g.rateMultiplier })),
+    }
+  })
+
   app.get('/api/users/keys', { preHandler: requireUser }, async (request) => {
     return { keys: await listApiKeysForUser(request.currentUser!.id) }
   })
@@ -251,6 +262,9 @@ export function registerUserRoutes(app: FastifyInstance): void {
     const body = createKeySchema.safeParse(request.body)
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
+    }
+    if (body.data.accountGroupId && !(await groupExists(body.data.accountGroupId))) {
+      return reply.code(400).send({ error: 'account group not found' })
     }
     const user = request.currentUser!
     return reply.code(201).send(await createApiKey({
@@ -285,6 +299,9 @@ export function registerUserRoutes(app: FastifyInstance): void {
       const body = updateKeySchema.safeParse(request.body)
       if (!params.success || !body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
+      }
+      if (body.data.accountGroupId && !(await groupExists(body.data.accountGroupId))) {
+        return reply.code(400).send({ error: 'account group not found' })
       }
       await updateApiKey(params.data.id, {
         ...body.data,

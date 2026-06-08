@@ -50,6 +50,16 @@ export async function listGroups() {
     .orderBy(desc(accountGroups.createdAt))
 }
 
+/** True when an account group with the given id exists. */
+export async function groupExists(id: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: accountGroups.id })
+    .from(accountGroups)
+    .where(eq(accountGroups.id, id))
+    .limit(1)
+  return rows.length > 0
+}
+
 /** Updates a group's name/description/multiplier. Only provided fields change. */
 export async function updateGroup(id: string, patch: UpdateGroupPatch): Promise<void> {
   const set: Record<string, unknown> = {}

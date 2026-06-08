@@ -23,6 +23,7 @@ interface ApiKey {
   allowedProviders: string[] | null
   allowedModels: string[] | null
   modelMappings: Record<string, string> | null
+  accountGroupId: string | null
   rateLimit: number | null
   concurrencyLimit: number | null
   quotaLimit: number | null
@@ -32,10 +33,29 @@ interface ApiKey {
   createdAt: number
 }
 
+interface AccountGroup {
+  id: string
+  name: string
+  rateMultiplier: number
+}
+
 const message = useMessage()
 const dialog = useDialog()
 const keys = ref<ApiKey[]>([])
+const groups = ref<AccountGroup[]>([])
 const loading = ref(true)
+
+const groupSelectOptions = computed(() =>
+  groups.value.map((g) => ({
+    label: g.rateMultiplier === 1 ? g.name : `${g.name} ×${g.rateMultiplier}`,
+    value: g.id,
+  })),
+)
+
+function groupName(id: string | null): string {
+  if (!id) return '默认池'
+  return groups.value.find((g) => g.id === id)?.name ?? '(已删除)'
+}
 const showCreate = ref(false)
 const creating = ref(false)
 const newKey = ref<string | null>(null)
@@ -58,6 +78,7 @@ const editForm = ref({
   allowedProviders: [] as string[],
   allowedModels: [] as string[],
   modelMappings: [] as string[],
+  accountGroupId: null as string | null,
   rateLimit: null as number | null,
   concurrencyLimit: null as number | null,
   quotaLimit: null as number | null,
@@ -69,6 +90,7 @@ const form = ref({
   allowedProviders: [] as string[],
   allowedModels: [] as string[],
   modelMappings: [] as string[],
+  accountGroupId: null as string | null,
 })
 
 const providerOptions = [
@@ -120,6 +142,15 @@ async function load() {
   }
 }
 
+async function loadGroups() {
+  try {
+    const { data } = await api.get('/users/account-groups')
+    groups.value = data.groups
+  } catch {
+    // 分组仅用于选择器，加载失败时静默忽略
+  }
+}
+
 async function create() {
   if (!form.value.name.trim()) {
     message.warning('请填写名称')
@@ -132,11 +163,12 @@ async function create() {
       allowedProviders: form.value.allowedProviders.length ? form.value.allowedProviders : undefined,
       allowedModels: form.value.allowedModels.length ? form.value.allowedModels : undefined,
       modelMappings: parseMappingEntries(form.value.modelMappings) ?? undefined,
+      accountGroupId: form.value.accountGroupId ?? undefined,
     })
     newKey.value = data.key
     newKeyProviders.value = form.value.allowedProviders.length ? [...form.value.allowedProviders] : null
     showCreate.value = false
-    form.value = { name: '', allowedProviders: [], allowedModels: [], modelMappings: [] }
+    form.value = { name: '', allowedProviders: [], allowedModels: [], modelMappings: [], accountGroupId: null }
     await load()
   } catch (e) {
     message.error(errMsg(e, '创建失败'))
@@ -153,6 +185,7 @@ function openEdit(row: ApiKey) {
     allowedProviders: row.allowedProviders ?? [],
     allowedModels: row.allowedModels ?? [],
     modelMappings: mappingEntriesFromObject(row.modelMappings),
+    accountGroupId: row.accountGroupId,
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
     quotaLimit: row.quotaLimit,
@@ -169,6 +202,7 @@ async function saveEdit() {
     allowedProviders: editForm.value.allowedProviders.length ? editForm.value.allowedProviders : null,
     allowedModels: editForm.value.allowedModels.length ? editForm.value.allowedModels : null,
     modelMappings: parseMappingEntries(editForm.value.modelMappings),
+    accountGroupId: editForm.value.accountGroupId,
     rateLimit: editForm.value.rateLimit,
     concurrencyLimit: editForm.value.concurrencyLimit,
     quotaLimit: editForm.value.quotaLimit,
@@ -274,6 +308,9 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
     if (!list?.length) return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
     return h(UiSpace, { size: 4 }, { default: () => list.map((p) => h(UiTag, { size: 'small', bordered: false }, { default: () => providerLabel[p] ?? p })) })
   } },
+  { title: '分组', key: 'group', minWidth: 110, render: (row) => row.accountGroupId
+    ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) })
+    : h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' }) },
   { title: '已用', key: 'quotaUsed', width: 100, render: (row) => formatUsd(row.quotaUsed) },
   { title: '上限', key: 'quotaLimit', width: 100, render: (row) => row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) },
   { title: '限速', key: 'rateLimit', width: 90, render: (row) => row.rateLimit == null ? '不限' : `${row.rateLimit}/min` },
@@ -289,7 +326,10 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   ] }) },
 ])
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadGroups()
+})
 </script>
 
 <template>
@@ -299,7 +339,7 @@ onMounted(load)
     </div>
 
     <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1420" />
+      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1540" />
     </UiCard>
 
     <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">
@@ -315,6 +355,9 @@ onMounted(load)
         </UiFormItem>
         <UiFormItem label="模型映射">
           <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
+        </UiFormItem>
+        <UiFormItem v-if="groups.length" label="账号分组（留空 = 默认池）">
+          <UiSelect v-model:value="form.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池" />
         </UiFormItem>
       </UiForm>
       <template #footer>
@@ -372,6 +415,9 @@ onMounted(load)
         </UiFormItem>
         <UiFormItem label="模型映射">
           <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
+        </UiFormItem>
+        <UiFormItem v-if="groups.length" label="账号分组（留空 = 默认池）">
+          <UiSelect v-model:value="editForm.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池" />
         </UiFormItem>
         <UiFormItem label="成本上限（USD）">
           <UiInputNumber v-model:value="editForm.quotaLimit" :min="0" :step="1" style="width: 100%" />
