@@ -4,8 +4,7 @@
 
 - 本仓库是 `model-bridge`，一个自托管 AI API 中转平台。
 - 后端代码在 `src/`，技术栈是 Node.js、TypeScript、Fastify、PostgreSQL、Drizzle ORM。
-- 前端代码在 `web/src/`，技术栈是 Vue 3、Vite、Pinia、Vue Router、Naive UI。
-- 优先做小而聚焦的改动，遵循现有目录结构和代码风格。
+- 前端代码在 `web/src/`，技术栈是 Vue 3、Vite、Pinia、Vue Router
 - 除非任务明确需要，不要重写无关代码、生成文件、锁文件或配置。
 - 工作区里已有的用户改动必须保留，不要擅自回滚。
 
@@ -43,7 +42,7 @@
 
 - 修改后运行最相关的检查：
   - 后端或共享 TypeScript 改动：`npm run typecheck`
-  - 前端改动：`cd web && npm run typecheck`；涉及 UI 或构建时再运行 `cd web && npm run build`
+  - 前端改动：`cd web && npm run typecheck`
   - 脚本改动：`node --check <script>`
 - 如果命令因为沙箱、权限、端口占用或缺少服务无法运行，要明确说明。
 - 修改用户可见行为时，只有在能帮助后续维护者时才更新 README 或界面文案。
