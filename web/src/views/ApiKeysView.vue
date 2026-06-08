@@ -6,7 +6,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
-import { buildCcSwitchUrl, launchCcSwitch, targetsForProviders, type CcSwitchTarget } from '../ccswitch'
+import { buildCcSwitchUrl, ccSwitchProviderName, launchCcSwitch, targetsForProviders, type CcSwitchTarget } from '../ccswitch'
 
 interface ApiKey {
   id: string
@@ -502,7 +502,6 @@ GET ${baseOrigin.value}/api/deepseek/v1/models`,
 
 // CC Switch one-click import picker state (opened from the table row).
 const showCcSwitch = ref(false)
-const ccSwitchName = ref('')
 const ccSwitchSecret = ref('')
 const ccSwitchTargets = ref<CcSwitchTarget[]>([])
 
@@ -511,7 +510,6 @@ async function openCcSwitch(row: ApiKey) {
   const secret = await fetchFullKey(row)
   if (!secret) return
   ccSwitchSecret.value = secret
-  ccSwitchName.value = row.name
   ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
   showCcSwitch.value = true
 }
@@ -522,7 +520,7 @@ function triggerCcSwitch(target: CcSwitchTarget) {
   const url = buildCcSwitchUrl(target, {
     origin: baseOrigin.value,
     apiKey: ccSwitchSecret.value,
-    name: `${ccSwitchName.value} · ${target.label}`,
+    name: ccSwitchProviderName(target),
   })
   launchCcSwitch(url)
   message.success('已唤起 CC Switch，请在弹出的应用中确认导入')

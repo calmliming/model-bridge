@@ -20,6 +20,8 @@ export interface CcSwitchTarget {
   app: CcSwitchApp
   /** Human label shown on the import button. */
   label: string
+  /** Upstream model vendor (模型厂家), used to build the CC Switch provider name. */
+  vendor: string
   /** Builds the provider endpoint from the deployment origin (e.g. https://bridge.example.com). */
   endpoint: (origin: string) => string
   /** Optional model overrides (DeepSeek presets map onto Claude/Codex model slots). */
@@ -39,6 +41,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     id: 'claude',
     app: 'claude',
     label: 'Claude Code',
+    vendor: 'Claude',
     endpoint: (origin) => origin,
     provider: 'claude',
   },
@@ -46,6 +49,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     id: 'claude-deepseek',
     app: 'claude',
     label: 'Claude Code · DeepSeek',
+    vendor: 'DeepSeek',
     endpoint: (origin) => `${origin}/api/deepseek`,
     models: {
       model: 'deepseek-v4-pro',
@@ -59,6 +63,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     id: 'codex',
     app: 'codex',
     label: 'Codex CLI',
+    vendor: 'OpenAI',
     endpoint: (origin) => `${origin}/v1`,
     provider: 'openai',
   },
@@ -66,6 +71,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     id: 'codex-deepseek',
     app: 'codex',
     label: 'Codex CLI · DeepSeek',
+    vendor: 'DeepSeek',
     endpoint: (origin) => `${origin}/api/deepseek/v1`,
     models: { model: 'deepseek-v4-pro' },
     provider: 'deepseek',
@@ -74,10 +80,23 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     id: 'gemini',
     app: 'gemini',
     label: 'Gemini CLI',
+    vendor: 'Gemini',
     endpoint: (origin) => origin,
     provider: 'gemini',
   },
 ]
+
+/** Brand prefix for provider names imported into CC Switch. */
+export const CC_SWITCH_BRAND = 'ModelBridge'
+
+/**
+ * Builds the provider name shown inside CC Switch, e.g. "ModelBridge-Claude".
+ * Brand prefix + upstream vendor (模型厂家); short and deterministic, so the
+ * same upstream always lands on the same CC Switch provider entry.
+ */
+export function ccSwitchProviderName(target: CcSwitchTarget): string {
+  return `${CC_SWITCH_BRAND}-${target.vendor}`
+}
 
 /** Looks up a target by its id. */
 export function ccSwitchTarget(id: string): CcSwitchTarget | undefined {

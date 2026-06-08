@@ -8,6 +8,7 @@ import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
 import {
   buildCcSwitchUrl,
+  ccSwitchProviderName,
   launchCcSwitch,
   targetsForProviders,
   type CcSwitchTarget,
@@ -46,7 +47,6 @@ const baseOrigin = computed(() =>
 
 // CC Switch one-click import modal state.
 const showCcSwitch = ref(false)
-const ccSwitchName = ref('')
 const ccSwitchSecret = ref('')
 const ccSwitchTargets = ref<CcSwitchTarget[]>([])
 
@@ -239,7 +239,6 @@ async function openCcSwitch(row: ApiKey) {
       return
     }
     ccSwitchSecret.value = secret
-    ccSwitchName.value = row.name
     ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
     showCcSwitch.value = true
   } catch (e) {
@@ -251,7 +250,6 @@ async function openCcSwitch(row: ApiKey) {
 function openCcSwitchForNew() {
   if (!newKey.value) return
   ccSwitchSecret.value = newKey.value
-  ccSwitchName.value = '我的 model-bridge'
   ccSwitchTargets.value = targetsForProviders(newKeyProviders.value)
   showCcSwitch.value = true
 }
@@ -262,7 +260,7 @@ function triggerCcSwitch(target: CcSwitchTarget) {
   const url = buildCcSwitchUrl(target, {
     origin: baseOrigin.value,
     apiKey: ccSwitchSecret.value,
-    name: `${ccSwitchName.value} · ${target.label}`,
+    name: ccSwitchProviderName(target),
   })
   launchCcSwitch(url)
   message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
