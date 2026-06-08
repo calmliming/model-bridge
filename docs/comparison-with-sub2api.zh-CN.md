@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)
-> 更新日期：2026-06-07
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.134**，2026-06-06）
+> 更新日期：2026-06-08
 
 ## 一句话定位
 
@@ -56,6 +56,16 @@
 | 10 | **iframe 外部系统嵌入**（如工单系统）| ✅ | ❌ | 低优先级 |
 | 11 | **移动管理端 App**（RN / Expo）| ✅ | ❌ | 低优先级 · 生态 |
 | 12 | **Simple Mode**（隐藏 SaaS 功能给个人用）| ✅ | ➖ 本项目天然即简化版 | 不适用 |
+| 13 | **账号配额自动暂停**（按 5h/7d 用量阈值自动暂停账号调度，支持全局默认 + 单账号禁用） | ✅ (v0.1.133) | ✅ 已实现（可配置全局阈值 + 单账号覆盖/关闭，达到阈值停调至窗口重置，含后台周期兜底扫描） | ✅ 已完成 |
+| 14 | **用户分平台配额**（anthropic/openai/gemini/antigravity 各设日/周/月 USD 上限） | ✅ (v0.1.131/132) | ⚠️ 已有 per-Key USD 配额上限（`quotaLimit`），但无按用户分平台 + 时间窗的配额 | 中优先级 |
+| 15 | **失败请求追踪**（用户端 + 管理端记录/查看失败请求） | ✅ (v0.1.134) | ❌ | 中优先级 · 观测增强 |
+| 16 | **OpenAI embeddings 网关** | ✅ (v0.1.133) | ❌ | 低优先级 · 协议覆盖 |
+| 17 | **内容审计 / 风控**（按模型生效的内容审核、前置拦截风控运行态） | ✅ (v0.1.130/134) | ❌ | 待评估 · 合规向 |
+| 18 | **钉钉 OAuth 登录** | ✅ (v0.1.127) | ❌ | 低优先级 |
+| 19 | **图像 token 计费** | ✅ (v0.1.134) | ❌ | 低优先级 · 计费精度 |
+| 20 | **邀请返利系统**（返利冻结期 / 有效期 / 单人上限 / 专属邀请码） | ✅ (v0.1.119) | ⚠️ 已有邀请制用户体系，无返利结算 | 低优先级 · 偏 SaaS |
+
+> 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
 
 ---
 
@@ -85,6 +95,14 @@
 ---
 
 ## 六、本次更新整理
+
+- **跟踪 sub2api 至 v0.1.134（2026-06-08）**：对照 v0.1.119–v0.1.134 的新发布，补入差异表第 13–20 项 —— 账号配额自动暂停、用户分平台配额、失败请求追踪、OpenAI embeddings 网关、内容审计/风控、钉钉 OAuth、图像 token 计费、邀请返利系统。其中两项 model-bridge 已有部分基础并标 ⚠️：第 13 项已有 quota 快照观测（`src/accounts/quota.ts` 读上游响应头 5h/weekly 窗口）但未做自动停调；第 14 项已有 per-Key USD 配额上限（`src/middleware/apiKeyAuth.ts`、`schema.ts` 的 `quotaLimit`）但无「按用户分平台 + 时间窗」配额。其余多为偏 SaaS / 合规 / 计费精度方向，符合错位定位，择优追赶。
+- **账号配额自动暂停已落地**（差异表第 13 项 ✅）：在原有 quota 快照基础上加阈值停调——账号 5h/7d 用量达到阈值即置入 cooldown 直到对应窗口重置。全局阈值存 `settings.quota_autopause_percent`（默认 100＝仅超额时停调，调低可提前切走流量），单账号可在「账号」页用 `metadata.autopausePercent` 覆盖（留空=继承、0=关闭）。即时停调走 relay 成功路径与手动测试/刷新；另加后台周期扫描 `jobs/quotaAutopause.ts` 兜底闲置账号与阈值下调场景（多实例 Redis 锁、只读快照不打上游、忽略已过期窗口）。核心逻辑 `quotaPauseUntil` / `resolveAutopausePercent` 见 `src/accounts/quota.ts`，含单测。
+- **下一步建议优先级**：① 失败请求追踪（纯观测增强，风险低）；② 用户分平台配额（从 per-Key 上限扩展到 per-user 多平台时间窗）。embeddings / 钉钉 OAuth / 图像计费 / 内容审计可按需求再排。
+
+---
+
+### 历史更新
 
 - **账号分组隔离已落地**：差异表第 1 项、策略「追赶」第 5 项标记为 ✅ 完成。上游账号可编入分组，API Key 可绑定到某个分组，调度时绑定组的 Key 只命中组内账号、未绑定的 Key 只用默认池（未分组账号）；存量数据全为 null，行为向后兼容。代码涉及 `src/db/schema.ts`、`src/accounts/{scheduler,manager,groups}.ts`、`src/keys/manager.ts`、`src/routes/admin.ts`、`web/src/views/{AccountsView,ApiKeysView}.vue`，迁移为 `0002_zippy_invaders.sql`。
 - **支付宝 / 微信在线收款已落地**：差异表第 4 项、策略「追赶」中的支付接入与回调审计标记为 ✅ 完成（扫码 + 异步回调 + RSA2/MD5 验签 + 幂等入账，代码见 `src/payments/`、`src/routes/payment-callback.ts`）。

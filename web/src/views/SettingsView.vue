@@ -20,6 +20,11 @@ const turnstileEnabled = ref(false)
 const turnstileConfigured = ref(false)
 const securityHeadersEnabled = ref(false)
 
+const quotaAutopausePercent = ref(100)
+const autopauseInput = ref(100)
+const savingAutopause = ref(false)
+const autopauseDirty = computed(() => autopauseInput.value !== quotaAutopausePercent.value)
+
 type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 'failed'
 type TagType = 'default' | 'info' | 'success' | 'warning' | 'error' | 'primary'
 
@@ -123,8 +128,27 @@ async function loadSettings() {
     turnstileEnabled.value = !!data.turnstileEnabled
     turnstileConfigured.value = !!data.turnstileConfigured
     securityHeadersEnabled.value = !!data.securityHeadersEnabled
+    if (typeof data.quotaAutopausePercent === 'number') {
+      quotaAutopausePercent.value = data.quotaAutopausePercent
+      autopauseInput.value = data.quotaAutopausePercent
+    }
   } catch (e) {
     message.error(errMsg(e, '加载设置失败'))
+  }
+}
+
+async function saveAutopause() {
+  const value = Math.max(1, Math.min(100, Math.trunc(autopauseInput.value)))
+  savingAutopause.value = true
+  try {
+    const { data } = await api.patch('/admin/settings', { quotaAutopausePercent: value })
+    quotaAutopausePercent.value = data.quotaAutopausePercent
+    autopauseInput.value = data.quotaAutopausePercent
+    message.success('已更新自动停调阈值')
+  } catch (e) {
+    message.error(errMsg(e, '保存失败'))
+  } finally {
+    savingAutopause.value = false
   }
 }
 
@@ -420,6 +444,37 @@ function confirmSystemUpdate() {
           :value="registrationEnabled"
           @update:value="toggleRegistration"
         />
+      </div>
+    </UiCard>
+
+    <UiCard class="max-w-xl" title="账号配额自动停调">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <strong class="text-gray-900 dark:text-white">用量阈值</strong>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            账号 5 小时 / 7 天用量达到该百分比时，自动暂停调度直到对应窗口重置。
+            设为 100 表示仅在上游判定超额时停调；调低可在账号快用尽前提前切走流量。
+            单个账号可在「账号」页单独覆盖或关闭。
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <UiInputNumber
+            v-model:value="autopauseInput"
+            :min="1"
+            :max="100"
+            :step="5"
+            style="width: 120px"
+          />
+          <span class="text-sm text-gray-500 dark:text-dark-400">%</span>
+          <UiButton
+            type="primary"
+            :loading="savingAutopause"
+            :disabled="!autopauseDirty"
+            @click="saveAutopause"
+          >
+            保存
+          </UiButton>
+        </div>
       </div>
     </UiCard>
 

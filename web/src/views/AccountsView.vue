@@ -39,6 +39,8 @@ interface Account {
   groups: AccountGroupRef[]
   createdAt: number
   quota: AccountQuotaSnapshot | null
+  // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
+  autopausePercent: number | null
 }
 
 /** A named account pool (distinct from the per-provider display grouping below). */
@@ -70,6 +72,8 @@ const loading = ref(true)
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
+const savingAutopauseId = ref<string | null>(null)
+const globalAutopausePercent = ref(100)
 
 // Account-pool grouping (feature), distinct from the per-provider display group.
 const groups = ref<GroupInfo[]>([])
@@ -360,6 +364,23 @@ function renderPriority(row: Account) {
     'aria-label': `${row.name} 优先级`,
     onUpdateValue: (value: number | null) => {
       void updateWeight(row, value)
+    },
+  })
+}
+
+function renderAutopause(row: Account) {
+  return h(UiInputNumber, {
+    value: row.autopausePercent,
+    min: 0,
+    max: 100,
+    step: 5,
+    disabled: savingAutopauseId.value === row.id,
+    placeholder: `继承 ${globalAutopausePercent.value}`,
+    class: 'autopause-input',
+    title: '用量达到该百分比时自动暂停调度，直到窗口重置。留空=继承全局，0=关闭。',
+    'aria-label': `${row.name} 自动停调阈值`,
+    onUpdateValue: (value: number | null) => {
+      void updateAutopause(row, value)
     },
   })
 }
@@ -699,6 +720,24 @@ async function updateWeight(row: Account, value: number | null) {
   }
 }
 
+async function updateAutopause(row: Account, value: number | null) {
+  // null = clear override (inherit global); 0-100 = explicit per-account threshold.
+  const next = value == null ? null : Math.max(0, Math.min(100, Math.trunc(value)))
+  if (next === row.autopausePercent) return
+
+  const previous = row.autopausePercent
+  row.autopausePercent = next
+  savingAutopauseId.value = row.id
+  try {
+    await api.patch(`/admin/accounts/${row.id}`, { autopausePercent: next })
+  } catch (e) {
+    row.autopausePercent = previous
+    message.error(errMsg(e, '更新停调阈值失败'))
+  } finally {
+    if (savingAutopauseId.value === row.id) savingAutopauseId.value = null
+  }
+}
+
 async function testConnectivity(row: Account) {
   testingId.value = row.id
   try {
@@ -763,6 +802,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
   },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
+  { title: '停调阈值', key: 'autopause', width: 116, render: renderAutopause },
   { title: '优先级', key: 'weight', width: 110, render: renderPriority },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 150, render: (row) => formatTime(row.lastUsedAt) },
   {
@@ -831,9 +871,21 @@ function providerRank(provider: string): number {
   return index === -1 ? providerOrder.length : index
 }
 
+async function loadGlobalAutopause() {
+  try {
+    const { data } = await api.get('/admin/settings')
+    if (typeof data.quotaAutopausePercent === 'number') {
+      globalAutopausePercent.value = data.quotaAutopausePercent
+    }
+  } catch {
+    // Non-critical: the column placeholder just falls back to the default.
+  }
+}
+
 onMounted(() => {
   void load()
   void loadGroups()
+  void loadGlobalAutopause()
   refreshTimer = window.setInterval(() => void load(), 30_000)
 })
 
@@ -878,7 +930,7 @@ onBeforeUnmount(() => {
           :data="group.accounts"
           :loading="loading"
           :bordered="false"
-          :scroll-x="1370"
+          :scroll-x="1486"
         />
       </UiCard>
     </div>
@@ -889,7 +941,7 @@ onBeforeUnmount(() => {
         :data="accounts"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1510"
+        :scroll-x="1626"
       />
     </UiCard>
 
@@ -1391,6 +1443,10 @@ onBeforeUnmount(() => {
 
 :deep(.priority-input) {
   width: 82px;
+}
+
+:deep(.autopause-input) {
+  width: 88px;
 }
 
 :deep(.group-select) {

@@ -5,7 +5,7 @@ import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
 import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
-import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
+import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 import { clearExpiredAccountCooldowns } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
 
@@ -101,6 +101,7 @@ export async function listAccounts() {
     ...account,
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
+    autopausePercent: accountAutopausePercent(metadata),
   }))
 }
 
@@ -136,6 +137,23 @@ export async function setAccountStatus(id: string, status: 'active' | 'disabled'
   await db.update(accounts)
     .set({ status, cooldownUntil: status === 'active' ? null : undefined })
     .where(eq(accounts.id, id))
+}
+
+/**
+ * Sets a per-account auto-pause threshold override.
+ *  - `null` clears the override so the account inherits the global default;
+ *  - `0` disables early auto-pause for this account;
+ *  - `1`–`100` sets this account's own threshold.
+ */
+export async function setAccountAutopause(id: string, percent: number | null): Promise<void> {
+  const [row] = await db.select({ metadata: accounts.metadata }).from(accounts).where(eq(accounts.id, id))
+  const metadata = metadataObject(row?.metadata)
+  if (percent == null) {
+    delete metadata.autopausePercent
+  } else {
+    metadata.autopausePercent = Math.max(0, Math.min(100, Math.trunc(percent)))
+  }
+  await db.update(accounts).set({ metadata }).where(eq(accounts.id, id))
 }
 
 /** Updates the scheduler priority. Higher weight accounts are tried first. */

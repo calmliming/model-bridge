@@ -14,6 +14,7 @@ import { registerRelayRoutes } from './routes/relay'
 import { registerPaymentCallbackRoutes } from './routes/payment-callback'
 import { registerSecurityHeaders } from './middleware/securityHeaders'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
+import { startQuotaAutopauseJob } from './jobs/quotaAutopause'
 import { startOauthCallbackServer } from './oauthCallback'
 import { initPaymentProviders } from './payments/providers/index'
 
@@ -86,6 +87,7 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.PORT, host: config.HOST })
   startTokenRefreshJob()
+  startQuotaAutopauseJob()
   // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
   // as a redirect URI, so we run a small dedicated listener on 1455.
   startOauthCallbackServer()

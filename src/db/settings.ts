@@ -26,3 +26,27 @@ export async function isRegistrationEnabled(): Promise<boolean> {
 export async function setRegistrationEnabled(enabled: boolean): Promise<void> {
   await setSetting(REGISTRATION_ENABLED_KEY, enabled ? 'true' : 'false')
 }
+
+const QUOTA_AUTOPAUSE_PERCENT_KEY = 'quota_autopause_percent'
+/** 100 = pause only when a window is actually exceeded (legacy behavior). */
+export const DEFAULT_QUOTA_AUTOPAUSE_PERCENT = 100
+
+function clampPercent(value: number, min: number): number {
+  return Math.max(min, Math.min(100, Math.trunc(value)))
+}
+
+/**
+ * Global usage% at which an account auto-pauses (cooldown) until the breaching
+ * quota window resets. 100 keeps the legacy "pause only when exceeded" behavior;
+ * a lower value pauses earlier so traffic shifts off a nearly-spent account.
+ */
+export async function getQuotaAutopausePercent(): Promise<number> {
+  const raw = await getSetting(QUOTA_AUTOPAUSE_PERCENT_KEY)
+  const n = raw == null ? NaN : Number(raw)
+  return Number.isFinite(n) ? clampPercent(n, 1) : DEFAULT_QUOTA_AUTOPAUSE_PERCENT
+}
+
+/** Sets the global auto-pause threshold (clamped to 1–100). */
+export async function setQuotaAutopausePercent(percent: number): Promise<void> {
+  await setSetting(QUOTA_AUTOPAUSE_PERCENT_KEY, String(clampPercent(percent, 1)))
+}

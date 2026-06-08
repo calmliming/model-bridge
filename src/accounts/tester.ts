@@ -8,9 +8,11 @@ import {
 import {
   extractAccountQuota,
   extractClaudeOAuthUsageQuota,
-  quotaCooldownUntil,
+  quotaPauseUntil,
+  resolveAutopausePercent,
   type AccountQuotaSnapshot,
 } from './quota'
+import { getQuotaAutopausePercent } from '../db/settings'
 import { markAccountUsed, penalizeAccount } from './scheduler'
 
 const TEST_TIMEOUT_MS = 15_000
@@ -237,7 +239,8 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
   const result = await runProviderTest(account, accessToken)
   const latencyMs = Date.now() - startedAt
 
-  const cooldownUntil = quotaCooldownUntil(result.quota)
+  const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+  const cooldownUntil = quotaPauseUntil(result.quota, threshold)
   if (cooldownUntil) {
     await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
   } else {

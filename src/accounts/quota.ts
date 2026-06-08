@@ -220,14 +220,56 @@ export function extractAccountQuota(
   return null
 }
 
+/**
+ * Earliest future window reset that should pause the account, given a usage
+ * threshold. A window pauses when the upstream already marks it `exceeded`, or
+ * when its `usedPercent` has reached `thresholdPercent`. Returns null if none.
+ *
+ * `thresholdPercent`: 1–100 lowers the bar for an early pause; 0 disables the
+ * early pause (genuinely exceeded windows still pause, so a rate-limited account
+ * is never kept in rotation).
+ */
+export function quotaPauseUntil(
+  quota: AccountQuotaSnapshot | null | undefined,
+  thresholdPercent = 100,
+  now = Date.now(),
+): number | null {
+  if (!quota) return null
+  const threshold = Number.isFinite(thresholdPercent) ? thresholdPercent : 100
+  const resetTimes = quota.windows
+    .filter((window) => {
+      if (window.resetAt == null || window.resetAt <= now) return false
+      if (window.exceeded) return true
+      return threshold > 0 && window.usedPercent != null && window.usedPercent >= threshold
+    })
+    .map((window) => window.resetAt!)
+  return resetTimes.length ? Math.min(...resetTimes) : null
+}
+
+/** Legacy helper: pause only on windows the upstream marks exceeded. */
 export function quotaCooldownUntil(
   quota: AccountQuotaSnapshot | null | undefined,
   now = Date.now(),
 ): number | null {
-  const resetTimes = quota?.windows
-    .filter((window) => window.exceeded && window.resetAt != null && window.resetAt > now)
-    .map((window) => window.resetAt!) ?? []
-  return resetTimes.length ? Math.min(...resetTimes) : null
+  return quotaPauseUntil(quota, 100, now)
+}
+
+/**
+ * Per-account auto-pause override stored in `metadata.autopausePercent`:
+ * undefined → inherit the global default; 0 → disabled (no early pause);
+ * 1–100 → this account's own threshold. Returns null when no override is set.
+ */
+export function accountAutopausePercent(metadata: unknown): number | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const raw = (metadata as { autopausePercent?: unknown }).autopausePercent
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null
+  return Math.max(0, Math.min(100, Math.trunc(raw)))
+}
+
+/** Effective threshold for an account: its override if set, else the global default. */
+export function resolveAutopausePercent(metadata: unknown, globalPercent: number): number {
+  const override = accountAutopausePercent(metadata)
+  return override == null ? globalPercent : override
 }
 
 function isQuotaWindow(value: unknown): value is AccountQuotaWindow {

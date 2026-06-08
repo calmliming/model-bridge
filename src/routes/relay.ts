@@ -2,7 +2,8 @@ import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { ensureFreshToken, updateAccountQuota } from '../accounts/manager'
-import { extractAccountQuota, quotaCooldownUntil } from '../accounts/quota'
+import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
+import { getQuotaAutopausePercent } from '../db/settings'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
 import { bindStickyAccount, clearStickyAccount, computeSessionKey } from '../accounts/session'
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
@@ -677,7 +678,14 @@ async function runRelayLoop(
     } else if (failure.penalty) {
       await penalizeAccount(account.id, failure.penalty, failure.resetAt)
     } else if (upstream.ok) {
-      const quotaCooldown = quotaCooldownUntil(quota)
+      // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
+      // the configured threshold, until the breaching window resets. Only costs
+      // a settings lookup when the upstream actually reported a quota snapshot.
+      let quotaCooldown: number | null = null
+      if (quota) {
+        const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+        quotaCooldown = quotaPauseUntil(quota, threshold)
+      }
       if (quotaCooldown) {
         await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
       } else {

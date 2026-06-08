@@ -9,13 +9,18 @@ import { changeAdminPassword, getAdminUsername, verifyAdminCredentials } from '.
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
-import { createAccount, deleteAccount, listAccounts, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
+import { createAccount, deleteAccount, listAccounts, setAccountAutopause, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
 import { createGroup, deleteGroup, listGroupMembers, listGroups, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
-import { isRegistrationEnabled, setRegistrationEnabled } from '../db/settings'
+import {
+  getQuotaAutopausePercent,
+  isRegistrationEnabled,
+  setQuotaAutopausePercent,
+  setRegistrationEnabled,
+} from '../db/settings'
 import {
   assignSubscription,
   createPlan,
@@ -138,6 +143,8 @@ const accountUpdateSchema = z
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
     groupIds: z.array(z.string().trim().min(1)).optional(),
+    // 0 = disable early auto-pause; 1-100 = own threshold; null = inherit global
+    autopausePercent: z.number().int().min(0).max(100).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -181,6 +188,7 @@ const updateRedeemCodeSchema = z.object({
 const updateSettingsSchema = z
   .object({
     registrationEnabled: z.boolean().optional(),
+    quotaAutopausePercent: z.number().int().min(1).max(100).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -301,6 +309,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
+      quotaAutopausePercent: await getQuotaAutopausePercent(),
     }
   })
 
@@ -312,11 +321,15 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (body.data.registrationEnabled !== undefined) {
       await setRegistrationEnabled(body.data.registrationEnabled)
     }
+    if (body.data.quotaAutopausePercent !== undefined) {
+      await setQuotaAutopausePercent(body.data.quotaAutopausePercent)
+    }
     return {
       registrationEnabled: await isRegistrationEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
+      quotaAutopausePercent: await getQuotaAutopausePercent(),
     }
   })
 
@@ -891,6 +904,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (body.data.status) await setAccountStatus(request.params.id, body.data.status)
       if (body.data.weight !== undefined) await setAccountWeight(request.params.id, body.data.weight)
       if (body.data.groupIds !== undefined) await setAccountGroups(request.params.id, body.data.groupIds)
+      if (body.data.autopausePercent !== undefined) {
+        await setAccountAutopause(request.params.id, body.data.autopausePercent)
+      }
       return { ok: true }
     },
   )
