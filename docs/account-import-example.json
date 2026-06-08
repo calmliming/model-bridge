@@ -1,0 +1,38 @@
+{
+  "accounts": [
+    {
+      "provider": "claude",
+      "name": "Claude Account 1",
+      "accessToken": "sk-ant-api03-xxx",
+      "refreshToken": "optional-refresh-token",
+      "expiresAt": 1735689600000,
+      "weight": 10,
+      "groupIds": []
+    },
+    {
+      "provider": "openai",
+      "name": "OpenAI Account 1",
+      "accessToken": "sk-proj-xxx",
+      "weight": 5,
+      "groupIds": ["group-id-example"]
+    },
+    {
+      "provider": "gemini",
+      "name": "Gemini Account 1",
+      "accessToken": "ya29.xxx",
+      "refreshToken": "1//xxx",
+      "expiresAt": 1735689600000
+    },
+    {
+      "provider": "deepseek",
+      "name": "DeepSeek API Key 1",
+      "accessToken": "sk-xxx"
+    },
+    {
+      "provider": "xiaomi",
+      "name": "Xiaomi MiMo API Key 1",
+      "accessToken": "sk-xxx",
+      "weight": 8
+    }
+  ]
+}

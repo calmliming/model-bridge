@@ -237,6 +237,20 @@ const importTokenSchema = z.object({
   expiresAt: z.number().int().positive().optional(),
 })
 
+const batchImportAccountSchema = z.object({
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']),
+  name: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().optional(),
+  expiresAt: z.number().int().positive().optional(),
+  weight: z.number().int().min(1).max(100).optional(),
+  groupIds: z.array(z.string()).optional(),
+})
+
+const batchImportSchema = z.object({
+  accounts: z.array(batchImportAccountSchema).min(1).max(100),
+})
+
 const paginationQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(10),
@@ -917,6 +931,71 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         metadata: null,
       })
       return reply.code(201).send({ id: created.id, name, provider })
+    },
+  )
+
+  // Batch import accounts: create multiple accounts at once from JSON payload
+  app.post(
+    '/api/admin/accounts/import/batch',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = batchImportSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
+      }
+
+      const results: Array<{
+        name: string
+        provider: string
+        success: boolean
+        id?: string
+        error?: string
+      }> = []
+
+      for (const accountData of body.data.accounts) {
+        try {
+          const created = await createAccount({
+            provider: accountData.provider,
+            name: accountData.name,
+            tokens: {
+              accessToken: accountData.accessToken,
+              refreshToken: accountData.refreshToken ?? '',
+              expiresAt: accountData.expiresAt ?? 0,
+            },
+            metadata: null,
+            groupIds: accountData.groupIds ?? [],
+          })
+
+          // Set weight if specified
+          if (accountData.weight !== undefined) {
+            await setAccountWeight(created.id, accountData.weight)
+          }
+
+          results.push({
+            name: accountData.name,
+            provider: accountData.provider,
+            success: true,
+            id: created.id,
+          })
+        } catch (err) {
+          results.push({
+            name: accountData.name,
+            provider: accountData.provider,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      const successCount = results.filter((r) => r.success).length
+      const failureCount = results.filter((r) => !r.success).length
+
+      return reply.code(200).send({
+        total: results.length,
+        successCount,
+        failureCount,
+        results,
+      })
     },
   )
 

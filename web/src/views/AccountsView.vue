@@ -6,6 +6,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
+import ImportAccountsModal from '../components/ImportAccountsModal.vue'
 
 interface AccountQuotaWindow {
   key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'primary' | 'secondary'
@@ -118,6 +119,9 @@ const importRefreshToken = ref('')
 const apiKeyInput = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
+
+// Batch import modal state.
+const showBatchImport = ref(false)
 
 const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
@@ -563,6 +567,14 @@ function openAdd() {
   showAdd.value = true
 }
 
+function openBatchImport() {
+  showBatchImport.value = true
+}
+
+async function handleBatchImported() {
+  await load()
+}
+
 async function finishApiKeyImport() {
   const provider = form.value.provider
   const label = providerLabel[provider]
@@ -918,6 +930,7 @@ onBeforeUnmount(() => {
   <div>
     <div class="page-head">
       <UiButton secondary @click="openGroups">管理分组</UiButton>
+      <UiButton secondary @click="openBatchImport">批量导入</UiButton>
       <UiButton type="primary" @click="openAdd">添加账户</UiButton>
     </div>
 
@@ -1238,6 +1251,11 @@ onBeforeUnmount(() => {
         </UiSpace>
       </template>
     </UiModal>
+
+    <ImportAccountsModal
+      v-model:show="showBatchImport"
+      @imported="handleBatchImported"
+    />
   </div>
 </template>
 
