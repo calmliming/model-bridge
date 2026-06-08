@@ -30,7 +30,7 @@
 
 ## 二、model-bridge 独有 / 更强的地方 ✅
 
-1. **DeepSeek 支持** —— sub2api 没有 DeepSeek，本项目支持 messages / chat completions / responses 三种协议。
+1. **DeepSeek / Xiaomi MiMo 支持** —— 本项目支持 messages / chat completions / responses 三种协议，并可用 API key 接入国产上游。
 2. **更细的协议兼容层** —— 显式实现了 OpenAI Responses API、DeepSeek 格式转换、流式终止事件保证。
 3. **轻量、零外部依赖默认值** —— 不强制 Redis，单进程内存即可跑通限流 / 并发 / 粘性会话，部署更简单；需要扩展时再开 Redis。
 4. **TypeScript 全栈** —— 对 JS / TS 团队更友好，二次开发门槛低。
@@ -96,7 +96,7 @@
 
 ## 六、本次更新整理
 
-- **跟踪 sub2api 至 v0.1.134（2026-06-08）**：对照 v0.1.119–v0.1.134 的新发布，补入差异表第 13–20 项 —— 账号配额自动暂停、用户分平台配额、失败请求追踪、OpenAI embeddings 网关、内容审计/风控、钉钉 OAuth、图像 token 计费、邀请返利系统。其中两项 model-bridge 已有部分基础并标 ⚠️：第 13 项已有 quota 快照观测（`src/accounts/quota.ts` 读上游响应头 5h/weekly 窗口）但未做自动停调；第 14 项已有 per-Key USD 配额上限（`src/middleware/apiKeyAuth.ts`、`schema.ts` 的 `quotaLimit`）但无「按用户分平台 + 时间窗」配额。其余多为偏 SaaS / 合规 / 计费精度方向，符合错位定位，择优追赶。
+- **跟踪 sub2api 至 v0.1.134（2026-06-08）**：对照 v0.1.119–v0.1.134 的新发布，补入差异表第 13–20 项 —— 账号配额自动暂停、用户分平台配额、失败请求追踪、OpenAI embeddings 网关、内容审计/风控、钉钉 OAuth、图像 token 计费、邀请返利系统。其中第 13 项账号配额自动暂停已在 model-bridge 补齐；第 14 项已有 per-Key USD 配额上限（`src/middleware/apiKeyAuth.ts`、`schema.ts` 的 `quotaLimit`），但无「按用户分平台 + 时间窗」配额。其余多为偏 SaaS / 合规 / 计费精度方向，符合错位定位，择优追赶。
 - **账号配额自动暂停已落地**（差异表第 13 项 ✅）：在原有 quota 快照基础上加阈值停调——账号 5h/7d 用量达到阈值即置入 cooldown 直到对应窗口重置。全局阈值存 `settings.quota_autopause_percent`（默认 100＝仅超额时停调，调低可提前切走流量），单账号可在「账号」页用 `metadata.autopausePercent` 覆盖（留空=继承、0=关闭）。即时停调走 relay 成功路径与手动测试/刷新；另加后台周期扫描 `jobs/quotaAutopause.ts` 兜底闲置账号与阈值下调场景（多实例 Redis 锁、只读快照不打上游、忽略已过期窗口）。核心逻辑 `quotaPauseUntil` / `resolveAutopausePercent` 见 `src/accounts/quota.ts`，含单测。
 - **下一步建议优先级**：① 失败请求追踪（纯观测增强，风险低）；② 用户分平台配额（从 per-Key 上限扩展到 per-user 多平台时间窗）。embeddings / 钉钉 OAuth / 图像计费 / 内容审计可按需求再排。
 

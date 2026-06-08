@@ -2,9 +2,10 @@
 
 > **English** · [中文](./README.zh-CN.md)
 
-Self-hosted AI API relay platform — turn your **Claude / OpenAI / Gemini / DeepSeek**
-subscriptions into standard API endpoints you can share with friends, with
-per-user API keys, usage statistics and automatic multi-account rotation.
+Self-hosted AI API relay platform — turn your **Claude / OpenAI / Gemini /
+DeepSeek / Xiaomi MiMo** accounts or API keys into standard API endpoints you
+can share with friends, with per-user API keys, usage statistics and automatic
+multi-account rotation.
 
 See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
@@ -12,12 +13,12 @@ See **[PLAN.md](./PLAN.md)** for the full architecture and phased roadmap.
 
 ✅ **v1 shipped.** Admin dashboard, API keys with per-key cost quotas, Claude
 (paste-code OAuth) / OpenAI (browser callback) / Gemini (Google OAuth +
-Code Assist) / DeepSeek (API key) account onboarding, multi-account rotation
-with configurable priority, relay surfaces with
-legacy `/api/*` paths plus clean provider-native aliases (`/v1/messages`,
-`/v1/responses`, `/v1/chat/completions`, `/v1/models`,
-`/v1beta/models/*`), usage logging with daily / provider / model / key
-breakdowns, and a one-command Docker deploy.
+Code Assist) / DeepSeek and Xiaomi MiMo (API key) account onboarding,
+multi-account rotation with configurable priority, account groups, concurrency
+caps and quota auto-pause, relay surfaces with legacy `/api/*` paths plus clean
+provider-native aliases (`/v1/messages`, `/v1/responses`,
+`/v1/chat/completions`, `/v1/models`, `/v1beta/models/*`), usage logging with
+daily / provider / model / key breakdowns, and a one-command Docker deploy.
 
 ## Tech stack
 
@@ -112,22 +113,30 @@ The backend then serves the built dashboard directly at <http://localhost:3000>.
 
 Create an API key on the **API Keys** page first, and add at least one
 upstream account on the **Upstream Accounts** page (paste-code for Claude,
-browser callback for OpenAI/Gemini, API key for DeepSeek).
+browser callback for OpenAI/Gemini, API key for DeepSeek/Xiaomi MiMo).
 
-API keys can optionally restrict providers/models and define model mappings
-such as `gpt-public=gpt-5.4`. Model mappings are client-facing aliases:
+API keys can optionally restrict providers/models, bind to an account group,
+set rate/concurrency/cost limits, and define model mappings such as
+`gpt-public=gpt-5.4`. Model mappings are client-facing aliases:
 `GET /v1/models` lists the alias, while relay requests are sent upstream with
 the mapped model.
 
-### Account priority
+### Account pool scheduling
 
-When you have multiple accounts for the same provider, you can control which
-one is tried first by setting the **Priority** (1–100, default 1) in the
-accounts table. Higher values are tried before lower ones. Accounts with the
-same priority fall back to least-recently-used rotation.
+When you have multiple accounts for the same provider, scheduling can be tuned
+with:
 
-Set this on the **Upstream Accounts** page — adjust the number in the
-**Priority** column and the value is saved immediately.
+- **Priority**: set 1–100 (default 1) in the accounts table. Higher values are
+  tried first; ties fall back to least-recently-used rotation.
+- **Account groups**: create named pools on the **Account Groups** page.
+  Accounts can join multiple groups; an API key bound to a group only schedules
+  inside that group, while unbound keys use the default pool (accounts with no
+  group membership).
+- **Concurrency caps**: accounts and API keys can both limit simultaneous
+  in-flight requests. Leave blank for unlimited.
+- **Quota auto-pause**: set a global usage-percent threshold under **Settings**.
+  Accounts pause until the breaching quota window resets, and each account can
+  inherit, override, or disable the threshold.
 
 The account page also has a manual health check. It records the latest
 connectivity result on each account without running continuously in the
@@ -141,10 +150,11 @@ export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
-To route Claude Code through DeepSeek's Anthropic-compatible upstream
-instead, point `ANTHROPIC_BASE_URL` at `http://localhost:3000/api/deepseek`.
-This shares the same DeepSeek account pool as [Codex CLI on DeepSeek](#codex-cli-on-deepseek)
-— one DeepSeek API key serves both clients.
+To route Claude Code through DeepSeek or Xiaomi MiMo's Anthropic-compatible
+upstreams instead, point `ANTHROPIC_BASE_URL` at
+`http://localhost:3000/api/deepseek` or `http://localhost:3000/api/xiaomi`.
+Each one shares its account pool with the matching Codex / OpenAI-compatible
+endpoints.
 
 ### Codex CLI
 
@@ -237,6 +247,34 @@ A healthy response is an SSE stream: `response.created` → several
 - **Always streams**: this endpoint ignores the client's `stream` field and always returns `text/event-stream`.
 - **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.
 
+### Codex CLI on Xiaomi MiMo
+
+Xiaomi MiMo uses the same pattern as DeepSeek: add a Xiaomi MiMo account in
+the dashboard with its API key, then use `/api/xiaomi/v1/messages`,
+`/api/xiaomi/v1/chat/completions`, or `/api/xiaomi/v1/responses`. Codex config:
+
+```toml
+[profiles.model-bridge-mimo]
+model_provider = "model-bridge-mimo"
+model = "mimo-v2.5-pro"   # or "mimo-v2.5"
+
+[model_providers.model-bridge-mimo]
+name = "model-bridge-mimo"
+base_url = "http://localhost:3000/api/xiaomi/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+```bash
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge-mimo
+```
+
+Model names starting with `mimo-` are passed through; everything else is
+rewritten to `mimo-v2.5-pro`. The Responses endpoint always streams and usage
+is recorded under `provider=xiaomi`.
+
 ### Cherry Studio
 
 Add a custom provider per service:
@@ -245,6 +283,7 @@ Add a custom provider per service:
 - **Gemini** — base URL `http://localhost:3000`, API key `mb-xxxx`
 - **OpenAI** — base URL `http://localhost:3000/v1`, API key `mb-xxxx`
 - **DeepSeek as OpenAI** — base URL `http://localhost:3000/api/deepseek/v1`, API key `mb-xxxx`
+- **Xiaomi MiMo as OpenAI** — base URL `http://localhost:3000/api/xiaomi/v1`, API key `mb-xxxx`
 
 ### Gemini CLI
 
@@ -304,11 +343,16 @@ provider's sign-in page. Three options:
 | Method | Description | Best for |
 | ------ | ----------- | -------- |
 | **Paste callback URL** (recommended) | After authorizing in the browser, copy the full redirect URL from the address bar (`localhost:1455/auth/callback?code=...`) and paste it into the dashboard. The system auto-extracts code/state. | No extra tools needed |
-| **SSH tunnel** | Run `ssh -R 1455:localhost:1455 your-server` locally before authorizing. The browser redirect flows through the tunnel to the server. | Occasional account setup |
+| **SSH tunnel** | Run `ssh -L 1455:127.0.0.1:1455 your-server` locally before authorizing. The browser's `localhost:1455` redirect is forwarded to the server. | Occasional account setup |
 | **Move database** | Add accounts locally first, then copy `./data/` to the remote host. The background refresh job keeps tokens alive. | Bulk migration |
 
 You can also use the **Direct Import Token** feature on the Add Account page
 if you already have an Access Token / Refresh Token — this bypasses OAuth entirely.
+For multiple accounts at once, use **Batch Import JSON**; see
+[docs/account-import-example.json](docs/account-import-example.json) for the
+native format and [docs/codex-import-example.json](docs/codex-import-example.json)
+for Codex session exports. These files contain sensitive credentials, so keep
+them local and out of commits.
 
 ### Docker deployment notes
 

@@ -2,17 +2,18 @@
 
 > [English](./README.md) · **中文**
 
-自托管的 AI API 中转平台 —— 把你的 **Claude / OpenAI / Gemini / DeepSeek** 订阅转化为
-标准 API 端点，可与好友共享；支持按用户隔离的 API Key、用量统计，以及多账户
-自动轮换。
+自托管的 AI API 中转平台 —— 把你的 **Claude / OpenAI / Gemini / DeepSeek / Xiaomi MiMo**
+账号或 API Key 转化为标准 API 端点，可与好友共享；支持按用户隔离的 API Key、
+用量统计，以及多账户自动轮换。
 
 完整架构与分期路线图见 **[PLAN.zh-CN.md](./PLAN.zh-CN.md)**。
 
 ## 当前状态
 
 ✅ **v1 已交付。** 管理后台、带成本配额的 API Key、Claude（粘贴 code）/
-OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek（API key）账户接入、
-多账户轮换（支持优先级）、三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
+OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek 与 Xiaomi MiMo
+（API key）账户接入、多账户轮换（支持优先级、账号分组、并发上限和配额自动停调）、
+三类中转入口（兼容旧版 `/api/*` 路径，也支持干净的 `/v1/messages`、
 `/v1/responses`、`/v1/chat/completions`、`/v1/models`、`/v1beta/models/*`），
 按日 / 服务商 / 模型 / Key 的用量统计，以及一键 Docker 部署。
 
@@ -100,18 +101,20 @@ npm start
 ## 接入客户端
 
 先在 **API Keys** 页面创建一个密钥，再在 **上游账户** 页面至少添加一个上游
-账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调，DeepSeek 填 API key）。
+账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调，DeepSeek / Xiaomi MiMo 填 API key）。
 
-API Key 可按需限制服务商/模型，也可配置 `gpt-public=gpt-5.4` 这类模型映射。
-模型映射是客户端可见的别名：`GET /v1/models` 会展示别名，实际请求上游时改写为
-映射后的模型。
+API Key 可按需限制服务商/模型、绑定账号分组、设置限速/并发/成本配额，也可配置
+`gpt-public=gpt-5.4` 这类模型映射。模型映射是客户端可见的别名：
+`GET /v1/models` 会展示别名，实际请求上游时改写为映射后的模型。
 
-### 账户优先级
+### 账号池调度
 
-同一服务商有多个账户时，可在账户列表中设置**优先级**（1–100，默认 1）来控制
-调度顺序。数值越高越优先使用，相同优先级则按最近最少使用策略轮换。
+同一服务商有多个账户时，可用以下配置控制调度：
 
-在**上游账户**页面直接调整优先级列的数值即可，修改即时生效。
+- **优先级**：在账户列表设置 1–100（默认 1），数值越高越优先；相同优先级按最近最少使用策略轮换。
+- **账号分组**：在**账号分组**页面创建池，账号可加入多个分组；API Key 绑定分组后只调度组内账号，未绑定 Key 只使用默认池（未加入任何分组的账号）。
+- **并发上限**：账户和 API Key 都可设置最大同时在途请求数，留空表示不限。
+- **配额自动停调**：设置页可配置全局 quota 用量阈值；账号达到阈值后会暂停调度到对应窗口重置，也可在单账号上继承、覆盖或关闭。
 
 账户页还提供手动健康检查，会把最近一次连通性结果记录到账号元数据里；它不会在后台
 自动循环运行，避免已有部署意外消耗额度。
@@ -124,9 +127,10 @@ export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude
 ```
 
-想让 Claude Code 走 DeepSeek 上游（DeepSeek 提供 Anthropic 兼容端点），把
-`ANTHROPIC_BASE_URL` 改成 `http://localhost:3000/api/deepseek` 即可，账号池
-和 [Codex CLI 接 DeepSeek](#codex-cli-接-deepseek) 共享同一份 DeepSeek API key。
+想让 Claude Code 走 DeepSeek 或 Xiaomi MiMo 这类 Anthropic 兼容上游，把
+`ANTHROPIC_BASE_URL` 改成 `http://localhost:3000/api/deepseek` 或
+`http://localhost:3000/api/xiaomi` 即可。它们分别和对应的 Codex / OpenAI
+兼容入口共享同一账号池。
 
 ### Codex CLI
 
@@ -215,6 +219,33 @@ curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
 - **始终 SSE**：该端点忽略客户端的 `stream` 字段，永远以 text/event-stream 返回
 - **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计
 
+### Codex CLI 接 Xiaomi MiMo
+
+Xiaomi MiMo 的接法和 DeepSeek 一样：后台添加 Xiaomi MiMo 账户并填入 API key 后，
+可使用 `/api/xiaomi/v1/messages`、`/api/xiaomi/v1/chat/completions` 和
+`/api/xiaomi/v1/responses` 三个入口。Codex 配置示例：
+
+```toml
+[profiles.model-bridge-mimo]
+model_provider = "model-bridge-mimo"
+model = "mimo-v2.5-pro"   # 或 "mimo-v2.5"
+
+[model_providers.model-bridge-mimo]
+name = "model-bridge-mimo"
+base_url = "http://localhost:3000/api/xiaomi/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+```
+
+```bash
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge-mimo
+```
+
+以 `mimo-` 开头的模型名会透传，其它模型会改写为 `mimo-v2.5-pro`；Responses
+入口同样始终以 SSE 返回，用量记在 `provider=xiaomi` 下。
+
 ### Cherry Studio
 
 为每个服务商各加一个自定义 provider：
@@ -223,6 +254,7 @@ curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
 - **Gemini** —— base URL `http://localhost:3000`，API key `mb-xxxx`
 - **OpenAI** —— base URL `http://localhost:3000/v1`，API key `mb-xxxx`
 - **DeepSeek as OpenAI** —— base URL `http://localhost:3000/api/deepseek/v1`，API key `mb-xxxx`
+- **Xiaomi MiMo as OpenAI** —— base URL `http://localhost:3000/api/xiaomi/v1`，API key `mb-xxxx`
 
 ### Gemini CLI
 
@@ -276,11 +308,14 @@ Host model-bridge-prod
 | 方式 | 说明 | 适用场景 |
 | ---- | ---- | -------- |
 | **粘贴回调 URL**（推荐） | 浏览器授权完成后，从地址栏复制完整回调 URL（`localhost:1455/auth/callback?code=...`），粘贴到后台输入框。系统自动提取 code/state 完成授权。 | 无法 SSH/搬数据库时最方便 |
-| **SSH 隧道** | 本地执行 `ssh -R 1455:localhost:1455 your-server`，授权时浏览器跳转会通过隧道送达服务器。 | 偶尔添加账号 |
+| **SSH 隧道** | 本地执行 `ssh -L 1455:127.0.0.1:1455 your-server`，授权时浏览器访问本机 `localhost:1455` 会转发到服务器。 | 偶尔添加账号 |
 | **搬数据库** | 先在本地添加账户，再把 `./data/` 目录拷贝到服务器。Token 刷新任务会自动续期。 | 批量迁移或不方便实时操作 |
 
 另外，如果已有 Access Token / Refresh Token，可以直接用后台的「直接导入 Token」
-功能，完全跳过 OAuth 授权流程。
+功能，完全跳过 OAuth 授权流程。需要一次导入多个账号时，可用「批量导入 JSON」；
+原生格式见 [docs/account-import-example.json](docs/account-import-example.json)，
+Codex 导出格式见 [docs/codex-import-example.json](docs/codex-import-example.json)。
+这些文件包含敏感凭据，导入后不要提交或外传。
 
 ### Docker 部署说明
 
