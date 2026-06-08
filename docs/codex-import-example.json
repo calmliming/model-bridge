@@ -1,0 +1,23 @@
+{
+  "accounts": [
+    {
+      "type": "codex",
+      "email": "user1@example.com",
+      "token_source": "ChatGPT_team",
+      "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjE5MzQ0ZTY1LWJiYzktNDRkMS1hOWQwLWY5NTdiMDc5YmQwZSIsInR5cCI6IkpXVCJ9...",
+      "refresh_token": "rt.1.AABo9vpZq-3K73GuH-qPWd4cC6J2LBarnk5XUPvvGmuWlXxYozvBbp5B_wZC3vOFn2Qfmu5xEmayXQ2MWgnTb5N63DygU4rzxgmOKIEoK1WlAD1HRc_2UhrkGuUTiZXfPGUGpCjoU1YjkGmKUHdx6lV-9Se_AJbjtQwpVzGPqW-MzTEdvBHCnqelnEuNvg9GHZT9jREiZuiO7pmg-ifR_XuS6nqm1Prc17b4O5PDnrV0JM2BfIIhEBm2VhXvuPwXtF_G852fXQA_0yxJKUZI5HRgvfq47RzaaZQcGwyZfzAzrpFFnHXSHu8kvpu5Ssp87rQ",
+      "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6ImIxZGQzZjhmLTlhYWQtNDdmZS1iMGU3LWVkYjAwOTc3N2Q2YiIsInR5cCI6IkpXVCJ9...",
+      "saved_at": "2026-06-08T12:40:35.717143+00:00"
+    },
+    {
+      "type": "codex",
+      "email": "user2@example.com",
+      "token_source": "ChatGPT_plus",
+      "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjE5MzQ0ZTY1LWJiYzktNDRkMS1hOWQwLWY5NTdiMDc5YmQwZSIsInR5cCI6IkpXVCJ9...",
+      "refresh_token": "rt.1.BBCp9vpZq...",
+      "name": "My Custom Name",
+      "weight": 10,
+      "groupIds": ["group-abc123"]
+    }
+  ]
+}

@@ -60,8 +60,29 @@ async function handleImport() {
     try {
       jsonData = JSON.parse(text)
     } catch {
-      message.error('JSON 格式解析失败，请检查文件格式')
-      return
+      // Try parsing concatenated JSON objects (e.g. multiple Codex sessions in one file)
+      try {
+        const objects: unknown[] = []
+        // Split on }{ boundary between concatenated JSON objects
+        const parts = text.replace(/\}\s*\{/g, '}|||{').split('|||')
+        for (const part of parts) {
+          objects.push(JSON.parse(part.trim()))
+        }
+        jsonData = { accounts: objects }
+      } catch {
+        message.error('JSON 格式解析失败，请检查文件格式')
+        return
+      }
+    }
+
+    // Normalize: if it's a single Codex object, wrap it
+    if (jsonData && typeof jsonData === 'object' && 'type' in (jsonData as any) && (jsonData as any).type === 'codex') {
+      jsonData = { accounts: [jsonData] }
+    }
+
+    // Normalize: if it's a plain array, wrap it
+    if (Array.isArray(jsonData)) {
+      jsonData = { accounts: jsonData }
     }
 
     // Validate basic structure
@@ -111,7 +132,9 @@ function resetAndClose() {
     <div class="import-modal-content">
       <div v-if="!importResult" class="import-form">
         <div class="import-hint">
-          <p>请选择 JSON 格式的账号导入文件。文件格式示例：</p>
+          <p>支持两种导入格式：</p>
+
+          <h4>1. Model-Bridge 标准格式</h4>
           <pre class="import-example">{
   "accounts": [
     {
@@ -125,8 +148,31 @@ function resetAndClose() {
     }
   ]
 }</pre>
+
+          <h4>2. Codex 会话格式（自动识别）</h4>
+          <pre class="import-example">{
+  "accounts": [
+    {
+      "type": "codex",
+      "email": "user@example.com",
+      "token_source": "ChatGPT_team",
+      "access_token": "eyJhbGc...",
+      "refresh_token": "rt.1.AABo...",
+      "saved_at": "2026-06-08T12:40:35.717143+00:00"
+    }
+  ]
+}</pre>
+
           <p class="import-note">
-            <strong>字段说明：</strong><br>
+            <strong>Codex 格式说明：</strong><br>
+            • 自动识别 <code>type: "codex"</code> 字段<br>
+            • 使用 <code>email</code> 作为账号名称<br>
+            • 自动从 JWT 解析过期时间<br>
+            • 可选添加 <code>name</code>、<code>weight</code>、<code>groupIds</code> 字段
+          </p>
+
+          <p class="import-note">
+            <strong>标准格式字段：</strong><br>
             • provider: claude | openai | gemini | deepseek | xiaomi<br>
             • name: 账号名称（必填）<br>
             • accessToken: 访问令牌（必填）<br>

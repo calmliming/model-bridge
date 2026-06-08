@@ -237,6 +237,7 @@ const importTokenSchema = z.object({
   expiresAt: z.number().int().positive().optional(),
 })
 
+// Standard format: model-bridge native format
 const batchImportAccountSchema = z.object({
   provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']),
   name: z.string().min(1),
@@ -247,8 +248,23 @@ const batchImportAccountSchema = z.object({
   groupIds: z.array(z.string()).optional(),
 })
 
+// Codex format: compatibility with Codex session exports
+const codexAccountSchema = z.object({
+  type: z.literal('codex'),
+  email: z.string().email(),
+  token_source: z.string(),
+  access_token: z.string().min(1),
+  refresh_token: z.string().optional(),
+  id_token: z.string().optional(),
+  saved_at: z.string().optional(),
+  // Optional fields for naming and grouping
+  name: z.string().optional(),
+  weight: z.number().int().min(1).max(100).optional(),
+  groupIds: z.array(z.string()).optional(),
+})
+
 const batchImportSchema = z.object({
-  accounts: z.array(batchImportAccountSchema).min(1).max(100),
+  accounts: z.array(z.union([batchImportAccountSchema, codexAccountSchema])).min(1).max(100),
 })
 
 const paginationQuerySchema = z.object({
@@ -934,7 +950,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
-  // Batch import accounts: create multiple accounts at once from JSON payload
+  // Batch import accounts: create multiple accounts at once from JSON payload.
+  // Supports both model-bridge native format and Codex session export format.
   app.post(
     '/api/admin/accounts/import/batch',
     { preHandler: requireAdmin },
@@ -952,35 +969,61 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         error?: string
       }> = []
 
-      for (const accountData of body.data.accounts) {
+      for (const raw of body.data.accounts) {
+        // Normalize: detect Codex format and convert to standard fields
+        let provider: string
+        let name: string
+        let accessToken: string
+        let refreshToken: string
+        let expiresAt: number
+        let weight: number | undefined
+        let groupIds: string[]
+
+        if ('type' in raw && raw.type === 'codex') {
+          // Codex format: derive provider from token_source, name from email
+          provider = 'openai'
+          name = raw.name || raw.email
+          accessToken = raw.access_token
+          refreshToken = raw.refresh_token ?? ''
+          weight = raw.weight
+          groupIds = raw.groupIds ?? []
+
+          // Parse JWT exp from access_token
+          expiresAt = 0
+          try {
+            const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString())
+            if (payload.exp) expiresAt = payload.exp * 1000
+          } catch { /* ignore parse errors */ }
+        } else {
+          // Standard format — discriminated by absence of `type`
+          const std = raw as { provider: string; name: string; accessToken: string; refreshToken?: string; expiresAt?: number; weight?: number; groupIds?: string[] }
+          provider = std.provider
+          name = std.name
+          accessToken = std.accessToken
+          refreshToken = std.refreshToken ?? ''
+          expiresAt = std.expiresAt ?? 0
+          weight = std.weight
+          groupIds = std.groupIds ?? []
+        }
+
         try {
           const created = await createAccount({
-            provider: accountData.provider,
-            name: accountData.name,
-            tokens: {
-              accessToken: accountData.accessToken,
-              refreshToken: accountData.refreshToken ?? '',
-              expiresAt: accountData.expiresAt ?? 0,
-            },
+            provider,
+            name,
+            tokens: { accessToken, refreshToken, expiresAt },
             metadata: null,
-            groupIds: accountData.groupIds ?? [],
+            groupIds,
           })
 
-          // Set weight if specified
-          if (accountData.weight !== undefined) {
-            await setAccountWeight(created.id, accountData.weight)
+          if (weight !== undefined) {
+            await setAccountWeight(created.id, weight)
           }
 
-          results.push({
-            name: accountData.name,
-            provider: accountData.provider,
-            success: true,
-            id: created.id,
-          })
+          results.push({ name, provider, success: true, id: created.id })
         } catch (err) {
           results.push({
-            name: accountData.name,
-            provider: accountData.provider,
+            name,
+            provider,
             success: false,
             error: err instanceof Error ? err.message : String(err),
           })
