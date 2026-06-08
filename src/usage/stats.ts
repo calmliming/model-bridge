@@ -138,6 +138,13 @@ function utcDayStart(timestampMs: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
 }
 
+/** Epoch ms of today's midnight in the server's local timezone. */
+function startOfTodayMs(): number {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
 function rangeStart(days: number): number {
   const range = clampDays(days)
   return utcDayStart(Date.now()) - (range - 1) * MS_PER_DAY
@@ -396,7 +403,9 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
 export async function dashboardOverview(): Promise<DashboardOverview> {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
-  const since24h = now - MS_PER_DAY
+  // "Today" = since local midnight (server timezone), not a rolling 24h window.
+  // The *24h field names are kept as-is; they now carry calendar-today figures.
+  const sinceToday = startOfTodayMs()
   const since5m = now - 5 * 60_000
   const since30d = now - 30 * MS_PER_DAY
 
@@ -435,7 +444,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
           FROM usage_logs WHERE ts >= $5) AS tokens30d,
        (SELECT COALESCE(SUM(cost), 0)
           FROM usage_logs WHERE ts >= $5) AS cost30d`,
-    [now, now, since24h, since5m, since30d],
+    [now, now, sinceToday, since5m, since30d],
   )
   const t = totalsRes.rows[0] ?? {}
   const totals: DashboardOverview['totals'] = {

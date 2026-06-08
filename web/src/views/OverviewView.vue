@@ -229,7 +229,7 @@ const cards = computed(() => [
     icon: 'server',
   },
   {
-    label: '24h 请求',
+    label: '今日请求',
     value: formatNumber(totals.value.requests24h),
     hint: `累计 ${formatNumber(totals.value.requestCount)} 次`,
     tone: 'violet',
@@ -238,12 +238,12 @@ const cards = computed(() => [
   {
     label: '用户',
     value: formatNumber(totals.value.totalUsers),
-    hint: `24h 新增 ${formatNumber(totals.value.newUsers24h)} · 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
+    hint: `今日新增 ${formatNumber(totals.value.newUsers24h)} · 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
     tone: 'cyan',
     icon: 'users',
   },
   {
-    label: '24h Tokens',
+    label: '今日 Tokens',
     value: formatTokens(totals.value.tokens24h),
     hint: `费用 ${formatCost(totals.value.cost24h)}`,
     tone: 'amber',
@@ -268,8 +268,8 @@ const cards = computed(() => [
     value: formatDuration(totals.value.avgLatencyMs24h),
     hint:
       successRate24h.value == null
-        ? '暂无 24h 请求'
-        : `24h 成功率 ${successRate24h.value.toFixed(1)}%`,
+        ? '暂无今日请求'
+        : `今日成功率 ${successRate24h.value.toFixed(1)}%`,
     tone: 'rose',
     icon: 'clock',
   },

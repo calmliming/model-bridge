@@ -399,7 +399,11 @@ const USAGE_MS_PER_DAY = 86_400_000
 
 export async function userUsageSummary(userId: string): Promise<UserUsageSummary> {
   const now = Date.now()
-  const since24h = now - USAGE_MS_PER_DAY
+  // "Today" = since local midnight (server timezone); the *24h fields are kept
+  // for compatibility but now carry calendar-today figures.
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const since24h = todayStart.getTime()
   const since30d = now - 30 * USAGE_MS_PER_DAY
   const tokenSum =
     'input_tokens + output_tokens + cache_create_tokens + cache_read_tokens'

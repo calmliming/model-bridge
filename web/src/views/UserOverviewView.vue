@@ -125,19 +125,19 @@ function formatNumber(n: number): string {
 
 const metricCards = computed(() => [
   {
-    label: '24h 请求',
+    label: '今日请求',
     value: formatNumber(stat.value.requests24h),
     hint: `累计 ${formatNumber(stat.value.requestsTotal)} 次`,
     tone: 'violet',
   },
   {
-    label: '24h Tokens',
+    label: '今日 Tokens',
     value: formatNumber(stat.value.tokens24h),
     hint: `费用 ${formatUsd(stat.value.cost24h)}`,
     tone: 'indigo',
   },
   {
-    label: '24h 费用',
+    label: '今日费用',
     value: formatUsd(stat.value.cost24h),
     hint: `${formatNumber(stat.value.tokens24h)} tokens`,
     tone: 'rose',
