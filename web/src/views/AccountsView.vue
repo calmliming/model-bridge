@@ -53,7 +53,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -115,7 +115,7 @@ const pasteCallbackUrl = ref('')
 const showImportToken = ref(false)
 const importAccessToken = ref('')
 const importRefreshToken = ref('')
-const deepseekApiKey = ref('')
+const apiKeyInput = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
 
@@ -124,19 +124,33 @@ const providerLabel: Record<Provider, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
+  xiaomi: 'Xiaomi MiMo',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
   gemini: 'warning',
   deepseek: 'info',
+  xiaomi: 'warning',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
   openai: 'auth.openai.com',
   gemini: 'accounts.google.com',
   deepseek: 'platform.deepseek.com',
+  xiaomi: 'platform.xiaomimimo.com',
+}
+
+// Providers that authenticate with a plain API key (no OAuth flow). They share
+// the single-step "粘贴 API Key" form below.
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi']
+function isApiKeyProvider(provider: Provider): boolean {
+  return API_KEY_PROVIDERS.includes(provider)
+}
+const apiKeyConsoleHint: Record<string, string> = {
+  deepseek: '在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。',
+  xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
 }
 
 const statusMeta: Record<string, { label: string; type: TagType }> = {
@@ -545,27 +559,29 @@ function openAdd() {
   showImportToken.value = false
   importAccessToken.value = ''
   importRefreshToken.value = ''
-  deepseekApiKey.value = ''
+  apiKeyInput.value = ''
   showAdd.value = true
 }
 
-async function finishDeepseekImport() {
+async function finishApiKeyImport() {
+  const provider = form.value.provider
+  const label = providerLabel[provider]
   if (!form.value.name.trim()) {
     message.warning('请填写账户名称')
     return
   }
-  if (!deepseekApiKey.value.trim()) {
-    message.warning('请填写 DeepSeek API Key')
+  if (!apiKeyInput.value.trim()) {
+    message.warning(`请填写 ${label} API Key`)
     return
   }
   busy.value = true
   try {
     await api.post('/admin/accounts/import/token', {
-      provider: 'deepseek',
+      provider,
       name: form.value.name.trim(),
-      accessToken: deepseekApiKey.value.trim(),
+      accessToken: apiKeyInput.value.trim(),
     })
-    message.success('DeepSeek 账户已添加')
+    message.success(`${label} 账户已添加`)
     showAdd.value = false
     await load()
   } catch (e) {
@@ -954,6 +970,7 @@ onBeforeUnmount(() => {
               <UiRadioButton value="openai">OpenAI</UiRadioButton>
               <UiRadioButton value="gemini">Gemini</UiRadioButton>
               <UiRadioButton value="deepseek">DeepSeek</UiRadioButton>
+              <UiRadioButton value="xiaomi">Xiaomi MiMo</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>
           <UiFormItem label="账户名称">
@@ -962,21 +979,21 @@ onBeforeUnmount(() => {
               :placeholder="`例如：我的 ${providerLabel[form.provider]}`"
             />
           </UiFormItem>
-          <UiFormItem v-if="form.provider === 'deepseek'" label="API Key">
+          <UiFormItem v-if="isApiKeyProvider(form.provider)" label="API Key">
             <UiInput
-              v-model:value="deepseekApiKey"
+              v-model:value="apiKeyInput"
               placeholder="sk-..."
               type="password"
               show-password-on="click"
             />
           </UiFormItem>
         </UiForm>
-        <UiText v-if="form.provider !== 'deepseek'" depth="3" style="font-size: 13px">
+        <UiText v-if="!isApiKeyProvider(form.provider)" depth="3" style="font-size: 13px">
           下一步会生成 {{ authorizeHost[form.provider] }} 的授权链接；
           你需要用拥有该订阅的账号登录并授权。
         </UiText>
         <UiText v-else depth="3" style="font-size: 13px">
-          在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。
+          {{ apiKeyConsoleHint[form.provider] }}
         </UiText>
       </div>
 
@@ -1080,10 +1097,10 @@ onBeforeUnmount(() => {
         <UiSpace justify="end">
           <UiButton @click="showAdd = false">取消</UiButton>
           <UiButton
-            v-if="step === 'name' && form.provider === 'deepseek'"
+            v-if="step === 'name' && isApiKeyProvider(form.provider)"
             type="primary"
             :loading="busy"
-            @click="finishDeepseekImport"
+            @click="finishApiKeyImport"
           >
             添加账户
           </UiButton>

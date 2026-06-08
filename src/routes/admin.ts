@@ -93,7 +93,7 @@ const walletAdjustSchema = z.object({
 const createKeySchema = z.object({
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
-  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).optional(),
+  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])).optional(),
   allowedModels: z.array(z.string().trim().min(1)).optional(),
   modelMappings: z.record(z.string()).optional(),
   accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -108,7 +108,7 @@ const updateKeySchema = z
     enabled: z.boolean().optional(),
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
-    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek'])).nullable().optional(),
+    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])).nullable().optional(),
     allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
     modelMappings: z.record(z.string()).nullable().optional(),
     accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -226,7 +226,7 @@ const assignSubscriptionSchema = z.object({
 })
 
 const importTokenSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']),
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),

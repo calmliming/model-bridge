@@ -110,6 +110,7 @@ const providerOptions = [
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
   { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Xiaomi MiMo', value: 'xiaomi' },
 ]
 
 const providerLabel: Record<string, string> = {
@@ -117,6 +118,7 @@ const providerLabel: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
+  xiaomi: 'Xiaomi MiMo',
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -124,6 +126,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   openai: 'success',
   gemini: 'warning',
   deepseek: 'error',
+  xiaomi: 'warning',
 }
 
 const commonModelOptions = [
@@ -133,6 +136,9 @@ const commonModelOptions = [
   'deepseek-*',
   'deepseek-v4-pro',
   'deepseek-v4-flash',
+  'mimo-*',
+  'mimo-v2.5-pro',
+  'mimo-v2.5',
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [

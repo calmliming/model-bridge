@@ -151,6 +151,7 @@ const providerLabels: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
+  xiaomi: 'Xiaomi MiMo',
 }
 
 const providerColors: Record<string, string> = {
@@ -158,6 +159,7 @@ const providerColors: Record<string, string> = {
   openai: '#10a37f',
   gemini: '#4285f4',
   deepseek: '#6366f1',
+  xiaomi: '#ff6900',
 }
 
 const statIconPaths: Record<string, string[]> = {

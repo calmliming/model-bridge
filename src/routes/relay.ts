@@ -29,6 +29,13 @@ import { relayDeepseekResponses } from '../providers/deepseek/responses-relay'
 import * as deepseekResponsesUsage from '../providers/deepseek/responses-usage'
 import { createDeepseekResponsesStreamTransform } from '../providers/deepseek/stream'
 import { mapModel as mapDeepseekResponsesModel } from '../providers/deepseek/converter'
+import { relayXiaomiMessages } from '../providers/xiaomi/relay'
+import * as xiaomiUsage from '../providers/xiaomi/usage'
+import { relayXiaomiChatCompletions } from '../providers/xiaomi/chat-relay'
+import { relayXiaomiResponses } from '../providers/xiaomi/responses-relay'
+import * as xiaomiResponsesUsage from '../providers/xiaomi/responses-usage'
+import { createXiaomiResponsesStreamTransform } from '../providers/xiaomi/stream'
+import { mapModel as mapXiaomiResponsesModel } from '../providers/xiaomi/converter'
 import {
   isProviderAllowed,
   listGeminiModels,
@@ -216,6 +223,50 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: deepseekResponsesUsage.createStreamParser,
     parseJsonUsage: deepseekResponsesUsage.parseJsonUsage,
     createStreamTransform: createDeepseekResponsesStreamTransform,
+  },
+  // Xiaomi MiMo — same shape as DeepSeek: Anthropic-compatible /v1/messages,
+  // plus OpenAI Chat-Completions and a Responses-API adapter for Codex CLI.
+  xiaomi: {
+    id: 'xiaomi',
+    forceStream: false,
+    normalizeModel: mapXiaomiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayXiaomiMessages(token, body),
+    createStreamParser: xiaomiUsage.createStreamParser,
+    parseJsonUsage: xiaomiUsage.parseJsonUsage,
+  },
+  'xiaomi-chat': {
+    id: 'xiaomi',
+    forceStream: false,
+    normalizeModel: mapXiaomiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayXiaomiChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  // Route key only — provider.id stays 'xiaomi' so account pool, allowed-
+  // provider checks, and usage records all reuse the existing xiaomi setup.
+  // Backed by MiMo's OpenAI-compatible chat/completions endpoint with a
+  // Responses-API ↔ Chat-Completions stream converter for Codex CLI.
+  'xiaomi-responses': {
+    id: 'xiaomi',
+    forceStream: true,
+    responsesProtocol: true,
+    normalizeModel: mapXiaomiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayXiaomiResponses(token, body),
+    createStreamParser: xiaomiResponsesUsage.createStreamParser,
+    parseJsonUsage: xiaomiResponsesUsage.parseJsonUsage,
+    createStreamTransform: createXiaomiResponsesStreamTransform,
   },
 }
 
@@ -459,6 +510,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['deepseek-chat']!)
   const deepseekResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['deepseek-responses']!)
+  const xiaomiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.xiaomi!)
+  const xiaomiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['xiaomi-chat']!)
+  const xiaomiResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['xiaomi-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
@@ -476,6 +533,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey }, deepseekResponsesHandler)
+  // Xiaomi MiMo: Anthropic-compatible endpoint under /api/xiaomi prefix.
+  // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/xiaomi
+  app.post('/api/xiaomi/v1/messages', { preHandler: requireApiKey }, xiaomiHandler)
+  // Xiaomi MiMo: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/xiaomi/v1
+  app.post('/api/xiaomi/v1/chat/completions', { preHandler: requireApiKey }, xiaomiChatHandler)
+  // Xiaomi MiMo: OpenAI Responses-API surface for Codex CLI. The relay rewrites
+  // requests into chat/completions and translates the SSE stream back.
+  // Codex: configure base_url=https://your-host/api/xiaomi
+  app.post('/api/xiaomi/v1/responses', { preHandler: requireApiKey }, xiaomiResponsesHandler)
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
@@ -487,6 +554,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   )
   app.get('/api/deepseek/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'deepseek'),
+  )
+  app.get('/api/xiaomi/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'xiaomi'),
   )
   app.get('/api/gemini/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
   app.get('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
@@ -504,11 +574,20 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com  (+ /v1/messages)
   // - OpenAI/Codex: base_url           = https://api.example.com  (+ /responses)
   // - Gemini:       base URL           = https://api.example.com  (+ /v1beta/...)
-  // DeepSeek shares these paths and is selected by model name (deepseek-*),
-  // so it needs no separate prefix — see dispatchByModel.
-  const messagesHandler = dispatchByModel(PROVIDERS.claude!, PROVIDERS.deepseek!)
-  const responsesHandler = dispatchByModel(PROVIDERS.openai!, PROVIDERS['deepseek-responses']!)
-  const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, PROVIDERS['deepseek-chat']!)
+  // DeepSeek (deepseek-*) and Xiaomi MiMo (mimo-*) share these paths and are
+  // selected by model name, so they need no separate prefix — see dispatchByModel.
+  const messagesHandler = dispatchByModel(PROVIDERS.claude!, [
+    { test: /^deepseek/i, handler: PROVIDERS.deepseek! },
+    { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
+  ])
+  const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
+    { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
+    { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
+  ])
+  const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
+    { test: /^deepseek/i, handler: PROVIDERS['deepseek-chat']! },
+    { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
+  ])
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
   app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
@@ -522,17 +601,21 @@ export function registerRelayRoutes(app: FastifyInstance): void {
 
 /**
  * Clean-endpoint dispatch: route by the (mapping-applied) model name so a
- * single bare base URL serves every provider. `deepseek-*` models go to the
- * DeepSeek backend; everything else uses the path's default provider. This is a
- * cheap in-memory check (no extra upstream round-trip), so it adds no latency.
+ * single bare base URL serves every provider. Model-routed backends are tried
+ * in order (e.g. `deepseek-*` → DeepSeek, `mimo-*` → Xiaomi); anything that
+ * matches none uses the path's default provider. This is a cheap in-memory
+ * check (no extra upstream round-trip), so it adds no latency.
  */
-function dispatchByModel(defaultHandler: ProviderHandler, deepseekHandler: ProviderHandler) {
+function dispatchByModel(
+  defaultHandler: ProviderHandler,
+  routed: Array<{ test: RegExp; handler: ProviderHandler }>,
+) {
   return (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body ?? {}) as Record<string, unknown>
     const raw = typeof body.model === 'string' ? body.model : ''
     const mapped = mapRequestedModel(raw, request.apiKey!.modelMappings)
-    const isDeepseek = /^deepseek/i.test(raw) || /^deepseek/i.test(mapped)
-    return executeRelay(request, reply, isDeepseek ? deepseekHandler : defaultHandler)
+    const match = routed.find((r) => r.test.test(raw) || r.test.test(mapped))
+    return executeRelay(request, reply, match ? match.handler : defaultHandler)
   }
 }
 

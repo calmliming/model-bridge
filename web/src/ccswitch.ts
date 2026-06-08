@@ -32,7 +32,7 @@ export interface CcSwitchTarget {
     opusModel?: string
   }
   /** Which key provider this target maps to, for filtering by a key's allowedProviders. */
-  provider: 'claude' | 'openai' | 'gemini' | 'deepseek'
+  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi'
 }
 
 /** All supported import targets, in display order. */
@@ -75,6 +75,29 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     endpoint: (origin) => origin,
     models: { model: 'deepseek-v4-pro' },
     provider: 'deepseek',
+  },
+  {
+    id: 'claude-xiaomi',
+    app: 'claude',
+    label: 'Claude Code · MiMo',
+    vendor: 'Xiaomi',
+    endpoint: (origin) => origin,
+    models: {
+      model: 'mimo-v2.5-pro',
+      sonnetModel: 'mimo-v2.5-pro',
+      haikuModel: 'mimo-v2.5',
+      opusModel: 'mimo-v2.5-pro',
+    },
+    provider: 'xiaomi',
+  },
+  {
+    id: 'codex-xiaomi',
+    app: 'codex',
+    label: 'Codex CLI · MiMo',
+    vendor: 'Xiaomi',
+    endpoint: (origin) => origin,
+    models: { model: 'mimo-v2.5-pro' },
+    provider: 'xiaomi',
   },
   {
     id: 'gemini',
@@ -127,6 +150,20 @@ const CC_SWITCH_USAGE_SCRIPT =
 /** Auto-refresh interval (minutes) for the balance query. */
 const CC_SWITCH_USAGE_INTERVAL = 30
 
+/**
+ * Base64-encodes a UTF-8 string. CC Switch Base64-decodes the `usageScript`
+ * parameter (after URL-decoding the query), so the raw JS must be Base64'd
+ * first — otherwise it rejects the link with "usage_script ... Base64 解码失败:
+ * Invalid symbol 40" (the script starts with '('). encodeURIComponent at the
+ * call site then percent-escapes '+' '/' '=' so the Base64 survives the URL.
+ */
+function toBase64(input: string): string {
+  const bytes = new TextEncoder().encode(input)
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary)
+}
+
 /*
  * Query values are encoded with encodeURIComponent (spaces as %20) to match the
  * format CC Switch documents and parses.
@@ -155,7 +192,7 @@ export function buildCcSwitchUrl(
   parts.push('usageEnabled=true')
   parts.push(`usageAutoInterval=${CC_SWITCH_USAGE_INTERVAL}`)
   parts.push(`usageApiKey=${encodeURIComponent(opts.apiKey)}`)
-  parts.push(`usageScript=${encodeURIComponent(CC_SWITCH_USAGE_SCRIPT)}`)
+  parts.push(`usageScript=${encodeURIComponent(toBase64(CC_SWITCH_USAGE_SCRIPT))}`)
   return `ccswitch://v1/import?${parts.join('&')}`
 }
 

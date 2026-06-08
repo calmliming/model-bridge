@@ -98,6 +98,7 @@ const providerOptions = [
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
   { label: 'DeepSeek', value: 'deepseek' },
+  { label: 'Xiaomi MiMo', value: 'xiaomi' },
 ]
 
 const providerLabel: Record<string, string> = {
@@ -105,10 +106,11 @@ const providerLabel: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
+  xiaomi: 'Xiaomi MiMo',
 }
 
-const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*'].map((value) => ({ label: value, value }))
-const commonMappingOptions = ['gpt-public=gpt-5.4', 'deepseek-pro=deepseek-v4-pro'].map((value) => ({ label: value, value }))
+const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*'].map((value) => ({ label: value, value }))
+const commonMappingOptions = ['gpt-public=gpt-5.4', 'deepseek-pro=deepseek-v4-pro', 'mimo-pro=mimo-v2.5-pro'].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
   const out: Record<string, string> = {}

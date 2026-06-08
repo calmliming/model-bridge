@@ -69,12 +69,27 @@ function deepseekTier(model: string): keyof typeof DEEPSEEK_TIERS {
   return 'pro'
 }
 
+// Xiaomi MiMo V2.5 list prices (per 1M tokens). MiMo-V2.5-Pro uses the official
+// CNY rate (3 / 6 CNY, cache-hit input 0.025 CNY) converted to USD; the standard
+// MiMo-V2.5 uses the international USD rate ($1 / $3, cached $0.2). MiMo has no
+// separate cache-write fee — cacheWrite is 0; cacheRead is the cached-input price.
+const XIAOMI_TIERS: Record<'standard' | 'pro', TierPrice> = {
+  standard: { input: 1, output: 3, cacheWrite: 0, cacheRead: 0.2 },
+  pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) },
+}
+
+function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
+  // mimo-v2.5-pro (and legacy mimo-v2-pro) → pro; mimo-v2.5 / flash / omni → standard
+  return model.toLowerCase().includes('pro') ? 'pro' : 'standard'
+}
+
 /** Returns the built-in fallback price for a (provider, model) pair. */
 function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'claude') return CLAUDE_TIERS[claudeTier(model)]
   if (provider === 'openai') return OPENAI_TIERS[openaiTier(model)]
   if (provider === 'gemini') return GEMINI_TIERS[geminiTier(model)]
   if (provider === 'deepseek') return DEEPSEEK_TIERS[deepseekTier(model)]
+  if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   return null
 }
 
@@ -100,6 +115,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_TIERS.pro },
   { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_TIERS.pro },
+  { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
+  { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
 ]
 
 /** In-memory cache: "provider:model" → TierPrice (DB-loaded). */

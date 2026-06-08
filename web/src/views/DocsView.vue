@@ -103,6 +103,10 @@ codex --profile model-bridge</code></pre>
               <span class="text-sm text-gray-900 dark:text-white">DeepSeek (OpenAI)</span>
               <code class="code-inline w-fit">{{ baseOrigin }}/api/deepseek/v1</code>
             </div>
+            <div class="grid gap-1.5">
+              <span class="text-sm text-gray-900 dark:text-white">Xiaomi MiMo (OpenAI)</span>
+              <code class="code-inline w-fit">{{ baseOrigin }}/api/xiaomi/v1</code>
+            </div>
           </div>
           <p class="doc-p mt-3">
             API Key 填后台生成的 <code class="code-inline">mb-...</code> 密钥；OpenAI 兼容客户端使用 Chat Completions，
