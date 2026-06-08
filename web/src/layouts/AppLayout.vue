@@ -8,17 +8,53 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const menu = [
-  { to: '/overview', key: 'overview', label: '仪表盘' },
-  { to: '/accounts', key: 'accounts', label: '上游账户' },
-  { to: '/keys', key: 'keys', label: 'API Keys' },
-  { to: '/users', key: 'users', label: '用户钱包' },
-  { to: '/payments', key: 'payments', label: '充值订单' },
-  { to: '/redeem-codes', key: 'redeem-codes', label: '兑换码' },
-  { to: '/subscription-plans', key: 'subscription-plans', label: '订阅套餐' },
-  { to: '/stats', key: 'stats', label: '用量统计' },
-  { to: '/docs', key: 'docs', label: '使用文档' },
-  { to: '/settings', key: 'settings', label: '设置' },
+const menuIconPaths = {
+  overview: ['M3 13h8V3H3v10Zm10 8h8v-8h-8v8ZM3 21h8v-6H3v6Zm10-10h8V3h-8v8Z'],
+  accounts: [
+    'M6 4h12a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+    'M6 13h12a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2Z',
+  ],
+  keys: ['M15.75 7.5a4.5 4.5 0 1 1-4.25 6L7 18H4.5v-2.5L9 11a4.48 4.48 0 0 1 6.75-3.5Z'],
+  users: [
+    'M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5v-9Z',
+    'M3 9h18M16 14h3',
+  ],
+  payments: [
+    'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
+    'M3 10h18M7 15h4',
+  ],
+  'redeem-codes': [
+    'M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 1 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 1 0 0-4V8Z',
+    'M9 9v.01M9 15v.01M12 9v.01M12 15v.01',
+  ],
+  'subscription-plans': [
+    'M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+    'M8 8h8M8 12h8M8 16h5',
+  ],
+  stats: ['M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-8'],
+  docs: [
+    'M7 4h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+    'M14 4v5h5M8 13h8M8 17h6',
+  ],
+  settings: [
+    'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
+    'M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41',
+  ],
+} as const
+
+type MenuIcon = keyof typeof menuIconPaths
+
+const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = [
+  { to: '/overview', key: 'overview', label: '仪表盘', icon: 'overview' },
+  { to: '/accounts', key: 'accounts', label: '上游账户', icon: 'accounts' },
+  { to: '/keys', key: 'keys', label: 'API Keys', icon: 'keys' },
+  { to: '/users', key: 'users', label: '用户钱包', icon: 'users' },
+  { to: '/payments', key: 'payments', label: '充值订单', icon: 'payments' },
+  { to: '/redeem-codes', key: 'redeem-codes', label: '兑换码', icon: 'redeem-codes' },
+  { to: '/subscription-plans', key: 'subscription-plans', label: '订阅套餐', icon: 'subscription-plans' },
+  { to: '/stats', key: 'stats', label: '用量统计', icon: 'stats' },
+  { to: '/docs', key: 'docs', label: '使用文档', icon: 'docs' },
+  { to: '/settings', key: 'settings', label: '设置', icon: 'settings' },
 ]
 
 const titleMap: Record<string, string> = {
@@ -142,7 +178,23 @@ function logout() {
               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white'
           "
         >
-          {{ item.label }}
+          <svg
+            class="h-5 w-5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path
+              v-for="path in menuIconPaths[item.icon]"
+              :key="path"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              :d="path"
+            />
+          </svg>
+          <span class="truncate">{{ item.label }}</span>
         </RouterLink>
       </nav>
 
@@ -188,8 +240,8 @@ function logout() {
               @click="toggleNotifications"
             >
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2a2 2 0 0 1-.6 1.4L4 17h5" />
-                <path stroke-linecap="round" stroke-linejoin="round" d="M10 21h4" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.5 18.5a2.5 2.5 0 0 1-5 0" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 10a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" />
               </svg>
             </button>
             <div
