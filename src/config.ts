@@ -69,6 +69,20 @@ const schema = z.object({
   TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),
   TURNSTILE_SECRET_KEY: z.preprocess(blankToUndefined, z.string().optional()),
   SECURITY_HEADERS_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
+  // IANA timezone used to compute "today" boundaries for dashboard stats.
+  // Defaults to Asia/Shanghai so daily figures match Beijing time regardless of
+  // where the server runs. Unlike some gateways we don't crash on a bad value —
+  // an unrecognized zone falls back to UTC with a warning.
+  STATS_TIMEZONE: z.preprocess(blankToUndefined, z.string().optional()).transform((tz) => {
+    const wanted = tz ?? 'Asia/Shanghai'
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: wanted })
+      return wanted
+    } catch {
+      console.warn(`[config] invalid STATS_TIMEZONE "${wanted}", falling back to UTC`)
+      return 'UTC'
+    }
+  }),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers

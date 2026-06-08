@@ -1,6 +1,7 @@
 import { pool } from '../db/index'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
 import { resolvePrice } from './pricing'
+import { startOfTodayMs } from '../time'
 
 export interface DailyStat {
   day: string // YYYY-MM-DD (UTC)
@@ -136,13 +137,6 @@ function utcDayKey(timestampMs: number): string {
 function utcDayStart(timestampMs: number): number {
   const d = new Date(timestampMs)
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-}
-
-/** Epoch ms of today's midnight in the server's local timezone. */
-function startOfTodayMs(): number {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
 }
 
 function rangeStart(days: number): number {

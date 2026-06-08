@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { pool } from '../db/index'
 import { microsToUsd } from '../wallet/money'
+import { startOfTodayMs } from '../time'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000
 const BCRYPT_ROUNDS = 10
@@ -399,11 +400,9 @@ const USAGE_MS_PER_DAY = 86_400_000
 
 export async function userUsageSummary(userId: string): Promise<UserUsageSummary> {
   const now = Date.now()
-  // "Today" = since local midnight (server timezone); the *24h fields are kept
-  // for compatibility but now carry calendar-today figures.
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const since24h = todayStart.getTime()
+  // "Today" = since midnight in the configured stats timezone (default Beijing);
+  // the *24h fields are kept for compatibility but now carry calendar-today figures.
+  const since24h = startOfTodayMs()
   const since30d = now - 30 * USAGE_MS_PER_DAY
   const tokenSum =
     'input_tokens + output_tokens + cache_create_tokens + cache_read_tokens'
