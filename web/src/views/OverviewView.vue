@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useMessage } from '../composables/useMessage'
 import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatTokens } from '../utils'
 
 interface DailyStat {
   day: string
@@ -388,15 +388,6 @@ async function loadRecentLogs() {
 
 function formatNumber(n: number): string {
   return Math.round(n).toLocaleString('en-US')
-}
-
-function formatTokens(n: number): string {
-  const value = Number.isFinite(n) ? n : 0
-  const abs = Math.abs(value)
-  if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(2)}K`
-  return Math.round(value).toLocaleString('en-US')
 }
 
 function formatRate(n: number): string {

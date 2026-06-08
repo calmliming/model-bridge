@@ -5,6 +5,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
+import { formatTokens } from '../utils'
 
 interface DailyStat {
   day: string
@@ -133,15 +134,6 @@ function compactNumber(n: number): string {
   return formatNumber(n)
 }
 
-// Cards have limited width: compact large values with K/M/B (2 decimals),
-// matching the sub2api style; keep full digits below 1K.
-function formatCardTokens(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`
-  return formatNumber(n)
-}
-
 function percent(value: number, total: number): string {
   if (!total) return '0.00%'
   return `${((value / total) * 100).toFixed(2)}%`
@@ -168,14 +160,14 @@ const cards = computed(() => {
     { label: '请求数', value: formatNumber(t.requests), hint: '中转请求总数', tone: 'blue', icon: 'document' },
     {
       label: 'Token 总量',
-      value: formatCardTokens(totalTokens(t)),
+      value: formatTokens(totalTokens(t)),
       hint: `输入 ${formatNumber(t.inputTokens)} · 输出 ${formatNumber(t.outputTokens)} · 缓存 ${formatNumber(t.cacheCreateTokens + t.cacheReadTokens)}`,
       tone: 'green',
       icon: 'cube',
     },
     {
       label: '缓存 Token',
-      value: formatCardTokens(t.cacheCreateTokens + t.cacheReadTokens),
+      value: formatTokens(t.cacheCreateTokens + t.cacheReadTokens),
       hint: `写入 ${formatNumber(t.cacheCreateTokens)} · 读取 ${formatNumber(t.cacheReadTokens)}`,
       tone: 'violet',
       icon: 'cache',
