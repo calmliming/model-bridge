@@ -134,6 +134,21 @@ export async function listGroupMembers(groupId: string) {
     .orderBy(desc(sql`COALESCE(${accountGroupMembers.weight}, ${accounts.weight})`))
 }
 
+/** Adds one account to a group. No-op if it is already a member. */
+export async function addGroupMember(groupId: string, accountId: string): Promise<void> {
+  await db
+    .insert(accountGroupMembers)
+    .values({ accountId, groupId })
+    .onConflictDoNothing()
+}
+
+/** Removes one account from a group. No-op if it was not a member. */
+export async function removeGroupMember(groupId: string, accountId: string): Promise<void> {
+  await db
+    .delete(accountGroupMembers)
+    .where(and(eq(accountGroupMembers.groupId, groupId), eq(accountGroupMembers.accountId, accountId)))
+}
+
 /** Sets (or clears, when null) one member's in-group weight override. */
 export async function setMemberWeight(
   groupId: string,

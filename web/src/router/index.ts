@@ -27,6 +27,7 @@ export const router = createRouter({
         { path: '', redirect: '/overview' },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
+        { path: 'account-groups', name: 'account-groups', component: () => import('../views/AccountGroupsView.vue') },
         { path: 'keys', name: 'keys', component: () => import('../views/ApiKeysView.vue') },
         { path: 'users', name: 'users', component: () => import('../views/AdminUsersView.vue') },
         { path: 'payments', name: 'payments', component: () => import('../views/PaymentOrdersView.vue') },

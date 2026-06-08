@@ -10,7 +10,7 @@ import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
 import { createAccount, deleteAccount, listAccounts, setAccountAutopause, setAccountGroups, setAccountStatus, setAccountWeight } from '../accounts/manager'
-import { createGroup, deleteGroup, listGroupMembers, listGroups, setMemberWeight, updateGroup } from '../accounts/groups'
+import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -165,6 +165,10 @@ const updateGroupSchema = z
 const memberWeightSchema = z.object({
   accountId: z.string().trim().min(1),
   weight: z.number().int().min(1).max(100).nullable(),
+})
+
+const addMemberSchema = z.object({
+  accountId: z.string().trim().min(1),
 })
 
 const generateRedeemCodesSchema = z.object({
@@ -623,6 +627,29 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: 'invalid request body' })
       }
       await setMemberWeight(request.params.id, body.data.accountId, body.data.weight)
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/account-groups/:id/members/add',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = addMemberSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid request body' })
+      }
+      await addGroupMember(params.data.id, body.data.accountId)
+      return reply.code(201).send({ ok: true })
+    },
+  )
+
+  app.delete<{ Params: { id: string; accountId: string } }>(
+    '/api/admin/account-groups/:id/members/:accountId',
+    { preHandler: requireAdmin },
+    async (request) => {
+      await removeGroupMember(request.params.id, request.params.accountId)
       return { ok: true }
     },
   )
