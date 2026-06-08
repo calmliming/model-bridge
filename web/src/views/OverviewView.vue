@@ -237,8 +237,8 @@ const cards = computed(() => [
   },
   {
     label: '用户',
-    value: `+${formatNumber(totals.value.newUsers24h)}`,
-    hint: `总计 ${formatNumber(totals.value.totalUsers)} · 24h 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
+    value: formatNumber(totals.value.totalUsers),
+    hint: `24h 新增 ${formatNumber(totals.value.newUsers24h)} · 活跃 ${formatNumber(totals.value.activeUsers24h)}`,
     tone: 'cyan',
     icon: 'users',
   },
