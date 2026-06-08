@@ -11,6 +11,7 @@ import { registerAuthRoutes } from './routes/auth'
 import { registerAdminRoutes } from './routes/admin'
 import { registerUserRoutes } from './routes/users'
 import { registerRelayRoutes } from './routes/relay'
+import { registerUsageRoutes } from './routes/usage'
 import { registerPaymentCallbackRoutes } from './routes/payment-callback'
 import { registerSecurityHeaders } from './middleware/securityHeaders'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
   registerAdminRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
+  registerUsageRoutes(app)
   registerPaymentCallbackRoutes(app)
 
   // Serve the built admin dashboard (web/dist) if it has been built.

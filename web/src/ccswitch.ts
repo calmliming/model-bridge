@@ -115,6 +115,19 @@ export function targetsForProviders(allowed: string[] | null | undefined): CcSwi
 
 /**
  * Builds a `ccswitch://v1/import` provider deep link.
+/**
+ * CC Switch usage-query script. CC Switch runs this against the provider to show
+ * "剩余 X USD" on the card — it GETs model-bridge's /api/usage with the provider
+ * API key and maps `balance` → remaining. See docs 2.5 用量查询.
+ */
+const CC_SWITCH_USAGE_SCRIPT =
+  '({request:{url:"{{baseUrl}}/api/usage",method:"GET",headers:{"Authorization":"Bearer {{apiKey}}","User-Agent":"cc-switch/1.0"}},' +
+  'extractor:function(r){return{isValid:r.balance!=null,remaining:r.balance,used:r.used,total:r.limit,unit:r.currency||"USD"};}})'
+
+/** Auto-refresh interval (minutes) for the balance query. */
+const CC_SWITCH_USAGE_INTERVAL = 30
+
+/*
  * Query values are encoded with encodeURIComponent (spaces as %20) to match the
  * format CC Switch documents and parses.
  */
@@ -136,6 +149,13 @@ export function buildCcSwitchUrl(
     if (models.haikuModel) parts.push(`haikuModel=${encodeURIComponent(models.haikuModel)}`)
     if (models.opusModel) parts.push(`opusModel=${encodeURIComponent(models.opusModel)}`)
   }
+  // Balance display: enable CC Switch's usage query against /api/usage. Pass the
+  // key explicitly as usageApiKey so {{apiKey}} resolves even on CC Switch builds
+  // that don't auto-fill it from the provider key.
+  parts.push('usageEnabled=true')
+  parts.push(`usageAutoInterval=${CC_SWITCH_USAGE_INTERVAL}`)
+  parts.push(`usageApiKey=${encodeURIComponent(opts.apiKey)}`)
+  parts.push(`usageScript=${encodeURIComponent(CC_SWITCH_USAGE_SCRIPT)}`)
   return `ccswitch://v1/import?${parts.join('&')}`
 }
 
