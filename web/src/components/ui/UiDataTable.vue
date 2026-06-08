@@ -18,13 +18,26 @@ function keyOf(row: T, index: number): string | number {
   return props.rowKey ? props.rowKey(row) : (row.id ?? index)
 }
 
-function cellStyle(col: TableColumn<T>) {
+function isFixedLeft(col: TableColumn<T>): boolean {
+  return col.fixed === true || col.fixed === 'left'
+}
+
+function cellStyle(col: TableColumn<T>, section: 'head' | 'body') {
   const style: Record<string, string> = {}
   if (col.width != null) style.width = typeof col.width === 'number' ? `${col.width}px` : col.width
   if (col.minWidth != null)
     style.minWidth = typeof col.minWidth === 'number' ? `${col.minWidth}px` : col.minWidth
   if (col.align) style.textAlign = col.align
+  if (isFixedLeft(col)) {
+    style.position = 'sticky'
+    style.left = '0'
+    style.zIndex = section === 'head' ? '4' : '3'
+  }
   return style
+}
+
+function cellClass(col: TableColumn<T>) {
+  return isFixedLeft(col) ? 'is-fixed-left' : undefined
 }
 
 const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}px` } : {}))
@@ -35,12 +48,24 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
     <table class="data-table" :style="tableStyle">
       <thead>
         <tr>
-          <th v-for="col in columns" :key="col.key" :style="cellStyle(col)">{{ col.title }}</th>
+          <th
+            v-for="col in columns"
+            :key="col.key"
+            :class="cellClass(col)"
+            :style="cellStyle(col, 'head')"
+          >
+            {{ col.title }}
+          </th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="(row, index) in data" :key="keyOf(row, index)">
-          <td v-for="col in columns" :key="col.key" :style="cellStyle(col)">
+          <td
+            v-for="col in columns"
+            :key="col.key"
+            :class="cellClass(col)"
+            :style="cellStyle(col, 'body')"
+          >
             <component :is="() => col.render!(row, index)" v-if="col.render" />
             <template v-else>{{ row[col.key] ?? '—' }}</template>
           </td>

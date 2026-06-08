@@ -736,7 +736,7 @@ function renderTime(value: number | null) {
 }
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [
-  { title: '名称', key: 'name', minWidth: 140, render: renderKeyInfo },
+  { title: '名称', key: 'name', minWidth: 140, fixed: 'left', render: renderKeyInfo },
   { title: '归属用户', key: 'owner', minWidth: 190, render: renderOwner },
   {
     title: '密钥',

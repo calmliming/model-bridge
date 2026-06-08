@@ -6,6 +6,7 @@ export interface TableColumn<Row = Record<string, unknown>> {
   key: string
   width?: number | string
   minWidth?: number | string
+  fixed?: boolean | 'left'
   align?: 'left' | 'center' | 'right'
   render?: (row: Row, index: number) => VNodeChild
   // Permissive: views may carry extra column props (sorter, ellipsis, fixed,
