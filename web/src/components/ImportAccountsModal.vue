@@ -16,7 +16,7 @@ const emit = defineEmits<{
 const message = useMessage()
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const selectedFile = ref<File | null>(null)
+const selectedFiles = ref<File[]>([])
 const importing = ref(false)
 const importResult = ref<{
   total: number
@@ -33,9 +33,9 @@ const importResult = ref<{
 
 function handleFileSelect(event: Event) {
   const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (file) {
-    selectedFile.value = file
+  const files = target.files
+  if (files && files.length > 0) {
+    selectedFiles.value = Array.from(files)
     importResult.value = null
   }
 }
@@ -45,7 +45,7 @@ function triggerFileInput() {
 }
 
 async function handleImport() {
-  if (!selectedFile.value) {
+  if (selectedFiles.value.length === 0) {
     message.warning('请先选择要导入的 JSON 文件')
     return
   }
@@ -54,44 +54,63 @@ async function handleImport() {
   importResult.value = null
 
   try {
-    const text = await selectedFile.value.text()
-    let jsonData: unknown
+    const allAccounts: unknown[] = []
 
-    try {
-      jsonData = JSON.parse(text)
-    } catch {
-      // Try parsing concatenated JSON objects (e.g. multiple Codex sessions in one file)
+    for (const file of selectedFiles.value) {
+      const text = await file.text()
+      let parsed: unknown
+
       try {
-        const objects: unknown[] = []
-        // Split on }{ boundary between concatenated JSON objects
-        const parts = text.replace(/\}\s*\{/g, '}|||{').split('|||')
-        for (const part of parts) {
-          objects.push(JSON.parse(part.trim()))
-        }
-        jsonData = { accounts: objects }
+        parsed = JSON.parse(text)
       } catch {
-        message.error('JSON 格式解析失败，请检查文件格式')
-        return
+        // Try parsing concatenated JSON objects (e.g. multiple Codex sessions in one file)
+        try {
+          const parts = text.replace(/\}\s*\{/g, '}|||{').split('|||')
+          for (const part of parts) {
+            allAccounts.push(JSON.parse(part.trim()))
+          }
+          continue
+        } catch {
+          message.error(`文件 ${file.name} JSON 格式解析失败`)
+          return
+        }
+      }
+
+      // Single Codex object
+      if (parsed && typeof parsed === 'object' && 'type' in (parsed as any) && (parsed as any).type === 'codex') {
+        allAccounts.push(parsed)
+        continue
+      }
+
+      // Array of accounts
+      if (Array.isArray(parsed)) {
+        allAccounts.push(...parsed)
+        continue
+      }
+
+      // Standard format with accounts array
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).accounts)) {
+        allAccounts.push(...(parsed as any).accounts)
+        continue
+      }
+
+      // Unknown single object, try as account
+      if (parsed && typeof parsed === 'object') {
+        allAccounts.push(parsed)
       }
     }
 
-    // Normalize: if it's a single Codex object, wrap it
-    if (jsonData && typeof jsonData === 'object' && 'type' in (jsonData as any) && (jsonData as any).type === 'codex') {
-      jsonData = { accounts: [jsonData] }
-    }
-
-    // Normalize: if it's a plain array, wrap it
-    if (Array.isArray(jsonData)) {
-      jsonData = { accounts: jsonData }
-    }
-
-    // Validate basic structure
-    if (!jsonData || typeof jsonData !== 'object' || !Array.isArray((jsonData as any).accounts)) {
-      message.error('无效的导入格式：需要包含 accounts 数组')
+    if (allAccounts.length === 0) {
+      message.error('未找到可导入的账号数据')
       return
     }
 
-    const { data } = await api.post('/admin/accounts/import/batch', jsonData)
+    if (allAccounts.length > 100) {
+      message.error(`共发现 ${allAccounts.length} 个账号，超过单次上限 100 个。请分批导入。`)
+      return
+    }
+
+    const { data } = await api.post('/admin/accounts/import/batch', { accounts: allAccounts })
     importResult.value = data
 
     if (data.successCount > 0) {
@@ -111,14 +130,14 @@ async function handleImport() {
 
 function handleClose() {
   if (!importing.value) {
-    selectedFile.value = null
+    selectedFiles.value = []
     importResult.value = null
     emit('update:show', false)
   }
 }
 
 function resetAndClose() {
-  selectedFile.value = null
+  selectedFiles.value = []
   importResult.value = null
   if (fileInputRef.value) {
     fileInputRef.value.value = ''
@@ -132,7 +151,7 @@ function resetAndClose() {
     <div class="import-modal-content">
       <div v-if="!importResult" class="import-form">
         <div class="import-hint">
-          <p>支持两种导入格式：</p>
+          <p>支持两种导入格式（可一次选择多个文件）：</p>
 
           <h4>1. Model-Bridge 标准格式</h4>
           <pre class="import-example">{
@@ -188,14 +207,15 @@ function resetAndClose() {
             ref="fileInputRef"
             type="file"
             accept=".json,application/json"
+            multiple
             style="display: none"
             @change="handleFileSelect"
           >
           <UiButton secondary @click="triggerFileInput">
             选择文件
           </UiButton>
-          <span v-if="selectedFile" class="selected-file">
-            {{ selectedFile.name }}
+          <span v-if="selectedFiles.length > 0" class="selected-file">
+            已选择 {{ selectedFiles.length }} 个文件
           </span>
         </div>
       </div>
@@ -241,7 +261,7 @@ function resetAndClose() {
         <UiButton
           type="primary"
           :loading="importing"
-          :disabled="!selectedFile"
+          :disabled="selectedFiles.length === 0"
           @click="handleImport"
         >
           开始导入
