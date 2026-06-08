@@ -6,6 +6,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
+import { buildCcSwitchUrl, launchCcSwitch, targetsForProviders, type CcSwitchTarget } from '../ccswitch'
 
 interface ApiKey {
   id: string
@@ -499,6 +500,34 @@ GET ${baseOrigin.value}/api/deepseek/v1/models`,
   }
 })
 
+// CC Switch one-click import picker state (opened from the table row).
+const showCcSwitch = ref(false)
+const ccSwitchName = ref('')
+const ccSwitchSecret = ref('')
+const ccSwitchTargets = ref<CcSwitchTarget[]>([])
+
+/** Opens the CC Switch import picker for a key, fetching its plaintext first. */
+async function openCcSwitch(row: ApiKey) {
+  const secret = await fetchFullKey(row)
+  if (!secret) return
+  ccSwitchSecret.value = secret
+  ccSwitchName.value = row.name
+  ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
+  showCcSwitch.value = true
+}
+
+/** Builds the deep link for the chosen target and hands off to CC Switch. */
+function triggerCcSwitch(target: CcSwitchTarget) {
+  if (!ccSwitchSecret.value) return
+  const url = buildCcSwitchUrl(target, {
+    origin: baseOrigin.value,
+    apiKey: ccSwitchSecret.value,
+    name: `${ccSwitchName.value} · ${target.label}`,
+  })
+  launchCcSwitch(url)
+  message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
+}
+
 function quotaPercent(row: ApiKey): number {
   if (!row.quotaLimit || row.quotaLimit <= 0) return 0
   return Math.max(0, Math.min(100, Math.round((row.quotaUsed / row.quotaLimit) * 100)))
@@ -700,7 +729,7 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 172,
+    width: 250,
     render: (row) =>
       h(
         UiSpace,
@@ -711,6 +740,11 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
               UiButton,
               { size: 'small', quaternary: true, onClick: () => openUse(row) },
               { default: () => '使用' },
+            ),
+            h(
+              UiButton,
+              { size: 'small', quaternary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) },
+              { default: () => 'CC Switch' },
             ),
             h(
               UiButton,
@@ -746,7 +780,7 @@ onMounted(() => {
         :data="keys"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1880"
+        :scroll-x="1960"
       />
     </UiCard>
 
@@ -883,6 +917,30 @@ onMounted(() => {
       <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
         已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。
       </UiAlert>
+    </UiModal>
+
+    <!-- CC Switch one-click import -->
+    <UiModal v-model:show="showCcSwitch" title="一键导入 CC Switch" :width="460">
+      <UiAlert type="info" style="margin-bottom: 14px">
+        选择要导入的工具，浏览器会唤起本机的 CC Switch 应用并自动填入服务商地址与密钥。需先安装
+        <a href="https://ccswitch.io" target="_blank" rel="noopener">CC Switch</a>。
+      </UiAlert>
+      <UiSpace vertical size="small" style="width: 100%">
+        <UiButton
+          v-for="target in ccSwitchTargets"
+          :key="target.id"
+          block
+          secondary
+          @click="triggerCcSwitch(target)"
+        >
+          {{ target.label }}
+        </UiButton>
+      </UiSpace>
+      <template #footer>
+        <UiSpace justify="end">
+          <UiButton @click="showCcSwitch = false">关闭</UiButton>
+        </UiSpace>
+      </template>
     </UiModal>
 
     <!-- edit limits -->

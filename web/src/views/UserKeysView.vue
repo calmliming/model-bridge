@@ -6,6 +6,12 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
+import {
+  buildCcSwitchUrl,
+  launchCcSwitch,
+  targetsForProviders,
+  type CcSwitchTarget,
+} from '../ccswitch'
 
 interface ApiKey {
   id: string
@@ -32,6 +38,18 @@ const loading = ref(true)
 const showCreate = ref(false)
 const creating = ref(false)
 const newKey = ref<string | null>(null)
+const newKeyProviders = ref<string[] | null>(null)
+
+const baseOrigin = computed(() =>
+  typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
+)
+
+// CC Switch one-click import modal state.
+const showCcSwitch = ref(false)
+const ccSwitchName = ref('')
+const ccSwitchSecret = ref('')
+const ccSwitchTargets = ref<CcSwitchTarget[]>([])
+
 const showEdit = ref(false)
 const editingId = ref<string | null>(null)
 const editForm = ref({
@@ -116,6 +134,7 @@ async function create() {
       modelMappings: parseMappingEntries(form.value.modelMappings) ?? undefined,
     })
     newKey.value = data.key
+    newKeyProviders.value = form.value.allowedProviders.length ? [...form.value.allowedProviders] : null
     showCreate.value = false
     form.value = { name: '', allowedProviders: [], allowedModels: [], modelMappings: [] }
     await load()
@@ -207,6 +226,48 @@ async function copyKey(row: ApiKey) {
   }
 }
 
+/** Opens the CC Switch import picker for an existing key, fetching its plaintext. */
+async function openCcSwitch(row: ApiKey) {
+  if (!row.canReveal) {
+    message.warning('这个 Key 无法再次显示完整值，无法一键导入。请重新创建一个 Key。')
+    return
+  }
+  try {
+    const secret = await fetchSecret(row)
+    if (!secret) {
+      message.warning('无法获取完整 Key')
+      return
+    }
+    ccSwitchSecret.value = secret
+    ccSwitchName.value = row.name
+    ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
+    showCcSwitch.value = true
+  } catch (e) {
+    message.error(errMsg(e, '获取完整 Key 失败'))
+  }
+}
+
+/** Opens the CC Switch import picker for a freshly created key (plaintext in hand). */
+function openCcSwitchForNew() {
+  if (!newKey.value) return
+  ccSwitchSecret.value = newKey.value
+  ccSwitchName.value = '我的 model-bridge'
+  ccSwitchTargets.value = targetsForProviders(newKeyProviders.value)
+  showCcSwitch.value = true
+}
+
+/** Builds the deep link for the chosen target and hands off to CC Switch. */
+function triggerCcSwitch(target: CcSwitchTarget) {
+  if (!ccSwitchSecret.value) return
+  const url = buildCcSwitchUrl(target, {
+    origin: baseOrigin.value,
+    apiKey: ccSwitchSecret.value,
+    name: `${ccSwitchName.value} · ${target.label}`,
+  })
+  launchCcSwitch(url)
+  message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
+}
+
 const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '名称', key: 'name', minWidth: 150, render: (row) => h('strong', { class: 'key-name' }, row.name) },
   { title: '密钥', key: 'prefix', minWidth: 150, render: (row) => h('code', `${row.keyPrefix}...`) },
@@ -222,8 +283,9 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => formatTime(row.expiresAt) },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => formatTime(row.lastUsedAt) },
   { title: '状态', key: 'enabled', width: 76, render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }) },
-  { title: '操作', key: 'actions', width: 160, render: (row) => h(UiSpace, { size: 4, wrap: false }, { default: () => [
+  { title: '操作', key: 'actions', width: 260, render: (row) => h(UiSpace, { size: 4, wrap: false }, { default: () => [
     h(UiButton, { size: 'small', quaternary: true, onClick: () => copyKey(row) }, { default: () => '复制' }),
+    h(UiButton, { size: 'small', quaternary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) }, { default: () => 'CC Switch' }),
     h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
     h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
   ] }) },
@@ -239,7 +301,7 @@ onMounted(load)
     </div>
 
     <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1320" />
+      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1420" />
     </UiCard>
 
     <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">
@@ -270,7 +332,31 @@ onMounted(load)
       <UiInput :value="newKey ?? ''" readonly />
       <template #footer>
         <UiSpace justify="end">
+          <UiButton secondary @click="openCcSwitchForNew">一键导入 CC Switch</UiButton>
           <UiButton type="primary" @click="copyText(newKey ?? '')">复制</UiButton>
+        </UiSpace>
+      </template>
+    </UiModal>
+
+    <UiModal v-model:show="showCcSwitch" title="一键导入 CC Switch" :width="460">
+      <UiAlert type="info" style="margin-bottom: 14px">
+        选择要导入的工具，浏览器会唤起本机的 CC Switch 应用并自动填入服务商地址与密钥。需先安装
+        <a href="https://ccswitch.io" target="_blank" rel="noopener">CC Switch</a>。
+      </UiAlert>
+      <UiSpace vertical size="small" style="width: 100%">
+        <UiButton
+          v-for="target in ccSwitchTargets"
+          :key="target.id"
+          block
+          secondary
+          @click="triggerCcSwitch(target)"
+        >
+          {{ target.label }}
+        </UiButton>
+      </UiSpace>
+      <template #footer>
+        <UiSpace justify="end">
+          <UiButton @click="showCcSwitch = false">关闭</UiButton>
         </UiSpace>
       </template>
     </UiModal>
