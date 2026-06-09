@@ -162,6 +162,23 @@ const providerColors: Record<string, string> = {
   xiaomi: '#ff6900',
 }
 
+interface ToneColor {
+  icon: string
+  iconBg: string
+  blob: string
+}
+
+const toneColors: Record<string, ToneColor> = {
+  blue: { icon: '#2563eb', iconBg: 'rgba(37, 99, 235, 0.13)', blob: '#2563eb' },
+  green: { icon: '#0d9488', iconBg: 'rgba(20, 184, 166, 0.14)', blob: '#14b8a6' },
+  violet: { icon: '#8b5cf6', iconBg: 'rgba(139, 92, 246, 0.14)', blob: '#8b5cf6' },
+  amber: { icon: '#d97706', iconBg: 'rgba(245, 158, 11, 0.17)', blob: '#f59e0b' },
+  teal: { icon: '#0d9488', iconBg: 'rgba(13, 148, 136, 0.14)', blob: '#0d9488' },
+  cyan: { icon: '#0891b2', iconBg: 'rgba(6, 182, 212, 0.14)', blob: '#06b6d4' },
+  indigo: { icon: '#4f46e5', iconBg: 'rgba(99, 102, 241, 0.15)', blob: '#6366f1' },
+  rose: { icon: '#e11d48', iconBg: 'rgba(244, 63, 94, 0.14)', blob: '#f43f5e' },
+}
+
 const statIconPaths: Record<string, string[]> = {
   key: [
     'M15.5 7.5a4.5 4.5 0 1 0-3.2 7.7l-1.8 1.8H8.5v2H6.5v2H3.5v-3.1l5.3-5.3a4.5 4.5 0 0 0 6.7-5.1Z',
@@ -495,28 +512,37 @@ function openRequestInput(row: DashboardRecentLog) {
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <div class="grid gap-4">
     <UiGrid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <UiGi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
-        <UiCard class="stat-card surface-card" :class="`is-${card.tone}`" :bordered="false">
-          <div class="stat-content">
-            <div class="stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path
-                  v-for="path in statIconPaths[card.icon]"
-                  :key="path"
-                  :d="path"
-                  stroke="currentColor"
-                  stroke-width="2.35"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
+        <UiCard class="surface-card relative overflow-hidden min-h-[132px]" :bordered="false">
+          <div
+            class="absolute -right-7 -top-7 h-24 w-24 rounded-full opacity-15"
+            :style="{ background: toneColors[card.tone].blob }"
+            aria-hidden="true"
+          />
+          <div class="relative z-[1] flex items-center gap-4 min-h-[92px]">
+            <div
+              class="grid place-items-center shrink-0 w-14 h-14 rounded-[14px]"
+              :style="{ color: toneColors[card.tone].icon, background: toneColors[card.tone].iconBg }"
+              aria-hidden="true"
+            >
+              <svg
+                class="w-7 h-7"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.35"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path v-for="path in statIconPaths[card.icon]" :key="path" :d="path" />
               </svg>
             </div>
-            <div class="stat-copy">
-              <div class="stat-label">{{ card.label }}</div>
-              <div class="stat-value">{{ loading ? '—' : card.value }}</div>
-              <div class="stat-hint">{{ card.hint }}</div>
+            <div class="min-w-0">
+              <div class="text-accent-900/60 text-[13px] font-[760]">{{ card.label }}</div>
+              <div class="overflow-hidden text-accent-900 text-[clamp(26px,2.2vw,34px)] font-[820] leading-[1.05] truncate mt-1.5 mb-0.5">{{ loading ? '—' : card.value }}</div>
+              <div class="truncate text-accent-900/40 text-xs">{{ card.hint }}</div>
             </div>
           </div>
         </UiCard>
@@ -525,11 +551,11 @@ function openRequestInput(row: DashboardRecentLog) {
 
     <UiGrid :cols="12" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <UiGi span="12 l:8">
-        <UiCard class="surface-card panel-card" :bordered="false">
-          <div class="panel-head">
+        <UiCard class="surface-card h-full" :bordered="false">
+          <div class="flex items-start justify-between gap-3.5 mb-4 max-md:flex-col max-md:items-start">
             <div>
-              <h3>流量趋势</h3>
-              <span>近 14 天请求与 Token 走势</span>
+              <h3 class="text-accent-900 text-base font-[820] m-0">流量趋势</h3>
+              <span class="block mt-1 text-accent-900/45 text-xs">近 14 天请求与 Token 走势</span>
             </div>
             <UiButton size="small" quaternary @click="load">刷新</UiButton>
           </div>
@@ -538,198 +564,201 @@ function openRequestInput(row: DashboardRecentLog) {
       </UiGi>
 
       <UiGi span="12 l:4">
-        <UiCard class="surface-card panel-card" :bordered="false">
-          <div class="panel-head">
+        <UiCard class="surface-card h-full" :bordered="false">
+          <div class="flex items-start justify-between gap-3.5 mb-4 max-md:flex-col max-md:items-start">
             <div>
-              <h3>服务商占比</h3>
-              <span>按近 30 天 Tokens 统计</span>
+              <h3 class="text-accent-900 text-base font-[820] m-0">服务商占比</h3>
+              <span class="block mt-1 text-accent-900/45 text-xs">按近 30 天 Tokens 统计</span>
             </div>
           </div>
           <EChart v-if="providerRows.length" :option="providerOption" height="218px" />
-          <div v-else class="empty-state">暂无用量数据</div>
-          <div class="provider-list">
+          <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">暂无用量数据</div>
+          <div class="grid gap-2.5 mt-1">
             <div
               v-for="row in providerRows"
               :key="row.provider"
-              class="provider-row"
+              class="flex items-center justify-between gap-3 px-3 py-2.5 border border-accent-900/7 rounded-xl bg-accent-50"
               :style="providerStyle(row.provider)"
             >
-              <span>{{ providerLabel(row.provider) }}</span>
-              <strong>{{ formatNumber(row.tokens) }}</strong>
+              <span class="flex items-center gap-2 text-accent-900/70 text-[13px] before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--provider-color)]">{{ providerLabel(row.provider) }}</span>
+              <strong class="text-accent-900 text-[13px]">{{ formatNumber(row.tokens) }}</strong>
             </div>
           </div>
         </UiCard>
       </UiGi>
     </UiGrid>
 
-    <UiCard class="surface-card panel-card" :bordered="false">
-      <div class="panel-head">
+    <UiCard class="surface-card h-full" :bordered="false">
+      <div class="flex items-start justify-between gap-3.5 mb-4 max-md:flex-col max-md:items-start">
         <div>
-          <h3>使用记录</h3>
-          <span>最近调用的 Key、账号、模型、Token、费用和耗时</span>
+          <h3 class="text-accent-900 text-base font-[820] m-0">使用记录</h3>
+          <span class="block mt-1 text-accent-900/45 text-xs">最近调用的 Key、账号、模型、Token、费用和耗时</span>
         </div>
-        <div class="panel-actions">
+        <div class="flex items-center gap-3 max-md:w-full max-md:justify-between">
           <UiButton size="small" quaternary :loading="recentLoading" @click="loadRecentLogs">刷新</UiButton>
-          <router-link class="panel-link" to="/stats">详细统计</router-link>
+          <router-link class="text-blue-600 text-[13px] font-bold no-underline" to="/stats">详细统计</router-link>
         </div>
       </div>
 
-      <div v-if="recentLogs.length" class="log-list">
-        <div v-for="row in recentLogs" :key="row.id" class="log-row">
-          <div class="log-status-cell">
-            <UiTag class="log-status" size="small" :type="logStatusType(row.status)" :bordered="false">
+      <div v-if="recentLogs.length" class="grid gap-2.5 min-w-0">
+        <div
+          v-for="row in recentLogs"
+          :key="row.id"
+          class="grid items-center gap-2.5 p-3 border border-accent-900/7 rounded-[14px] bg-white grid-cols-[76px_minmax(0,0.95fr)_minmax(0,1.05fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,0.82fr)_minmax(0,0.8fr)_auto] max-xl:grid-cols-[minmax(0,1fr)_auto] max-xl:items-start"
+        >
+          <div class="flex flex-col items-start gap-[7px] min-w-0">
+            <UiTag size="small" :type="logStatusType(row.status)" :bordered="false">
               {{ logStatusLabel(row.status) }}
             </UiTag>
-            <span class="request-type-badge">API</span>
           </div>
 
-          <div class="log-identity-cell">
-            <div class="log-cell-label">API Key</div>
-            <strong>{{ row.apiKeyName || '-' }}</strong>
-            <span>账号 {{ row.accountName || '-' }}</span>
+          <div class="grid gap-1 min-w-0 max-xl:col-span-full">
+            <div class="truncate text-accent-900/50 text-[11px] font-[650]">API Key</div>
+            <strong class="truncate text-accent-900 text-[13px] font-[780]">{{ row.apiKeyName || '-' }}</strong>
+            <span class="truncate text-accent-900/50 text-xs">{{ row.accountName || '-' }}</span>
           </div>
 
-          <div class="log-model-cell" :style="providerStyle(row.provider)">
-            <span class="provider-chip compact">{{ providerLabel(row.provider) }}</span>
-            <strong>{{ row.model || '(unknown model)' }}</strong>
+          <div class="grid gap-1 min-w-0 max-xl:col-span-full" :style="providerStyle(row.provider)">
+            <span class="w-fit px-[7px] py-0.5 rounded-full text-[11px] font-extrabold text-[var(--provider-color)] bg-[color-mix(in_srgb,var(--provider-color)_10%,white)]">{{ providerLabel(row.provider) }}</span>
+            <strong class="truncate text-accent-900 text-[13px] font-[780]">{{ row.model || '(unknown model)' }}</strong>
           </div>
 
-          <div class="log-token-cell">
-            <div class="token-main-line">
-              <span class="token-chip token-input">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <div class="min-w-0 max-xl:col-span-full">
+            <div class="flex items-center gap-2 min-w-0 flex-wrap">
+              <span class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-emerald-600">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14m0 0 6-6m-6 6-6-6" />
                 </svg>
                 {{ formatNumber(row.inputTokens) }}
               </span>
-              <span class="token-chip token-output">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <span class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-violet-600">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 19V5m0 0 6 6m-6-6-6 6" />
                 </svg>
                 {{ formatNumber(row.outputTokens) }}
               </span>
               <UiTooltip trigger="hover" placement="top">
                 <template #trigger>
-                  <button class="info-button" type="button" aria-label="Token 明细">
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <button class="inline-grid w-[18px] h-[18px] p-0 place-items-center border-0 rounded-full text-accent-900/40 bg-accent-900/6 cursor-help hover:text-blue-600 hover:bg-blue-600/12" type="button" aria-label="Token 明细">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 17v-5" />
                       <path d="M12 8h.01" />
                       <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
                     </svg>
                   </button>
                 </template>
-                <div class="token-breakdown">
-                  <div v-for="item in tokenBreakdown(row)" :key="item.label" class="token-breakdown-row">
+                <div class="grid gap-[5px] min-w-[150px]">
+                  <div v-for="item in tokenBreakdown(row)" :key="item.label" class="flex items-center justify-between gap-4 text-xs">
                     <span>{{ item.label }}</span>
                     <strong>{{ formatNumber(item.value) }}</strong>
                   </div>
-                  <div class="token-breakdown-row total">
+                  <div class="flex items-center justify-between gap-4 text-xs pt-[5px] border-t border-white/15">
                     <span>总计</span>
                     <strong>{{ formatNumber(logTokens(row)) }}</strong>
                   </div>
                 </div>
               </UiTooltip>
             </div>
-            <div v-if="hasCacheTokens(row)" class="token-cache-line">
-              <span v-if="row.cacheReadTokens > 0" class="token-cache read">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <div v-if="hasCacheTokens(row)" class="flex flex-wrap items-center gap-2 min-w-0 mt-1">
+              <span v-if="row.cacheReadTokens > 0" class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-sky-600">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M5 8h14M5 8a2 2 0 1 1 0-4h14a2 2 0 1 1 0 4M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4" />
                 </svg>
                 {{ formatNumber(row.cacheReadTokens) }}
               </span>
-              <span v-if="row.cacheCreateTokens > 0" class="token-cache create">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <span v-if="row.cacheCreateTokens > 0" class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-amber-600">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 20h9" />
                   <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
                 </svg>
                 {{ formatNumber(row.cacheCreateTokens) }}
               </span>
             </div>
-            <div v-else class="log-subtle">总计 {{ formatNumber(logTokens(row)) }}</div>
+            <div v-else class="text-accent-900/50 text-xs">总计 {{ formatNumber(logTokens(row)) }}</div>
           </div>
 
-          <div class="log-cost-cell">
-            <div class="log-cell-label">费用</div>
-            <div class="cost-line">
-              <strong>{{ formatLogCost(row.cost) }}</strong>
+          <div class="grid gap-1 min-w-0 max-xl:col-span-full">
+            <div class="truncate text-accent-900/50 text-[11px] font-[650]">费用</div>
+            <div class="flex items-center gap-2 min-w-0">
+              <strong class="truncate text-green-600 text-[13px] font-extrabold">{{ formatLogCost(row.cost) }}</strong>
               <UiTooltip trigger="hover" placement="top">
                 <template #trigger>
-                  <button class="info-button" type="button" aria-label="费用明细">
-                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <button class="inline-grid w-[18px] h-[18px] p-0 place-items-center border-0 rounded-full text-accent-900/40 bg-accent-900/6 cursor-help hover:text-blue-600 hover:bg-blue-600/12" type="button" aria-label="费用明细">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M12 17v-5" />
                       <path d="M12 8h.01" />
                       <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" />
                     </svg>
                   </button>
                 </template>
-                <div class="cost-breakdown">
-                  <div class="cost-breakdown-title">费用明细</div>
-                  <div v-for="item in costBreakdown(row)" :key="item.label" class="cost-breakdown-row">
+                <div class="grid gap-[7px] min-w-[260px] text-slate-50">
+                  <div class="mb-0.5 text-slate-50 text-sm font-[850]">费用明细</div>
+                  <div v-for="item in costBreakdown(row)" :key="item.label" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>{{ item.label }}</span>
-                    <strong>{{ item.value }}</strong>
+                    <strong class="text-slate-50 font-extrabold whitespace-nowrap">{{ item.value }}</strong>
                   </div>
-                  <div class="cost-breakdown-row price">
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>输入单价</span>
-                    <strong>{{ formatTokenPrice(row.inputPrice) }}</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.inputPrice) }}</strong>
                   </div>
-                  <div class="cost-breakdown-row price">
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>输出单价</span>
-                    <strong>{{ formatTokenPrice(row.outputPrice) }}</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.outputPrice) }}</strong>
                   </div>
-                  <div v-if="row.cacheCreatePrice && row.cacheCreatePrice > 0" class="cost-breakdown-row price">
+                  <div v-if="row.cacheCreatePrice && row.cacheCreatePrice > 0" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>缓存写入单价</span>
-                    <strong>{{ formatTokenPrice(row.cacheCreatePrice) }}</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreatePrice) }}</strong>
                   </div>
-                  <div v-if="row.cacheReadPrice && row.cacheReadPrice > 0" class="cost-breakdown-row price">
+                  <div v-if="row.cacheReadPrice && row.cacheReadPrice > 0" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>缓存读取单价</span>
-                    <strong>{{ formatTokenPrice(row.cacheReadPrice) }}</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheReadPrice) }}</strong>
                   </div>
-                  <div class="cost-breakdown-divider" />
-                  <div class="cost-breakdown-row">
+                  <div class="h-px my-[3px] bg-slate-400/30" />
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>服务档位</span>
-                    <strong class="accent-cyan">Standard</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">Standard</strong>
                   </div>
-                  <div class="cost-breakdown-row">
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>倍率</span>
-                    <strong class="accent-blue">{{ costMultiplier(row) }}</strong>
+                    <strong class="text-blue-400 font-extrabold whitespace-nowrap">{{ costMultiplier(row) }}</strong>
                   </div>
-                  <div class="cost-breakdown-row">
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>原始</span>
-                    <strong>{{ formatLogCost(row.baseCost) }}</strong>
+                    <strong class="text-slate-50 font-extrabold whitespace-nowrap">{{ formatLogCost(row.baseCost) }}</strong>
                   </div>
-                  <div class="cost-breakdown-divider" />
-                  <div class="cost-breakdown-row">
+                  <div class="h-px my-[3px] bg-slate-400/30" />
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>预算</span>
-                    <strong>{{ billingLabel(row) }}</strong>
+                    <strong class="text-slate-50 font-extrabold whitespace-nowrap">{{ billingLabel(row) }}</strong>
                   </div>
-                  <div class="cost-breakdown-row total">
+                  <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>计费</span>
-                    <strong>{{ formatLogCost(row.cost) }}</strong>
+                    <strong class="text-green-400 text-[13px] font-extrabold whitespace-nowrap">{{ formatLogCost(row.cost) }}</strong>
                   </div>
                 </div>
               </UiTooltip>
             </div>
           </div>
 
-          <div class="log-duration-cell">
-            <div>
-              <span>首 Token</span>
-              <strong>{{ latencyLabel(row.firstTokenMs) }}</strong>
+          <div class="grid grid-cols-2 gap-2 max-xl:col-span-full">
+            <div class="grid gap-[3px] min-w-0">
+              <span class="truncate text-accent-900/50 text-[11px] font-[650]">首 Token</span>
+              <strong class="truncate text-accent-900/70 text-xs font-[760]">{{ latencyLabel(row.firstTokenMs) }}</strong>
             </div>
-            <div>
-              <span>耗时</span>
-              <strong>{{ latencyLabel(row.latencyMs) }}</strong>
+            <div class="grid gap-[3px] min-w-0">
+              <span class="truncate text-accent-900/50 text-[11px] font-[650]">耗时</span>
+              <strong class="truncate text-accent-900/70 text-xs font-[760]">{{ latencyLabel(row.latencyMs) }}</strong>
             </div>
           </div>
 
-          <div class="log-time-cell">
-            <div class="log-cell-label">时间</div>
-            <strong>{{ formatTime(row.ts) }}</strong>
+          <div class="grid gap-1 min-w-0 max-xl:col-span-full">
+            <div class="truncate text-accent-900/50 text-[11px] font-[650]">时间</div>
+            <strong class="truncate text-accent-900 text-[13px] font-[780]">{{ formatTime(row.ts) }}</strong>
           </div>
 
-          <UiButton class="log-action" size="small" secondary @click="openRequestInput(row)">查看</UiButton>
+          <UiButton class="justify-self-end max-xl:col-start-2 max-xl:row-start-1" size="small" secondary @click="openRequestInput(row)">查看</UiButton>
         </div>
-        <div class="log-pagination">
+        <div class="flex justify-end pt-0.5">
           <UiPagination
             v-model:page="recentPage"
             :page-size="RECENT_PAGE_SIZE"
@@ -738,7 +767,7 @@ function openRequestInput(row: DashboardRecentLog) {
           />
         </div>
       </div>
-      <div v-else class="empty-state">{{ recentLoading ? '加载中...' : '暂无请求记录' }}</div>
+      <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">{{ recentLoading ? '加载中...' : '暂无请求记录' }}</div>
     </UiCard>
 
     <UiModal
@@ -756,628 +785,3 @@ function openRequestInput(row: DashboardRecentLog) {
     </UiModal>
   </div>
 </template>
-
-<style scoped>
-.dashboard-page {
-  display: grid;
-  gap: 16px;
-}
-
-.stat-card {
-  position: relative;
-  min-height: 132px;
-  overflow: hidden;
-}
-
-.stat-card::after {
-  content: '';
-  position: absolute;
-  width: 96px;
-  height: 96px;
-  right: -28px;
-  top: -28px;
-  border-radius: 999px;
-  opacity: 0.15;
-}
-
-.stat-card.is-green::after {
-  background: #14b8a6;
-}
-
-.stat-card.is-blue::after {
-  background: #2563eb;
-}
-
-.stat-card.is-violet::after {
-  background: #8b5cf6;
-}
-
-.stat-card.is-amber::after {
-  background: #f59e0b;
-}
-
-.stat-card.is-teal::after {
-  background: #0d9488;
-}
-
-.stat-card.is-cyan::after {
-  background: #06b6d4;
-}
-
-.stat-card.is-indigo::after {
-  background: #6366f1;
-}
-
-.stat-card.is-rose::after {
-  background: #f43f5e;
-}
-
-.stat-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-height: 92px;
-}
-
-.stat-icon {
-  display: grid;
-  flex: 0 0 auto;
-  width: 56px;
-  height: 56px;
-  place-items: center;
-  border-radius: 14px;
-}
-
-.stat-icon svg {
-  width: 28px;
-  height: 28px;
-}
-
-.stat-copy {
-  min-width: 0;
-}
-
-.stat-label {
-  color: rgba(15, 23, 42, 0.58);
-  font-size: 13px;
-  font-weight: 760;
-}
-
-.stat-value {
-  margin: 6px 0 2px;
-  overflow: hidden;
-  color: #0f172a;
-  font-size: clamp(26px, 2.2vw, 34px);
-  font-weight: 820;
-  line-height: 1.05;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stat-hint {
-  overflow: hidden;
-  color: rgba(15, 23, 42, 0.42);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stat-card.is-green .stat-icon {
-  color: #0d9488;
-  background: rgba(20, 184, 166, 0.14);
-}
-
-.stat-card.is-blue .stat-icon {
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.13);
-}
-
-.stat-card.is-violet .stat-icon {
-  color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.14);
-}
-
-.stat-card.is-amber .stat-icon {
-  color: #d97706;
-  background: rgba(245, 158, 11, 0.17);
-}
-
-.stat-card.is-teal .stat-icon {
-  color: #0d9488;
-  background: rgba(13, 148, 136, 0.14);
-}
-
-.stat-card.is-cyan .stat-icon {
-  color: #0891b2;
-  background: rgba(6, 182, 212, 0.14);
-}
-
-.stat-card.is-indigo .stat-icon {
-  color: #4f46e5;
-  background: rgba(99, 102, 241, 0.15);
-}
-
-.stat-card.is-rose .stat-icon {
-  color: #e11d48;
-  background: rgba(244, 63, 94, 0.14);
-}
-
-.panel-card {
-  height: 100%;
-}
-
-.panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 16px;
-}
-
-.panel-head h3 {
-  margin: 0;
-  color: #0f172a;
-  font-size: 16px;
-  font-weight: 820;
-}
-
-.panel-head span {
-  display: block;
-  margin-top: 4px;
-  color: rgba(15, 23, 42, 0.46);
-  font-size: 12px;
-}
-
-.panel-link {
-  color: #2563eb;
-  font-size: 13px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.provider-list,
-.account-list,
-.key-list,
-.log-list {
-  display: grid;
-  gap: 10px;
-}
-
-.provider-list {
-  margin-top: 4px;
-}
-
-.provider-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 12px;
-  background: #f8fafc;
-}
-
-.provider-row span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: rgba(15, 23, 42, 0.68);
-  font-size: 13px;
-}
-
-.provider-row span::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--provider-color);
-}
-
-.provider-row strong {
-  color: #0f172a;
-  font-size: 13px;
-}
-
-.account-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-}
-
-.account-main {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-}
-
-.account-main strong,
-.key-head strong {
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 780;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-main small,
-.key-head span,
-.key-foot,
-.log-subtle {
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 12px;
-}
-
-.provider-chip {
-  width: fit-content;
-  padding: 3px 8px;
-  border-radius: 999px;
-  color: var(--provider-color);
-  background: color-mix(in srgb, var(--provider-color) 10%, white);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.provider-chip.compact {
-  padding: 2px 7px;
-}
-
-.key-row {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.key-head,
-.key-foot {
-  display: flex;
-  align-items: center;
-}
-
-.key-head,
-.key-foot {
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.key-head > div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.log-list {
-  min-width: 0;
-}
-
-.log-row {
-  display: grid;
-  grid-template-columns:
-    76px minmax(0, 0.95fr) minmax(0, 1.05fr) minmax(0, 1.2fr)
-    minmax(0, 0.8fr) minmax(0, 0.82fr) minmax(0, 0.8fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.07);
-  border-radius: 14px;
-  background: #ffffff;
-}
-
-.log-status-cell,
-.log-identity-cell,
-.log-model-cell,
-.log-token-cell,
-.log-cost-cell,
-.log-time-cell {
-  min-width: 0;
-}
-
-.log-status-cell {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.request-type-badge {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 2px 8px;
-  border-radius: 999px;
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.1);
-  font-size: 11px;
-  font-weight: 780;
-}
-
-.log-cell-label,
-.log-duration-cell span,
-.log-cost-cell > span {
-  overflow: hidden;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 11px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.log-identity-cell,
-.log-model-cell,
-.log-cost-cell,
-.log-time-cell {
-  display: grid;
-  gap: 4px;
-}
-
-.log-identity-cell strong,
-.log-model-cell strong,
-.log-time-cell strong {
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 13px;
-  font-weight: 780;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.log-identity-cell span {
-  overflow: hidden;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.token-main-line,
-.token-cache-line,
-.cost-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.token-main-line {
-  flex-wrap: wrap;
-}
-
-.token-chip,
-.token-cache {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 760;
-  white-space: nowrap;
-}
-
-.token-chip svg,
-.token-cache svg,
-.info-button svg {
-  width: 14px;
-  height: 14px;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.token-input {
-  color: #059669;
-}
-
-.token-output {
-  color: #7c3aed;
-}
-
-.token-cache-line {
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.token-cache.read {
-  color: #0284c7;
-}
-
-.token-cache.create {
-  color: #d97706;
-}
-
-.info-button {
-  display: inline-grid;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  color: rgba(15, 23, 42, 0.42);
-  background: rgba(15, 23, 42, 0.06);
-  cursor: help;
-}
-
-.info-button:hover {
-  color: #2563eb;
-  background: rgba(37, 99, 235, 0.12);
-}
-
-.cost-line strong {
-  overflow: hidden;
-  color: #16a34a;
-  font-size: 13px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.log-duration-cell {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.log-duration-cell div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.log-duration-cell strong {
-  overflow: hidden;
-  color: rgba(15, 23, 42, 0.7);
-  font-size: 12px;
-  font-weight: 760;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.log-action {
-  justify-self: end;
-}
-
-.token-breakdown {
-  display: grid;
-  gap: 5px;
-  min-width: 150px;
-}
-
-.token-breakdown-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  font-size: 12px;
-}
-
-.token-breakdown-row.total {
-  padding-top: 5px;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
-}
-
-.cost-breakdown {
-  display: grid;
-  gap: 7px;
-  min-width: 260px;
-  color: #f8fafc;
-}
-
-.cost-breakdown-title {
-  margin-bottom: 2px;
-  color: #f8fafc;
-  font-size: 14px;
-  font-weight: 850;
-}
-
-.cost-breakdown-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  color: #94a3b8;
-  font-size: 12px;
-  line-height: 1.15;
-}
-
-.cost-breakdown-row strong {
-  color: #f8fafc;
-  font-size: 12px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.cost-breakdown-row.price strong {
-  color: #67e8f9;
-}
-
-.cost-breakdown-row.total strong {
-  color: #4ade80;
-  font-size: 13px;
-}
-
-.cost-breakdown-row .accent-cyan {
-  color: #67e8f9;
-}
-
-.cost-breakdown-row .accent-blue {
-  color: #60a5fa;
-}
-
-.cost-breakdown-divider {
-  height: 1px;
-  margin: 3px 0;
-  background: rgba(148, 163, 184, 0.28);
-}
-
-.log-pagination {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 2px;
-}
-
-.empty-state {
-  display: grid;
-  min-height: 150px;
-  place-items: center;
-  border: 1px dashed rgba(15, 23, 42, 0.13);
-  border-radius: 14px;
-  color: rgba(15, 23, 42, 0.42);
-  background: #f8fafc;
-  font-size: 13px;
-}
-
-@media (max-width: 1279px) {
-  .log-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: flex-start;
-  }
-
-  .log-status-cell {
-    grid-column: 1;
-  }
-
-  .log-action {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .log-identity-cell,
-  .log-model-cell,
-  .log-token-cell,
-  .log-cost-cell,
-  .log-duration-cell,
-  .log-time-cell {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 720px) {
-  .key-head,
-  .key-foot {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .panel-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .panel-actions {
-    justify-content: space-between;
-    width: 100%;
-  }
-}
-</style>
