@@ -68,6 +68,21 @@ interface AccountGroup {
   disabledCount: number
 }
 
+interface BulkEditForm {
+  updateStatus: boolean
+  status: 'active' | 'disabled'
+  updateGroups: boolean
+  groupIds: string[]
+  updateWeight: boolean
+  weight: number | null
+  updateConcurrency: boolean
+  concurrencyLimit: number | null
+  updateNotes: boolean
+  notes: string
+  updateAutopause: boolean
+  autopausePercent: number | null
+}
+
 const message = useMessage()
 const dialog = useDialog()
 
@@ -89,6 +104,12 @@ const groupSelectOptions = computed(() =>
     value: g.id,
   })),
 )
+const selectedAccountIdStrings = computed(() => selectedAccountIds.value.map(String))
+const selectedAccounts = computed(() => {
+  const ids = new Set(selectedAccountIdStrings.value)
+  return accounts.value.filter((account) => ids.has(account.id))
+})
+const selectedCount = computed(() => selectedAccounts.value.length)
 const showGroups = ref(false)
 const groupViewMode = ref<'list' | 'create' | 'edit'>('list')
 const editingGroup = ref<GroupInfo | null>(null)
@@ -127,6 +148,23 @@ let refreshTimer: number | null = null
 
 // Batch import modal state.
 const showBatchImport = ref(false)
+const selectedAccountIds = ref<Array<string | number>>([])
+const bulkBusy = ref(false)
+const showBulkEdit = ref(false)
+const bulkForm = ref<BulkEditForm>({
+  updateStatus: false,
+  status: 'active',
+  updateGroups: false,
+  groupIds: [],
+  updateWeight: false,
+  weight: 1,
+  updateConcurrency: false,
+  concurrencyLimit: null,
+  updateNotes: false,
+  notes: '',
+  updateAutopause: false,
+  autopausePercent: null,
+})
 
 const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
@@ -168,6 +206,10 @@ const statusMeta: Record<string, { label: string; type: TagType }> = {
   error: { label: '异常', type: 'error' },
   disabled: { label: '已禁用', type: 'default' },
 }
+const bulkStatusOptions = [
+  { label: '启用调度', value: 'active' },
+  { label: '禁用调度', value: 'disabled' },
+]
 
 function isCoolingDown(row: Account) {
   return !!row.cooldownUntil && row.cooldownUntil > Date.now()
@@ -472,6 +514,7 @@ async function load() {
   try {
     const { data } = await api.get('/admin/accounts')
     accounts.value = data.accounts
+    pruneSelectedAccounts()
   } catch (e) {
     message.error(errMsg(e))
   } finally {
@@ -618,6 +661,178 @@ function openBatchImport() {
 
 async function handleBatchImported() {
   await load()
+}
+
+function resetBulkForm() {
+  bulkForm.value = {
+    updateStatus: false,
+    status: 'active',
+    updateGroups: false,
+    groupIds: [],
+    updateWeight: false,
+    weight: 1,
+    updateConcurrency: false,
+    concurrencyLimit: null,
+    updateNotes: false,
+    notes: '',
+    updateAutopause: false,
+    autopausePercent: null,
+  }
+}
+
+function pruneSelectedAccounts() {
+  const ids = new Set(accounts.value.map((account) => account.id))
+  selectedAccountIds.value = selectedAccountIds.value.filter((id) => ids.has(String(id)))
+}
+
+function selectAllAccounts() {
+  selectedAccountIds.value = accounts.value.map((account) => account.id)
+}
+
+function clearSelectedAccounts() {
+  selectedAccountIds.value = []
+}
+
+function requireSelectedIds(): string[] | null {
+  const ids = selectedAccountIdStrings.value
+  if (!ids.length) {
+    message.warning('请先选择账户')
+    return null
+  }
+  return ids
+}
+
+function notifyBatchResult(action: string, data: { successCount: number; failureCount: number }) {
+  if (data.failureCount > 0) {
+    message.warning(`${action}完成：成功 ${data.successCount} 个，失败 ${data.failureCount} 个`)
+    return
+  }
+  message.success(`${action}完成：${data.successCount} 个账户`)
+}
+
+async function bulkUpdateSelected(patch: Record<string, unknown>, action: string) {
+  const ids = requireSelectedIds()
+  if (!ids) return false
+  bulkBusy.value = true
+  try {
+    const { data } = await api.post('/admin/accounts/bulk-update', { ids, patch })
+    notifyBatchResult(action, data)
+    await load()
+    if (patch.groupIds !== undefined) await loadGroups()
+    return data.failureCount === 0
+  } catch (e) {
+    message.error(errMsg(e, `${action}失败`))
+    return false
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+function openBulkEdit() {
+  if (!requireSelectedIds()) return
+  resetBulkForm()
+  showBulkEdit.value = true
+}
+
+function buildBulkPatch(): Record<string, unknown> | null {
+  const patch: Record<string, unknown> = {}
+  const form = bulkForm.value
+  if (form.updateStatus) patch.status = form.status
+  if (form.updateGroups) patch.groupIds = form.groupIds
+  if (form.updateWeight) {
+    if (form.weight == null || !Number.isFinite(form.weight)) {
+      message.warning('请填写有效优先级')
+      return null
+    }
+    patch.weight = Math.max(1, Math.min(100, Math.trunc(form.weight)))
+  }
+  if (form.updateConcurrency) {
+    patch.concurrencyLimit = form.concurrencyLimit == null
+      ? null
+      : Math.max(1, Math.min(1000, Math.trunc(form.concurrencyLimit)))
+  }
+  if (form.updateNotes) patch.notes = form.notes.trim() || null
+  if (form.updateAutopause) {
+    patch.autopausePercent = form.autopausePercent == null
+      ? null
+      : Math.max(0, Math.min(100, Math.trunc(form.autopausePercent)))
+  }
+  if (!Object.keys(patch).length) {
+    message.warning('请选择至少一个要批量更新的字段')
+    return null
+  }
+  return patch
+}
+
+async function submitBulkEdit() {
+  const patch = buildBulkPatch()
+  if (!patch) return
+  const ok = await bulkUpdateSelected(patch, '批量更新')
+  if (ok) showBulkEdit.value = false
+}
+
+async function bulkSetStatus(status: 'active' | 'disabled') {
+  await bulkUpdateSelected({ status }, status === 'active' ? '批量启用' : '批量禁用')
+}
+
+async function batchTestSelected() {
+  const ids = requireSelectedIds()
+  if (!ids) return
+  bulkBusy.value = true
+  try {
+    const { data } = await api.post('/admin/accounts/batch-test', { ids })
+    notifyBatchResult('批量测试', data)
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '批量测试失败'))
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+async function batchRefreshQuotaSelected() {
+  const ids = requireSelectedIds()
+  if (!ids) return
+  bulkBusy.value = true
+  try {
+    const { data } = await api.post('/admin/accounts/batch-quota-refresh', { ids })
+    notifyBatchResult('批量刷新配额', data)
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '批量刷新配额失败'))
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+function confirmBulkDelete() {
+  const ids = requireSelectedIds()
+  if (!ids) return
+  const names = selectedAccounts.value.slice(0, 5).map((account) => `「${account.name}」`).join('、')
+  const suffix = selectedCount.value > 5 ? ` 等 ${selectedCount.value} 个账户` : ''
+  dialog.warning({
+    title: '批量删除账户',
+    content: `确定删除 ${names}${suffix}？这些账户将不再参与中转。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      bulkBusy.value = true
+      try {
+        const { data } = await api.post('/admin/accounts/bulk-delete', { ids })
+        notifyBatchResult('批量删除', data)
+        const failedIds = new Set<string>(
+          (data.results ?? []).filter((item: { id: string; success: boolean }) => !item.success).map((item: { id: string }) => item.id),
+        )
+        selectedAccountIds.value = selectedAccountIds.value.filter((id) => failedIds.has(String(id)))
+        await load()
+        await loadGroups()
+      } catch (e) {
+        message.error(errMsg(e, '批量删除失败'))
+      } finally {
+        bulkBusy.value = false
+      }
+    },
+  })
 }
 
 async function finishApiKeyImport() {
@@ -899,6 +1114,10 @@ function confirmDelete(row: Account) {
   })
 }
 
+function accountRowKey(row: Account) {
+  return row.id
+}
+
 const columns = computed<TableColumn<Account>[]>(() => [
   { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
   { title: '分组', key: 'group', width: 140, render: renderGroupCell },
@@ -1016,6 +1235,41 @@ onBeforeUnmount(() => {
       <UiButton type="primary" @click="openAdd">添加账户</UiButton>
     </div>
 
+    <div v-if="accounts.length" class="bulk-actions">
+      <div class="bulk-summary">
+        <strong>{{ selectedCount ? `已选 ${selectedCount} 个账户` : '批量操作' }}</strong>
+        <span>{{ selectedCount ? '可对选中账户统一测试、调度或修改字段' : '勾选账户后使用批量操作' }}</span>
+        <div class="bulk-selection-tools">
+          <UiButton size="tiny" quaternary :disabled="bulkBusy || selectedCount === accounts.length" @click="selectAllAccounts">
+            全选
+          </UiButton>
+          <UiButton size="tiny" quaternary :disabled="bulkBusy || !selectedCount" @click="clearSelectedAccounts">
+            清空
+          </UiButton>
+        </div>
+      </div>
+      <div class="bulk-buttons">
+        <UiButton size="small" secondary :disabled="bulkBusy || !selectedCount" @click="batchTestSelected">
+          测试
+        </UiButton>
+        <UiButton size="small" secondary :disabled="bulkBusy || !selectedCount" @click="batchRefreshQuotaSelected">
+          刷新配额
+        </UiButton>
+        <UiButton size="small" type="success" secondary :disabled="bulkBusy || !selectedCount" @click="bulkSetStatus('active')">
+          启用
+        </UiButton>
+        <UiButton size="small" type="warning" secondary :disabled="bulkBusy || !selectedCount" @click="bulkSetStatus('disabled')">
+          禁用
+        </UiButton>
+        <UiButton size="small" type="primary" :disabled="bulkBusy || !selectedCount" @click="openBulkEdit">
+          批量编辑
+        </UiButton>
+        <UiButton size="small" type="error" secondary :disabled="bulkBusy || !selectedCount" @click="confirmBulkDelete">
+          删除
+        </UiButton>
+      </div>
+    </div>
+
     <div v-if="accountGroups.length" class="account-groups">
       <UiCard
         v-for="group in accountGroups"
@@ -1040,8 +1294,11 @@ onBeforeUnmount(() => {
           :columns="columns"
           :data="group.accounts"
           :loading="loading"
+          selectable
+          v-model:checked-row-keys="selectedAccountIds"
+          :row-key="accountRowKey"
           :bordered="false"
-          :scroll-x="1788"
+          :scroll-x="1830"
         />
       </UiCard>
     </div>
@@ -1051,8 +1308,11 @@ onBeforeUnmount(() => {
         :columns="columns"
         :data="accounts"
         :loading="loading"
+        selectable
+        v-model:checked-row-keys="selectedAccountIds"
+        :row-key="accountRowKey"
         :bordered="false"
-        :scroll-x="1928"
+        :scroll-x="1970"
       />
     </UiCard>
 
@@ -1334,6 +1594,89 @@ onBeforeUnmount(() => {
       </template>
     </UiModal>
 
+    <UiModal v-model:show="showBulkEdit" title="批量编辑账户" :width="620">
+      <div class="bulk-edit">
+        <div class="bulk-edit-note">
+          <strong>{{ selectedCount }} 个账户</strong>
+          <span>只会更新已勾选的字段，未勾选字段保持不变。</span>
+        </div>
+
+        <div class="bulk-edit-row">
+          <UiCheckbox v-model:checked="bulkForm.updateStatus">调度状态</UiCheckbox>
+          <UiSelect
+            v-model:value="bulkForm.status"
+            :options="bulkStatusOptions"
+            :disabled="!bulkForm.updateStatus"
+          />
+        </div>
+
+        <div class="bulk-edit-row">
+          <UiCheckbox v-model:checked="bulkForm.updateGroups">分组</UiCheckbox>
+          <UiSelect
+            v-model:value="bulkForm.groupIds"
+            multiple
+            clearable
+            :options="groupSelectOptions"
+            :disabled="!bulkForm.updateGroups"
+            placeholder="默认池"
+          />
+        </div>
+
+        <div class="bulk-edit-grid">
+          <div class="bulk-edit-row is-compact">
+            <UiCheckbox v-model:checked="bulkForm.updateWeight">优先级</UiCheckbox>
+            <UiInputNumber
+              v-model:value="bulkForm.weight"
+              :min="1"
+              :max="100"
+              :disabled="!bulkForm.updateWeight"
+            />
+          </div>
+
+          <div class="bulk-edit-row is-compact">
+            <UiCheckbox v-model:checked="bulkForm.updateConcurrency">并发上限</UiCheckbox>
+            <UiInputNumber
+              v-model:value="bulkForm.concurrencyLimit"
+              :min="1"
+              :max="1000"
+              :disabled="!bulkForm.updateConcurrency"
+              placeholder="不限"
+            />
+          </div>
+
+          <div class="bulk-edit-row is-compact">
+            <UiCheckbox v-model:checked="bulkForm.updateAutopause">停调阈值</UiCheckbox>
+            <UiInputNumber
+              v-model:value="bulkForm.autopausePercent"
+              :min="0"
+              :max="100"
+              :step="5"
+              :disabled="!bulkForm.updateAutopause"
+              placeholder="继承全局"
+            />
+          </div>
+        </div>
+
+        <div class="bulk-edit-row is-notes">
+          <UiCheckbox v-model:checked="bulkForm.updateNotes">备注</UiCheckbox>
+          <UiInput
+            v-model:value="bulkForm.notes"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 5 }"
+            :disabled="!bulkForm.updateNotes"
+            placeholder="留空将清除备注"
+          />
+        </div>
+      </div>
+
+      <template #footer>
+        <UiSpace justify="end">
+          <UiButton :disabled="bulkBusy" @click="showBulkEdit = false">取消</UiButton>
+          <UiButton type="primary" :loading="bulkBusy" @click="submitBulkEdit">保存</UiButton>
+        </UiSpace>
+      </template>
+    </UiModal>
+
     <ImportAccountsModal
       v-model:show="showBatchImport"
       @imported="handleBatchImported"
@@ -1345,6 +1688,93 @@ onBeforeUnmount(() => {
 .account-groups {
   display: grid;
   gap: 14px;
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -8px 0 16px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.74);
+}
+
+.bulk-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(15, 23, 42, 0.62);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.bulk-summary strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.bulk-selection-tools,
+.bulk-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bulk-buttons {
+  justify-content: flex-end;
+}
+
+.bulk-edit {
+  display: grid;
+  gap: 14px;
+}
+
+.bulk-edit-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.82);
+  color: rgba(15, 23, 42, 0.58);
+  font-size: 13px;
+}
+
+.bulk-edit-note strong {
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
+.bulk-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bulk-edit-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.bulk-edit-row.is-compact {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.bulk-edit-row.is-notes {
+  align-items: flex-start;
 }
 
 .account-group-card {
@@ -1825,7 +2255,41 @@ onBeforeUnmount(() => {
   border-color: rgba(71, 85, 105, 0.58);
 }
 
+:global(.dark) .bulk-actions,
+:global(.dark) .bulk-edit-note {
+  border-color: rgba(59, 130, 246, 0.24);
+  background: rgba(30, 41, 59, 0.58);
+  color: rgba(226, 232, 240, 0.62);
+}
+
+:global(.dark) .bulk-summary,
+:global(.dark) .bulk-edit-note {
+  color: rgba(226, 232, 240, 0.62);
+}
+
+:global(.dark) .bulk-summary strong {
+  color: #f8fafc;
+}
+
+:global(.dark) .bulk-edit-note strong {
+  color: #93c5fd;
+}
+
 @media (max-width: 720px) {
+  .bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bulk-buttons {
+    justify-content: flex-start;
+  }
+
+  .bulk-edit-grid,
+  .bulk-edit-row {
+    grid-template-columns: 1fr;
+  }
+
   .account-group-head {
     align-items: flex-start;
     flex-direction: column;

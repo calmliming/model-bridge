@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
@@ -26,6 +26,22 @@ export interface CreateAccountInput {
   concurrencyLimit?: number | null
   /** Admin-only operational note. Never sent upstream. */
   notes?: string | null
+}
+
+export interface AccountUpdatePatch {
+  status?: 'active' | 'disabled'
+  weight?: number
+  concurrencyLimit?: number | null
+  groupIds?: string[]
+  notes?: string | null
+  autopausePercent?: number | null
+}
+
+export interface AccountBatchResult {
+  total: number
+  successCount: number
+  failureCount: number
+  results: Array<{ id: string; success: boolean; error?: string }>
 }
 
 function metadataObject(metadata: unknown): Record<string, unknown> {
@@ -133,7 +149,77 @@ export async function getAccount(id: string) {
 }
 
 export async function deleteAccount(id: string): Promise<void> {
+  await db.delete(accountGroupMembers).where(eq(accountGroupMembers.accountId, id))
   await db.delete(accounts).where(eq(accounts.id, id))
+}
+
+async function applyAccountPatch(id: string, patch: AccountUpdatePatch): Promise<void> {
+  const account = await getAccount(id)
+  if (!account) throw new Error('account not found')
+  if (patch.status) await setAccountStatus(id, patch.status)
+  if (patch.weight !== undefined) await setAccountWeight(id, patch.weight)
+  if (patch.concurrencyLimit !== undefined) await setAccountConcurrencyLimit(id, patch.concurrencyLimit)
+  if (patch.groupIds !== undefined) await setAccountGroups(id, patch.groupIds)
+  if (patch.notes !== undefined) await setAccountNotes(id, patch.notes)
+  if (patch.autopausePercent !== undefined) await setAccountAutopause(id, patch.autopausePercent)
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+}
+
+/** Applies the same account patch to many accounts and reports per-row status. */
+export async function updateAccounts(ids: string[], patch: AccountUpdatePatch): Promise<AccountBatchResult> {
+  const targetIds = uniqueIds(ids)
+  const results: AccountBatchResult['results'] = []
+  for (const id of targetIds) {
+    try {
+      await applyAccountPatch(id, patch)
+      results.push({ id, success: true })
+    } catch (err) {
+      results.push({ id, success: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  }
+  const successCount = results.filter((r) => r.success).length
+  return {
+    total: results.length,
+    successCount,
+    failureCount: results.length - successCount,
+    results,
+  }
+}
+
+/** Deletes many accounts, including their group memberships. */
+export async function deleteAccounts(ids: string[]): Promise<AccountBatchResult> {
+  const targetIds = uniqueIds(ids)
+  if (!targetIds.length) {
+    return { total: 0, successCount: 0, failureCount: 0, results: [] }
+  }
+
+  const existingRows = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(inArray(accounts.id, targetIds))
+  const existingSet = new Set(existingRows.map((row) => row.id))
+  const existingIds = targetIds.filter((id) => existingSet.has(id))
+
+  if (existingIds.length) {
+    await db.delete(accountGroupMembers).where(inArray(accountGroupMembers.accountId, existingIds))
+    await db.delete(accounts).where(inArray(accounts.id, existingIds))
+  }
+
+  const results: AccountBatchResult['results'] = targetIds.map((id) =>
+    existingSet.has(id)
+      ? { id, success: true }
+      : { id, success: false, error: 'account not found' },
+  )
+  const successCount = results.filter((r) => r.success).length
+  return {
+    total: results.length,
+    successCount,
+    failureCount: results.length - successCount,
+    results,
+  }
 }
 
 /** Updates provider-specific metadata cached on an account. */

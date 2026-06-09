@@ -7,6 +7,9 @@ const props = withDefaults(
     columns: TableColumn<T>[]
     data: T[]
     loading?: boolean
+    selectable?: boolean
+    checkedRowKeys?: Array<string | number>
+    rowCheckable?: (row: T) => boolean
     rowKey?: (row: T) => string | number
     scrollX?: number
     emptyText?: string
@@ -14,8 +17,47 @@ const props = withDefaults(
   { emptyText: '暂无数据' },
 )
 
+const emit = defineEmits<{
+  (e: 'update:checkedRowKeys', keys: Array<string | number>): void
+}>()
+
 function keyOf(row: T, index: number): string | number {
   return props.rowKey ? props.rowKey(row) : (row.id ?? index)
+}
+
+function canCheck(row: T): boolean {
+  return props.rowCheckable ? props.rowCheckable(row) : true
+}
+
+const checkedSet = computed(() => new Set(props.checkedRowKeys ?? []))
+const checkableRows = computed(() =>
+  props.data
+    .map((row, index) => ({ row, index, key: keyOf(row, index) }))
+    .filter(({ row }) => canCheck(row)),
+)
+const allRowsChecked = computed(() =>
+  checkableRows.value.length > 0 && checkableRows.value.every(({ key }) => checkedSet.value.has(key)),
+)
+const someRowsChecked = computed(() => checkableRows.value.some(({ key }) => checkedSet.value.has(key)))
+
+function setChecked(key: string | number, checked: boolean) {
+  const next = new Set(checkedSet.value)
+  if (checked) next.add(key)
+  else next.delete(key)
+  emit('update:checkedRowKeys', [...next])
+}
+
+function toggleAll(checked: boolean) {
+  const next = new Set(checkedSet.value)
+  for (const { key } of checkableRows.value) {
+    if (checked) next.add(key)
+    else next.delete(key)
+  }
+  emit('update:checkedRowKeys', [...next])
+}
+
+function checkedFromEvent(event: Event): boolean {
+  return (event.target as HTMLInputElement).checked
 }
 
 function isFixedLeft(col: TableColumn<T>): boolean {
@@ -48,6 +90,18 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
     <table class="data-table" :style="tableStyle">
       <thead>
         <tr>
+          <th v-if="selectable" class="selection-cell">
+            <input
+              type="checkbox"
+              class="selection-checkbox"
+              :checked="allRowsChecked"
+              :indeterminate="someRowsChecked && !allRowsChecked"
+              :disabled="!checkableRows.length"
+              :aria-checked="someRowsChecked && !allRowsChecked ? 'mixed' : allRowsChecked"
+              aria-label="选择当前表格账户"
+              @change="toggleAll(checkedFromEvent($event))"
+            />
+          </th>
           <th
             v-for="col in columns"
             :key="col.key"
@@ -60,6 +114,16 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
       </thead>
       <tbody>
         <tr v-for="(row, index) in data" :key="keyOf(row, index)">
+          <td v-if="selectable" class="selection-cell">
+            <input
+              type="checkbox"
+              class="selection-checkbox"
+              :checked="checkedSet.has(keyOf(row, index))"
+              :disabled="!canCheck(row)"
+              :aria-label="`选择 ${row.name ?? keyOf(row, index)}`"
+              @change="setChecked(keyOf(row, index), checkedFromEvent($event))"
+            />
+          </td>
           <td
             v-for="col in columns"
             :key="col.key"
@@ -85,3 +149,25 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
     </div>
   </div>
 </template>
+
+<style scoped>
+.selection-cell {
+  width: 42px;
+  min-width: 42px;
+  text-align: center;
+}
+
+.selection-checkbox {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: #2563eb;
+}
+
+.selection-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+</style>

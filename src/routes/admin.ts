@@ -12,6 +12,7 @@ import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/s
 import {
   createAccount,
   deleteAccount,
+  deleteAccounts,
   listAccounts,
   setAccountAutopause,
   setAccountConcurrencyLimit,
@@ -19,6 +20,7 @@ import {
   setAccountNotes,
   setAccountStatus,
   setAccountWeight,
+  updateAccounts,
 } from '../accounts/manager'
 import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
@@ -162,6 +164,15 @@ const accountUpdateSchema = z
     autopausePercent: z.number().int().min(0).max(100).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
+
+const accountIdsSchema = z.object({
+  ids: z.array(z.string().trim().min(1)).min(1).max(200),
+})
+
+const accountBulkUpdateSchema = z.object({
+  ids: accountIdsSchema.shape.ids,
+  patch: accountUpdateSchema,
+})
 
 const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -319,6 +330,50 @@ function sendUserManagerError(
     return reply.code(err.statusCode).send({ error: err.message })
   }
   throw err
+}
+
+async function batchTestAccounts(ids: string[]) {
+  const targetIds = [...new Set(ids)]
+  const results: Array<{
+    id: string
+    success: boolean
+    message?: string
+    latencyMs?: number
+    checkedAt?: number
+    error?: string
+  }> = []
+  let index = 0
+  const workerCount = Math.min(3, targetIds.length)
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (index < targetIds.length) {
+        const id = targetIds[index++]
+        try {
+          const result = await testAccountConnectivity(id)
+          results.push({
+            id,
+            success: result.success,
+            message: result.message,
+            latencyMs: result.latencyMs,
+            checkedAt: result.checkedAt,
+          })
+        } catch (err) {
+          results.push({
+            id,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+    }),
+  )
+  const successCount = results.filter((r) => r.success).length
+  return {
+    total: results.length,
+    successCount,
+    failureCount: results.length - successCount,
+    results,
+  }
 }
 
 /** Registers all `/api/admin/*` endpoints used by the dashboard. */
@@ -1107,6 +1162,54 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         failureCount,
         results,
       })
+    },
+  )
+
+  app.post(
+    '/api/admin/accounts/bulk-update',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = accountBulkUpdateSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
+      }
+      return updateAccounts(body.data.ids, body.data.patch)
+    },
+  )
+
+  app.post(
+    '/api/admin/accounts/bulk-delete',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = accountIdsSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
+      }
+      return deleteAccounts(body.data.ids)
+    },
+  )
+
+  app.post(
+    '/api/admin/accounts/batch-test',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = accountIdsSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
+      }
+      return batchTestAccounts(body.data.ids)
+    },
+  )
+
+  app.post(
+    '/api/admin/accounts/batch-quota-refresh',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const body = accountIdsSchema.safeParse(request.body)
+      if (!body.success) {
+        return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
+      }
+      return batchTestAccounts(body.data.ids)
     },
   )
 
