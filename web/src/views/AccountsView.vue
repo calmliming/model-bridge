@@ -88,6 +88,7 @@ const dialog = useDialog()
 
 const accounts = ref<Account[]>([])
 const loading = ref(true)
+const searchQuery = ref('')
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
@@ -1162,13 +1163,34 @@ const columns = computed<TableColumn<Account>[]>(() => [
                 quaternary: true,
                 loading: testingId.value === row.id,
                 onClick: () => testConnectivity(row),
+                title: '测试连通性',
               },
-              { default: () => '测试' },
+              {
+                default: () => h('div', { class: 'flex items-center gap-1' }, [
+                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
+                  ]),
+                  h('span', '测试')
+                ])
+              },
             ),
             h(
               UiButton,
-              { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
-              { default: () => '删除' },
+              {
+                size: 'small',
+                type: 'error',
+                quaternary: true,
+                onClick: () => confirmDelete(row),
+                title: '删除账户',
+              },
+              {
+                default: () => h('div', { class: 'flex items-center gap-1' }, [
+                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' })
+                  ]),
+                  h('span', '删除')
+                ])
+              },
             ),
           ],
         },
@@ -1177,8 +1199,15 @@ const columns = computed<TableColumn<Account>[]>(() => [
 ])
 
 const accountGroups = computed<AccountGroup[]>(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const filteredAccounts = query
+    ? accounts.value.filter(
+        (a) => a.name.toLowerCase().includes(query) || a.provider.toLowerCase().includes(query),
+      )
+    : accounts.value
+
   const groups = new Map<string, Account[]>()
-  for (const account of accounts.value) {
+  for (const account of filteredAccounts) {
     const rows = groups.get(account.provider) ?? []
     rows.push(account)
     groups.set(account.provider, rows)
@@ -1230,45 +1259,77 @@ onBeforeUnmount(() => {
 <template>
   <div>
     <div class="page-head">
-      <UiButton secondary @click="openGroups">管理分组</UiButton>
-      <UiButton secondary @click="openBatchImport">批量导入</UiButton>
-      <UiButton type="primary" @click="openAdd">添加账户</UiButton>
-    </div>
-
-    <div v-if="accounts.length" class="bulk-actions">
-      <div class="bulk-summary">
-        <strong>{{ selectedCount ? `已选 ${selectedCount} 个账户` : '批量操作' }}</strong>
-        <span>{{ selectedCount ? '可对选中账户统一测试、调度或修改字段' : '勾选账户后使用批量操作' }}</span>
-        <div class="bulk-selection-tools">
-          <UiButton size="tiny" quaternary :disabled="bulkBusy || selectedCount === accounts.length" @click="selectAllAccounts">
-            全选
-          </UiButton>
-          <UiButton size="tiny" quaternary :disabled="bulkBusy || !selectedCount" @click="clearSelectedAccounts">
-            清空
-          </UiButton>
+      <div class="flex flex-1 items-center gap-3">
+        <div class="relative w-full max-w-[280px]">
+          <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+          </span>
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="input !pl-9"
+            placeholder="搜索账户名称或服务商..."
+          />
         </div>
       </div>
-      <div class="bulk-buttons">
-        <UiButton size="small" secondary :disabled="bulkBusy || !selectedCount" @click="batchTestSelected">
-          测试
+      <div class="flex flex-shrink-0 items-center gap-2">
+        <UiButton secondary @click="openGroups">
+          <template #default>
+            <div class="flex items-center gap-1.5">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+              </svg>
+              <span>管理分组</span>
+            </div>
+          </template>
         </UiButton>
-        <UiButton size="small" secondary :disabled="bulkBusy || !selectedCount" @click="batchRefreshQuotaSelected">
-          刷新配额
+        <UiButton secondary @click="openBatchImport">
+          <template #default>
+            <div class="flex items-center gap-1.5">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              <span>批量导入</span>
+            </div>
+          </template>
         </UiButton>
-        <UiButton size="small" type="success" secondary :disabled="bulkBusy || !selectedCount" @click="bulkSetStatus('active')">
-          启用
-        </UiButton>
-        <UiButton size="small" type="warning" secondary :disabled="bulkBusy || !selectedCount" @click="bulkSetStatus('disabled')">
-          禁用
-        </UiButton>
-        <UiButton size="small" type="primary" :disabled="bulkBusy || !selectedCount" @click="openBulkEdit">
-          批量编辑
-        </UiButton>
-        <UiButton size="small" type="error" secondary :disabled="bulkBusy || !selectedCount" @click="confirmBulkDelete">
-          删除
+        <UiButton type="primary" @click="openAdd">
+          <template #default>
+            <div class="flex items-center gap-1.5">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              <span>添加账户</span>
+            </div>
+          </template>
         </UiButton>
       </div>
     </div>
+
+    <Transition name="fade">
+      <div v-if="selectedCount > 0" class="bulk-actions sticky top-0 z-20 shadow-lg backdrop-blur-md">
+        <div class="bulk-summary">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-600 dark:bg-primary-900/40 dark:text-primary-300">
+            {{ selectedCount }}
+          </span>
+          <strong>已选中账户</strong>
+          <div class="bulk-selection-tools ml-2">
+            <UiButton size="tiny" quaternary :disabled="bulkBusy" @click="clearSelectedAccounts">取消选择</UiButton>
+          </div>
+        </div>
+        <div class="bulk-buttons">
+          <UiButton size="small" secondary :disabled="bulkBusy" @click="batchTestSelected">批量测试</UiButton>
+          <UiButton size="small" secondary :disabled="bulkBusy" @click="batchRefreshQuotaSelected">刷新配额</UiButton>
+          <div class="h-4 w-px bg-gray-200 dark:bg-dark-700 mx-1"></div>
+          <UiButton size="small" type="success" secondary :disabled="bulkBusy" @click="bulkSetStatus('active')">启用</UiButton>
+          <UiButton size="small" type="warning" secondary :disabled="bulkBusy" @click="bulkSetStatus('disabled')">禁用</UiButton>
+          <UiButton size="small" type="primary" :disabled="bulkBusy" @click="openBulkEdit">批量编辑</UiButton>
+          <UiButton size="small" type="error" secondary :disabled="bulkBusy" @click="confirmBulkDelete">删除</UiButton>
+        </div>
+      </div>
+    </Transition>
 
     <div v-if="accountGroups.length" class="account-groups">
       <UiCard
@@ -1695,22 +1756,30 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: -8px 0 16px;
-  padding: 12px;
-  border: 1px solid rgba(37, 99, 235, 0.14);
-  border-radius: 8px;
-  background: rgba(239, 246, 255, 0.74);
+  margin: -8px -12px 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(239, 246, 255, 0.85);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 .bulk-summary {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
-  color: rgba(15, 23, 42, 0.62);
-  font-size: 12px;
-  line-height: 1.35;
+  color: #0f172a;
+  font-size: 13px;
 }
 
 .bulk-summary strong {
@@ -1786,30 +1855,46 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  padding: 2px 4px 12px;
 }
 
-.account-group-title,
-.account-group-meta {
+.account-group-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
+  gap: 10px;
 }
 
 .account-group-title strong {
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 700;
-  white-space: nowrap;
+  color: #1e293b;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .account-group-meta {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  color: rgba(15, 23, 42, 0.52);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #64748b;
   font-size: 12px;
+  font-weight: 500;
 }
+
+.account-group-meta span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.account-group-meta span::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.account-group-meta span:nth-child(1)::before { background: #10b981; }
+.account-group-meta span:nth-child(2)::before { background: #f59e0b; }
+.account-group-meta span:nth-child(3)::before { background: #94a3b8; }
 
 :deep(.muted-cell) {
   color: rgba(15, 23, 42, 0.52);
@@ -1873,30 +1958,31 @@ onBeforeUnmount(() => {
 
 :deep(.quota-row) {
   display: grid;
-  grid-template-columns: 42px 48px 44px minmax(54px, 1fr);
+  grid-template-columns: 60px 50px 42px minmax(60px, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  padding: 2px 0;
 }
 
 :deep(.quota-label) {
-  padding: 1px 5px;
-  border-radius: 6px;
+  padding: 1.5px 6px;
+  border-radius: 5px;
   font-size: 11px;
-  font-weight: 700;
-  line-height: 1.35;
+  font-weight: 600;
+  line-height: 1.2;
   text-align: center;
   white-space: nowrap;
 }
 
 :deep(.quota-label.is-5h) {
-  color: #3730a3;
-  background: #e0e7ff;
+  color: #4338ca;
+  background: rgba(224, 231, 255, 0.8);
 }
 
 :deep(.quota-label.is-7d) {
-  color: #047857;
-  background: #d1fae5;
+  color: #059669;
+  background: rgba(209, 250, 229, 0.8);
 }
 
 :deep(.quota-percent),
@@ -2068,11 +2154,18 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 8px;
-  background: rgba(248, 250, 252, 0.72);
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: white;
+  transition: all 0.2s ease;
+}
+
+.group-item:hover {
+  border-color: rgba(37, 99, 235, 0.3);
+  background: rgba(248, 250, 252, 0.8);
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.04);
 }
 
 .group-main {
@@ -2231,10 +2324,15 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark) .group-name,
+:global(.dark) .account-group-title strong,
 :global(.dark) .group-metric strong,
 :global(.dark) .group-preview strong,
 :global(.dark) .group-empty-card strong {
   color: #f8fafc;
+}
+
+:global(.dark) .account-group-meta {
+  color: #94a3b8;
 }
 
 :global(.dark) .group-description,
@@ -2255,16 +2353,16 @@ onBeforeUnmount(() => {
   border-color: rgba(71, 85, 105, 0.58);
 }
 
-:global(.dark) .bulk-actions,
-:global(.dark) .bulk-edit-note {
+:global(.dark) .bulk-actions {
   border-color: rgba(59, 130, 246, 0.24);
-  background: rgba(30, 41, 59, 0.58);
-  color: rgba(226, 232, 240, 0.62);
+  background: rgba(30, 41, 59, 0.82);
+  color: rgba(226, 232, 240, 0.9);
 }
 
-:global(.dark) .bulk-summary,
 :global(.dark) .bulk-edit-note {
-  color: rgba(226, 232, 240, 0.62);
+  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(30, 41, 59, 0.6);
+  color: rgba(226, 232, 240, 0.6);
 }
 
 :global(.dark) .bulk-summary strong {

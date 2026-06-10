@@ -5,6 +5,9 @@ import { checkLoginRateLimit, getTurnstileSiteKey, verifyTurnstileToken } from '
 import { registerUser, UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
 import { isRegistrationEnabled } from '../db/settings'
 import { checkRateLimit } from '../middleware/limits'
+import { db } from '../db'
+import { accounts, usageLogs } from '../db/schema'
+import { count, sql } from 'drizzle-orm'
 
 const loginSchema = z.object({
   account: z.string().trim().min(1),
@@ -61,6 +64,23 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return {
       enabled: await isRegistrationEnabled(),
       turnstileSiteKey: getTurnstileSiteKey(),
+    }
+  })
+
+  // Public: system summary for the landing page.
+  app.get('/api/auth/system-summary', async () => {
+    const [accountCount] = await db.select({ value: count() }).from(accounts)
+    const [requestCount] = await db.select({ value: count() }).from(usageLogs)
+    const providers = await db
+      .select({ provider: accounts.provider })
+      .from(accounts)
+      .groupBy(accounts.provider)
+
+    return {
+      registrationEnabled: await isRegistrationEnabled(),
+      accounts: accountCount.value,
+      requests: requestCount.value,
+      providers: providers.map((p) => p.provider),
     }
   })
 

@@ -5,6 +5,11 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/',
+      name: 'landing',
+      component: () => import('../views/LandingView.vue'),
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
@@ -20,11 +25,11 @@ export const router = createRouter({
       component: () => import('../views/AcceptInviteView.vue'),
     },
     {
-      path: '/',
+      path: '/admin',
       component: () => import('../layouts/AppLayout.vue'),
       meta: { role: 'admin' },
       children: [
-        { path: '', redirect: '/overview' },
+        { path: '', redirect: '/admin/overview' },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'account-groups', name: 'account-groups', component: () => import('../views/AccountGroupsView.vue') },
@@ -54,7 +59,7 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (to.name === 'accept-invite') return
+  if (to.name === 'accept-invite' || to.name === 'landing') return
   const requiredRole = to.matched.find((record) => record.meta.role)?.meta.role
   if (requiredRole === 'admin' || to.name === 'login') {
     auth.activateRole('admin')

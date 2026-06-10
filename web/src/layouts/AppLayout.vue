@@ -177,15 +177,19 @@ function logout() {
           v-for="item in menu"
           :key="item.key"
           :to="item.to"
-          class="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+          class="group relative flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
           :class="
             activeKey === item.key
-              ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
+              ? 'bg-primary-50 text-primary-600 shadow-sm shadow-primary-500/10 dark:bg-primary-900/20 dark:text-primary-300'
               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white'
           "
         >
+          <div
+            v-if="activeKey === item.key"
+            class="absolute left-0 h-5 w-1 rounded-r-full bg-primary-500 transition-all"
+          />
           <svg
-            class="h-5 w-5 flex-shrink-0"
+            class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -204,11 +208,14 @@ function logout() {
         </RouterLink>
       </nav>
 
-      <div class="m-4 flex items-center gap-2.5 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 dark:border-dark-700 dark:bg-dark-800/60">
-        <span class="h-2.5 w-2.5 rounded-full bg-primary-500 shadow-[0_0_0_5px_rgba(20,184,166,0.12)]" />
+      <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-dark-700/50 dark:bg-dark-800/60">
+        <div class="relative flex h-2.5 w-2.5 items-center justify-center">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-75"></span>
+          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary-500"></span>
+        </div>
         <div class="leading-tight">
-          <strong class="block text-[13px] text-gray-900 dark:text-white">Relay Ready</strong>
-          <span class="text-xs text-gray-400 dark:text-dark-400">控制台在线</span>
+          <strong class="block text-[13px] font-bold text-gray-900 dark:text-white">Relay Ready</strong>
+          <span class="text-[11px] font-medium text-gray-400 dark:text-dark-400">控制台在线</span>
         </div>
       </div>
     </aside>
