@@ -2,11 +2,40 @@ const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
 // These mimic the official Claude Code client. Reverse-engineered and
 // undocumented — update here if Anthropic changes the requirements.
+// 对齐 sub2api constants.go（截至 2026-06）的 FullClaudeCodeMimicryBetas。
 const ANTHROPIC_VERSION = '2023-06-01'
-const ANTHROPIC_BETA = 'oauth-2025-04-20'
+const CLI_VERSION = '2.1.161'
+
+// Beta flags — 顺序与真实 Claude Code CLI 抓包一致。
+// Anthropic 基于完整 beta 集合判定请求来源；缺少任何官方 beta 会被降级到第三方额度。
+const ANTHROPIC_BETAS = [
+  'claude-code-20250219',
+  'oauth-2025-04-20',
+  'interleaved-thinking-2025-05-14',
+  'prompt-caching-scope-2026-01-05',
+  'effort-2025-11-24',
+  'context-management-2025-06-27',
+  'extended-cache-ttl-2025-04-11',
+] as const
+const ANTHROPIC_BETA = ANTHROPIC_BETAS.join(',')
+
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
-const USER_AGENT = 'claude-cli/1.0.0 (external, cli)'
+const USER_AGENT = `claude-cli/${CLI_VERSION} (external, cli)`
 const FORBIDDEN_FIELDS = ['context_management'] as const
+
+// X-Stainless-* headers — Claude Code SDK 自动附加的指纹，上游用于来源判定。
+const STAINLESS_HEADERS: Record<string, string> = {
+  'x-stainless-lang': 'js',
+  'x-stainless-package-version': '0.94.0',
+  'x-stainless-os': 'Linux',
+  'x-stainless-arch': 'arm64',
+  'x-stainless-runtime': 'node',
+  'x-stainless-runtime-version': 'v24.3.0',
+  'x-stainless-retry-count': '0',
+  'x-stainless-timeout': '600',
+  'x-app': 'cli',
+  'anthropic-dangerous-direct-browser-access': 'true',
+}
 
 interface TextBlock {
   type: 'text'
@@ -41,6 +70,10 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
   out.system = normalizeSystem(body.system)
+  // 注入自动缓存：Anthropic 自动选择最优断点，无需手动放置 cache_control
+  if (!out.cache_control) {
+    out.cache_control = { type: 'ephemeral' }
+  }
   return out
 }
 
@@ -59,6 +92,7 @@ export function relayClaudeMessages(
       'content-type': 'application/json',
       'user-agent': USER_AGENT,
       accept: body.stream === true ? 'text/event-stream' : 'application/json',
+      ...STAINLESS_HEADERS,
     },
     body: JSON.stringify(payload),
   })
