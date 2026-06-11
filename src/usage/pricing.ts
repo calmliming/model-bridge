@@ -26,6 +26,11 @@ const CLAUDE_OPUS_REDUCED: TierPrice = { input: 5, output: 25, cacheWrite: 6.25,
 const CLAUDE_OPUS_LEGACY: TierPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }
 const CLAUDE_SONNET: TierPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 }
 const CLAUDE_HAIKU: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
+// Fable 5 (Mythos-class flagship) has no published per-token list price yet.
+// Seed it at the current top Claude rate (Opus 4.5+ reduced) so it is never
+// under-billed as the default Sonnet tier; admins can edit the row once the
+// official price is known.
+const CLAUDE_FABLE: TierPrice = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
 function isLegacyOpus(model: string): boolean {
@@ -43,6 +48,7 @@ function isLegacyOpus(model: string): boolean {
 
 function claudePrice(model: string): TierPrice {
   const m = model.toLowerCase()
+  if (m.includes('fable') || m.includes('mythos')) return CLAUDE_FABLE
   if (m.includes('haiku')) return CLAUDE_HAIKU
   if (m.includes('opus')) return isLegacyOpus(m) ? CLAUDE_OPUS_LEGACY : CLAUDE_OPUS_REDUCED
   return CLAUDE_SONNET
@@ -142,6 +148,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-opus-4-1', price: CLAUDE_OPUS_LEGACY },
   { provider: 'claude', model: 'sonnet', price: CLAUDE_SONNET },
   { provider: 'claude', model: 'haiku', price: CLAUDE_HAIKU },
+  { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-5.5', price: OPENAI_GPT55 },
   { provider: 'openai', model: 'gpt-5.4', price: OPENAI_GPT54 },

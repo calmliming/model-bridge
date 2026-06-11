@@ -25,10 +25,15 @@ export interface GeminiModelItem {
 
 const CREATED_AT = 1_704_067_200
 
+// Curated per-provider model lists surfaced by GET /v1/models. This is a
+// discovery/display list only — actual relaying passes body.model through
+// untouched, so a model missing here can still be called directly (unless a
+// key pins an exact allowedModels allow-list). Keep the current flagship of
+// each tier here; pricing.ts resolves any other version via substring tiers.
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
-  claude: ['claude-opus-4-1', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
+  claude: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
-  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
 }

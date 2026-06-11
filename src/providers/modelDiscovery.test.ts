@@ -4,7 +4,7 @@ import { isProviderAllowed, listGeminiModels, listModelIdsForKey } from './model
 describe('model discovery', () => {
   it('returns all default models for unrestricted keys', () => {
     expect(listModelIdsForKey({ allowedProviders: null, allowedModels: null })).toEqual(
-      expect.arrayContaining(['gpt-5.5', 'claude-sonnet-4-5', 'gemini-2.5-flash', 'deepseek-v4-pro']),
+      expect.arrayContaining(['gpt-5.5', 'claude-sonnet-4-6', 'gemini-2.5-flash', 'deepseek-v4-pro']),
     )
   })
 
@@ -49,6 +49,18 @@ describe('model discovery', () => {
   it('returns Gemini API model objects', () => {
     const key = { allowedProviders: ['gemini'] as const, allowedModels: ['gemini-*'] }
     expect(listGeminiModels(key)).toEqual([
+      {
+        name: 'models/gemini-3-pro-preview',
+        version: '001',
+        displayName: 'Gemini 3 Pro Preview',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+      },
+      {
+        name: 'models/gemini-3-flash-preview',
+        version: '001',
+        displayName: 'Gemini 3 Flash Preview',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+      },
       {
         name: 'models/gemini-2.5-pro',
         version: '001',
