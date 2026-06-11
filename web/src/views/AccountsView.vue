@@ -390,7 +390,7 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
           },
         },
         {
-          icon: () => h('span', { class: 'quota-refresh-icon', 'aria-hidden': 'true' }, '↻'),
+          default: () => h('span', { class: 'quota-refresh-icon', 'aria-hidden': 'true' }, '↻'),
         },
       ),
     ],
