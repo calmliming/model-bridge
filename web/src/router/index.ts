@@ -25,11 +25,10 @@ export const router = createRouter({
       component: () => import('../views/AcceptInviteView.vue'),
     },
     {
-      path: '/admin',
+      path: '/',
       component: () => import('../layouts/AppLayout.vue'),
       meta: { role: 'admin' },
       children: [
-        { path: '', redirect: '/admin/overview' },
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'account-groups', name: 'account-groups', component: () => import('../views/AccountGroupsView.vue') },

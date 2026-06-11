@@ -108,7 +108,7 @@ const openai = new OpenAI({
             登录
           </RouterLink>
           <RouterLink
-            :to="auth.isAuthenticated ? (auth.isAdmin ? '/admin' : '/app') : { name: 'login' }"
+            :to="auth.isAuthenticated ? (auth.isAdmin ? '/overview' : '/app') : { name: 'login' }"
             class="rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-primary-700 transition-all active:scale-95"
           >
             {{ auth.isAuthenticated ? '进入控制台' : '立即开始' }}
@@ -133,7 +133,7 @@ const openai = new OpenAI({
           </p>
           <div class="mt-12 flex flex-wrap justify-center lg:justify-start gap-5">
             <RouterLink
-              :to="auth.isAuthenticated ? (auth.isAdmin ? '/admin' : '/app') : { name: 'login' }"
+              :to="auth.isAuthenticated ? (auth.isAdmin ? '/overview' : '/app') : { name: 'login' }"
               class="rounded-xl bg-slate-900 px-8 py-4 text-lg font-bold text-white shadow-xl hover:bg-slate-800 transition-all dark:bg-primary-600 dark:hover:bg-primary-700"
             >
               {{ auth.isAuthenticated ? '进入管理后台' : '立即开始构建' }}
