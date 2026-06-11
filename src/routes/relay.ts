@@ -375,17 +375,12 @@ function parseAnthropicReset(headers: Headers): number | null {
 }
 
 function parseCodexReset(headers: Headers): number | null {
-  const primaryUsed = headerNumber(headers, 'x-codex-primary-used-percent')
-  const secondaryUsed = headerNumber(headers, 'x-codex-secondary-used-percent')
-  const primaryReset = headerResetAfter(headers, 'x-codex-primary-reset-after-seconds')
-  const secondaryReset = headerResetAfter(headers, 'x-codex-secondary-reset-after-seconds')
+  const quota = extractAccountQuota('openai', headers)
+  if (!quota) return null
 
-  const primaryExceeded = primaryUsed != null && primaryUsed >= 100
-  const secondaryExceeded = secondaryUsed != null && secondaryUsed >= 100
-  if (primaryExceeded && secondaryExceeded) return pickLater([primaryReset, secondaryReset])
-  if (primaryExceeded) return primaryReset
-  if (secondaryExceeded) return secondaryReset
-  return pickLater([primaryReset, secondaryReset])
+  const exceeded = quota.windows.filter((window) => window.exceeded)
+  if (exceeded.length) return pickLater(exceeded.map((window) => window.resetAt))
+  return pickLater(quota.windows.map((window) => window.resetAt))
 }
 
 function parseDurationMs(raw: string): number | null {

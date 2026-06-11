@@ -82,7 +82,7 @@ describe('extractAccountQuota', () => {
     const quota = extractAccountQuota(
       'openai',
       new Headers({
-        'x-codex-primary-used-percent': '1',
+        'x-codex-primary-used-percent': '12',
         'x-codex-primary-reset-after-seconds': '604800',
         'x-codex-secondary-used-percent': '64',
         'x-codex-secondary-reset-after-seconds': '3600',
@@ -92,7 +92,27 @@ describe('extractAccountQuota', () => {
 
     expect(quota?.windows.map((window) => [window.label, window.usedPercent, window.resetAt])).toEqual([
       ['5小时', 64, 1700003600000],
-      ['7天', 1, 1700604800000],
+      ['7天', 12, 1700604800000],
+    ])
+  })
+
+  it('treats Codex decimal used-percent headers as ratios', () => {
+    const quota = extractAccountQuota(
+      'openai',
+      new Headers({
+        'x-codex-primary-used-percent': '0.125',
+        'x-codex-primary-reset-after-seconds': '604800',
+        'x-codex-primary-window-minutes': '10080',
+        'x-codex-secondary-used-percent': '1.0',
+        'x-codex-secondary-reset-after-seconds': '18000',
+        'x-codex-secondary-window-minutes': '300',
+      }),
+      1700000000000,
+    )
+
+    expect(quota?.windows.map((window) => [window.label, window.usedPercent, window.exceeded])).toEqual([
+      ['5小时', 100, true],
+      ['7天', 12.5, false],
     ])
   })
 })
