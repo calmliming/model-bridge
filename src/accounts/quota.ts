@@ -57,10 +57,6 @@ function percentFromPercent(value: number | null): number | null {
   return Math.max(0, Math.min(100, value))
 }
 
-function codexPercentFromHeader(headers: Headers, name: string): number | null {
-  return percentFromUtilization(headerNumber(headers, name))
-}
-
 function parseClaudeQuota(headers: Headers, now: number): AccountQuotaSnapshot | null {
   const specs = [
     { key: 'hourly' as const, label: '5小时', prefix: 'anthropic-ratelimit-unified-5h-' },
@@ -160,8 +156,10 @@ interface CodexRawWindow {
 }
 
 function readCodexWindow(headers: Headers, prefix: string, now: number): CodexRawWindow {
-  const usedPercent = codexPercentFromHeader(headers, `${prefix}-used-percent`)
-  const resetAt = resetAfter(headers, `${prefix}-reset-after-seconds`, now)
+  const usedPercent = percentFromPercent(headerNumber(headers, `${prefix}-used-percent`))
+  const resetAt =
+    resetAfter(headers, `${prefix}-reset-after-seconds`, now) ??
+    parseEpochMs(headers.get(`${prefix}-reset-at`))
   const windowMinutes = headerNumber(headers, `${prefix}-window-minutes`)
   return {
     usedPercent,

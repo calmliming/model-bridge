@@ -96,12 +96,12 @@ describe('extractAccountQuota', () => {
     ])
   })
 
-  it('treats Codex decimal used-percent headers as ratios', () => {
+  it('treats Codex decimal used-percent headers as percentages', () => {
     const quota = extractAccountQuota(
       'openai',
       new Headers({
         'x-codex-primary-used-percent': '0.125',
-        'x-codex-primary-reset-after-seconds': '604800',
+        'x-codex-primary-reset-at': '1700604800',
         'x-codex-primary-window-minutes': '10080',
         'x-codex-secondary-used-percent': '1.0',
         'x-codex-secondary-reset-after-seconds': '18000',
@@ -111,9 +111,10 @@ describe('extractAccountQuota', () => {
     )
 
     expect(quota?.windows.map((window) => [window.label, window.usedPercent, window.exceeded])).toEqual([
-      ['5小时', 100, true],
-      ['7天', 12.5, false],
+      ['5小时', 1, false],
+      ['7天', 0.125, false],
     ])
+    expect(quota?.windows.find((window) => window.label === '7天')?.resetAt).toBe(1700604800000)
   })
 })
 
