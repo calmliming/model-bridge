@@ -13,6 +13,8 @@
 
 export type CcSwitchApp = 'claude' | 'codex' | 'gemini'
 
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
+
 export interface CcSwitchTarget {
   /** Stable id, also matches the snippet tab names in the views. */
   id: string
@@ -65,6 +67,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI',
     vendor: 'OpenAI',
     endpoint: (origin) => origin,
+    models: { model: OPENAI_CC_SWITCH_CODEX_MODEL },
     provider: 'openai',
   },
   {
