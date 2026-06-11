@@ -240,19 +240,33 @@ function resetAndClose() {
           </div>
         </div>
 
-        <div v-if="importResult.failureCount > 0" class="error-list">
-          <h4>失败详情</h4>
-          <div class="error-items">
+        <div class="result-list">
+          <h4>导入明细</h4>
+          <div class="result-items">
             <div
-              v-for="(item, index) in importResult.results.filter(r => !r.success)"
+              v-for="(item, index) in importResult.results"
               :key="index"
-              class="error-item"
+              class="result-item"
+              :class="item.success ? 'is-success' : 'is-error'"
             >
-              <div class="error-item-header">
-                <span class="error-item-name">{{ item.name }}</span>
-                <span class="error-item-provider">{{ item.provider }}</span>
+              <span class="result-item-icon">
+                <svg v-if="item.success" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                </svg>
+                <svg v-else class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </span>
+              <div class="result-item-body">
+                <div class="result-item-header">
+                  <span class="result-item-name">{{ item.name }}</span>
+                  <span class="result-item-provider">{{ item.provider }}</span>
+                </div>
+                <div v-if="!item.success" class="result-item-message">{{ item.error }}</div>
               </div>
-              <div class="error-item-message">{{ item.error }}</div>
+              <span class="result-item-status" :class="item.success ? 'ok' : 'fail'">
+                {{ item.success ? '成功' : '失败' }}
+              </span>
             </div>
           </div>
         </div>
@@ -385,59 +399,125 @@ function resetAndClose() {
   color: #d03050;
 }
 
-.error-list {
+.result-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.error-list h4 {
+.result-list h4 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-color-1);
 }
 
-.error-items {
+.result-items {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 300px;
+  max-height: 320px;
   overflow-y: auto;
   padding: 2px;
 }
 
-.error-item {
-  padding: 12px;
-  background: #fff1f0;
-  border: 1px solid #ffccc7;
-  border-radius: 4px;
-}
-
-.error-item-header {
+.result-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: white;
 }
 
-.error-item-name {
+.result-item.is-success {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+}
+
+.result-item.is-error {
+  border-color: #ffccc7;
+  background: #fff1f0;
+}
+
+.result-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+}
+
+.result-item.is-success .result-item-icon {
+  color: #18a058;
+}
+
+.result-item.is-error .result-item-icon {
+  color: #d03050;
+}
+
+.result-item-icon .icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+}
+
+.result-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.result-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.result-item-name {
   font-weight: 600;
   font-size: 14px;
   color: var(--text-color-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.error-item-provider {
+.result-item-provider {
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--text-color-3);
   padding: 2px 8px;
   background: white;
+  border: 1px solid var(--border-color);
   border-radius: 3px;
 }
 
-.error-item-message {
+.result-item-message {
+  margin-top: 4px;
   font-size: 13px;
   color: #cf1322;
   line-height: 1.5;
+  word-break: break-word;
+}
+
+.result-item-status {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.result-item-status.ok {
+  color: #18a058;
+  background: rgba(24, 160, 88, 0.12);
+}
+
+.result-item-status.fail {
+  color: #d03050;
+  background: rgba(208, 48, 80, 0.12);
 }
 </style>

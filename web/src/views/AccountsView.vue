@@ -369,6 +369,7 @@ function renderQuotaWindow(window: AccountQuotaWindow) {
 }
 
 function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
+  const refreshing = refreshingQuotaId.value === row.id
   return h(
     'div',
     { class: 'quota-refresh-wrap' },
@@ -382,7 +383,10 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
           circle: true,
           title: '刷新配额',
           'aria-label': '刷新配额',
-          loading: refreshingQuotaId.value === row.id,
+          // Don't use `loading`: UiButton renders its own generic spinner *next
+          // to* the slot icon. Instead spin the ↻ glyph itself and just disable
+          // the button while the request is in flight.
+          disabled: refreshing,
           class: 'quota-refresh',
           onClick: (event: MouseEvent) => {
             event.stopPropagation()
@@ -390,7 +394,27 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
           },
         },
         {
-          default: () => h('span', { class: 'quota-refresh-icon', 'aria-hidden': 'true' }, '↻'),
+          default: () =>
+            h(
+              'svg',
+              {
+                class: ['quota-refresh-icon', { 'is-spinning': refreshing }],
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                'aria-hidden': 'true',
+              },
+              [
+                h('path', {
+                  'stroke-linecap': 'round',
+                  'stroke-linejoin': 'round',
+                  'stroke-width': '2',
+                  // Two-arrow refresh icon with 180° rotational symmetry, so the
+                  // spin animation reads as a smooth continuous rotation.
+                  d: 'M20 11A8 8 0 0 0 5.5 7M4 4v3.5h3.5M4 13a8 8 0 0 0 14.5 4M20 20v-3.5h-3.5',
+                }),
+              ],
+            ),
         },
       ),
     ],
@@ -2068,10 +2092,23 @@ onBeforeUnmount(() => {
 }
 
 :deep(.quota-refresh-icon) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
+  display: block;
+  width: 14px;
+  height: 14px;
+  transform-origin: center;
+}
+
+:deep(.quota-refresh-icon.is-spinning) {
+  animation: quota-refresh-spin 0.7s linear infinite;
+}
+
+@keyframes quota-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 :deep(.priority-input) {

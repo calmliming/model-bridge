@@ -55,7 +55,7 @@ const codeSnippets = {
   curl: `curl https://api.model-bridge.io/v1/chat/completions \\
   -H "Authorization: Bearer $MB_KEY" \\
   -d '{
-    "model": "gpt-4-turbo",
+    "model": "gpt-5.5",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,
   python: `import openai
@@ -66,7 +66,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="claude-3-opus",
+    model="claude-opus-4-8",
     messages=[{"role": "user", "content": "Hello!"}]
 )`,
   js: `const OpenAI = require('openai');
