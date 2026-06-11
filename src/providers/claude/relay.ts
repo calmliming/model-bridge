@@ -21,7 +21,6 @@ const ANTHROPIC_BETA = ANTHROPIC_BETAS.join(',')
 
 const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 const USER_AGENT = `claude-cli/${CLI_VERSION} (external, cli)`
-const FORBIDDEN_FIELDS = ['context_management'] as const
 
 // X-Stainless-* headers — Claude Code SDK 自动附加的指纹，上游用于来源判定。
 const STAINLESS_HEADERS: Record<string, string> = {
@@ -39,6 +38,26 @@ const STAINLESS_HEADERS: Record<string, string> = {
 
 const CACHE_CONTROL = { type: 'ephemeral' } as const
 
+// Real Claude Code (2.1.x) sends system[0] as a billing-attribution block:
+//   "x-anthropic-billing-header: cc_version=…; cc_entrypoint=cli; cch=…;"
+// The cch field is an xxhash64 signature over the whole request body, so the
+// block's text changes on every request. Anthropic strips it server-side
+// before prompt rendering / cache hashing — but only in the leading position
+// the real CLI puts it in. Anything inserted before it demotes it to ordinary
+// prompt text that varies per request and sits before every cache breakpoint,
+// which orphans every cache write (cache_read stays 0 for the whole session).
+const BILLING_HEADER_PREFIX = 'x-anthropic-billing-header:'
+
+// Identity prefixes that mark genuine Claude Code traffic. The CLI uses a
+// different variant per surface (main CLI / Agent SDK / sub-agents / compact);
+// aligned with sub2api's claudeCodePromptPrefixes.
+const IDENTITY_PREFIXES = [
+  "You are Claude Code, Anthropic's official CLI for Claude",
+  "You are a Claude agent, built on Anthropic's Claude Agent SDK",
+  'You are a file search specialist for Claude Code',
+  'You are a helpful AI assistant tasked with summarizing conversations',
+] as const
+
 type SystemBlock = Record<string, unknown>
 
 type TextBlock = {
@@ -47,14 +66,27 @@ type TextBlock = {
 }
 
 function hasIdentityPrefix(text: unknown): boolean {
-  return typeof text === 'string' && text.startsWith(CLAUDE_CODE_IDENTITY)
+  return typeof text === 'string' && IDENTITY_PREFIXES.some((prefix) => text.startsWith(prefix))
+}
+
+function isTextBlockWithIdentity(block: SystemBlock | undefined): boolean {
+  return block?.type === 'text' && hasIdentityPrefix(block.text)
+}
+
+function isBillingHeaderBlock(block: SystemBlock | undefined): boolean {
+  return (
+    block?.type === 'text' &&
+    typeof block.text === 'string' &&
+    block.text.startsWith(BILLING_HEADER_PREFIX)
+  )
 }
 
 /**
  * Anthropic silently rejects subscription OAuth tokens unless the system
- * prompt begins with the Claude Code identity block. Returns the system in
+ * prompt carries a Claude Code identity block. Returns the system in
  * block-array form (so a cache breakpoint can be attached) with the identity
- * guaranteed first. Claude Code traffic already includes it.
+ * guaranteed present. Claude Code traffic already includes it — possibly
+ * after the billing-attribution block — and is passed through untouched.
  */
 function normalizeSystem(system: unknown): SystemBlock[] {
   const identity: TextBlock = { type: 'text', text: CLAUDE_CODE_IDENTITY }
@@ -65,9 +97,12 @@ function normalizeSystem(system: unknown): SystemBlock[] {
       : [identity, { type: 'text', text: system }]
   }
   if (Array.isArray(system)) {
-    const first = system[0] as { type?: string; text?: string } | undefined
-    if (first?.type === 'text' && hasIdentityPrefix(first.text)) return system as SystemBlock[]
-    return [identity, ...(system as SystemBlock[])]
+    const blocks = system as SystemBlock[]
+    if (blocks.some(isTextBlockWithIdentity)) return blocks
+    // Inject the identity, but never in front of a leading billing block —
+    // it must stay at position 0 to be stripped upstream (see above).
+    const insertAt = isBillingHeaderBlock(blocks[0]) ? 1 : 0
+    return [...blocks.slice(0, insertAt), identity, ...blocks.slice(insertAt)]
   }
   return [identity]
 }
@@ -78,22 +113,36 @@ function systemHasCacheControl(system: SystemBlock[]): boolean {
 }
 
 /**
- * Attaches a cache breakpoint to the LAST system block. Render order is
+ * Attaches a cache breakpoint to the last stable system block. Render order is
  * tools → system → messages, so a breakpoint here caches tools+system together
  * — the stable prefix that repeats across requests and can be read back.
- * Relying on top-level auto cache_control instead places the only breakpoint on
- * the volatile last message, producing cache writes that are never read.
+ * Billing-header blocks are skipped: their cch signature varies per request,
+ * so a breakpoint there would never be read. Relying on top-level auto
+ * cache_control instead places the only breakpoint on the volatile last
+ * message, producing cache writes that are never read.
  */
 function withSystemCacheBreakpoint(system: SystemBlock[]): SystemBlock[] {
-  if (system.length === 0) return system
-  const last = system[system.length - 1]
-  return [...system.slice(0, -1), { ...last, cache_control: CACHE_CONTROL }]
+  for (let i = system.length - 1; i >= 0; i--) {
+    if (isBillingHeaderBlock(system[i])) continue
+    return [
+      ...system.slice(0, i),
+      { ...system[i], cache_control: CACHE_CONTROL },
+      ...system.slice(i + 1),
+    ]
+  }
+  return system
 }
 
-/** Normalises an incoming Messages-API body to what Anthropic accepts. */
+/**
+ * Normalises an incoming Messages-API body to what Anthropic accepts. Beyond
+ * the system handling, the body is forwarded byte-faithfully: Claude Code's
+ * billing-header cch signs the whole body, so gratuitous field rewrites would
+ * invalidate it. (`context_management` used to be stripped here from the days
+ * when the relay only sent the oauth beta; with context-management-2025-06-27
+ * now in the beta set the field is accepted upstream.)
+ */
 export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
-  for (const field of FORBIDDEN_FIELDS) delete out[field]
   const system = normalizeSystem(body.system)
   // Cache the stable tools+system prefix so it can be READ across requests.
   // Skip when the client (e.g. real Claude Code) already manages its own
