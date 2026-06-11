@@ -37,7 +37,11 @@ const STAINLESS_HEADERS: Record<string, string> = {
   'anthropic-dangerous-direct-browser-access': 'true',
 }
 
-interface TextBlock {
+const CACHE_CONTROL = { type: 'ephemeral' } as const
+
+type SystemBlock = Record<string, unknown>
+
+type TextBlock = {
   type: 'text'
   text: string
 }
@@ -48,32 +52,54 @@ function hasIdentityPrefix(text: unknown): boolean {
 
 /**
  * Anthropic silently rejects subscription OAuth tokens unless the system
- * prompt begins with the Claude Code identity block. This guarantees it
- * for traffic from any client (Claude Code already includes it).
+ * prompt begins with the Claude Code identity block. Returns the system in
+ * block-array form (so a cache breakpoint can be attached) with the identity
+ * guaranteed first. Claude Code traffic already includes it.
  */
-function normalizeSystem(system: unknown): unknown {
+function normalizeSystem(system: unknown): SystemBlock[] {
   const identity: TextBlock = { type: 'text', text: CLAUDE_CODE_IDENTITY }
   if (system == null) return [identity]
   if (typeof system === 'string') {
-    return hasIdentityPrefix(system) ? system : [identity, { type: 'text', text: system }]
+    return hasIdentityPrefix(system)
+      ? [{ type: 'text', text: system }]
+      : [identity, { type: 'text', text: system }]
   }
   if (Array.isArray(system)) {
     const first = system[0] as { type?: string; text?: string } | undefined
-    if (first?.type === 'text' && hasIdentityPrefix(first.text)) return system
-    return [identity, ...system]
+    if (first?.type === 'text' && hasIdentityPrefix(first.text)) return system as SystemBlock[]
+    return [identity, ...(system as SystemBlock[])]
   }
-  return system
+  return [identity]
+}
+
+/** True if any system block already carries a cache_control breakpoint. */
+function systemHasCacheControl(system: SystemBlock[]): boolean {
+  return system.some((block) => block != null && typeof block === 'object' && 'cache_control' in block)
+}
+
+/**
+ * Attaches a cache breakpoint to the LAST system block. Render order is
+ * tools → system → messages, so a breakpoint here caches tools+system together
+ * — the stable prefix that repeats across requests and can be read back.
+ * Relying on top-level auto cache_control instead places the only breakpoint on
+ * the volatile last message, producing cache writes that are never read.
+ */
+function withSystemCacheBreakpoint(system: SystemBlock[]): SystemBlock[] {
+  if (system.length === 0) return system
+  const last = system[system.length - 1]
+  return [...system.slice(0, -1), { ...last, cache_control: CACHE_CONTROL }]
 }
 
 /** Normalises an incoming Messages-API body to what Anthropic accepts. */
 export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
-  out.system = normalizeSystem(body.system)
-  // 注入自动缓存：Anthropic 自动选择最优断点，无需手动放置 cache_control
-  if (!out.cache_control) {
-    out.cache_control = { type: 'ephemeral' }
-  }
+  const system = normalizeSystem(body.system)
+  // Cache the stable tools+system prefix so it can be READ across requests.
+  // Skip when the client (e.g. real Claude Code) already manages its own
+  // breakpoints, to avoid competing markers / exceeding the 4-breakpoint cap.
+  out.system =
+    body.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
   return out
 }
 
