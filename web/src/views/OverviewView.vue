@@ -119,6 +119,9 @@ const recentPage = ref(1)
 const recentLogs = ref<DashboardRecentLog[]>([])
 const recentTotal = ref(0)
 const selectedLog = ref<DashboardRecentLog | null>(null)
+const recentProviderFilter = ref<string | null>(null)
+const recentModelFilter = ref('')
+const recentKeyFilter = ref('')
 const RECENT_PAGE_SIZE = 10
 
 const emptyTotals: DashboardOverview['totals'] = {
@@ -225,6 +228,25 @@ const statIconPaths: Record<string, string[]> = {
 
 const totals = computed(() => dashboard.value?.totals ?? emptyTotals)
 const providerRows = computed(() => dashboard.value?.byProvider ?? [])
+
+const recentProviderOptions = computed(() => {
+  const providers = new Set<string>(Object.keys(providerLabels))
+  for (const row of providerRows.value) providers.add(row.provider)
+  for (const row of recentLogs.value) providers.add(row.provider)
+  return Array.from(providers).map((provider) => ({
+    label: providerLabel(provider),
+    value: provider,
+  }))
+})
+
+const hasRecentFilters = computed(
+  () => !!recentProviderFilter.value || !!recentModelFilter.value.trim() || !!recentKeyFilter.value.trim(),
+)
+
+const recentEmptyText = computed(() => {
+  if (recentLoading.value) return '加载中...'
+  return hasRecentFilters.value ? '没有匹配的请求记录' : '暂无请求记录'
+})
 
 const successRate24h = computed(() => {
   const { requests24h, success24h } = totals.value
@@ -393,8 +415,15 @@ async function loadOverview() {
 async function loadRecentLogs() {
   recentLoading.value = true
   try {
+    const params: Record<string, string | number> = {
+      page: recentPage.value,
+      pageSize: RECENT_PAGE_SIZE,
+    }
+    if (recentProviderFilter.value) params.provider = recentProviderFilter.value
+    if (recentModelFilter.value.trim()) params.model = recentModelFilter.value.trim()
+    if (recentKeyFilter.value.trim()) params.key = recentKeyFilter.value.trim()
     const { data } = await api.get<DashboardRecentLogsPage>('/admin/overview/recent-logs', {
-      params: { page: recentPage.value, pageSize: RECENT_PAGE_SIZE },
+      params,
     })
     recentLogs.value = data.logs
     recentTotal.value = data.total
@@ -403,6 +432,21 @@ async function loadRecentLogs() {
   } finally {
     recentLoading.value = false
   }
+}
+
+function applyRecentFilters() {
+  if (recentPage.value === 1) {
+    loadRecentLogs()
+    return
+  }
+  recentPage.value = 1
+}
+
+function resetRecentFilters() {
+  recentProviderFilter.value = null
+  recentModelFilter.value = ''
+  recentKeyFilter.value = ''
+  applyRecentFilters()
 }
 
 function formatNumber(n: number): string {
@@ -600,6 +644,38 @@ function openRequestInput(row: DashboardRecentLog) {
         </div>
       </div>
 
+      <div class="mb-4 grid items-end gap-3 rounded-[14px] border border-accent-900/7 bg-accent-50/80 p-3 md:grid-cols-[minmax(150px,0.75fr)_minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+        <label class="grid gap-1.5 text-xs font-[720] text-accent-900/55">
+          模型厂商
+          <UiSelect
+            v-model:value="recentProviderFilter"
+            :options="recentProviderOptions"
+            clearable
+            placeholder="全部厂商"
+          />
+        </label>
+        <label class="grid gap-1.5 text-xs font-[720] text-accent-900/55">
+          具体模型
+          <UiInput
+            v-model:value="recentModelFilter"
+            placeholder="输入模型名称"
+            @keyup.enter="applyRecentFilters"
+          />
+        </label>
+        <label class="grid gap-1.5 text-xs font-[720] text-accent-900/55">
+          Key
+          <UiInput
+            v-model:value="recentKeyFilter"
+            placeholder="输入 Key 名称或前缀"
+            @keyup.enter="applyRecentFilters"
+          />
+        </label>
+        <div class="flex items-center justify-end gap-2 max-md:justify-start">
+          <UiButton size="small" type="primary" :loading="recentLoading" @click="applyRecentFilters">查询</UiButton>
+          <UiButton size="small" quaternary :disabled="!hasRecentFilters" @click="resetRecentFilters">重置</UiButton>
+        </div>
+      </div>
+
       <div v-if="recentLogs.length" class="grid gap-2.5 min-w-0">
         <div
           v-for="row in recentLogs"
@@ -767,7 +843,7 @@ function openRequestInput(row: DashboardRecentLog) {
           />
         </div>
       </div>
-      <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">{{ recentLoading ? '加载中...' : '暂无请求记录' }}</div>
+      <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">{{ recentEmptyText }}</div>
     </UiCard>
 
     <UiModal

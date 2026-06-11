@@ -304,6 +304,21 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
+const optionalTrimmedQuery = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).max(max).optional(),
+  )
+
+const recentLogsQuerySchema = paginationQuerySchema.extend({
+  provider: optionalTrimmedQuery(40).refine(
+    (value) => value == null || /^[a-z][a-z0-9_-]*$/i.test(value),
+    'invalid provider',
+  ),
+  model: optionalTrimmedQuery(160),
+  key: optionalTrimmedQuery(120),
+})
+
 const paymentOrdersQuerySchema = paginationQuerySchema.extend({
   status: z.enum(['pending', 'paid', 'canceled', 'expired']).optional(),
 })
@@ -1290,15 +1305,19 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   })
 
   // Dashboard recent calls
-  app.get<{ Querystring: { page?: string; pageSize?: string } }>(
+  app.get<{ Querystring: { page?: string; pageSize?: string; provider?: string; model?: string; key?: string } }>(
     '/api/admin/overview/recent-logs',
     { preHandler: requireAdmin },
     async (request, reply) => {
-      const query = paginationQuerySchema.safeParse(request.query)
+      const query = recentLogsQuerySchema.safeParse(request.query)
       if (!query.success) {
-        return reply.code(400).send({ error: 'invalid pagination query' })
+        return reply.code(400).send({ error: 'invalid recent logs query' })
       }
-      return await dashboardRecentLogs(query.data.page, query.data.pageSize)
+      return await dashboardRecentLogs(query.data.page, query.data.pageSize, {
+        provider: query.data.provider,
+        model: query.data.model,
+        key: query.data.key,
+      })
     },
   )
 

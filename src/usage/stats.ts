@@ -128,6 +128,12 @@ export interface DashboardRecentLogsPage {
   logs: DashboardRecentLog[]
 }
 
+export interface DashboardRecentLogsFilter {
+  provider?: string
+  model?: string
+  key?: string
+}
+
 const MS_PER_DAY = 86_400_000
 
 function utcDayKey(timestampMs: number): string {
@@ -477,6 +483,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
 export async function dashboardRecentLogs(
   page = 1,
   pageSize = 10,
+  filters: DashboardRecentLogsFilter = {},
 ): Promise<DashboardRecentLogsPage> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
   const safePageSize = Math.max(
@@ -484,9 +491,41 @@ export async function dashboardRecentLogs(
     Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 10)),
   )
   const offset = (safePage - 1) * safePageSize
+  const where: string[] = []
+  const params: unknown[] = []
+
+  const addParam = (value: unknown): string => {
+    params.push(value)
+    return `$${params.length}`
+  }
+
+  const provider = filters.provider?.trim()
+  if (provider) {
+    where.push(`usage_logs.provider = ${addParam(provider)}`)
+  }
+
+  const model = filters.model?.trim()
+  if (model) {
+    where.push(`usage_logs.model ILIKE ${addParam(`%${model}%`)}`)
+  }
+
+  const key = filters.key?.trim()
+  if (key) {
+    const keyParam = addParam(`%${key}%`)
+    where.push(`(api_keys.name ILIKE ${keyParam} OR api_keys.key_prefix ILIKE ${keyParam} OR usage_logs.api_key_id ILIKE ${keyParam})`)
+  }
+
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const logsParams = [...params, safePageSize, offset]
 
   const [totalRes, logsRes] = await Promise.all([
-    pool.query<Record<string, unknown>>('SELECT COUNT(*) AS total FROM usage_logs'),
+    pool.query<Record<string, unknown>>(
+      `SELECT COUNT(*) AS total
+       FROM usage_logs
+       LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
+       ${whereSql}`,
+      params,
+    ),
     pool.query<Record<string, unknown>>(
       `SELECT usage_logs.id AS id,
               usage_logs.ts AS ts,
@@ -508,9 +547,10 @@ export async function dashboardRecentLogs(
        FROM usage_logs
        LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
        LEFT JOIN accounts ON accounts.id = usage_logs.account_id
+       ${whereSql}
        ORDER BY usage_logs.ts DESC, usage_logs.id DESC
-       LIMIT $1 OFFSET $2`,
-      [safePageSize, offset],
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      logsParams,
     ),
   ])
 
