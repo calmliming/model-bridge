@@ -1,4 +1,4 @@
-import { emptyUsage, type UsageData } from '../types'
+import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 interface OpenAIUsage {
   input_tokens?: number
@@ -8,13 +8,11 @@ interface OpenAIUsage {
 }
 
 function mapUsage(u: OpenAIUsage | undefined): UsageData {
-  return {
-    inputTokens: u?.input_tokens ?? 0,
-    outputTokens: u?.output_tokens ?? 0,
-    // OpenAI does not surface cache-write separately on /responses.
-    cacheCreateTokens: 0,
-    cacheReadTokens: u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens ?? 0,
-  }
+  return usageWithCachedInput(
+    u?.input_tokens,
+    u?.output_tokens,
+    u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens,
+  )
 }
 
 /** Extracts usage from a non-streaming Responses API JSON body. */

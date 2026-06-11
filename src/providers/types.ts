@@ -18,3 +18,23 @@ export interface UsageData {
 export function emptyUsage(): UsageData {
   return { inputTokens: 0, outputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0 }
 }
+
+/**
+ * Builds UsageData for providers whose total input includes cache hits and
+ * whose usage payload exposes only cached-input reads, not cache writes.
+ */
+export function usageWithCachedInput(
+  inputTokens: number | undefined,
+  outputTokens: number | undefined,
+  cachedInputTokens: number | undefined,
+): UsageData {
+  const input = Math.max(0, inputTokens ?? 0)
+  const cached = Math.max(0, cachedInputTokens ?? 0)
+  const cacheRead = input > 0 ? Math.min(cached, input) : cached
+  return {
+    inputTokens: Math.max(0, input - cacheRead),
+    outputTokens: Math.max(0, outputTokens ?? 0),
+    cacheCreateTokens: 0,
+    cacheReadTokens: cacheRead,
+  }
+}

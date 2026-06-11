@@ -1,4 +1,4 @@
-import { emptyUsage, type UsageData } from '../types'
+import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 /**
  * Usage parser for the Xiaomi MiMo → Responses adapter. It consumes events
@@ -15,12 +15,7 @@ interface ResponsesUsage {
 }
 
 function mapUsage(u: ResponsesUsage | undefined): UsageData {
-  return {
-    inputTokens: u?.input_tokens ?? 0,
-    outputTokens: u?.output_tokens ?? 0,
-    cacheCreateTokens: 0, // MiMo does not separate cache-write tokens.
-    cacheReadTokens: u?.input_tokens_details?.cached_tokens ?? 0,
-  }
+  return usageWithCachedInput(u?.input_tokens, u?.output_tokens, u?.input_tokens_details?.cached_tokens)
 }
 
 interface ResponsesStreamEvent {

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { emptyUsage, type UsageData } from '../types'
+import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 interface ChatMessage {
   role?: string
@@ -178,12 +178,11 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
 }
 
 function usageDataFromResponses(usage: ResponsesUsage | undefined): UsageData {
-  return {
-    inputTokens: usage?.input_tokens ?? 0,
-    outputTokens: usage?.output_tokens ?? 0,
-    cacheCreateTokens: 0,
-    cacheReadTokens: usage?.input_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? 0,
-  }
+  return usageWithCachedInput(
+    usage?.input_tokens,
+    usage?.output_tokens,
+    usage?.input_tokens_details?.cached_tokens ?? usage?.cached_tokens,
+  )
 }
 
 function chatUsageFromResponses(usage: ResponsesUsage | undefined): ChatUsage | undefined {
@@ -202,12 +201,11 @@ function chatUsageFromResponses(usage: ResponsesUsage | undefined): ChatUsage | 
 export function parseChatCompletionUsage(body: unknown): UsageData {
   const usage = (body as { usage?: ChatUsage } | null)?.usage
   if (!usage) return emptyUsage()
-  return {
-    inputTokens: usage.prompt_tokens ?? 0,
-    outputTokens: usage.completion_tokens ?? 0,
-    cacheCreateTokens: 0,
-    cacheReadTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
-  }
+  return usageWithCachedInput(
+    usage.prompt_tokens,
+    usage.completion_tokens,
+    usage.prompt_tokens_details?.cached_tokens,
+  )
 }
 
 export function createChatCompletionStreamParser() {

@@ -92,7 +92,7 @@ describe('responsesSseToChatCompletion', () => {
       },
     })
     expect(result.usage).toEqual({
-      inputTokens: 3,
+      inputTokens: 2,
       outputTokens: 2,
       cacheCreateTokens: 0,
       cacheReadTokens: 1,

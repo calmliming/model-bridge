@@ -1,4 +1,4 @@
-import { emptyUsage, type UsageData } from '../types'
+import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 interface GeminiUsageMetadata {
   promptTokenCount?: number
@@ -8,13 +8,7 @@ interface GeminiUsageMetadata {
 }
 
 function mapUsage(u: GeminiUsageMetadata | undefined): UsageData {
-  return {
-    inputTokens: u?.promptTokenCount ?? 0,
-    outputTokens: u?.candidatesTokenCount ?? 0,
-    // Gemini does not surface cache-write separately on the public API.
-    cacheCreateTokens: 0,
-    cacheReadTokens: u?.cachedContentTokenCount ?? 0,
-  }
+  return usageWithCachedInput(u?.promptTokenCount, u?.candidatesTokenCount, u?.cachedContentTokenCount)
 }
 
 /** Extracts usage from a (already-unwrapped) standard Gemini response body. */
