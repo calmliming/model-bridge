@@ -50,3 +50,33 @@ export async function getQuotaAutopausePercent(): Promise<number> {
 export async function setQuotaAutopausePercent(percent: number): Promise<void> {
   await setSetting(QUOTA_AUTOPAUSE_PERCENT_KEY, String(clampPercent(percent, 1)))
 }
+
+const OPENAI_SCHEDULING_STRATEGY_KEY = 'openai_scheduling_strategy'
+
+/**
+ * How OpenAI account fallback scheduling picks among available accounts:
+ *   - `weighted_lru`        — default; weight then least-recently-used.
+ *   - `prefer_soonest_reset` — prefer the account whose quota window resets
+ *     soonest, so a nearly-spent account drains first and frees others.
+ * Sticky sessions always take priority regardless of strategy.
+ */
+export type OpenAiSchedulingStrategy = 'weighted_lru' | 'prefer_soonest_reset'
+export const DEFAULT_OPENAI_SCHEDULING_STRATEGY: OpenAiSchedulingStrategy = 'weighted_lru'
+
+const OPENAI_SCHEDULING_STRATEGIES: OpenAiSchedulingStrategy[] = ['weighted_lru', 'prefer_soonest_reset']
+
+function isOpenAiSchedulingStrategy(value: string | undefined): value is OpenAiSchedulingStrategy {
+  return value != null && (OPENAI_SCHEDULING_STRATEGIES as string[]).includes(value)
+}
+
+/** Reads the OpenAI scheduling strategy, defaulting to the legacy weighted-LRU. */
+export async function getOpenAiSchedulingStrategy(): Promise<OpenAiSchedulingStrategy> {
+  const raw = await getSetting(OPENAI_SCHEDULING_STRATEGY_KEY)
+  return isOpenAiSchedulingStrategy(raw) ? raw : DEFAULT_OPENAI_SCHEDULING_STRATEGY
+}
+
+/** Sets the OpenAI scheduling strategy (ignored if the value is unknown). */
+export async function setOpenAiSchedulingStrategy(strategy: OpenAiSchedulingStrategy): Promise<void> {
+  const value = isOpenAiSchedulingStrategy(strategy) ? strategy : DEFAULT_OPENAI_SCHEDULING_STRATEGY
+  await setSetting(OPENAI_SCHEDULING_STRATEGY_KEY, value)
+}

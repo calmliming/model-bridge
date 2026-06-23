@@ -151,6 +151,34 @@ describe('accountQuotaFromMetadata', () => {
       ],
     })
   })
+
+  it('overlays standalone openaiResetCredits onto an OpenAI snapshot', () => {
+    const quota = accountQuotaFromMetadata({
+      openaiResetCredits: 4,
+      quota: {
+        source: 'openai',
+        updatedAt: 1700000000000,
+        windows: [{ key: 'hourly', label: '5小时', usedPercent: 20, resetAt: null, exceeded: false }],
+      },
+    })
+    expect(quota?.resetCredits).toBe(4)
+  })
+
+  it('surfaces reset credits even when no window snapshot exists', () => {
+    const quota = accountQuotaFromMetadata({ openaiResetCredits: 2 })
+    expect(quota).toEqual({ source: 'openai', updatedAt: 0, windows: [], resetCredits: 2 })
+  })
+
+  it('omits resetCredits for snapshots that never carried them', () => {
+    const quota = accountQuotaFromMetadata({
+      quota: {
+        source: 'claude',
+        updatedAt: 1700000000000,
+        windows: [{ key: 'hourly', label: '5小时', usedPercent: 10, resetAt: null, exceeded: false }],
+      },
+    })
+    expect(quota).not.toHaveProperty('resetCredits')
+  })
 })
 
 describe('quotaCooldownUntil', () => {

@@ -12,6 +12,12 @@ export interface AccountQuotaSnapshot {
   source: 'claude' | 'openai'
   updatedAt: number
   windows: AccountQuotaWindow[]
+  /**
+   * OpenAI only: number of rate-limit reset credits available to consume.
+   * Sourced from the ChatGPT `wham/usage` endpoint (not relay headers), so it's
+   * only populated by the explicit quota query, not passive header scraping.
+   */
+  resetCredits?: number | null
 }
 
 function headerNumber(headers: Headers, name: string): number | null {
@@ -290,11 +296,31 @@ function isQuotaWindow(value: unknown): value is AccountQuotaWindow {
 
 export function accountQuotaFromMetadata(metadata: unknown): AccountQuotaSnapshot | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  // Reset credits are persisted separately from the window snapshot because the
+  // relay's header-scrape path rewrites `metadata.quota` on every request and
+  // would otherwise drop them. Overlay the standalone count on read.
+  const standaloneCredits = (metadata as { openaiResetCredits?: unknown }).openaiResetCredits
+  const resetCreditsOverride =
+    typeof standaloneCredits === 'number' ? Math.max(0, Math.trunc(standaloneCredits)) : null
+
   const quota = (metadata as { quota?: unknown }).quota
-  if (!quota || typeof quota !== 'object' || Array.isArray(quota)) return null
+  if (!quota || typeof quota !== 'object' || Array.isArray(quota)) {
+    // No window snapshot yet, but we may still know the credit balance.
+    return resetCreditsOverride == null
+      ? null
+      : { source: 'openai', updatedAt: 0, windows: [], resetCredits: resetCreditsOverride }
+  }
   const row = quota as Partial<AccountQuotaSnapshot>
   if (row.source !== 'claude' && row.source !== 'openai') return null
   if (typeof row.updatedAt !== 'number' || !Array.isArray(row.windows)) return null
   const windows = row.windows.filter(isQuotaWindow)
-  return windows.length ? { source: row.source, updatedAt: row.updatedAt, windows } : null
+  const inlineCredits = typeof row.resetCredits === 'number' ? row.resetCredits : null
+  const resetCredits = resetCreditsOverride ?? inlineCredits
+  // Keep the snapshot when reset credits are known even if no windows reported,
+  // so the dashboard can still surface the credit balance for an idle account.
+  if (!windows.length && resetCredits == null) return null
+  // Only attach resetCredits when known — keeps non-OpenAI snapshots clean.
+  return resetCredits == null
+    ? { source: row.source, updatedAt: row.updatedAt, windows }
+    : { source: row.source, updatedAt: row.updatedAt, windows, resetCredits }
 }

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { TokenSet } from '../types'
+import { extractOpenAIIdentity } from './identity'
 
 // ── Codex CLI / ChatGPT OAuth constants ──────────────────────────
 // Reverse-engineered from the official Codex CLI. The public client
@@ -48,13 +49,19 @@ interface RawTokenResponse {
   access_token: string
   refresh_token: string
   expires_in?: number
+  id_token?: string
 }
 
 function toTokenSet(data: RawTokenResponse): TokenSet {
+  const identity = extractOpenAIIdentity(data.id_token)
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
+    // Persist the ChatGPT identity under `metadata.openai` so quota/reset can
+    // address the right account without re-decoding tokens. Empty when the
+    // id_token is absent (e.g. a refresh that doesn't re-issue one).
+    ...(Object.keys(identity).length ? { metadata: { openai: identity } } : {}),
   }
 }
 

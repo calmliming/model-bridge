@@ -922,8 +922,9 @@ async function sendStreaming(
     firstTokenMs ??= Date.now() - meta.startedAt
   }
   // For Responses-protocol providers, track whether a terminal event reached
-  // the client so we can synthesize one if the stream drops early.
-  let sawTerminal = false
+  // the client (and whether it was a failure) so we can synthesize one if the
+  // stream drops early and record the right usage status.
+  const streamState: ResponsesStreamState = { sawTerminal: false, sawFailure: false }
 
   if (upstream.body) {
     const reader = upstream.body.getReader()
@@ -939,18 +940,15 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            if (
-              emitFromStreamTransform(
-                raw,
-                buffer.slice(0, sep),
-                streamTransform,
-                parser,
-                parseUpstreamStream,
-                markFirstToken,
-              )
-            ) {
-              sawTerminal = true
-            }
+            emitFromStreamTransform(
+              raw,
+              buffer.slice(0, sep),
+              streamTransform,
+              parser,
+              parseUpstreamStream,
+              markFirstToken,
+              streamState,
+            )
             buffer = buffer.slice(sep + 2)
           }
         } else if (transform) {
@@ -966,7 +964,7 @@ async function sendStreaming(
           raw.write(Buffer.from(value))
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            if (feedSseBlock(buffer.slice(0, sep), parser)) sawTerminal = true
+            feedSseBlock(buffer.slice(0, sep), parser, streamState)
             buffer = buffer.slice(sep + 2)
           }
         }
@@ -978,14 +976,15 @@ async function sendStreaming(
   if (streamTransform) {
     for (const event of streamTransform.flush()) {
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
-      if (isResponsesTerminalEvent(event)) sawTerminal = true
+      noteResponsesTerminal(event, streamState)
       markFirstToken()
       writeSseData(raw, event)
     }
   }
   // Stream ended without a terminal event (upstream dropped mid-response) —
   // append one so Codex stops and reports it instead of reconnecting.
-  if (responsesProtocol && !sawTerminal) {
+  if (responsesProtocol && !streamState.sawTerminal) {
+    streamState.sawFailure = true
     for (const event of buildResponsesErrorEvents(
       'Upstream stream closed before completion.',
       'upstream_stream_closed',
@@ -1005,7 +1004,10 @@ async function sendStreaming(
     billTo: meta.billTo,
     subscriptionId: meta.subscriptionId,
     usage: parser.result(),
-    status: upstream.ok && (!responsesProtocol || sawTerminal) ? 'success' : 'error',
+    // Responses-protocol success requires a `response.completed` terminal. A
+    // `response.failed` / `response.incomplete` (incl. `cyber_policy` blocks) or
+    // a dropped stream is an error. Non-Responses providers use upstream.ok.
+    status: responsesStreamStatus(upstream.ok, responsesProtocol, streamState),
     latencyMs: Date.now() - meta.startedAt,
     firstTokenMs,
     requestInput: meta.requestInput,
@@ -1018,11 +1020,57 @@ const RESPONSES_TERMINAL_EVENTS = new Set([
   'response.incomplete',
 ])
 
-/** True when a Responses-API SSE event is one of the stream-terminating types. */
-function isResponsesTerminalEvent(event: unknown): boolean {
-  if (!event || typeof event !== 'object') return false
+/**
+ * Classifies a Responses-API SSE event's terminal kind, or null if it isn't a
+ * terminal event. `response.completed` is the only success terminal; `failed`
+ * and `incomplete` are error terminals.
+ */
+function responsesTerminalKind(event: unknown): 'completed' | 'failed' | 'incomplete' | null {
+  if (!event || typeof event !== 'object') return null
   const type = (event as { type?: unknown }).type
-  return typeof type === 'string' && RESPONSES_TERMINAL_EVENTS.has(type)
+  if (typeof type !== 'string' || !RESPONSES_TERMINAL_EVENTS.has(type)) return null
+  if (type === 'response.completed') return 'completed'
+  return type === 'response.failed' ? 'failed' : 'incomplete'
+}
+
+/**
+ * Tracks Responses-protocol terminal events across a stream so usage can be
+ * recorded with the right status: a stream is a success only when it reaches
+ * `response.completed`; `response.failed` / `response.incomplete` (e.g. a
+ * `cyber_policy` hard block) are errors, and a stream that drops with no
+ * terminal at all is also an error.
+ */
+interface ResponsesStreamState {
+  sawTerminal: boolean
+  sawFailure: boolean
+}
+
+/** A fresh stream state for tracking Responses terminal events. */
+export function newResponsesStreamState(): ResponsesStreamState {
+  return { sawTerminal: false, sawFailure: false }
+}
+
+/** Records an event's terminal kind into the stream state. */
+export function noteResponsesTerminal(event: unknown, state: ResponsesStreamState): void {
+  const kind = responsesTerminalKind(event)
+  if (!kind) return
+  state.sawTerminal = true
+  if (kind !== 'completed') state.sawFailure = true
+}
+
+/**
+ * The usage-log status for a finished stream. Non-Responses providers key off
+ * `upstreamOk` alone; Responses providers additionally require a successful
+ * `response.completed` terminal (no failure terminal, no early drop).
+ */
+export function responsesStreamStatus(
+  upstreamOk: boolean,
+  responsesProtocol: boolean,
+  state: ResponsesStreamState,
+): 'success' | 'error' {
+  if (!upstreamOk) return 'error'
+  if (!responsesProtocol) return 'success'
+  return state.sawTerminal && !state.sawFailure ? 'success' : 'error'
 }
 
 /** Extracts a displayable error code + message from an upstream error body. */
@@ -1154,11 +1202,14 @@ function sanitizeRequestValue(value: unknown): unknown {
 }
 
 /**
- * Passthrough mode: parses each event for usage without rewriting. Returns
- * true if the block contained a Responses-API terminal event.
+ * Passthrough mode: parses each event for usage without rewriting, and records
+ * any Responses-API terminal event (and its success/failure kind) into `state`.
  */
-function feedSseBlock(block: string, parser: { feed(event: unknown): void }): boolean {
-  let sawTerminal = false
+function feedSseBlock(
+  block: string,
+  parser: { feed(event: unknown): void },
+  state: ResponsesStreamState,
+): void {
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
@@ -1167,19 +1218,18 @@ function feedSseBlock(block: string, parser: { feed(event: unknown): void }): bo
     try {
       const parsed = JSON.parse(payload)
       parser.feed(parsed)
-      if (isResponsesTerminalEvent(parsed)) sawTerminal = true
+      noteResponsesTerminal(parsed, state)
     } catch {
       // Ignore non-JSON data lines.
     }
   }
-  return sawTerminal
 }
 
 /**
  * Stateful transform mode: parses each upstream `data:` JSON event, feeds it
  * to the stream transform, and writes each emitted event as its own SSE
  * frame. Non-data lines and `[DONE]` are dropped (the downstream protocol
- * has its own completion signal).
+ * has its own completion signal). Terminal events are recorded into `state`.
  */
 function emitFromStreamTransform(
   raw: ServerResponse,
@@ -1187,9 +1237,9 @@ function emitFromStreamTransform(
   xform: StreamTransform,
   parser: { feed(event: unknown): void },
   parseUpstream: boolean,
-  onEmit?: () => void,
-): boolean {
-  let sawTerminal = false
+  onEmit: (() => void) | undefined,
+  state: ResponsesStreamState,
+): void {
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
@@ -1204,12 +1254,11 @@ function emitFromStreamTransform(
     if (parseUpstream) parser.feed(parsed)
     for (const event of xform.transform(parsed)) {
       if (!parseUpstream && event !== '[DONE]') parser.feed(event)
-      if (isResponsesTerminalEvent(event)) sawTerminal = true
+      noteResponsesTerminal(event, state)
       onEmit?.()
       writeSseData(raw, event)
     }
   }
-  return sawTerminal
 }
 
 function writeSseData(raw: ServerResponse, event: unknown): void {

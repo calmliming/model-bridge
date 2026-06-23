@@ -24,12 +24,19 @@ import {
 } from '../accounts/manager'
 import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
+import {
+  OpenAIQuotaError,
+  queryOpenAIAccountQuota,
+  resetOpenAIAccountQuota,
+} from '../accounts/openaiQuota'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
 import {
+  getOpenAiSchedulingStrategy,
   getQuotaAutopausePercent,
   isRegistrationEnabled,
+  setOpenAiSchedulingStrategy,
   setQuotaAutopausePercent,
   setRegistrationEnabled,
 } from '../db/settings'
@@ -219,6 +226,7 @@ const updateSettingsSchema = z
   .object({
     registrationEnabled: z.boolean().optional(),
     quotaAutopausePercent: z.number().int().min(1).max(100).optional(),
+    openaiSchedulingStrategy: z.enum(['weighted_lru', 'prefer_soonest_reset']).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -435,6 +443,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
       quotaAutopausePercent: await getQuotaAutopausePercent(),
+      openaiSchedulingStrategy: await getOpenAiSchedulingStrategy(),
     }
   })
 
@@ -449,12 +458,16 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (body.data.quotaAutopausePercent !== undefined) {
       await setQuotaAutopausePercent(body.data.quotaAutopausePercent)
     }
+    if (body.data.openaiSchedulingStrategy !== undefined) {
+      await setOpenAiSchedulingStrategy(body.data.openaiSchedulingStrategy)
+    }
     return {
       registrationEnabled: await isRegistrationEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
       quotaAutopausePercent: await getQuotaAutopausePercent(),
+      openaiSchedulingStrategy: await getOpenAiSchedulingStrategy(),
     }
   })
 
@@ -1296,6 +1309,47 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     async (request) => {
       await deleteAccount(request.params.id)
       return { ok: true }
+    },
+  )
+
+  // ── OpenAI quota + reset credits (OAuth accounts only) ──────────
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/openai/quota',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        const result = await queryOpenAIAccountQuota(request.params.id)
+        return { success: true, quota: result.quota, resetCredits: result.resetCredits }
+      } catch (err) {
+        if (err instanceof OpenAIQuotaError) {
+          return reply.code(err.statusCode).send({ success: false, error: err.message })
+        }
+        request.log.warn(`openai quota query failed for ${request.params.id}`)
+        return reply.code(500).send({ success: false, error: '查询配额失败' })
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/openai/reset-quota',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        const result = await resetOpenAIAccountQuota(request.params.id)
+        return {
+          success: true,
+          message: `已消耗一次 reset credit，重置了 ${result.windowsReset} 个限额窗口`,
+          windowsReset: result.windowsReset,
+          quota: result.quota,
+          resetCredits: result.resetCredits,
+        }
+      } catch (err) {
+        if (err instanceof OpenAIQuotaError) {
+          return reply.code(err.statusCode).send({ success: false, error: err.message })
+        }
+        request.log.warn(`openai quota reset failed for ${request.params.id}`)
+        return reply.code(500).send({ success: false, error: '重置限额失败' })
+      }
     },
   )
 

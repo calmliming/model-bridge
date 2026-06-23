@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.134**，2026-06-06）
-> 更新日期：2026-06-08
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.138**，2026-06-22）
+> 更新日期：2026-06-23
 
 ## 一句话定位
 
@@ -63,9 +63,13 @@
 | 17 | **内容审计 / 风控**（按模型生效的内容审核、前置拦截风控运行态） | ✅ (v0.1.130/134) | ❌ | 待评估 · 合规向 |
 | 18 | **钉钉 OAuth 登录** | ✅ (v0.1.127) | ❌ | 低优先级 |
 | 19 | **图像 token 计费** | ✅ (v0.1.134) | ❌ | 低优先级 · 计费精度 |
-| 20 | **邀请返利系统**（返利冻结期 / 有效期 / 单人上限 / 专属邀请码） | ✅ (v0.1.119) | ⚠️ 已有邀请制用户体系，无返利结算 | 低优先级 · 偏 SaaS |
+| 20 | **邀请返利系统**（返利冻结期 / 有效期 / 单人上限 / 专属邀请码） | ✅ (v0.1.119/138) | ⚠️ 已有邀请制用户体系，无返利结算 | 低优先级 · 偏 SaaS |
+| 21 | **OpenAI 账号 quota 查询 + 手动 reset credit** | ✅ (v0.1.137/138) | ✅ 已实现（管理员查询 ChatGPT 配额、消耗 reset credit，OAuth 账号专属）| ✅ 已完成 |
+| 22 | **OpenAI 调度策略「优先最快重置」** | ✅ (v0.1.138) | ✅ 已实现（设置项 `openai_scheduling_strategy`，仅影响 OpenAI 非粘性回退）| ✅ 已完成 |
+| 23 | **`cyber_policy` 硬阻断全链路透传** | ✅ (v0.1.137) | ✅ 已实现（Responses `failed`/`incomplete` 记为错误，不 failover/cooldown，透传上游 code/message）| ✅ 已完成 |
+| 24 | **Gemini 工具 schema 兼容清理** | ✅ (v0.1.138) | ✅ 已实现（递归清理 function declarations 中不兼容的 JSON Schema 字段）| ✅ 已完成 |
 
-> 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
+> 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；第 21–24 项为对照 **v0.1.137/v0.1.138** 补入并已在 model-bridge 落地。标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
 
 ---
 
@@ -96,7 +100,19 @@
 
 ## 六、本次更新整理
 
-- **跟踪 sub2api 至 v0.1.134（2026-06-08）**：对照 v0.1.119–v0.1.134 的新发布，补入差异表第 13–20 项 —— 账号配额自动暂停、用户分平台配额、失败请求追踪、OpenAI embeddings 网关、内容审计/风控、钉钉 OAuth、图像 token 计费、邀请返利系统。其中第 13 项账号配额自动暂停已在 model-bridge 补齐；第 14 项已有 per-Key USD 配额上限（`src/middleware/apiKeyAuth.ts`、`schema.ts` 的 `quotaLimit`），但无「按用户分平台 + 时间窗」配额。其余多为偏 SaaS / 合规 / 计费精度方向，符合错位定位，择优追赶。
+- **跟踪 sub2api 至 v0.1.138（2026-06-22）**：对照 v0.1.137/v0.1.138 的发布，补入差异表第 21–24 项 —— OpenAI 账号 quota 查询 + 手动 reset credit、OpenAI 调度策略「优先最快重置」、`cyber_policy` 硬阻断全链路透传、Gemini 工具 schema 兼容清理。四项均已在 model-bridge 落地（实施依据见 [sub2api 近期更新实施计划](./sub2api近期更新实施计划.md)）；订阅推广返利属偏运营 SaaS 能力，首期不实现（见第 20 项）。
+- **OpenAI quota 查询 + reset credit 已落地**（差异表第 21 项 ✅）：OpenAI OAuth token 交换 / 刷新时解析 `id_token`，提取 `chatgptAccountId`/`chatgptUserId`/`organizationId`/`email`/`planType` 等非敏感元数据存入 `accounts.metadata.openai`（不新增表）。管理员可在「账号」页查询 ChatGPT 配额（`GET /api/admin/accounts/:id/openai/quota`，调用 `chatgpt.com/backend-api/wham/usage`）并手动消耗一次 reset credit（`POST .../openai/reset-quota`，调用 `wham/rate-limit-reset-credits/consume`），reset credit 余额单独存 `metadata.openaiResetCredits` 以免被 relay 头部抓取覆盖。日志只记账号 ID / 状态码，不打 token / 授权码 / 原始敏感响应。仅支持 OAuth 账号；缺 `chatgptAccountId` 的老账号需重新授权或等 token 刷新补齐。核心见 `src/providers/openai/{identity,quota}.ts`、`src/accounts/openaiQuota.ts`，含单测。
+- **OpenAI 调度策略「优先最快重置」已落地**（差异表第 22 项 ✅）：新增设置项 `settings.openai_scheduling_strategy`，可选 `weighted_lru`（默认，保持原行为）或 `prefer_soonest_reset`（优先选 quota 窗口最快重置的可用账号）。仅影响 OpenAI 非粘性回退调度，粘性会话仍优先，其它 provider 不受影响。在设置页可切换。逻辑见 `src/accounts/scheduler.ts` 的 `soonestReset` 与 `src/db/settings.ts`，含单测。
+- **`cyber_policy` 硬阻断透传已落地**（差异表第 23 项 ✅）：Responses 流 `response.completed` 才记为成功；`response.failed` / `response.incomplete`（含 `cyber_policy`）记为 `status="error"`，并按原样透传上游 code/message 给客户端，不触发 failover、不置 cooldown。逻辑见 `src/routes/relay.ts` 的 `responsesStreamStatus` / `noteResponsesTerminal`，含单测。
+- **Gemini 工具 schema 清理已落地**（差异表第 24 项 ✅）：relay 请求前递归清理 `tools[].functionDeclarations[].parameters` 中 Gemini 不支持或易致 400 的 JSON Schema 字段（`$schema`/`$id`/`$defs`/`definitions`/`additionalProperties`/`title`/`default`/`examples`/`nullable` 等），保留 `type`/`description`/`enum`/`required`/`properties`/`items`。无 tools 时请求体不变、不改原对象。见 `src/providers/gemini/relay.ts` 的 `sanitizeGeminiBody`，含单测。
+- **部署提示**：若用 Nginx 反代且上游依赖带下划线的请求头，需在 server/location 配 `underscores_in_headers on;`，否则带下划线的头会被默认丢弃。
+- **下一步建议优先级**：① 失败请求追踪（纯观测增强，风险低）；② 用户分平台配额（从 per-Key 上限扩展到 per-user 多平台时间窗）。embeddings / 钉钉 OAuth / 图像计费 / 内容审计 / 邀请返利可按需求再排。
+
+---
+
+### v0.1.134 跟踪（2026-06-08）
+
+- **跟踪 sub2api 至 v0.1.134**：对照 v0.1.119–v0.1.134 的新发布，补入差异表第 13–20 项 —— 账号配额自动暂停、用户分平台配额、失败请求追踪、OpenAI embeddings 网关、内容审计/风控、钉钉 OAuth、图像 token 计费、邀请返利系统。其中第 13 项账号配额自动暂停已在 model-bridge 补齐；第 14 项已有 per-Key USD 配额上限（`src/middleware/apiKeyAuth.ts`、`schema.ts` 的 `quotaLimit`），但无「按用户分平台 + 时间窗」配额。其余多为偏 SaaS / 合规 / 计费精度方向，符合错位定位，择优追赶。
 - **账号配额自动暂停已落地**（差异表第 13 项 ✅）：在原有 quota 快照基础上加阈值停调——账号 5h/7d 用量达到阈值即置入 cooldown 直到对应窗口重置。全局阈值存 `settings.quota_autopause_percent`（默认 100＝仅超额时停调，调低可提前切走流量），单账号可在「账号」页用 `metadata.autopausePercent` 覆盖（留空=继承、0=关闭）。即时停调走 relay 成功路径与手动测试/刷新；另加后台周期扫描 `jobs/quotaAutopause.ts` 兜底闲置账号与阈值下调场景（多实例 Redis 锁、只读快照不打上游、忽略已过期窗口）。核心逻辑 `quotaPauseUntil` / `resolveAutopausePercent` 见 `src/accounts/quota.ts`，含单测。
 - **下一步建议优先级**：① 失败请求追踪（纯观测增强，风险低）；② 用户分平台配额（从 per-Key 上限扩展到 per-user 多平台时间窗）。embeddings / 钉钉 OAuth / 图像计费 / 内容审计可按需求再排。
 

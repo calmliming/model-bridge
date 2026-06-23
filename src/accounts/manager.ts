@@ -50,6 +50,19 @@ function metadataObject(metadata: unknown): Record<string, unknown> {
     : {}
 }
 
+/**
+ * Shallow-merges metadata sources into one object (or null when all empty).
+ * Nested objects like `openai` are replaced wholesale, not deep-merged — the
+ * caller passes complete sub-objects. Later sources win on key conflicts.
+ */
+function mergeMetadata(
+  ...sources: Array<Record<string, unknown> | null | undefined>
+): Record<string, unknown> | null {
+  const merged: Record<string, unknown> = {}
+  for (const source of sources) Object.assign(merged, metadataObject(source))
+  return Object.keys(merged).length ? merged : null
+}
+
 export const accountConcurrencyKey = (accountId: string): string => `account:${accountId}`
 
 function normalizeConcurrencyLimit(value: number | null | undefined): number | null {
@@ -71,6 +84,9 @@ function decryptAccountSecret(value: string): string {
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
 export async function createAccount(input: CreateAccountInput): Promise<{ id: string }> {
   const id = randomBytes(12).toString('hex')
+  // Merge provider metadata fetched separately (e.g. Gemini project) with any
+  // non-secret identity the token exchange derived (e.g. OpenAI id_token claims).
+  const metadata = mergeMetadata(input.metadata, input.tokens.metadata)
   await db.insert(accounts)
     .values({
       id,
@@ -82,7 +98,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       status: 'active',
       concurrencyLimit: normalizeConcurrencyLimit(input.concurrencyLimit),
       notes: input.notes?.trim() || null,
-      metadata: input.metadata ?? null,
+      metadata,
     })
   if (input.groupIds?.length) {
     await setAccountGroupMembers(id, input.groupIds)
@@ -289,6 +305,12 @@ async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
       tokenExpiresAt: tokens.expiresAt,
     })
     .where(eq(accounts.id, id))
+  // A refresh can re-issue an id_token with fresh identity claims; merge any
+  // non-secret metadata so backfill works for accounts authorized before the
+  // id_token was parsed. Skips the read/write when the refresh carried none.
+  if (tokens.metadata && Object.keys(tokens.metadata).length) {
+    await updateAccountMetadata(id, tokens.metadata)
+  }
 }
 
 /** Refreshes an account's OAuth token and persists it. Returns the new access token. */

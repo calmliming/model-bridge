@@ -25,6 +25,14 @@ const autopauseInput = ref(100)
 const savingAutopause = ref(false)
 const autopauseDirty = computed(() => autopauseInput.value !== quotaAutopausePercent.value)
 
+type OpenAiSchedulingStrategy = 'weighted_lru' | 'prefer_soonest_reset'
+const openaiSchedulingStrategy = ref<OpenAiSchedulingStrategy>('weighted_lru')
+const savingSchedulingStrategy = ref(false)
+const schedulingStrategyOptions = [
+  { label: '权重 + 最近最少使用（默认）', value: 'weighted_lru' },
+  { label: '优先最快重置', value: 'prefer_soonest_reset' },
+]
+
 type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 'failed'
 type TagType = 'default' | 'info' | 'success' | 'warning' | 'error' | 'primary'
 
@@ -132,6 +140,9 @@ async function loadSettings() {
       quotaAutopausePercent.value = data.quotaAutopausePercent
       autopauseInput.value = data.quotaAutopausePercent
     }
+    if (data.openaiSchedulingStrategy === 'weighted_lru' || data.openaiSchedulingStrategy === 'prefer_soonest_reset') {
+      openaiSchedulingStrategy.value = data.openaiSchedulingStrategy
+    }
   } catch (e) {
     message.error(errMsg(e, '加载设置失败'))
   }
@@ -149,6 +160,22 @@ async function saveAutopause() {
     message.error(errMsg(e, '保存失败'))
   } finally {
     savingAutopause.value = false
+  }
+}
+
+async function saveSchedulingStrategy(value: OpenAiSchedulingStrategy) {
+  const previous = openaiSchedulingStrategy.value
+  openaiSchedulingStrategy.value = value
+  savingSchedulingStrategy.value = true
+  try {
+    const { data } = await api.patch('/admin/settings', { openaiSchedulingStrategy: value })
+    if (data.openaiSchedulingStrategy) openaiSchedulingStrategy.value = data.openaiSchedulingStrategy
+    message.success('已更新 OpenAI 调度策略')
+  } catch (e) {
+    openaiSchedulingStrategy.value = previous
+    message.error(errMsg(e, '保存失败'))
+  } finally {
+    savingSchedulingStrategy.value = false
   }
 }
 
@@ -474,6 +501,28 @@ function confirmSystemUpdate() {
           >
             保存
           </UiButton>
+        </div>
+      </div>
+    </UiCard>
+
+    <UiCard class="max-w-xl" title="OpenAI 调度策略">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <strong class="text-gray-900 dark:text-white">账号选择方式</strong>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            仅影响 OpenAI 账号的非粘性回退调度，其它服务商不受影响。粘性会话始终优先以保持对话缓存。
+            「优先最快重置」会先选择配额窗口最快重置的可用账号，让接近用尽的账号先消耗、其余账号留作储备。
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <UiSelect
+            :value="openaiSchedulingStrategy"
+            :options="schedulingStrategyOptions"
+            :loading="savingSchedulingStrategy"
+            :disabled="savingSchedulingStrategy"
+            style="width: 220px"
+            @update:value="saveSchedulingStrategy"
+          />
         </div>
       </div>
     </UiCard>

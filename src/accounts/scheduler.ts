@@ -2,6 +2,8 @@ import { and, eq, inArray, lte, ne, notExists, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accounts } from '../db/schema'
 import { getStickyAccountId } from './session'
+import { accountQuotaFromMetadata } from './quota'
+import { getOpenAiSchedulingStrategy } from '../db/settings'
 
 /** How long an account stays in cooldown after a failure, by kind. */
 const COOLDOWN_MS: Record<'rate_limited' | 'error', number> = {
@@ -103,12 +105,42 @@ export async function pickAccount(
     }
   }
 
+  // OpenAI-only "prefer soonest reset" fallback: when enabled, pick the account
+  // whose quota window resets soonest so a nearly-spent account drains first and
+  // the rest stay in reserve. Sticky sessions above are unaffected; all other
+  // providers keep weighted-LRU. Falls back to weight, then LRU, on ties / when
+  // an account has no known reset time.
+  if (provider === 'openai' && (await getOpenAiSchedulingStrategy()) === 'prefer_soonest_reset') {
+    available.sort((a, b) => {
+      const resetDiff = soonestReset(a.metadata, now) - soonestReset(b.metadata, now)
+      if (resetDiff !== 0) return resetDiff
+      const weightDiff = Math.max(1, b.effectiveWeight ?? 1) - Math.max(1, a.effectiveWeight ?? 1)
+      if (weightDiff !== 0) return weightDiff
+      return (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0)
+    })
+    return available[0]
+  }
+
   available.sort((a, b) => {
     const weightDiff = Math.max(1, b.effectiveWeight ?? 1) - Math.max(1, a.effectiveWeight ?? 1)
     if (weightDiff !== 0) return weightDiff
     return (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0)
   })
   return available[0]
+}
+
+/**
+ * Earliest future quota-window reset for an account, in epoch ms. Accounts with
+ * no known future reset sort last (Infinity) so reset-bearing accounts drain first.
+ * Exported for unit testing the `prefer_soonest_reset` ordering.
+ */
+export function soonestReset(metadata: unknown, now: number): number {
+  const quota = accountQuotaFromMetadata(metadata)
+  if (!quota) return Number.POSITIVE_INFINITY
+  const future = quota.windows
+    .map((w) => w.resetAt)
+    .filter((t): t is number => typeof t === 'number' && t > now)
+  return future.length ? Math.min(...future) : Number.POSITIVE_INFINITY
 }
 
 /** Marks an account as healthy and just used (clears any cooldown). */

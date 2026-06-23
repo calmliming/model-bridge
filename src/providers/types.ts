@@ -5,6 +5,12 @@ export interface TokenSet {
   accessToken: string
   refreshToken: string
   expiresAt: number // epoch ms
+  /**
+   * Non-secret provider metadata derived during the token exchange/refresh
+   * (e.g. OpenAI's ChatGPT account identity from the id_token). Merged into
+   * `accounts.metadata` on create and refresh. Never carries secrets.
+   */
+  metadata?: Record<string, unknown>
 }
 
 /** Token counts extracted from one relayed request. */

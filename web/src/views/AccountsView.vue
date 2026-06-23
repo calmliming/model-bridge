@@ -20,6 +20,8 @@ interface AccountQuotaSnapshot {
   source: 'claude' | 'openai'
   updatedAt: number
   windows: AccountQuotaWindow[]
+  // OpenAI only: available rate-limit reset credits (null when unknown).
+  resetCredits?: number | null
 }
 
 interface AccountGroupRef {
@@ -91,6 +93,7 @@ const loading = ref(true)
 const searchQuery = ref('')
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
+const resettingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
 const savingConcurrencyId = ref<string | null>(null)
 const savingNotesId = ref<string | null>(null)
@@ -421,12 +424,26 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
   )
 }
 
+function renderResetCredits(row: Account) {
+  // OpenAI-only: surface the reset-credit balance, when known, next to the
+  // quota windows. `null`/undefined means we haven't queried it yet.
+  if (row.provider !== 'openai') return null
+  const credits = row.quota?.resetCredits
+  if (typeof credits !== 'number') return null
+  return h(
+    UiTag,
+    { size: 'small', type: credits > 0 ? 'success' : 'default', round: true, class: 'quota-credits' },
+    { default: () => `Reset credit ×${credits}` },
+  )
+}
+
 function renderQuota(row: Account) {
   const quota = row.quota
+  const credits = renderResetCredits(row)
   if (!quota || !quota.windows.length) {
     return h('div', { class: 'quota-cell' }, [
-      h('span', { class: 'muted-cell' }, '未更新'),
-      renderQuotaRefresh(row),
+      h('div', { class: 'quota-line' }, [h('span', { class: 'muted-cell' }, '未更新'), credits]),
+      renderQuotaRefresh(row, quota?.updatedAt),
     ])
   }
   return h(
@@ -435,6 +452,7 @@ function renderQuota(row: Account) {
     [
       h('div', { class: 'quota-line' }, [
         ...quota.windows.map(renderQuotaWindow),
+        credits,
       ]),
       renderQuotaRefresh(row, quota.updatedAt),
     ],
@@ -1107,6 +1125,18 @@ async function testConnectivity(row: Account) {
 async function refreshQuota(row: Account) {
   refreshingQuotaId.value = row.id
   try {
+    // OpenAI OAuth accounts have a dedicated endpoint that also returns the
+    // reset-credit balance; other providers use the generic connectivity probe.
+    if (row.provider === 'openai') {
+      const { data } = await api.get(`/admin/accounts/${row.id}/openai/quota`)
+      if (data.success) {
+        message.success('配额已刷新')
+        await load()
+        return
+      }
+      message.error(data.error || '刷新配额失败')
+      return
+    }
     const { data } = await api.post(`/admin/accounts/${row.id}/quota/refresh`)
     if (data.success) {
       message.success('配额已刷新')
@@ -1119,6 +1149,33 @@ async function refreshQuota(row: Account) {
   } finally {
     refreshingQuotaId.value = null
   }
+}
+
+function confirmResetQuota(row: Account) {
+  const credits = row.quota?.resetCredits
+  const creditHint = typeof credits === 'number' ? `当前剩余 ${credits} 次。` : ''
+  dialog.warning({
+    title: '重置限额',
+    content: `确定为「${row.name}」消耗一次上游 reset credit 吗？该操作会立即重置限额窗口，且不可撤销。${creditHint}`,
+    positiveText: '重置',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      resettingQuotaId.value = row.id
+      try {
+        const { data } = await api.post(`/admin/accounts/${row.id}/openai/reset-quota`)
+        if (data.success) {
+          message.success(data.message || '已重置限额')
+          await load()
+          return
+        }
+        message.error(data.error || '重置限额失败')
+      } catch (e) {
+        message.error(errMsg(e, '重置限额失败'))
+      } finally {
+        resettingQuotaId.value = null
+      }
+    },
+  })
 }
 
 function confirmDelete(row: Account) {
@@ -1173,7 +1230,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 130,
+    width: 180,
     render: (row) =>
       h(
         UiSpace,
@@ -1198,6 +1255,28 @@ const columns = computed<TableColumn<Account>[]>(() => [
                 ])
               },
             ),
+            // Reset quota: OpenAI OAuth accounts only — consumes an upstream credit.
+            row.provider === 'openai'
+              ? h(
+                  UiButton,
+                  {
+                    size: 'small',
+                    type: 'warning',
+                    quaternary: true,
+                    loading: resettingQuotaId.value === row.id,
+                    onClick: () => confirmResetQuota(row),
+                    title: '重置限额（消耗一次 reset credit）',
+                  },
+                  {
+                    default: () => h('div', { class: 'flex items-center gap-1' }, [
+                      h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                        h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
+                      ]),
+                      h('span', '重置')
+                    ])
+                  },
+                )
+              : null,
             h(
               UiButton,
               {
@@ -1383,7 +1462,7 @@ onBeforeUnmount(() => {
           v-model:checked-row-keys="selectedAccountIds"
           :row-key="accountRowKey"
           :bordered="false"
-          :scroll-x="1830"
+          :scroll-x="1880"
         />
       </UiCard>
     </div>
@@ -1397,7 +1476,7 @@ onBeforeUnmount(() => {
         v-model:checked-row-keys="selectedAccountIds"
         :row-key="accountRowKey"
         :bordered="false"
-        :scroll-x="1970"
+        :scroll-x="2020"
       />
     </UiCard>
 
@@ -1978,6 +2057,12 @@ onBeforeUnmount(() => {
   gap: 5px;
   flex: 1;
   min-width: 0;
+}
+
+:deep(.quota-credits) {
+  align-self: flex-start;
+  margin-top: 1px;
+  font-size: 11px;
 }
 
 :deep(.quota-row) {
