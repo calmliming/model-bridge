@@ -1,0 +1,292 @@
+/**
+ * Static model catalog for the Model Plaza (模型广场).
+ *
+ * Frontend-only display data — it does NOT drive relaying. Model ids, tiers
+ * and prices mirror src/providers/modelDiscovery.ts and src/usage/pricing.ts
+ * so the plaza stays consistent with what the relay actually exposes and
+ * bills. When a backend `/models` catalog endpoint lands, swap `MODEL_CATALOG`
+ * for a fetch that returns the same `PlazaModel` shape.
+ */
+
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi'
+
+export interface ProviderMeta {
+  id: ProviderId
+  /** Short label shown on cards (the upstream vendor brand). */
+  label: string
+  /** 1–2 letter mark for the logo chip. */
+  initials: string
+  /** Tailwind classes for the logo chip background/text. */
+  chipClass: string
+}
+
+export interface CategoryMeta {
+  key: string
+  label: string
+}
+
+export interface PlazaModel {
+  /** Model id used when calling the relay (body.model). */
+  id: string
+  /** Human-friendly display name. */
+  name: string
+  provider: ProviderId
+  /** Category keys this model belongs to (see CATEGORIES). */
+  categories: string[]
+  /** Capability chips shown on the card. */
+  tags: string[]
+  description: string
+  /** Context window, display string (e.g. "200K"). */
+  context: string
+  /** USD list price per 1M tokens. */
+  inputPrice: number
+  outputPrice: number
+  /** Optional highlight badge. */
+  badge?: 'new' | 'recommended'
+}
+
+export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
+  claude: {
+    id: 'claude',
+    label: 'Anthropic',
+    initials: 'A',
+    chipClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300',
+  },
+  openai: {
+    id: 'openai',
+    label: 'OpenAI',
+    initials: 'AI',
+    chipClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',
+  },
+  gemini: {
+    id: 'gemini',
+    label: 'Google',
+    initials: 'G',
+    chipClass: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300',
+  },
+  deepseek: {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    initials: 'DS',
+    chipClass: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300',
+  },
+  xiaomi: {
+    id: 'xiaomi',
+    label: '小米 MiMo',
+    initials: 'Mi',
+    chipClass: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
+  },
+}
+
+/** Capability categories used by the top filter. "all" is rendered separately. */
+export const CATEGORIES: CategoryMeta[] = [
+  { key: 'chat', label: '对话生成' },
+  { key: 'reasoning', label: '深度推理' },
+  { key: 'code', label: '代码开发' },
+  { key: 'multimodal', label: '多模态' },
+  { key: 'lightweight', label: '轻量高速' },
+]
+
+export const MODEL_CATALOG: PlazaModel[] = [
+  // --- Anthropic / Claude --------------------------------------------------
+  {
+    id: 'claude-opus-4-8',
+    name: 'Claude Opus 4.8',
+    provider: 'claude',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['旗舰', '复杂推理', '长文本'],
+    description: 'Anthropic 当前最强旗舰模型，擅长复杂推理、长上下文理解与高质量代码生成。',
+    context: '200K',
+    inputPrice: 5,
+    outputPrice: 25,
+    badge: 'recommended',
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6',
+    provider: 'claude',
+    categories: ['chat', 'code', 'reasoning'],
+    tags: ['均衡', '高性价比', '代码'],
+    description: '性能与成本平衡的主力模型，日常对话、代码与中等推理任务的首选。',
+    context: '200K',
+    inputPrice: 3,
+    outputPrice: 15,
+  },
+  {
+    id: 'claude-haiku-4-5',
+    name: 'Claude Haiku 4.5',
+    provider: 'claude',
+    categories: ['chat', 'lightweight'],
+    tags: ['轻量', '低延迟', '低成本'],
+    description: '轻量高速模型，适合高并发、低延迟与成本敏感的对话场景。',
+    context: '200K',
+    inputPrice: 1,
+    outputPrice: 5,
+  },
+  {
+    id: 'claude-fable-5',
+    name: 'Claude Fable 5',
+    provider: 'claude',
+    categories: ['chat', 'reasoning'],
+    tags: ['Mythos 级', '创意写作'],
+    description: 'Mythos 级旗舰，长文创作与叙事推理能力突出。',
+    context: '200K',
+    inputPrice: 5,
+    outputPrice: 25,
+    badge: 'new',
+  },
+
+  // --- OpenAI --------------------------------------------------------------
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    provider: 'openai',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['旗舰', '多模态', '推理'],
+    description: 'OpenAI 旗舰多模态模型，综合推理、文本与图像理解能力领先。',
+    context: '256K',
+    inputPrice: 5,
+    outputPrice: 30,
+    badge: 'recommended',
+  },
+  {
+    id: 'gpt-5.4',
+    name: 'GPT-5.4',
+    provider: 'openai',
+    categories: ['chat', 'reasoning'],
+    tags: ['通用', '稳定'],
+    description: '通用主力模型，覆盖大多数对话与推理任务，稳定可靠。',
+    context: '256K',
+    inputPrice: 2.5,
+    outputPrice: 15,
+  },
+  {
+    id: 'gpt-5.4-mini',
+    name: 'GPT-5.4 Mini',
+    provider: 'openai',
+    categories: ['chat', 'lightweight'],
+    tags: ['轻量', '低成本', '高速'],
+    description: '小尺寸高速模型，适合大批量、低成本的对话与分类任务。',
+    context: '128K',
+    inputPrice: 0.25,
+    outputPrice: 2,
+  },
+  {
+    id: 'gpt-5.3-codex',
+    name: 'GPT-5.3 Codex',
+    provider: 'openai',
+    categories: ['code', 'reasoning'],
+    tags: ['代码', 'Agent', 'Codex CLI'],
+    description: '面向编程与 Agent 的专用模型，深度适配 Codex CLI 工作流。',
+    context: '256K',
+    inputPrice: 1.5,
+    outputPrice: 12,
+  },
+
+  // --- Google / Gemini -----------------------------------------------------
+  {
+    id: 'gemini-3-pro-preview',
+    name: 'Gemini 3 Pro',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['超长上下文', '多模态', '预览'],
+    description: 'Google 新一代旗舰，超长上下文与原生多模态理解能力突出。',
+    context: '1M',
+    inputPrice: 1.25,
+    outputPrice: 10,
+    badge: 'new',
+  },
+  {
+    id: 'gemini-3-flash-preview',
+    name: 'Gemini 3 Flash',
+    provider: 'gemini',
+    categories: ['chat', 'lightweight', 'multimodal'],
+    tags: ['高速', '低成本', '多模态'],
+    description: '高速低成本的多模态模型，兼顾长上下文与吞吐表现。',
+    context: '1M',
+    inputPrice: 0.3,
+    outputPrice: 2.5,
+  },
+  {
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['长上下文', '多模态'],
+    description: '成熟稳定的多模态推理模型，长上下文场景表现优秀。',
+    context: '1M',
+    inputPrice: 1.25,
+    outputPrice: 10,
+  },
+  {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    provider: 'gemini',
+    categories: ['chat', 'lightweight', 'multimodal'],
+    tags: ['高速', '低成本'],
+    description: '轻量高速多模态模型，适合实时与高并发场景。',
+    context: '1M',
+    inputPrice: 0.3,
+    outputPrice: 2.5,
+  },
+
+  // --- DeepSeek ------------------------------------------------------------
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    provider: 'deepseek',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['强推理', '高性价比', '代码'],
+    description: '强推理主力模型，代码与数理能力突出，价格极具竞争力。',
+    context: '128K',
+    inputPrice: 0.42,
+    outputPrice: 0.84,
+    badge: 'recommended',
+  },
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash',
+    provider: 'deepseek',
+    categories: ['chat', 'lightweight'],
+    tags: ['轻量', '极低成本', '高速'],
+    description: '轻量高速版本，成本极低，适合大批量对话与轻任务。',
+    context: '128K',
+    inputPrice: 0.14,
+    outputPrice: 0.28,
+  },
+  {
+    id: 'deepseek-reasoner',
+    name: 'DeepSeek Reasoner',
+    provider: 'deepseek',
+    categories: ['reasoning', 'code'],
+    tags: ['思维链', '深度推理'],
+    description: '具备显式思维链的深度推理模型，擅长数学、逻辑与复杂代码。',
+    context: '128K',
+    inputPrice: 0.42,
+    outputPrice: 0.84,
+  },
+
+  // --- 小米 MiMo -----------------------------------------------------------
+  {
+    id: 'mimo-v2.5-pro',
+    name: 'MiMo V2.5 Pro',
+    provider: 'xiaomi',
+    categories: ['chat', 'reasoning'],
+    tags: ['推理', '高性价比'],
+    description: '小米 MiMo 旗舰版本，中文对话与推理表现均衡，价格友好。',
+    context: '256K',
+    inputPrice: 0.42,
+    outputPrice: 0.84,
+  },
+  {
+    id: 'mimo-v2.5',
+    name: 'MiMo V2.5',
+    provider: 'xiaomi',
+    categories: ['chat', 'lightweight'],
+    tags: ['通用', '低成本'],
+    description: '标准版通用模型，覆盖日常中文对话与轻量任务。',
+    context: '256K',
+    inputPrice: 1,
+    outputPrice: 3,
+  },
+]

@@ -16,18 +16,21 @@ const auth = useAuthStore()
 
 const menu = [
   { to: '/app', key: 'user-overview', label: '概览' },
+  { to: '/app/models', key: 'user-models', label: '模型广场' },
   { to: '/app/keys', key: 'user-keys', label: 'API Keys' },
   { to: '/app/usage', key: 'user-usage', label: '用量流水' },
 ]
 
 const titleMap: Record<string, string> = {
   'user-overview': '仪表盘',
+  'user-models': '模型广场',
   'user-keys': 'API Keys',
   'user-usage': '用量流水',
 }
 
 const subtitleMap: Record<string, string> = {
   'user-overview': '欢迎回来！这是您账户的概览。',
+  'user-models': '浏览可用模型、能力分类与计费价格。',
   'user-keys': '管理您的 API Key 和调用入口。',
   'user-usage': '查看请求消耗、账单扣费和钱包流水。',
 }
