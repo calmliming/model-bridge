@@ -1,4 +1,10 @@
-import { ensureFreshToken, getAccount, updateAccountMetadata, updateAccountQuota } from './manager'
+import {
+  ensureFreshToken,
+  getAccount,
+  refreshAccountToken,
+  updateAccountMetadata,
+  updateAccountQuota,
+} from './manager'
 import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 import {
   fetchOpenAIQuota,
@@ -20,24 +26,52 @@ export interface OpenAIResetResult {
   resetCredits: number | null
 }
 
-/** Loads an OpenAI OAuth account and its stored ChatGPT account id, or throws. */
-async function loadOpenAIAccount(id: string): Promise<{
-  account: NonNullable<Awaited<ReturnType<typeof getAccount>>>
+type AccountRow = NonNullable<Awaited<ReturnType<typeof getAccount>>>
+
+interface LoadedOpenAIAccount {
+  account: AccountRow
   chatgptAccountId: string
-}> {
-  const account = await getAccount(id)
-  if (!account) throw new OpenAIQuotaError('account not found', 404)
+}
+
+const MISSING_OPENAI_ACCOUNT_ID_MESSAGE =
+  '缺少 ChatGPT 账户标识，无法刷新配额；请重新授权 OpenAI 账号后再试'
+
+function assertOpenAIAccount(account: AccountRow): void {
   if (account.provider !== 'openai') {
     throw new OpenAIQuotaError('该操作仅支持 OpenAI OAuth 账号', 400)
   }
-  const chatgptAccountId = openAIAccountIdFromMetadata(account.metadata)
-  if (!chatgptAccountId) {
-    throw new OpenAIQuotaError(
-      '账号缺少 ChatGPT account id，请重新授权该 OpenAI 账号后再试',
-      409,
-    )
+}
+
+async function tryRefreshOpenAIIdentity(id: string): Promise<LoadedOpenAIAccount | null> {
+  try {
+    // Older OpenAI accounts may predate identity extraction. A forced token
+    // refresh can return an id_token and let manager.ts backfill metadata.
+    await refreshAccountToken(id)
+  } catch {
+    return null
   }
+
+  const account = await getAccount(id)
+  if (!account) throw new OpenAIQuotaError('account not found', 404)
+  assertOpenAIAccount(account)
+
+  const chatgptAccountId = openAIAccountIdFromMetadata(account.metadata)
+  return chatgptAccountId ? { account, chatgptAccountId } : null
+}
+
+/** Loads an OpenAI OAuth account and its stored ChatGPT account id, or throws. */
+async function loadOpenAIAccount(id: string): Promise<LoadedOpenAIAccount> {
+  const account = await getAccount(id)
+  if (!account) throw new OpenAIQuotaError('account not found', 404)
+  assertOpenAIAccount(account)
+
+  const chatgptAccountId = openAIAccountIdFromMetadata(account.metadata)
+  if (!chatgptAccountId) return (await tryRefreshOpenAIIdentity(id)) ?? missingOpenAIAccountId()
   return { account, chatgptAccountId }
+}
+
+function missingOpenAIAccountId(): never {
+  throw new OpenAIQuotaError(MISSING_OPENAI_ACCOUNT_ID_MESSAGE, 409)
 }
 
 /** Persists a fresh quota snapshot and standalone reset-credit count. */
