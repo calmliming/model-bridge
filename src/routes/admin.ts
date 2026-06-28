@@ -421,7 +421,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   })
 
   app.get('/api/admin/me', { preHandler: requireAdmin }, async () => {
-    return { username: await getAdminUsername() }
+    const [username, userId] = await Promise.all([getAdminUsername(), getAdminUserId()])
+    const user = userId ? await getUserById(userId) : null
+    return { username, balance: user?.balance ?? 0 }
   })
 
   app.post('/api/admin/change-password', { preHandler: requireAdmin }, async (request, reply) => {

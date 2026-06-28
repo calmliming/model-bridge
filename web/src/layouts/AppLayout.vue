@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import SystemVersionBadge from '../components/SystemVersionBadge.vue'
+import { api } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -103,6 +104,25 @@ const avatarInitials = computed(() => {
   const value = displayName.value.trim()
   return (value.slice(0, 2) || 'MB').toUpperCase()
 })
+
+const balance = ref<number | null>(null)
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
+}
+
+async function loadBalance() {
+  try {
+    const { data } = await api.get('/admin/me')
+    if (typeof data.balance === 'number') {
+      balance.value = data.balance
+    }
+  } catch {
+    // Non-critical: the header just falls back to '--'.
+  }
+}
+
+onMounted(loadBalance)
 
 const sidebarOpen = ref(false)
 const profileOpen = ref(false)
@@ -301,6 +321,16 @@ function logout() {
                 <span class="text-primary-500">ZH</span>
               </button>
             </div>
+          </div>
+          <div
+            class="hidden items-center gap-1.5 rounded-xl bg-primary-50 px-2.5 py-1 text-primary-700 dark:bg-primary-900/20 dark:text-primary-200 md:flex"
+          >
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 9.5h18v9A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5v-9Z" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M7 9.5V6a3 3 0 0 1 3-3h8v6.5" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 15h.01" />
+            </svg>
+            <strong class="text-sm font-extrabold">{{ balance == null ? '$--' : formatUsd(balance) }}</strong>
           </div>
           <div class="relative">
             <button
