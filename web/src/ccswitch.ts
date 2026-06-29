@@ -34,7 +34,7 @@ export interface CcSwitchTarget {
     opusModel?: string
   }
   /** Which key provider this target maps to, for filtering by a key's allowedProviders. */
-  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu'
+  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
 }
 
 /** All supported import targets, in display order. */
@@ -124,6 +124,29 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     endpoint: (origin) => origin,
     models: { model: 'glm-5.2' },
     provider: 'zhipu',
+  },
+  {
+    id: 'claude-qwen',
+    app: 'claude',
+    label: 'Claude Code · Qwen',
+    vendor: 'Qwen',
+    endpoint: (origin) => origin,
+    models: {
+      model: 'qwen3-coder-plus',
+      sonnetModel: 'qwen3-coder-plus',
+      haikuModel: 'qwen-plus',
+      opusModel: 'qwen3-coder-plus',
+    },
+    provider: 'qwen',
+  },
+  {
+    id: 'codex-qwen',
+    app: 'codex',
+    label: 'Codex CLI · Qwen',
+    vendor: 'Qwen',
+    endpoint: (origin) => origin,
+    models: { model: 'qwen3-coder-plus' },
+    provider: 'qwen',
   },
   {
     id: 'gemini',

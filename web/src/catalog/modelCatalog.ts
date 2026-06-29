@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -81,6 +81,12 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     label: '智谱 GLM',
     initials: '智',
     chipClass: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
+  },
+  qwen: {
+    id: 'qwen',
+    label: '通义 Qwen',
+    initials: '通',
+    chipClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300',
   },
 }
 
@@ -319,5 +325,41 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '200K',
     inputPrice: 0.84,
     outputPrice: 3.36,
+  },
+
+  // --- 通义 Qwen -----------------------------------------------------------
+  {
+    id: 'qwen3-coder-plus',
+    name: 'Qwen3 Coder Plus',
+    provider: 'qwen',
+    categories: ['code', 'reasoning'],
+    tags: ['编码旗舰', '仓库级', 'Agent'],
+    description: '通义千问代码专用旗舰，支持仓库级代码理解与长程 Agent，写码、Debug、Review 首选。',
+    context: '256K',
+    inputPrice: 1.03,
+    outputPrice: 5.14,
+    badge: 'recommended',
+  },
+  {
+    id: 'qwen-max',
+    name: 'Qwen Max',
+    provider: 'qwen',
+    categories: ['chat', 'reasoning'],
+    tags: ['通用旗舰', '复杂推理'],
+    description: '通义千问最强通用模型，擅长复杂推理与高精度长链路任务。',
+    context: '256K',
+    inputPrice: 0.34,
+    outputPrice: 1.34,
+  },
+  {
+    id: 'qwen-plus',
+    name: 'Qwen Plus',
+    provider: 'qwen',
+    categories: ['chat', 'code', 'lightweight'],
+    tags: ['均衡', '高性价比'],
+    description: '能力与成本平衡的主力模型，日常对话、代码辅助与文案撰写的高性价比之选。',
+    context: '128K',
+    inputPrice: 0.11,
+    outputPrice: 0.28,
   },
 ]

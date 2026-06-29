@@ -37,9 +37,10 @@ const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
+  qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
 }
 
-const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu']
+const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
@@ -49,6 +50,7 @@ function inferProvider(model: string): ProviderId | null {
   if (lower.startsWith('deepseek-')) return 'deepseek'
   if (lower.startsWith('mimo-')) return 'xiaomi'
   if (lower.startsWith('glm-')) return 'zhipu'
+  if (lower.startsWith('qwen')) return 'qwen'
   return null
 }
 

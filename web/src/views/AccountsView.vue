@@ -59,7 +59,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -177,8 +177,9 @@ const providerLabel: Record<Provider, string> = {
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
+  qwen: 'Tongyi Qwen',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
@@ -186,6 +187,7 @@ const providerTagType: Record<Provider, TagType> = {
   deepseek: 'info',
   xiaomi: 'warning',
   zhipu: 'info',
+  qwen: 'info',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
@@ -194,11 +196,12 @@ const authorizeHost: Record<Provider, string> = {
   deepseek: 'platform.deepseek.com',
   xiaomi: 'platform.xiaomimimo.com',
   zhipu: 'open.bigmodel.cn',
+  qwen: 'bailian.console.aliyun.com',
 }
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
@@ -206,6 +209,7 @@ const apiKeyConsoleHint: Record<string, string> = {
   deepseek: '在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。',
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
   zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
+  qwen: '在 bailian.console.aliyun.com 阿里云百炼控制台「API-KEY」创建后粘贴到上方。',
 }
 
 const statusMeta: Record<string, { label: string; type: TagType }> = {

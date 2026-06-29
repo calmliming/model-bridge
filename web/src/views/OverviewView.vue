@@ -156,6 +156,7 @@ const providerLabels: Record<string, string> = {
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
+  qwen: 'Tongyi Qwen',
 }
 
 const providerColors: Record<string, string> = {
@@ -165,6 +166,7 @@ const providerColors: Record<string, string> = {
   deepseek: '#6366f1',
   xiaomi: '#ff6900',
   zhipu: '#7c3aed',
+  qwen: '#06b6d4',
 }
 
 interface ToneColor {

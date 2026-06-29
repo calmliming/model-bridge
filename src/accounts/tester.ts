@@ -22,6 +22,7 @@ const GEMINI_LOAD_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1inter
 const DEEPSEEK_MESSAGES_URL = 'https://api.deepseek.com/anthropic/v1/messages'
 const XIAOMI_MESSAGES_URL = 'https://api.xiaomimimo.com/anthropic/v1/messages'
 const ZHIPU_MESSAGES_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages'
+const QWEN_MESSAGES_URL = 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages'
 
 interface AccountRow {
   id: string
@@ -256,6 +257,25 @@ async function testZhipu(apiKey: string): Promise<ProviderTestOutcome> {
   return { message: 'Zhipu GLM Anthropic 端点可访问' }
 }
 
+async function testQwen(apiKey: string): Promise<ProviderTestOutcome> {
+  const response = await fetchWithTimeout(QWEN_MESSAGES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'qwen3-coder-plus',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'hi' }],
+    }),
+  })
+  await assertOk(response)
+  return { message: 'Qwen 通义千问 Anthropic 端点可访问' }
+}
+
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
@@ -264,6 +284,7 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
   else if (account.provider === 'deepseek') result = await testDeepSeek(accessToken)
   else if (account.provider === 'xiaomi') result = await testXiaomi(accessToken)
   else if (account.provider === 'zhipu') result = await testZhipu(accessToken)
+  else if (account.provider === 'qwen') result = await testQwen(accessToken)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 
   if (result.metadata) await updateAccountMetadata(account.id, result.metadata)

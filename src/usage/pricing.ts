@@ -132,6 +132,26 @@ function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
   return model.toLowerCase().includes('5.2') ? 'flagship' : 'base'
 }
 
+// Qwen (通义千问 / 阿里百炼) list prices (per 1M tokens), quoted in CNY on the
+// Bailian pricing page and converted to USD. No separate cache-write fee —
+// cacheWrite 0; cacheRead is an estimated cache-hit input rate (~0.2x input).
+// qwen3-coder-plus is the repo-level coding flagship; qwen-max / qwen-plus are
+// the stable general / value aliases.
+const QWEN_TIERS: Record<'coder' | 'max' | 'plus', TierPrice> = {
+  coder: { input: cny(7.34), output: cny(36.7), cacheWrite: 0, cacheRead: cny(1.47) },
+  max: { input: cny(2.4), output: cny(9.6), cacheWrite: 0, cacheRead: cny(0.48) },
+  plus: { input: cny(0.8), output: cny(2), cacheWrite: 0, cacheRead: cny(0.16) },
+}
+
+function qwenTier(model: string): keyof typeof QWEN_TIERS {
+  const m = model.toLowerCase()
+  if (m.includes('coder')) return 'coder'
+  // qwen-plus / qwen-turbo / qwen-flash / qwen-long → cheap balanced tier.
+  if (m.includes('plus') || m.includes('turbo') || m.includes('flash') || m.includes('long')) return 'plus'
+  // qwen-max / qwen3-max / other → flagship general tier.
+  return 'max'
+}
+
 /** Returns the built-in fallback price for a (provider, model) pair. */
 function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'claude') return claudePrice(model)
@@ -140,6 +160,7 @@ function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'deepseek') return DEEPSEEK_TIERS[deepseekTier(model)]
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
+  if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
   return null
 }
 
@@ -186,6 +207,12 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
   { provider: 'zhipu', model: 'glm-5.1', price: ZHIPU_TIERS.base },
   { provider: 'zhipu', model: 'glm', price: ZHIPU_TIERS.base },
+  // Exact rows only — no generic 'qwen' row, because the granular qwenTier()
+  // builtin fallback prices other qwen-* variants (turbo/flash/long/3-max) more
+  // accurately than a broad substring row would.
+  { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.coder },
+  { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.max },
+  { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.plus },
 ]
 
 /**

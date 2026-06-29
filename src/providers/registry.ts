@@ -93,6 +93,20 @@ const registry: Record<string, OAuthProvider> = {
       return { accessToken: token, refreshToken: '', expiresAt: 0 }
     },
   },
+  qwen: {
+    id: 'qwen',
+    // Qwen (通义千问 / Alibaba DashScope) uses API keys — same API-key flow as
+    // DeepSeek, no OAuth. Accounts are added via the import/token endpoint with
+    // expiresAt: 0.
+    mode: 'paste' as const,
+    generatePkce(): never { return notSupported('generatePkce') },
+    buildAuthorizeUrl(): never { return notSupported('buildAuthorizeUrl') },
+    async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
+    async refreshToken(token: string): Promise<TokenSet> {
+      // API keys don't expire — return unchanged.
+      return { accessToken: token, refreshToken: '', expiresAt: 0 }
+    },
+  },
 }
 
 export function getProvider(id: string): OAuthProvider | undefined {

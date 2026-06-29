@@ -43,6 +43,13 @@ import { relayZhipuResponses } from '../providers/zhipu/responses-relay'
 import * as zhipuResponsesUsage from '../providers/zhipu/responses-usage'
 import { createZhipuResponsesStreamTransform } from '../providers/zhipu/stream'
 import { mapModel as mapZhipuResponsesModel } from '../providers/zhipu/converter'
+import { relayQwenMessages } from '../providers/qwen/relay'
+import * as qwenUsage from '../providers/qwen/usage'
+import { relayQwenChatCompletions } from '../providers/qwen/chat-relay'
+import { relayQwenResponses } from '../providers/qwen/responses-relay'
+import * as qwenResponsesUsage from '../providers/qwen/responses-usage'
+import { createQwenResponsesStreamTransform } from '../providers/qwen/stream'
+import { mapModel as mapQwenResponsesModel } from '../providers/qwen/converter'
 import {
   isProviderAllowed,
   listGeminiModels,
@@ -320,6 +327,51 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: zhipuResponsesUsage.parseJsonUsage,
     createStreamTransform: createZhipuResponsesStreamTransform,
   },
+  // Qwen (通义千问 / Alibaba DashScope) — same shape as DeepSeek/Xiaomi/Zhipu:
+  // Anthropic-compatible /v1/messages (dashscope.aliyuncs.com/apps/anthropic),
+  // plus OpenAI Chat-Completions and a Responses-API adapter for Codex CLI.
+  qwen: {
+    id: 'qwen',
+    forceStream: false,
+    normalizeModel: mapQwenResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayQwenMessages(token, body),
+    createStreamParser: qwenUsage.createStreamParser,
+    parseJsonUsage: qwenUsage.parseJsonUsage,
+  },
+  'qwen-chat': {
+    id: 'qwen',
+    forceStream: false,
+    normalizeModel: mapQwenResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayQwenChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  // Route key only — provider.id stays 'qwen' so account pool, allowed-provider
+  // checks, and usage records all reuse the existing qwen setup. Backed by
+  // DashScope's OpenAI-compatible chat/completions endpoint with a Responses-API
+  // ↔ Chat-Completions stream converter for Codex CLI.
+  'qwen-responses': {
+    id: 'qwen',
+    forceStream: true,
+    responsesProtocol: true,
+    normalizeModel: mapQwenResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayQwenResponses(token, body),
+    createStreamParser: qwenResponsesUsage.createStreamParser,
+    parseJsonUsage: qwenResponsesUsage.parseJsonUsage,
+    createStreamTransform: createQwenResponsesStreamTransform,
+  },
 }
 
 interface RelayMeta {
@@ -585,6 +637,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['zhipu-chat']!)
   const zhipuResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['zhipu-responses']!)
+  const qwenHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.qwen!)
+  const qwenChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['qwen-chat']!)
+  const qwenResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['qwen-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
@@ -622,6 +680,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/zhipu
   app.post('/api/zhipu/v1/responses', { preHandler: requireApiKey }, zhipuResponsesHandler)
+  // Qwen (通义千问): Anthropic-compatible endpoint under /api/qwen prefix.
+  // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/qwen
+  app.post('/api/qwen/v1/messages', { preHandler: requireApiKey }, qwenHandler)
+  // Qwen: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/qwen/v1
+  app.post('/api/qwen/v1/chat/completions', { preHandler: requireApiKey }, qwenChatHandler)
+  // Qwen: OpenAI Responses-API surface for Codex CLI. The relay rewrites
+  // requests into chat/completions and translates the SSE stream back.
+  // Codex: configure base_url=https://your-host/api/qwen
+  app.post('/api/qwen/v1/responses', { preHandler: requireApiKey }, qwenResponsesHandler)
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
@@ -639,6 +707,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   )
   app.get('/api/zhipu/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'zhipu'),
+  )
+  app.get('/api/qwen/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'qwen'),
   )
   app.get('/api/gemini/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
   app.get('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
@@ -663,16 +734,19 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^deepseek/i, handler: PROVIDERS.deepseek! },
     { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
     { test: /^glm/i, handler: PROVIDERS.zhipu! },
+    { test: /^qwen/i, handler: PROVIDERS.qwen! },
   ])
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
+    { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
   ])
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-chat']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
+    { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
   ])
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)

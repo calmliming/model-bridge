@@ -147,6 +147,7 @@ const providerOptions = [
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
+  { label: 'Tongyi Qwen', value: 'qwen' },
 ]
 
 const providerLabel: Record<string, string> = {
@@ -156,6 +157,7 @@ const providerLabel: Record<string, string> = {
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
+  qwen: 'Tongyi Qwen',
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -165,6 +167,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   deepseek: 'error',
   xiaomi: 'warning',
   zhipu: 'info',
+  qwen: 'info',
 }
 
 const commonModelOptions = [
@@ -180,6 +183,9 @@ const commonModelOptions = [
   'glm-*',
   'glm-5.2',
   'glm-5.1',
+  'qwen*',
+  'qwen3-coder-plus',
+  'qwen-plus',
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [
@@ -188,6 +194,7 @@ const commonMappingOptions = [
   'deepseek-pro=deepseek-v4-pro',
   'deepseek-fast=deepseek-v4-flash',
   'glm-pro=glm-5.2',
+  'qwen-coder=qwen3-coder-plus',
 ].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
@@ -594,6 +601,33 @@ POST ${baseOrigin.value}/api/zhipu/v1/chat/completions
 
 # Model list:
 GET ${baseOrigin.value}/api/zhipu/v1/models`,
+    qwen: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/qwen
+export ANTHROPIC_AUTH_TOKEN=${key}
+export ANTHROPIC_MODEL=qwen3-coder-plus
+export ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3-coder-plus
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen-plus
+claude`,
+    codexQwen: `[profiles.model-bridge-qwen]
+model_provider = "model-bridge-qwen"
+model = "qwen3-coder-plus"
+
+[model_providers.model-bridge-qwen]
+name = "model-bridge-qwen"
+base_url = "${baseOrigin.value}/api/qwen/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=${key}
+codex --profile model-bridge-qwen`,
+    qwenOpenai: `Base URL: ${baseOrigin.value}/api/qwen/v1
+API Key:  ${key}
+
+# Chat Completions endpoint:
+POST ${baseOrigin.value}/api/qwen/v1/chat/completions
+
+# Model list:
+GET ${baseOrigin.value}/api/qwen/v1/models`,
   }
 })
 
@@ -1032,6 +1066,18 @@ onMounted(() => {
         <UiTabPane name="zhipu-openai" tab="GLM (OpenAI)">
           <pre><code>{{ snippets.zhipuOpenai }}</code></pre>
           <UiButton size="small" secondary @click="copyKey(snippets.zhipuOpenai)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="qwen" tab="Qwen (Claude Code)">
+          <pre><code>{{ snippets.qwen }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.qwen)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="codex-qwen" tab="Codex CLI (Qwen)">
+          <pre><code>{{ snippets.codexQwen }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.codexQwen)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="qwen-openai" tab="Qwen (OpenAI)">
+          <pre><code>{{ snippets.qwenOpenai }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.qwenOpenai)">复制</UiButton>
         </UiTabPane>
       </UiTabs>
       <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
