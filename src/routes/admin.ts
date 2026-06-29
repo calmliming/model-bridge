@@ -114,7 +114,7 @@ const createKeySchema = z.object({
   userId: z.string().trim().min(1).nullable().optional(),
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
-  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])).optional(),
+  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu'])).optional(),
   allowedModels: z.array(z.string().trim().min(1)).optional(),
   modelMappings: z.record(z.string()).optional(),
   accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -130,7 +130,7 @@ const updateKeySchema = z
     enabled: z.boolean().optional(),
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
-    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])).nullable().optional(),
+    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu'])).nullable().optional(),
     allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
     modelMappings: z.record(z.string()).nullable().optional(),
     accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -264,7 +264,7 @@ const assignSubscriptionSchema = z.object({
 })
 
 const importTokenSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu']),
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
@@ -275,7 +275,7 @@ const importTokenSchema = z.object({
 
 // Standard format: model-bridge native format
 const batchImportAccountSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu']),
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),

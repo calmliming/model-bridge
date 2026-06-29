@@ -45,6 +45,7 @@ const providerLabel: Record<string, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
+  zhipu: 'Zhipu GLM',
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -53,6 +54,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   gemini: 'warning',
   deepseek: 'error',
   xiaomi: 'warning',
+  zhipu: 'info',
 }
 
 const statusLabel: Record<string, string> = {

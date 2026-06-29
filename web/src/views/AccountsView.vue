@@ -59,7 +59,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -176,14 +176,16 @@ const providerLabel: Record<Provider, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
+  zhipu: 'Zhipu GLM',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
   gemini: 'warning',
   deepseek: 'info',
   xiaomi: 'warning',
+  zhipu: 'info',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
@@ -191,17 +193,19 @@ const authorizeHost: Record<Provider, string> = {
   gemini: 'accounts.google.com',
   deepseek: 'platform.deepseek.com',
   xiaomi: 'platform.xiaomimimo.com',
+  zhipu: 'open.bigmodel.cn',
 }
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
 const apiKeyConsoleHint: Record<string, string> = {
   deepseek: '在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。',
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
+  zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
 }
 
 const statusMeta: Record<string, { label: string; type: TagType }> = {

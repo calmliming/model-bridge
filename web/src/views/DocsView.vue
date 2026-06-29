@@ -19,7 +19,7 @@ const isSecureContext = computed(() => {
         <UiCard title="使用流程">
           <UiSteps vertical :current="4">
             <UiStep title="修改管理员密码" description="首次登录后进入设置，立即替换默认密码。" />
-            <UiStep title="添加上游账户" description="在上游账户页面接入 Claude、OpenAI、Gemini、DeepSeek 或 Xiaomi MiMo。" />
+            <UiStep title="添加上游账户" description="在上游账户页面接入 Claude、OpenAI、Gemini、DeepSeek、Xiaomi MiMo 或 Zhipu GLM。" />
             <UiStep title="创建 API Key" description="在 API Keys 页面创建密钥，并按需设置服务商、分组、限速、并发、成本配额和过期时间。" />
             <UiStep title="配置客户端" description="把客户端 base URL 指向 model-bridge，并使用后台生成的 API Key。" />
           </UiSteps>
@@ -76,9 +76,10 @@ const isSecureContext = computed(() => {
 export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude</code></pre>
           <p class="doc-p mt-3">
-            DeepSeek / Xiaomi MiMo 的 Anthropic 兼容入口分别是
-            <code class="code-inline">{{ baseOrigin }}/api/deepseek</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/xiaomi</code>。
+            DeepSeek / Xiaomi MiMo / Zhipu GLM 的 Anthropic 兼容入口分别是
+            <code class="code-inline">{{ baseOrigin }}/api/deepseek</code>、
+            <code class="code-inline">{{ baseOrigin }}/api/xiaomi</code> 和
+            <code class="code-inline">{{ baseOrigin }}/api/zhipu</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="codex" tab="Codex CLI">
@@ -98,9 +99,10 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge</code></pre>
           <p class="doc-p mt-3">Codex 的 base URL 填到 <code class="code-inline">/v1</code>，客户端会自动请求 <code class="code-inline">/v1/responses</code>。</p>
           <p class="doc-p mt-2">
-            DeepSeek / Xiaomi MiMo 专用入口分别使用
-            <code class="code-inline">{{ baseOrigin }}/api/deepseek/v1</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/xiaomi/v1</code>。
+            DeepSeek / Xiaomi MiMo / Zhipu GLM 专用入口分别使用
+            <code class="code-inline">{{ baseOrigin }}/api/deepseek/v1</code>、
+            <code class="code-inline">{{ baseOrigin }}/api/xiaomi/v1</code> 和
+            <code class="code-inline">{{ baseOrigin }}/api/zhipu/v1</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="cherry" tab="Cherry Studio">
@@ -125,6 +127,10 @@ codex --profile model-bridge</code></pre>
               <span class="text-sm text-gray-900 dark:text-white">Xiaomi MiMo (OpenAI)</span>
               <code class="code-inline w-fit">{{ baseOrigin }}/api/xiaomi/v1</code>
             </div>
+            <div class="grid gap-1.5">
+              <span class="text-sm text-gray-900 dark:text-white">Zhipu GLM (OpenAI)</span>
+              <code class="code-inline w-fit">{{ baseOrigin }}/api/zhipu/v1</code>
+            </div>
           </div>
           <p class="doc-p mt-3">
             API Key 填后台生成的 <code class="code-inline">mb-...</code> 密钥；OpenAI 兼容客户端使用 Chat Completions，
@@ -147,7 +153,7 @@ codex --profile model-bridge</code></pre>
               <p class="doc-p">浏览器回调到本机 <code class="code-inline">localhost:1455</code> 后，回到后台刷新检测账户。</p>
             </div>
             <div>
-              <strong class="block text-sm text-gray-900 dark:text-white">DeepSeek / Xiaomi MiMo</strong>
+              <strong class="block text-sm text-gray-900 dark:text-white">DeepSeek / Xiaomi MiMo / Zhipu GLM</strong>
               <p class="doc-p">直接导入 API key；它们都支持 Messages、Chat Completions 和 Responses 入口。</p>
             </div>
             <div>

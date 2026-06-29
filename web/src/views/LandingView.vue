@@ -4,9 +4,11 @@ import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../api/client'
 
+type SnippetKey = 'curl' | 'python' | 'js'
+
 const auth = useAuthStore()
 const scrolled = ref(false)
-const activeTab = ref('curl')
+const activeTab = ref<SnippetKey>('curl')
 
 const systemSummary = ref<{
   registrationEnabled: boolean
@@ -51,7 +53,9 @@ const features = [
   }
 ]
 
-const codeSnippets = {
+const snippetTabs: SnippetKey[] = ['curl', 'python', 'js']
+
+const codeSnippets: Record<SnippetKey, string> = {
   curl: `curl https://api.model-bridge.io/v1/chat/completions \\
   -H "Authorization: Bearer $MB_KEY" \\
   -d '{
@@ -205,7 +209,7 @@ const openai = new OpenAI({
           <div class="absolute -inset-2 rounded-3xl bg-primary-600/5 blur-2xl"></div>
           <div class="relative overflow-hidden rounded-2xl bg-slate-950 shadow-2xl border border-white/10">
             <div class="flex items-center gap-2 border-b border-white/5 bg-white/5 px-6 py-4">
-              <button v-for="t in ['curl', 'python', 'js']" :key="t" @click="activeTab = t" :class="activeTab === t ? 'text-white' : 'text-white/40 hover:text-white/60'" class="text-xs font-bold uppercase tracking-widest px-3 transition-colors">
+              <button v-for="t in snippetTabs" :key="t" @click="activeTab = t" :class="activeTab === t ? 'text-white' : 'text-white/40 hover:text-white/60'" class="text-xs font-bold uppercase tracking-widest px-3 transition-colors">
                 {{ t }}
               </button>
             </div>

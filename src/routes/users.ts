@@ -23,7 +23,7 @@ import {
   SubscriptionError,
 } from '../subscriptions/manager'
 
-const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi'])
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu'])
 
 const loginSchema = z.object({
   email: z.string().email(),

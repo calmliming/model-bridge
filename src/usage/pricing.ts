@@ -118,6 +118,20 @@ function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
   return model.toLowerCase().includes('pro') ? 'pro' : 'standard'
 }
 
+// Zhipu GLM list prices (per 1M tokens), quoted in CNY on the BigModel pricing
+// page and converted to USD. GLM has no separate cache-write fee — cacheWrite
+// is 0; cacheRead is the cache-hit input price. Flagship is glm-5.2 (8 / 28,
+// cache-hit 2 CNY); the cheaper base tier is glm-5.1 (6 / 24, cache-hit ~1.5 CNY).
+const ZHIPU_TIERS: Record<'base' | 'flagship', TierPrice> = {
+  base: { input: cny(6), output: cny(24), cacheWrite: 0, cacheRead: cny(1.5) },
+  flagship: { input: cny(8), output: cny(28), cacheWrite: 0, cacheRead: cny(2) },
+}
+
+function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
+  // glm-5.2 → flagship; glm-5.1 / glm-5 / other glm-* → base.
+  return model.toLowerCase().includes('5.2') ? 'flagship' : 'base'
+}
+
 /** Returns the built-in fallback price for a (provider, model) pair. */
 function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'claude') return claudePrice(model)
@@ -125,6 +139,7 @@ function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'gemini') return geminiPrice(model)
   if (provider === 'deepseek') return DEEPSEEK_TIERS[deepseekTier(model)]
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
+  if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   return null
 }
 
@@ -168,6 +183,9 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
+  { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
+  { provider: 'zhipu', model: 'glm-5.1', price: ZHIPU_TIERS.base },
+  { provider: 'zhipu', model: 'glm', price: ZHIPU_TIERS.base },
 ]
 
 /**

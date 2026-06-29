@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -75,6 +75,12 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     label: '小米 MiMo',
     initials: 'Mi',
     chipClass: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
+  },
+  zhipu: {
+    id: 'zhipu',
+    label: '智谱 GLM',
+    initials: '智',
+    chipClass: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
   },
 }
 
@@ -288,5 +294,30 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '256K',
     inputPrice: 1,
     outputPrice: 3,
+  },
+
+  // --- 智谱 GLM ------------------------------------------------------------
+  {
+    id: 'glm-5.2',
+    name: 'GLM-5.2',
+    provider: 'zhipu',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['编程旗舰', 'Agent', '长上下文'],
+    description: '智谱新一代旗舰，专注编程与长程 Agent 任务，代码与推理能力对齐国际一流。',
+    context: '200K',
+    inputPrice: 1.12,
+    outputPrice: 3.92,
+    badge: 'recommended',
+  },
+  {
+    id: 'glm-5.1',
+    name: 'GLM-5.1',
+    provider: 'zhipu',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['通用', '推理', '高性价比'],
+    description: '高智能通用基座，覆盖对话、推理与代码场景，价格更友好。',
+    context: '200K',
+    inputPrice: 0.84,
+    outputPrice: 3.36,
   },
 ]

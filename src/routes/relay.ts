@@ -36,6 +36,13 @@ import { relayXiaomiResponses } from '../providers/xiaomi/responses-relay'
 import * as xiaomiResponsesUsage from '../providers/xiaomi/responses-usage'
 import { createXiaomiResponsesStreamTransform } from '../providers/xiaomi/stream'
 import { mapModel as mapXiaomiResponsesModel } from '../providers/xiaomi/converter'
+import { relayZhipuMessages } from '../providers/zhipu/relay'
+import * as zhipuUsage from '../providers/zhipu/usage'
+import { relayZhipuChatCompletions } from '../providers/zhipu/chat-relay'
+import { relayZhipuResponses } from '../providers/zhipu/responses-relay'
+import * as zhipuResponsesUsage from '../providers/zhipu/responses-usage'
+import { createZhipuResponsesStreamTransform } from '../providers/zhipu/stream'
+import { mapModel as mapZhipuResponsesModel } from '../providers/zhipu/converter'
 import {
   isProviderAllowed,
   listGeminiModels,
@@ -267,6 +274,51 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: xiaomiResponsesUsage.createStreamParser,
     parseJsonUsage: xiaomiResponsesUsage.parseJsonUsage,
     createStreamTransform: createXiaomiResponsesStreamTransform,
+  },
+  // Zhipu GLM (BigModel) — same shape as DeepSeek/Xiaomi: Anthropic-compatible
+  // /v1/messages (https://open.bigmodel.cn/api/anthropic), plus OpenAI Chat-
+  // Completions and a Responses-API adapter for Codex CLI.
+  zhipu: {
+    id: 'zhipu',
+    forceStream: false,
+    normalizeModel: mapZhipuResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayZhipuMessages(token, body),
+    createStreamParser: zhipuUsage.createStreamParser,
+    parseJsonUsage: zhipuUsage.parseJsonUsage,
+  },
+  'zhipu-chat': {
+    id: 'zhipu',
+    forceStream: false,
+    normalizeModel: mapZhipuResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayZhipuChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  // Route key only — provider.id stays 'zhipu' so account pool, allowed-
+  // provider checks, and usage records all reuse the existing zhipu setup.
+  // Backed by GLM's OpenAI-compatible chat/completions endpoint with a
+  // Responses-API ↔ Chat-Completions stream converter for Codex CLI.
+  'zhipu-responses': {
+    id: 'zhipu',
+    forceStream: true,
+    responsesProtocol: true,
+    normalizeModel: mapZhipuResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayZhipuResponses(token, body),
+    createStreamParser: zhipuResponsesUsage.createStreamParser,
+    parseJsonUsage: zhipuResponsesUsage.parseJsonUsage,
+    createStreamTransform: createZhipuResponsesStreamTransform,
   },
 }
 
@@ -527,6 +579,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['xiaomi-chat']!)
   const xiaomiResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['xiaomi-responses']!)
+  const zhipuHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.zhipu!)
+  const zhipuChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['zhipu-chat']!)
+  const zhipuResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['zhipu-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
@@ -554,6 +612,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/xiaomi
   app.post('/api/xiaomi/v1/responses', { preHandler: requireApiKey }, xiaomiResponsesHandler)
+  // Zhipu GLM: Anthropic-compatible endpoint under /api/zhipu prefix.
+  // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/zhipu
+  app.post('/api/zhipu/v1/messages', { preHandler: requireApiKey }, zhipuHandler)
+  // Zhipu GLM: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/zhipu/v1
+  app.post('/api/zhipu/v1/chat/completions', { preHandler: requireApiKey }, zhipuChatHandler)
+  // Zhipu GLM: OpenAI Responses-API surface for Codex CLI. The relay rewrites
+  // requests into chat/completions and translates the SSE stream back.
+  // Codex: configure base_url=https://your-host/api/zhipu
+  app.post('/api/zhipu/v1/responses', { preHandler: requireApiKey }, zhipuResponsesHandler)
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
@@ -568,6 +636,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   )
   app.get('/api/xiaomi/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'xiaomi'),
+  )
+  app.get('/api/zhipu/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'zhipu'),
   )
   app.get('/api/gemini/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
   app.get('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
@@ -585,19 +656,23 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // - Claude:       ANTHROPIC_BASE_URL = https://api.example.com  (+ /v1/messages)
   // - OpenAI/Codex: base_url           = https://api.example.com  (+ /responses)
   // - Gemini:       base URL           = https://api.example.com  (+ /v1beta/...)
-  // DeepSeek (deepseek-*) and Xiaomi MiMo (mimo-*) share these paths and are
-  // selected by model name, so they need no separate prefix — see dispatchByModel.
+  // DeepSeek (deepseek-*), Xiaomi MiMo (mimo-*) and Zhipu GLM (glm-*) share these
+  // paths and are selected by model name, so they need no separate prefix — see
+  // dispatchByModel.
   const messagesHandler = dispatchByModel(PROVIDERS.claude!, [
     { test: /^deepseek/i, handler: PROVIDERS.deepseek! },
     { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
+    { test: /^glm/i, handler: PROVIDERS.zhipu! },
   ])
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
+    { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
   ])
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-chat']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
+    { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
   ])
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)

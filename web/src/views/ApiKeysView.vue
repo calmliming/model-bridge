@@ -146,6 +146,7 @@ const providerOptions = [
   { label: 'Gemini', value: 'gemini' },
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
+  { label: 'Zhipu GLM', value: 'zhipu' },
 ]
 
 const providerLabel: Record<string, string> = {
@@ -154,6 +155,7 @@ const providerLabel: Record<string, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
+  zhipu: 'Zhipu GLM',
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -162,6 +164,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   gemini: 'warning',
   deepseek: 'error',
   xiaomi: 'warning',
+  zhipu: 'info',
 }
 
 const commonModelOptions = [
@@ -174,6 +177,9 @@ const commonModelOptions = [
   'mimo-*',
   'mimo-v2.5-pro',
   'mimo-v2.5',
+  'glm-*',
+  'glm-5.2',
+  'glm-5.1',
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [
@@ -181,6 +187,7 @@ const commonMappingOptions = [
   'gpt-fast=gpt-5.4-mini',
   'deepseek-pro=deepseek-v4-pro',
   'deepseek-fast=deepseek-v4-flash',
+  'glm-pro=glm-5.2',
 ].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
@@ -560,6 +567,33 @@ POST ${baseOrigin.value}/api/deepseek/v1/chat/completions
 
 # Model list:
 GET ${baseOrigin.value}/api/deepseek/v1/models`,
+    zhipu: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/zhipu
+export ANTHROPIC_AUTH_TOKEN=${key}
+export ANTHROPIC_MODEL=glm-5.2
+export ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.1
+claude`,
+    codexZhipu: `[profiles.model-bridge-zhipu]
+model_provider = "model-bridge-zhipu"
+model = "glm-5.2"
+
+[model_providers.model-bridge-zhipu]
+name = "model-bridge-zhipu"
+base_url = "${baseOrigin.value}/api/zhipu/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=${key}
+codex --profile model-bridge-zhipu`,
+    zhipuOpenai: `Base URL: ${baseOrigin.value}/api/zhipu/v1
+API Key:  ${key}
+
+# Chat Completions endpoint:
+POST ${baseOrigin.value}/api/zhipu/v1/chat/completions
+
+# Model list:
+GET ${baseOrigin.value}/api/zhipu/v1/models`,
   }
 })
 
@@ -986,6 +1020,18 @@ onMounted(() => {
         <UiTabPane name="deepseek-openai" tab="DeepSeek (OpenAI)">
           <pre><code>{{ snippets.deepseekOpenai }}</code></pre>
           <UiButton size="small" secondary @click="copyKey(snippets.deepseekOpenai)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="zhipu" tab="GLM (Claude Code)">
+          <pre><code>{{ snippets.zhipu }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.zhipu)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="codex-zhipu" tab="Codex CLI (GLM)">
+          <pre><code>{{ snippets.codexZhipu }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.codexZhipu)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="zhipu-openai" tab="GLM (OpenAI)">
+          <pre><code>{{ snippets.zhipuOpenai }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.zhipuOpenai)">复制</UiButton>
         </UiTabPane>
       </UiTabs>
       <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">

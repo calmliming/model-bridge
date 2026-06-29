@@ -155,6 +155,7 @@ const providerLabels: Record<string, string> = {
   gemini: 'Gemini',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
+  zhipu: 'Zhipu GLM',
 }
 
 const providerColors: Record<string, string> = {
@@ -163,6 +164,7 @@ const providerColors: Record<string, string> = {
   gemini: '#4285f4',
   deepseek: '#6366f1',
   xiaomi: '#ff6900',
+  zhipu: '#7c3aed',
 }
 
 interface ToneColor {
