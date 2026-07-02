@@ -2,6 +2,7 @@ import { ne } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accounts } from '../db/schema'
 import { refreshAccountToken } from '../accounts/manager'
+import { PermanentRefreshError, refreshFailureStatus } from '../accounts/refreshErrors'
 import { getRedis } from '../store/redis'
 
 const CHECK_INTERVAL_MS = 60_000
@@ -39,7 +40,20 @@ async function refreshExpiringTokens(): Promise<void> {
       await refreshAccountToken(account.id)
       console.log(`[token-refresh] refreshed account "${account.name}"`)
     } catch (err) {
-      console.error(`[token-refresh] failed for "${account.name}":`, (err as Error).message)
+      if (err instanceof PermanentRefreshError) {
+        // Account is now disabled; next cycle's ne(status,'disabled') filter
+        // skips it, so this line appears once instead of every 60s.
+        console.warn(
+          `[token-refresh] disabled "${account.name}": refresh token invalid (${err.signal}); needs re-auth`,
+        )
+      } else {
+        // Transient (429/5xx/network): log a status summary only — never the
+        // upstream response body — and let the next cycle retry.
+        const status = refreshFailureStatus(err)
+        console.error(
+          `[token-refresh] transient failure for "${account.name}"${status ? ` (status ${status})` : ''}; will retry`,
+        )
+      }
     }
   }
 }

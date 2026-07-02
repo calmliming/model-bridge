@@ -2,6 +2,7 @@ import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../accounts/manager'
+import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
 import { getQuotaAutopausePercent } from '../db/settings'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
@@ -915,6 +916,15 @@ async function runRelayLoop(
     try {
       token = await ensureFreshToken(account)
     } catch (err) {
+      if (err instanceof PermanentRefreshError) {
+        // Account was already disabled inside refreshAccountToken. Do NOT
+        // penalize — that would overwrite `disabled` with `error` + cooldown
+        // and revive the dead token into the pool. Just release and move on.
+        request.log.warn(`account ${account.id} disabled: refresh token invalid (${err.signal})`)
+        if (sessionKey) await clearStickyAccount(sessionKey)
+        if (accountLimit != null) await releaseSlot(accountSlotKey)
+        continue
+      }
       request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
       await penalizeAccount(account.id, 'error')
       if (accountLimit != null) await releaseSlot(accountSlotKey)

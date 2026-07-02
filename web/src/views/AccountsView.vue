@@ -47,6 +47,8 @@ interface Account {
   quota: AccountQuotaSnapshot | null
   // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
   autopausePercent: number | null
+  // Set when the refresh token permanently failed and the account was auto-disabled.
+  reauth: { required: boolean; reason: string; provider: string; at: number } | null
 }
 
 /** A named account pool (distinct from the per-provider display grouping below). */
@@ -321,6 +323,20 @@ function renderAccount(row: Account) {
   return h('div', { class: 'account-name' }, row.name)
 }
 
+function renderReauthBadge(row: Account) {
+  if (!row.reauth?.required) return null
+  const tip = `refresh token 已失效（${row.reauth.reason}），请重新授权 · ${formatShortTime(row.reauth.at)}`
+  return h(
+    UiTooltip,
+    { placement: 'top', trigger: 'hover' },
+    {
+      trigger: () =>
+        h(UiTag, { size: 'small', type: 'error', bordered: false }, { default: () => '需重新授权' }),
+      default: () => tip,
+    },
+  )
+}
+
 function renderStatus(row: Account) {
   const status = effectiveStatus(row)
   const meta = statusMeta[status] ?? { label: status, type: 'default' as const }
@@ -357,6 +373,7 @@ function renderStatus(row: Account) {
     {
       default: () => [
         tag,
+        renderReauthBadge(row),
         isCoolingDown(row)
           ? h('span', { class: 'muted-cell' }, `至 ${formatShortTime(row.cooldownUntil)}`)
           : null,

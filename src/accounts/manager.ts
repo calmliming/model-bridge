@@ -7,8 +7,15 @@ import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
 import { currentConcurrency } from '../middleware/limits'
 import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
-import { clearExpiredAccountCooldowns } from './scheduler'
+import { clearExpiredAccountCooldowns, disableAccount } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
+import {
+  matchPermanentRefreshSignal,
+  PermanentRefreshError,
+  reauthStateFromMetadata,
+  refreshFailureStatus,
+  type AccountReauthState,
+} from './refreshErrors'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
@@ -151,6 +158,7 @@ export async function listAccounts() {
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
     autopausePercent: accountAutopausePercent(metadata),
+    reauth: reauthStateFromMetadata(metadata),
   })))
 }
 
@@ -311,6 +319,35 @@ async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
   if (tokens.metadata && Object.keys(tokens.metadata).length) {
     await updateAccountMetadata(id, tokens.metadata)
   }
+  // If this account was previously flagged as needing re-authorization, a
+  // successful refresh means the token recovered: clear the flag and bring it
+  // back into the pool. Guarded so a routine refresh of a healthy (or merely
+  // rate-limited) account never touches its status.
+  const [row] = await db
+    .select({ metadata: accounts.metadata })
+    .from(accounts)
+    .where(eq(accounts.id, id))
+  if (reauthStateFromMetadata(row?.metadata)) {
+    const metadata = metadataObject(row?.metadata)
+    delete metadata.reauth
+    await db.update(accounts)
+      .set({ status: 'active', cooldownUntil: null, metadata })
+      .where(eq(accounts.id, id))
+  }
+}
+
+/**
+ * Disables an account and records that it needs manual re-authorization.
+ * Reuses `disableAccount` (status=disabled, cooldown cleared) so the scheduler
+ * and background refresh loop both skip it, then stamps a metadata marker the
+ * dashboard surfaces. A later successful refresh clears the marker (see
+ * `persistTokens`).
+ */
+async function markAccountReauthRequired(id: string, provider: string, signal: string): Promise<void> {
+  await disableAccount(id)
+  await updateAccountMetadata(id, {
+    reauth: { required: true, reason: signal, provider, at: Date.now() } satisfies AccountReauthState,
+  })
 }
 
 /** Refreshes an account's OAuth token and persists it. Returns the new access token. */
@@ -319,9 +356,22 @@ export async function refreshAccountToken(id: string): Promise<string> {
   if (!account?.oauthRefreshToken) throw new Error('account has no refresh token')
   const provider = getProvider(account.provider)
   if (!provider) throw new Error(`unknown provider: ${account.provider}`)
-  const tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
-  await persistTokens(id, tokens)
-  return tokens.accessToken
+  try {
+    const tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
+    await persistTokens(id, tokens)
+    return tokens.accessToken
+  } catch (err) {
+    // Permanent failure (revoked grant / reused refresh token / deleted team
+    // workspace): disable the account and stop retrying. Anything else is
+    // transient (429/5xx/network) and bubbles up unchanged so callers keep
+    // their existing retry / penalize behavior.
+    const signal = matchPermanentRefreshSignal(err)
+    if (signal) {
+      await markAccountReauthRequired(id, account.provider, signal)
+      throw new PermanentRefreshError(id, signal, refreshFailureStatus(err))
+    }
+    throw err
+  }
 }
 
 /** Returns a valid access token for an account, refreshing if near expiry. */

@@ -100,6 +100,22 @@
 
 ## 六、本次更新整理
 
+### 06-23~06-26 提交核查（2026-07-02，跟踪至 commit df99b94）
+
+对照 sub2api 最近一周（v0.1.138 之后、尚未发新 tag）的关键 relay 稳定性提交，逐项核对 model-bridge 实际代码，**五项均不适用或已正确，未改动代码**：
+
+| sub2api 提交 | 内容 | model-bridge 核查结论 |
+|---|---|---|
+| `29122e3` | 单块上游（GLM/Zhipu）致 tool_call 参数翻倍 | ❌ 不受影响 —— zhipu/qwen/xiaomi/deepseek 四个转换器同一套正确模板：`argsBuffer` 从 `''` 初始化、只 `+= argFrag` 累加一次（见各 `src/providers/*/stream.ts` 第 406/422 行），不会像 Go 版把整块含 arguments 先拷进 state 再累加 |
+| `2b49d66` | OpenAI passthrough function call args 去重 | ❌ 不适用 —— 转换器自行从 delta 合成 arguments，不透传上游 Responses 事件；OpenAI 走 `src/providers/openai/relay.ts` 逐字透传 Codex SSE，无二次累加，无翻倍源 |
+| `0a97a5f` | `refresh_token_invalidated` 视为不可重试 | ✅ 已落地 —— 新增 `src/accounts/refreshErrors.ts` 永久/临时分类器（含 `refresh_token_invalidated`），`refreshAccountToken` 命中永久信号即自动禁用账号并写 `metadata.reauth` 标记；relay 跳过 penalize、后台任务分级日志。详见 [token-refresh-permanent-failure-plan.zh-CN.md](./token-refresh-permanent-failure-plan.zh-CN.md) |
+| `fcd3bc1` | 无账号支持模型返回 404 而非 503 | ❌ 已正确 —— 未知模型在 provider/model allow-list 阶段即返回 403/404；relay 的 503（`src/routes/relay.ts` 第 899/1003 行）是真正的「账号不可用 / 全部失败」，语义无误 |
+| `82576e0` | auth 邮箱身份创建被 shadowed err 吞掉 | ❌ 不存在 —— Go 的 `err` 变量遮蔽陷阱；model-bridge 用 TS throw/catch，无此 bug 类 |
+
+> 结论：model-bridge 的流式转换器是「正确构造」版本，恰好是 sub2api 打补丁要达到的正确状态。核查时发现的**唯一真实（非关键）小缺口**——`tokenRefresh.ts` 对永久失效的 refresh token 每 60s 徒劳重试并刷屏日志——已于 2026-07-02 补齐：引入永久/临时刷新错误分类，永久失效自动禁用账号并标记「需重新授权」，后台不再刷屏、relay 不再把禁用复活成 error。实现见 [token-refresh-permanent-failure-plan.zh-CN.md](./token-refresh-permanent-failure-plan.zh-CN.md)。
+
+### 跟踪 sub2api 至 v0.1.138（2026-06-22）
+
 - **跟踪 sub2api 至 v0.1.138（2026-06-22）**：对照 v0.1.137/v0.1.138 的发布，补入差异表第 21–24 项 —— OpenAI 账号 quota 查询 + 手动 reset credit、OpenAI 调度策略「优先最快重置」、`cyber_policy` 硬阻断全链路透传、Gemini 工具 schema 兼容清理。四项均已在 model-bridge 落地（实施依据见 [sub2api 近期更新实施计划](./sub2api近期更新实施计划.md)）；订阅推广返利属偏运营 SaaS 能力，首期不实现（见第 20 项）。
 - **OpenAI quota 查询 + reset credit 已落地**（差异表第 21 项 ✅）：OpenAI OAuth token 交换 / 刷新时解析 `id_token`，提取 `chatgptAccountId`/`chatgptUserId`/`organizationId`/`email`/`planType` 等非敏感元数据存入 `accounts.metadata.openai`（不新增表）。管理员可在「账号」页查询 ChatGPT 配额（`GET /api/admin/accounts/:id/openai/quota`，调用 `chatgpt.com/backend-api/wham/usage`）并手动消耗一次 reset credit（`POST .../openai/reset-quota`，调用 `wham/rate-limit-reset-credits/consume`），reset credit 余额单独存 `metadata.openaiResetCredits` 以免被 relay 头部抓取覆盖。日志只记账号 ID / 状态码，不打 token / 授权码 / 原始敏感响应。仅支持 OAuth 账号；缺 `chatgptAccountId` 的老账号需重新授权或等 token 刷新补齐。核心见 `src/providers/openai/{identity,quota}.ts`、`src/accounts/openaiQuota.ts`，含单测。
 - **OpenAI 调度策略「优先最快重置」已落地**（差异表第 22 项 ✅）：新增设置项 `settings.openai_scheduling_strategy`，可选 `weighted_lru`（默认，保持原行为）或 `prefer_soonest_reset`（优先选 quota 窗口最快重置的可用账号）。仅影响 OpenAI 非粘性回退调度，粘性会话仍优先，其它 provider 不受影响。在设置页可切换。逻辑见 `src/accounts/scheduler.ts` 的 `soonestReset` 与 `src/db/settings.ts`，含单测。

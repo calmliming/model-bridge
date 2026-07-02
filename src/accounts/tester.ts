@@ -14,6 +14,7 @@ import {
 } from './quota'
 import { getQuotaAutopausePercent } from '../db/settings'
 import { markAccountUsed, penalizeAccount } from './scheduler'
+import { PermanentRefreshError } from './refreshErrors'
 
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -298,7 +299,17 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
   if (!account) throw new AccountTestError('account not found', 404)
 
   const startedAt = Date.now()
-  const accessToken = await ensureFreshToken(account)
+  let accessToken: string
+  try {
+    accessToken = await ensureFreshToken(account)
+  } catch (err) {
+    // refreshAccountToken has already disabled the account; surface a friendly
+    // hint to the admin instead of leaking the raw upstream error.
+    if (err instanceof PermanentRefreshError) {
+      throw new AccountTestError('refresh token 已失效，请重新授权该账号')
+    }
+    throw err
+  }
   const result = await runProviderTest(account, accessToken)
   const latencyMs = Date.now() - startedAt
 
