@@ -4,11 +4,17 @@ interface GeminiUsageMetadata {
   promptTokenCount?: number
   candidatesTokenCount?: number
   cachedContentTokenCount?: number
+  thoughtsTokenCount?: number
   totalTokenCount?: number
 }
 
 function mapUsage(u: GeminiUsageMetadata | undefined): UsageData {
-  return usageWithCachedInput(u?.promptTokenCount, u?.candidatesTokenCount, u?.cachedContentTokenCount)
+  return usageWithCachedInput(
+    u?.promptTokenCount,
+    u?.candidatesTokenCount,
+    u?.cachedContentTokenCount,
+    u?.thoughtsTokenCount,
+  )
 }
 
 /** Extracts usage from a (already-unwrapped) standard Gemini response body. */

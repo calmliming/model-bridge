@@ -17,12 +17,19 @@ export interface TokenSet {
 export interface UsageData {
   inputTokens: number
   outputTokens: number
+  /**
+   * Reasoning/thinking tokens, tracked separately for reporting only — never
+   * added on top when computing cost. For OpenAI-style providers it is a subset
+   * of outputTokens; Gemini reports it (thoughtsTokenCount) outside
+   * candidatesTokenCount. 0 when the provider does not report it.
+   */
+  reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
 }
 
 export function emptyUsage(): UsageData {
-  return { inputTokens: 0, outputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0 }
+  return { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0 }
 }
 
 /**
@@ -33,13 +40,16 @@ export function usageWithCachedInput(
   inputTokens: number | undefined,
   outputTokens: number | undefined,
   cachedInputTokens: number | undefined,
+  reasoningTokens?: number | undefined,
 ): UsageData {
   const input = Math.max(0, inputTokens ?? 0)
   const cached = Math.max(0, cachedInputTokens ?? 0)
   const cacheRead = input > 0 ? Math.min(cached, input) : cached
+  const output = Math.max(0, outputTokens ?? 0)
   return {
     inputTokens: Math.max(0, input - cacheRead),
-    outputTokens: Math.max(0, outputTokens ?? 0),
+    outputTokens: output,
+    reasoningTokens: Math.max(0, reasoningTokens ?? 0),
     cacheCreateTokens: 0,
     cacheReadTokens: cacheRead,
   }

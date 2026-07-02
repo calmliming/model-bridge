@@ -16,6 +16,8 @@ export interface AuthedApiKey {
   groupMultiplier: number
   rateLimit: number | null
   concurrencyLimit: number | null
+  /** Max simultaneous in-flight requests across ALL of this user's keys; null = unlimited. */
+  userConcurrencyLimit: number | null
   quotaLimit: number | null
   quotaUsed: number
   userId: string | null
@@ -116,6 +118,7 @@ export async function requireApiKey(
     groupMultiplier: record.groupMultiplier ?? 1,
     rateLimit: record.rateLimit ?? null,
     concurrencyLimit: record.concurrencyLimit ?? null,
+    userConcurrencyLimit: record.userConcurrencyLimit ?? null,
     quotaLimit: record.quotaLimit ?? null,
     quotaUsed: record.quotaUsed,
     userId: record.userId,

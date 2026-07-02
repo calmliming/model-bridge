@@ -120,6 +120,7 @@ export async function findApiKeyBySecret(secret: string) {
       createdAt: apiKeys.createdAt,
       userStatus: users.status,
       userBalanceMicros: users.balanceMicros,
+      userConcurrencyLimit: users.concurrencyLimit,
       userEmail: users.email,
       groupMultiplier: accountGroups.rateMultiplier,
     })

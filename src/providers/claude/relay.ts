@@ -1,3 +1,5 @@
+import { chatCompletionsToClaudeMessages } from './chat'
+
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
 // These mimic the official Claude Code client. Reverse-engineered and
@@ -150,6 +152,20 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
   out.system =
     body.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
   return out
+}
+
+/**
+ * Relays an OpenAI Chat Completions request to Anthropic by converting it to a
+ * Messages request first. Always asks the upstream to stream (the relay handler
+ * is forceStream) so the response can be translated event-by-event; non-stream
+ * clients get the stream buffered back into one Chat Completion JSON.
+ */
+export function relayClaudeChatCompletions(
+  accessToken: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const messagesBody = chatCompletionsToClaudeMessages({ ...body, stream: true })
+  return relayClaudeMessages(accessToken, messagesBody)
 }
 
 /** Relays a /v1/messages request to Anthropic using a subscription OAuth token. */

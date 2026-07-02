@@ -11,6 +11,9 @@ function mapUsage(u: ClaudeUsage | undefined): UsageData {
   return {
     inputTokens: u?.input_tokens ?? 0,
     outputTokens: u?.output_tokens ?? 0,
+    // Anthropic folds thinking tokens into output_tokens and does not break
+    // them out in the usage object, so there is nothing to report separately.
+    reasoningTokens: 0,
     cacheCreateTokens: u?.cache_creation_input_tokens ?? 0,
     cacheReadTokens: u?.cache_read_input_tokens ?? 0,
   }

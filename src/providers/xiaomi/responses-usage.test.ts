@@ -14,6 +14,7 @@ describe('Xiaomi Responses usage parsing', () => {
     ).toEqual({
       inputTokens: 75,
       outputTokens: 20,
+      reasoningTokens: 0,
       cacheCreateTokens: 0,
       cacheReadTokens: 25,
     })

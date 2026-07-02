@@ -64,6 +64,7 @@ interface ChatUsage {
   completion_tokens: number
   total_tokens: number
   prompt_tokens_details?: { cached_tokens: number }
+  completion_tokens_details?: { reasoning_tokens?: number }
 }
 
 function contentToText(content: unknown): string {
@@ -205,6 +206,7 @@ export function parseChatCompletionUsage(body: unknown): UsageData {
     usage.prompt_tokens,
     usage.completion_tokens,
     usage.prompt_tokens_details?.cached_tokens,
+    usage.completion_tokens_details?.reasoning_tokens,
   )
 }
 

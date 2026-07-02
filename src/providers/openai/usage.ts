@@ -4,6 +4,7 @@ interface OpenAIUsage {
   input_tokens?: number
   output_tokens?: number
   input_tokens_details?: { cached_tokens?: number }
+  output_tokens_details?: { reasoning_tokens?: number }
   cached_tokens?: number
 }
 
@@ -12,6 +13,7 @@ function mapUsage(u: OpenAIUsage | undefined): UsageData {
     u?.input_tokens,
     u?.output_tokens,
     u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens,
+    u?.output_tokens_details?.reasoning_tokens,
   )
 }
 

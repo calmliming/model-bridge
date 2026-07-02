@@ -21,6 +21,7 @@ export interface UserView {
   email: string
   name: string
   status: 'active' | 'disabled'
+  concurrencyLimit: number | null
   balanceMicros: number
   balance: number
   acceptedAt: number | null
@@ -50,6 +51,7 @@ export interface UserUsageLog {
   latencyMs: number | null
   inputTokens: number
   outputTokens: number
+  reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
@@ -84,6 +86,7 @@ function asUser(row: Record<string, unknown>): UserView {
     email: row.email as string,
     name: row.name as string,
     status: row.status as 'active' | 'disabled',
+    concurrencyLimit: row.concurrency_limit == null ? null : Number(row.concurrency_limit),
     balanceMicros,
     balance: microsToUsd(balanceMicros),
     acceptedAt: row.accepted_at == null ? null : Number(row.accepted_at),
@@ -112,6 +115,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     latencyMs: row.latency_ms == null ? null : Number(row.latency_ms),
     inputTokens: Number(row.input_tokens),
     outputTokens: Number(row.output_tokens),
+    reasoningTokens: Number(row.reasoning_tokens ?? 0),
     cacheCreateTokens: Number(row.cache_create_tokens),
     cacheReadTokens: Number(row.cache_read_tokens),
     cost: Number(row.cost),
@@ -122,7 +126,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
 
 export async function getUserById(id: string): Promise<UserView | null> {
   const { rows } = await pool.query<Record<string, unknown>>(
-    `SELECT id, email, name, status, balance_micros, accepted_at, last_login_at, created_at
+    `SELECT id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at
      FROM users WHERE id = $1`,
     [id],
   )
@@ -131,7 +135,7 @@ export async function getUserById(id: string): Promise<UserView | null> {
 
 export async function listUsers(): Promise<UserListRow[]> {
   const { rows } = await pool.query<Record<string, unknown>>(
-    `SELECT u.id, u.email, u.name, u.status, u.balance_micros, u.accepted_at,
+    `SELECT u.id, u.email, u.name, u.status, u.concurrency_limit, u.balance_micros, u.accepted_at,
             u.last_login_at, u.created_at,
             (u.id = (SELECT value FROM settings WHERE key = 'admin.user_id')) AS is_admin,
             (SELECT COUNT(*) FROM api_keys k WHERE k.user_id = u.id) AS key_count,
@@ -332,6 +336,8 @@ export async function updateUser(input: {
   id: string
   name?: string
   status?: 'active' | 'disabled'
+  /** null clears the limit (unlimited); undefined leaves it unchanged. */
+  concurrencyLimit?: number | null
 }): Promise<UserView | null> {
   const patches: string[] = []
   const values: unknown[] = []
@@ -343,12 +349,16 @@ export async function updateUser(input: {
     values.push(input.status)
     patches.push(`status = $${values.length}`)
   }
+  if (input.concurrencyLimit !== undefined) {
+    values.push(input.concurrencyLimit)
+    patches.push(`concurrency_limit = $${values.length}`)
+  }
   if (!patches.length) return getUserById(input.id)
   values.push(input.id)
   const { rows } = await pool.query<Record<string, unknown>>(
     `UPDATE users SET ${patches.join(', ')}
      WHERE id = $${values.length}
-     RETURNING id, email, name, status, balance_micros, accepted_at, last_login_at, created_at`,
+     RETURNING id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at`,
     values,
   )
   return rows[0] ? asUser(rows[0]) : null
@@ -369,7 +379,7 @@ export async function listUserUsage(
     ),
     pool.query<Record<string, unknown>>(
       `SELECT l.id, l.ts, l.provider, l.model, l.status, l.latency_ms,
-              l.input_tokens, l.output_tokens, l.cache_create_tokens,
+              l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.cost, l.request_input,
               k.name AS api_key_name
        FROM usage_logs l

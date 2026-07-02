@@ -100,6 +100,8 @@ const updateUserSchema = z
   .object({
     name: z.string().trim().min(1).optional(),
     status: z.enum(['active', 'disabled']).optional(),
+    // null = clear the limit (unlimited); omitted = unchanged.
+    concurrencyLimit: z.number().int().positive().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 

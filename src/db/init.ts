@@ -104,6 +104,7 @@ export async function initDb(): Promise<void> {
       name TEXT NOT NULL,
       password_hash TEXT,
       status TEXT NOT NULL DEFAULT 'active',
+      concurrency_limit BIGINT,
       balance_micros BIGINT NOT NULL DEFAULT 0,
       accepted_at BIGINT,
       last_login_at BIGINT,
@@ -189,6 +190,7 @@ export async function initDb(): Promise<void> {
       ts BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
       input_tokens BIGINT NOT NULL DEFAULT 0,
       output_tokens BIGINT NOT NULL DEFAULT 0,
+      reasoning_tokens BIGINT NOT NULL DEFAULT 0,
       cache_create_tokens BIGINT NOT NULL DEFAULT 0,
       cache_read_tokens BIGINT NOT NULL DEFAULT 0,
       cost DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -243,6 +245,8 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS rate_multiplier DOUBLE PRECISION NOT NULL DEFAULT 1;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS base_cost DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS bill_to TEXT NOT NULL DEFAULT 'balance';`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS reasoning_tokens BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

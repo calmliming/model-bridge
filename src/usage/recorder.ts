@@ -44,9 +44,9 @@ export async function recordUsage(record: UsageRecord): Promise<boolean> {
     await client.query(
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
-          input_tokens, output_tokens, cache_create_tokens, cache_read_tokens,
+          input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
           cost, base_cost, bill_to, status, latency_ms, first_token_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
       [
         id,
         record.apiKeyId,
@@ -57,6 +57,7 @@ export async function recordUsage(record: UsageRecord): Promise<boolean> {
         record.requestInput ?? null,
         record.usage.inputTokens,
         record.usage.outputTokens,
+        record.usage.reasoningTokens,
         record.usage.cacheCreateTokens,
         record.usage.cacheReadTokens,
         cost,

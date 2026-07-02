@@ -11,10 +11,16 @@ interface ResponsesUsage {
   input_tokens?: number
   output_tokens?: number
   input_tokens_details?: { cached_tokens?: number }
+  output_tokens_details?: { reasoning_tokens?: number }
 }
 
 function mapUsage(u: ResponsesUsage | undefined): UsageData {
-  return usageWithCachedInput(u?.input_tokens, u?.output_tokens, u?.input_tokens_details?.cached_tokens)
+  return usageWithCachedInput(
+    u?.input_tokens,
+    u?.output_tokens,
+    u?.input_tokens_details?.cached_tokens,
+    u?.output_tokens_details?.reasoning_tokens,
+  )
 }
 
 interface ResponsesStreamEvent {

@@ -126,6 +126,7 @@ export const users = pgTable('users', {
   name: text('name').notNull(),
   passwordHash: text('password_hash'),
   status: text('status').notNull().default('active'), // active | disabled
+  concurrencyLimit: bigint('concurrency_limit', { mode: 'number' }), // max simultaneous in-flight requests across all the user's keys; null = unlimited
   balanceMicros: bigint('balance_micros', { mode: 'number' }).notNull().default(0),
   acceptedAt: bigint('accepted_at', { mode: 'number' }),
   lastLoginAt: bigint('last_login_at', { mode: 'number' }),
@@ -209,6 +210,7 @@ export const usageLogs = pgTable('usage_logs', {
   ts: epochMs('ts'),
   inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
   outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
+  reasoningTokens: bigint('reasoning_tokens', { mode: 'number' }).notNull().default(0), // thinking/reasoning tokens, a subset of output_tokens
   cacheCreateTokens: bigint('cache_create_tokens', { mode: 'number' }).notNull().default(0),
   cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }).notNull().default(0),
   cost: doublePrecision('cost').notNull().default(0), // amount charged to the user (base_cost × group multiplier)

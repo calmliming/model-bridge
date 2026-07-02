@@ -7,6 +7,7 @@ import { getProvider } from '../providers/registry'
 import type { TokenSet } from '../providers/types'
 import { currentConcurrency } from '../middleware/limits'
 import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
+import { accountHealth, emptyHealth } from './health'
 import { clearExpiredAccountCooldowns, disableAccount } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
 import {
@@ -152,6 +153,9 @@ export async function listAccounts() {
     groupsByAccount.set(m.accountId, list)
   }
 
+  // Recent-window health scores for all accounts in one query (no N+1).
+  const health = await accountHealth(rows.map((r) => r.id))
+
   return Promise.all(rows.map(async ({ metadata, ...account }) => ({
     ...account,
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
@@ -159,6 +163,7 @@ export async function listAccounts() {
     quota: accountQuotaFromMetadata(metadata),
     autopausePercent: accountAutopausePercent(metadata),
     reauth: reauthStateFromMetadata(metadata),
+    health: health.get(account.id) ?? emptyHealth(),
   })))
 }
 

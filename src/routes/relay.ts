@@ -10,8 +10,12 @@ import { bindStickyAccount, clearStickyAccount, computeSessionKey } from '../acc
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
 import { isAllowedModel } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
-import { relayClaudeMessages } from '../providers/claude/relay'
+import { relayClaudeChatCompletions, relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
+import {
+  claudeSseToChatCompletion,
+  createClaudeChatCompletionsStreamTransform,
+} from '../providers/claude/chat'
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
 import {
   buildResponsesErrorEvents,
@@ -146,6 +150,25 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, _ctx) => relayClaudeMessages(token, body),
     createStreamParser: claudeUsage.createStreamParser,
     parseJsonUsage: claudeUsage.parseJsonUsage,
+  },
+  // Route key only — provider.id stays 'claude' so account pool, allowed-
+  // provider checks and usage records reuse the existing Claude setup. Lets an
+  // OpenAI Chat Completions client talk to a Claude subscription: the request
+  // is converted to Messages, the streamed response translated back to
+  // chat.completion chunks (buffered to JSON for non-stream clients).
+  'claude-chat': {
+    id: 'claude',
+    forceStream: true,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayClaudeChatCompletions(token, body),
+    createStreamParser: claudeUsage.createStreamParser,
+    parseJsonUsage: claudeUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
+    bufferSseResponse: (text, meta) => claudeSseToChatCompletion(text, meta.model),
+    createStreamTransform: createClaudeChatCompletionsStreamTransform,
   },
   openai: {
     id: 'openai',
@@ -614,6 +637,8 @@ async function classifyUpstreamFailure(
 export function registerRelayRoutes(app: FastifyInstance): void {
   const claudeHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.claude!)
+  const claudeChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['claude-chat']!)
   const openaiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.openai!)
   const openaiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
@@ -646,6 +671,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['qwen-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
+  // Claude via the OpenAI Chat Completions surface: OpenAI clients can point
+  // base URL=https://your-host/api/claude/v1 and call a Claude subscription.
+  app.post('/api/claude/v1/chat/completions', { preHandler: requireApiKey }, claudeChatHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
   app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
@@ -744,6 +772,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
   ])
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
+    { test: /^claude/i, handler: PROVIDERS['claude-chat']! },
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-chat']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
@@ -854,11 +883,25 @@ async function executeRelay(
     return
   }
 
-  // Per-key concurrency gate. Hold a slot for the whole request (including the
-  // streamed body) and release it once the response is fully sent. Streaming
-  // hijacks the reply, so onResponse hooks can't be relied on — release here.
+  // Concurrency gates. Hold a slot for the whole request (including the streamed
+  // body) and release it once the response is fully sent. Streaming hijacks the
+  // reply, so onResponse hooks can't be relied on — release here.
+  //
+  // Two independent gates apply, outermost first:
+  //   - per-user: caps in-flight requests across ALL of the user's keys, so one
+  //     tenant can't starve the shared account pool.
+  //   - per-key: caps a single key.
+  // Acquire user → key; release key → user (reverse order) so a failed inner
+  // acquire never leaks the outer slot.
+  const userLimit = apiKey.userConcurrencyLimit
+  const userSlotKey = apiKey.userId ? userConcurrencyKey(apiKey.userId) : null
+  if (userSlotKey && userLimit != null && !(await acquireSlot(userSlotKey, userLimit))) {
+    await reply.code(429).send({ error: 'too many concurrent requests for this user' })
+    return
+  }
   const concurrencyLimit = apiKey.concurrencyLimit
   if (concurrencyLimit != null && !(await acquireSlot(apiKey.id, concurrencyLimit))) {
+    if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
     await reply.code(429).send({ error: 'too many concurrent requests for this API key' })
     return
   }
@@ -866,8 +909,12 @@ async function executeRelay(
     await runRelayLoop(request, reply, provider, bodyWithMappedModel(body, parsed.model), parsed)
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
+    if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
   }
 }
+
+/** Concurrency-gate key for a user's aggregate in-flight requests. */
+const userConcurrencyKey = (userId: string): string => `user:${userId}`
 
 function isAnyAllowedModel(models: string[], allowedModels: string[] | null | undefined): boolean {
   if (!allowedModels || allowedModels.length === 0) return true

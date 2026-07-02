@@ -15,6 +15,7 @@ interface UsageLog {
   latencyMs: number | null
   inputTokens: number
   outputTokens: number
+  reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
@@ -47,6 +48,7 @@ function totalTokens(row: UsageLog) {
   const rows: [string, number][] = [
     ['输入', row.inputTokens],
     ['输出', row.outputTokens],
+    ...(row.reasoningTokens > 0 ? [['推理', row.reasoningTokens] as [string, number]] : []),
     ['缓存写入', row.cacheCreateTokens],
     ['缓存读取', row.cacheReadTokens],
   ]

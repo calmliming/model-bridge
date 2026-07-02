@@ -11,6 +11,7 @@ interface UserRow {
   email: string
   name: string
   status: 'active' | 'disabled'
+  concurrencyLimit: number | null
   balance: number
   acceptedAt: number | null
   lastLoginAt: number | null
@@ -58,6 +59,10 @@ const showAdjust = ref(false)
 const adjusting = ref(false)
 const selectedUser = ref<UserRow | null>(null)
 const adjustForm = ref({ amount: 10, note: '' })
+
+const showConcurrency = ref(false)
+const savingConcurrency = ref(false)
+const concurrencyForm = ref<{ value: number | null }>({ value: null })
 
 const showWallet = ref(false)
 const walletLoading = ref(false)
@@ -226,6 +231,30 @@ function openAdjust(row: UserRow, sign: 1 | -1) {
   showAdjust.value = true
 }
 
+function openConcurrency(row: UserRow) {
+  selectedUser.value = row
+  concurrencyForm.value = { value: row.concurrencyLimit }
+  showConcurrency.value = true
+}
+
+async function saveConcurrency() {
+  if (!selectedUser.value) return
+  const raw = concurrencyForm.value.value
+  // Empty or non-positive clears the limit (unlimited).
+  const limit = raw != null && raw > 0 ? Math.floor(raw) : null
+  savingConcurrency.value = true
+  try {
+    await api.patch(`/admin/users/${selectedUser.value.id}`, { concurrencyLimit: limit })
+    message.success('已更新并发上限')
+    showConcurrency.value = false
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '更新并发上限失败'))
+  } finally {
+    savingConcurrency.value = false
+  }
+}
+
 async function adjustWallet() {
   if (!selectedUser.value) return
   adjusting.value = true
@@ -305,6 +334,7 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
     ]),
   },
   { title: '余额', key: 'balance', minWidth: 96, render: (row) => h('span', { class: row.balance <= 0 ? 'danger' : 'amount' }, formatUsd(row.balance)) },
+  { title: '并发', key: 'concurrencyLimit', width: 72, render: (row) => (row.concurrencyLimit == null ? h('span', { class: 'subtext' }, '不限') : row.concurrencyLimit) },
   { title: 'Keys', key: 'keyCount', width: 72 },
   { title: '请求', key: 'requestCount', width: 80, render: (row) => row.requestCount.toLocaleString('en-US') },
   { title: '成本', key: 'totalCost', width: 96, render: (row) => formatUsd(row.totalCost) },
@@ -314,11 +344,12 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 390,
+    width: 450,
     render: (row) => h(UiSpace, { size: 4, wrap: false }, {
       default: () => [
         h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
         h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
+        h(UiButton, { size: 'small', quaternary: true, onClick: () => openConcurrency(row) }, { default: () => '并发' }),
         h(UiButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
         h(UiButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
         h(UiButton, { size: 'small', quaternary: true, onClick: () => openSubscriptions(row) }, { default: () => '订阅' }),
@@ -357,7 +388,7 @@ onMounted(load)
     </div>
 
     <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1260" />
+      <UiDataTable :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1400" />
     </UiCard>
 
     <UiModal v-model:show="showInvite" title="邀请用户" :width="460">
@@ -401,6 +432,21 @@ onMounted(load)
         <UiSpace justify="end">
           <UiButton @click="showAdjust = false">取消</UiButton>
           <UiButton type="primary" :loading="adjusting" @click="adjustWallet">保存</UiButton>
+        </UiSpace>
+      </template>
+    </UiModal>
+
+    <UiModal v-model:show="showConcurrency" :title="`并发上限：${selectedUser?.name ?? ''}`" :width="460">
+      <UiForm label-placement="top">
+        <UiFormItem label="最大并发请求数（跨该用户所有 Key）">
+          <UiInputNumber v-model:value="concurrencyForm.value" :min="1" :step="1" placeholder="留空 = 不限" style="width: 100%" />
+        </UiFormItem>
+      </UiForm>
+      <div class="subline">同一时刻在途请求数超过该值时返回 429。留空或 0 表示不限制。</div>
+      <template #footer>
+        <UiSpace justify="end">
+          <UiButton @click="showConcurrency = false">取消</UiButton>
+          <UiButton type="primary" :loading="savingConcurrency" @click="saveConcurrency">保存</UiButton>
         </UiSpace>
       </template>
     </UiModal>

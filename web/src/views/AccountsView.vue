@@ -49,6 +49,14 @@ interface Account {
   autopausePercent: number | null
   // Set when the refresh token permanently failed and the account was auto-disabled.
   reauth: { required: boolean; reason: string; provider: string; at: number } | null
+  // Recent-window health derived from usage logs; score is null when no traffic.
+  health: {
+    score: number | null
+    sampleSize: number
+    successRate: number | null
+    errorRate: number | null
+    avgLatencyMs: number | null
+  } | null
 }
 
 /** A named account pool (distinct from the per-provider display grouping below). */
@@ -378,6 +386,35 @@ function renderStatus(row: Account) {
           ? h('span', { class: 'muted-cell' }, `至 ${formatShortTime(row.cooldownUntil)}`)
           : null,
       ],
+    },
+  )
+}
+
+function healthTagType(score: number): TagType {
+  if (score >= 90) return 'success'
+  if (score >= 70) return 'info'
+  if (score >= 40) return 'warning'
+  return 'error'
+}
+
+function renderHealth(row: Account) {
+  const health = row.health
+  if (!health || health.score == null) {
+    return h('span', { class: 'muted-cell', title: '近 6 小时无请求，暂无健康数据' }, '—')
+  }
+  const score = health.score
+  const parts: string[] = []
+  if (health.successRate != null) parts.push(`成功率 ${(health.successRate * 100).toFixed(0)}%`)
+  if (health.avgLatencyMs != null) parts.push(`平均延迟 ${health.avgLatencyMs}ms`)
+  parts.push(`样本 ${health.sampleSize}`)
+  const tip = `近 6 小时 · ${parts.join(' · ')}`
+  return h(
+    UiTooltip,
+    { placement: 'top', trigger: 'hover' },
+    {
+      trigger: () =>
+        h(UiTag, { size: 'small', type: healthTagType(score), bordered: false }, { default: () => String(score) }),
+      default: () => tip,
     },
   )
 }
@@ -1234,6 +1271,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
     width: 110,
     render: renderStatus,
   },
+  { title: '健康', key: 'health', width: 84, render: renderHealth },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
   { title: '停调阈值', key: 'autopause', width: 116, render: renderAutopause },

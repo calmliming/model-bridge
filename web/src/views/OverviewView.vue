@@ -55,6 +55,7 @@ interface DashboardRecentLog {
   firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
+  reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
@@ -546,12 +547,17 @@ function costBreakdown(row: DashboardRecentLog): { label: string; value: string;
 }
 
 function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number }[] {
-  return [
+  const rows = [
     { label: '输入', value: row.inputTokens },
     { label: '输出', value: row.outputTokens },
+  ]
+  // Reasoning is a subset of / alongside output; only show when present.
+  if (row.reasoningTokens > 0) rows.push({ label: '推理', value: row.reasoningTokens })
+  rows.push(
     { label: '缓存创建', value: row.cacheCreateTokens },
     { label: '缓存读取', value: row.cacheReadTokens },
-  ]
+  )
+  return rows
 }
 
 function openRequestInput(row: DashboardRecentLog) {

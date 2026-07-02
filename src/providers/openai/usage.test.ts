@@ -14,8 +14,27 @@ describe('OpenAI usage parsing', () => {
     ).toEqual({
       inputTokens: 65,
       outputTokens: 20,
+      reasoningTokens: 0,
       cacheCreateTokens: 0,
       cacheReadTokens: 35,
+    })
+  })
+
+  it('reports reasoning_tokens from output_tokens_details', () => {
+    expect(
+      parseJsonUsage({
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          output_tokens_details: { reasoning_tokens: 18 },
+        },
+      }),
+    ).toEqual({
+      inputTokens: 100,
+      outputTokens: 50,
+      reasoningTokens: 18,
+      cacheCreateTokens: 0,
+      cacheReadTokens: 0,
     })
   })
 
@@ -35,6 +54,7 @@ describe('OpenAI usage parsing', () => {
     expect(parser.result()).toEqual({
       inputTokens: 7,
       outputTokens: 3,
+      reasoningTokens: 0,
       cacheCreateTokens: 0,
       cacheReadTokens: 5,
     })

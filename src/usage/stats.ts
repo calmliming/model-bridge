@@ -74,6 +74,7 @@ export interface DashboardRecentLog {
   firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
+  reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
   cost: number
@@ -228,6 +229,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const price = resolvePrice(provider, model ?? '')
   const inputTokens = toNum(row.inputtokens)
   const outputTokens = toNum(row.outputtokens)
+  const reasoningTokens = toNum(row.reasoningtokens)
   const cacheCreateTokens = toNum(row.cachecreatetokens)
   const cacheReadTokens = toNum(row.cachereadtokens)
   const cost = toNum(row.cost)
@@ -244,6 +246,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     firstTokenMs: row.firsttokenms == null ? null : toNum(row.firsttokenms),
     inputTokens,
     outputTokens,
+    reasoningTokens,
     cacheCreateTokens,
     cacheReadTokens,
     cost,
@@ -536,6 +539,7 @@ export async function dashboardRecentLogs(
               usage_logs.first_token_ms AS firstTokenMs,
               usage_logs.input_tokens AS inputTokens,
               usage_logs.output_tokens AS outputTokens,
+              usage_logs.reasoning_tokens AS reasoningTokens,
               usage_logs.cache_create_tokens AS cacheCreateTokens,
               usage_logs.cache_read_tokens AS cacheReadTokens,
               usage_logs.cost AS cost,
