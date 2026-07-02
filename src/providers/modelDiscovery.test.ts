@@ -4,7 +4,7 @@ import { isProviderAllowed, listGeminiModels, listModelIdsForKey } from './model
 describe('model discovery', () => {
   it('returns all default models for unrestricted keys', () => {
     expect(listModelIdsForKey({ allowedProviders: null, allowedModels: null })).toEqual(
-      expect.arrayContaining(['gpt-5.5', 'claude-sonnet-4-6', 'gemini-2.5-flash', 'deepseek-v4-pro']),
+      expect.arrayContaining(['gpt-5.5', 'claude-sonnet-5', 'gemini-2.5-flash', 'deepseek-v4-pro']),
     )
   })
 

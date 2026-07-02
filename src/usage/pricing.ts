@@ -26,11 +26,10 @@ const CLAUDE_OPUS_REDUCED: TierPrice = { input: 5, output: 25, cacheWrite: 6.25,
 const CLAUDE_OPUS_LEGACY: TierPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }
 const CLAUDE_SONNET: TierPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 }
 const CLAUDE_HAIKU: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
-// Fable 5 (Mythos-class flagship) has no published per-token list price yet.
-// Seed it at the current top Claude rate (Opus 4.5+ reduced) so it is never
-// under-billed as the default Sonnet tier; admins can edit the row once the
-// official price is known.
-const CLAUDE_FABLE: TierPrice = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }
+// Fable 5 (Mythos-class flagship) — Anthropic's most capable widely released
+// model, priced above the Opus tier at 10 / 50. Claude Mythos 5 shares the
+// same list price.
+const CLAUDE_FABLE: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
 function isLegacyOpus(model: string): boolean {
@@ -219,7 +218,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v2` settings flag.
+ * gated by the `pricing_seed_v3` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -255,6 +254,14 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'flash',
     from: { input: 0.075, output: 0.3, cacheWrite: 0, cacheRead: 0.019 },
     to: GEMINI_FLASH,
+  },
+  // Fable 5 now has a published list price (10/50); it was seeded at the Opus
+  // reduced rate (5/25) while unpriced.
+  {
+    provider: 'claude',
+    model: 'fable',
+    from: { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
+    to: CLAUDE_FABLE,
   },
 ]
 
@@ -320,7 +327,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v2'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v3'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -347,7 +354,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v2', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v3', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }
