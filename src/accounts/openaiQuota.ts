@@ -5,7 +5,14 @@ import {
   updateAccountMetadata,
   updateAccountQuota,
 } from './manager'
-import { accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
+import {
+  accountQuotaFromMetadata,
+  quotaPauseUntil,
+  resolveAutopausePercent,
+  type AccountQuotaSnapshot,
+} from './quota'
+import { clearAccountCooldown, penalizeAccount } from './scheduler'
+import { getQuotaAutopausePercent } from '../db/settings'
 import {
   fetchOpenAIQuota,
   openAIAccountIdFromMetadata,
@@ -99,13 +106,31 @@ export async function resetOpenAIAccountQuota(id: string): Promise<OpenAIResetRe
   // are reflected locally. A failure here doesn't undo the consumed credit, so
   // fall back to the cached snapshot rather than surfacing an error.
   let quota: AccountQuotaSnapshot
+  let refreshed = true
   try {
     quota = await fetchOpenAIQuota(accessToken, chatgptAccountId)
     await persistQuota(id, quota)
   } catch {
+    refreshed = false
     quota =
       accountQuotaFromMetadata((await getAccount(id))?.metadata) ??
       { source: 'openai', updatedAt: Date.now(), windows: [], resetCredits: null }
   }
+
+  // A reset credit exists to make the account usable again — but consuming it
+  // upstream does not clear the local auto-pause cooldown, so without this the
+  // account stays in `rate_limited` (invisible to pickAccount) until its old,
+  // now-stale window reset. Re-evaluate against the fresh quota: keep it paused
+  // only if a window still breaches the threshold, otherwise clear the cooldown
+  // so it rejoins the pool. When the refresh failed we can't recompute, so clear
+  // optimistically — the credit did reset the window upstream.
+  const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+  const pauseUntil = refreshed ? quotaPauseUntil(quota, threshold) : null
+  if (pauseUntil) {
+    await penalizeAccount(id, 'rate_limited', pauseUntil)
+  } else {
+    await clearAccountCooldown(id)
+  }
+
   return { windowsReset, quota, resetCredits: quota.resetCredits ?? null }
 }

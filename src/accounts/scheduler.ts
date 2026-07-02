@@ -143,6 +143,18 @@ export function soonestReset(metadata: unknown, now: number): number {
   return future.length ? Math.min(...future) : Number.POSITIVE_INFINITY
 }
 
+/**
+ * Clears a transient cooldown (`rate_limited` / `error`), returning the account
+ * to the pool immediately. Only touches accounts currently in a transient state
+ * — a `disabled` account (permanent, e.g. revoked token) is left untouched so a
+ * quota reset can never silently revive a dead credential.
+ */
+export async function clearAccountCooldown(id: string): Promise<void> {
+  await db.update(accounts)
+    .set({ status: 'active', cooldownUntil: null })
+    .where(and(eq(accounts.id, id), inArray(accounts.status, ['rate_limited', 'error'])))
+}
+
 /** Marks an account as healthy and just used (clears any cooldown). */
 export async function markAccountUsed(id: string): Promise<void> {
   await db.update(accounts)
