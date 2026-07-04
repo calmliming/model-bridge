@@ -16,6 +16,7 @@ describe('matchPermanentRefreshSignal', () => {
     const cases: Array<[string, string]> = [
       ['invalid_grant', '{"error":"invalid_grant"}'],
       ['invalid_refresh_token', '{"error":"invalid_refresh_token"}'],
+      ['token_expired', '{"error":{"code":"token_expired"}}'],
       ['refresh_token_invalidated', '{"error":"refresh_token_invalidated"}'],
       ['refresh_token_reused', '{"error":"refresh_token_reused"}'],
       ['app_session_terminated', '{"error":"app_session_terminated"}'],

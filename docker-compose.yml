@@ -38,6 +38,10 @@ services:
       # The browser doing the auth flow must reach this port; keep it on
       # localhost if the host is remote and you SSH-tunnel from your laptop.
       - "1455:1455"
+    extra_hosts:
+      # Lets the app container reach services published on the Docker host, e.g.
+      # a Redis instance managed by 1Panel outside this compose project.
+      - "host.docker.internal:host-gateway"
     environment:
       PORT: 3000
       HOST: 0.0.0.0
@@ -51,6 +55,8 @@ services:
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       SECURITY_HEADERS_ENABLED: ${SECURITY_HEADERS_ENABLED:-true}
+      REDIS_URL: ${REDIS_URL:-}
+      STICKY_SESSION_WAIT_MS: ${STICKY_SESSION_WAIT_MS:-15000}
     volumes:
       # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
       # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or

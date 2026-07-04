@@ -49,6 +49,8 @@ const CACHE_CONTROL = { type: 'ephemeral' } as const
 // prompt text that varies per request and sits before every cache breakpoint,
 // which orphans every cache write (cache_read stays 0 for the whole session).
 const BILLING_HEADER_PREFIX = 'x-anthropic-billing-header:'
+const DATELINE_PATTERN = /Today(['\u2019\u02bc\u02b9])s date is (\d{4})([-/])(\d{2})\3(\d{2})\./g
+const SYSTEM_REMINDER_PATTERN = /<system-reminder>[\s\S]*?<\/system-reminder>/g
 
 // Identity prefixes that mark genuine Claude Code traffic. The CLI uses a
 // different variant per surface (main CLI / Agent SDK / sub-agents / compact);
@@ -65,6 +67,57 @@ type SystemBlock = Record<string, unknown>
 type TextBlock = {
   type: 'text'
   text: string
+}
+
+function normalizeDatelineText(text: string): string {
+  return text.replace(DATELINE_PATTERN, (_match, _apostrophe, year, _separator, month, day) => {
+    return `Today's date is ${year}-${month}-${day}.`
+  })
+}
+
+function normalizeReminderDatelines(text: string): string {
+  if (!text.includes('<system-reminder>')) return text
+  return text.replace(SYSTEM_REMINDER_PATTERN, (block) => normalizeDatelineText(block))
+}
+
+function normalizeSystemBlock(block: SystemBlock): SystemBlock {
+  if (block?.type !== 'text' || typeof block.text !== 'string') return block
+  const text = normalizeDatelineText(block.text)
+  return text === block.text ? block : { ...block, text }
+}
+
+function normalizeMessageBlock(block: unknown): unknown {
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return block
+  const row = block as Record<string, unknown>
+  if (typeof row.text !== 'string') return block
+  const text = normalizeReminderDatelines(row.text)
+  return text === row.text ? block : { ...row, text }
+}
+
+function normalizeMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages
+  let changed = false
+  const next = messages.map((message) => {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return message
+    const row = message as Record<string, unknown>
+    if (typeof row.content === 'string') {
+      const content = normalizeReminderDatelines(row.content)
+      if (content !== row.content) {
+        changed = true
+        return { ...row, content }
+      }
+      return message
+    }
+    if (Array.isArray(row.content)) {
+      const content = row.content.map(normalizeMessageBlock)
+      if (content.some((block, index) => block !== (row.content as unknown[])[index])) {
+        changed = true
+        return { ...row, content }
+      }
+    }
+    return message
+  })
+  return changed ? next : messages
 }
 
 function hasIdentityPrefix(text: unknown): boolean {
@@ -94,12 +147,13 @@ function normalizeSystem(system: unknown): SystemBlock[] {
   const identity: TextBlock = { type: 'text', text: CLAUDE_CODE_IDENTITY }
   if (system == null) return [identity]
   if (typeof system === 'string') {
-    return hasIdentityPrefix(system)
-      ? [{ type: 'text', text: system }]
-      : [identity, { type: 'text', text: system }]
+    const text = normalizeDatelineText(system)
+    return hasIdentityPrefix(text)
+      ? [{ type: 'text', text }]
+      : [identity, { type: 'text', text }]
   }
   if (Array.isArray(system)) {
-    const blocks = system as SystemBlock[]
+    const blocks = (system as SystemBlock[]).map(normalizeSystemBlock)
     if (blocks.some(isTextBlockWithIdentity)) return blocks
     // Inject the identity, but never in front of a leading billing block —
     // it must stay at position 0 to be stripped upstream (see above).
@@ -151,6 +205,8 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
   // breakpoints, to avoid competing markers / exceeding the 4-breakpoint cap.
   out.system =
     body.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
+  const messages = normalizeMessages(body.messages)
+  if (messages !== body.messages) out.messages = messages
   return out
 }
 

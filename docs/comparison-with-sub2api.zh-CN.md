@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.138**，2026-06-22）
-> 更新日期：2026-06-23
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.144**，2026-07-04）
+> 更新日期：2026-07-04
 
 ## 一句话定位
 
@@ -68,8 +68,12 @@
 | 22 | **OpenAI 调度策略「优先最快重置」** | ✅ (v0.1.138) | ✅ 已实现（设置项 `openai_scheduling_strategy`，仅影响 OpenAI 非粘性回退）| ✅ 已完成 |
 | 23 | **`cyber_policy` 硬阻断全链路透传** | ✅ (v0.1.137) | ✅ 已实现（Responses `failed`/`incomplete` 记为错误，不 failover/cooldown，透传上游 code/message）| ✅ 已完成 |
 | 24 | **Gemini 工具 schema 兼容清理** | ✅ (v0.1.138) | ✅ 已实现（递归清理 function declarations 中不兼容的 JSON Schema 字段）| ✅ 已完成 |
+| 25 | **OpenAI `token_expired` refresh 永久失效分类** | ✅ (v0.1.144) | ✅ 已实现（命中即禁用账号并标记需重新授权，停止后台无效重试）| ✅ 已完成 |
+| 26 | **Claude Fable 7d_oi 模型级 quota 窗口** | ✅ (v0.1.144) | ⚠️ 已实现窗口采样/展示与 Fable-only 429 不整体 cooldown；未做持久化模型级调度黑名单 | 轻量完成 |
+| 27 | **Codex `image_generation` 工具策略** | ✅ (v0.1.144) | ⚠️ 已默认剥离显式 `image_generation` tool / `tool_choice`，未做账号级四态开关 | 轻量完成 |
+| 28 | **Anthropic OAuth dateline 指纹归一化** | ✅ (v0.1.142) | ✅ 已实现（system 与 `<system-reminder>` 内日期句归一化，避免改用户正文） | ✅ 已完成 |
 
-> 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；第 21–24 项为对照 **v0.1.137/v0.1.138** 补入并已在 model-bridge 落地。标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
+> 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；第 21–24 项为对照 **v0.1.137/v0.1.138** 补入；第 25–28 项为对照 **v0.1.142–v0.1.144** 补入。标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
 
 ---
 
@@ -99,6 +103,14 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api 至 v0.1.144（2026-07-04）
+
+- **OpenAI `token_expired` 不可重试已落地**：`src/accounts/refreshErrors.ts` 将 `token_expired` 纳入永久刷新失败信号，行为与 `invalid_refresh_token` / `refresh_token_invalidated` 一致，账号自动禁用并标记「需重新授权」，避免后台持续重试刷屏。
+- **Claude Fable 7d_oi 窗口轻量落地**：`src/accounts/quota.ts` 解析 `anthropic-ratelimit-unified-7d_oi-*` 响应头与 OAuth usage API 的 `seven_day_overage_included` 字段，后台账号页显示「7天 Fable」。该窗口是模型级限制，`quotaPauseUntil` / `soonestReset` 会跳过它，`src/routes/relay.ts` 对 Fable-only 429 不再把整个 Claude 账号置入 cooldown。
+- **Codex 图像工具剥离轻量落地**：`src/providers/openai/relay.ts` 在转发到 Codex backend 前剥离显式 `image_generation` tool 与指向它的 `tool_choice`，避免不支持该工具的 Codex 路径返回 400/502。本项目暂不做 sub2api 的账号级四态开关。
+- **Anthropic dateline 指纹归一化已落地**：`src/providers/claude/relay.ts` 将 system prompt 以及 `<system-reminder>` 内的 `Today's date is YYYY/MM/DD.` / 撇号变体归一为 ASCII 撇号 + `YYYY-MM-DD`，只处理特定日期句式，避免误改用户正文。
+- **不适用 / 暂不追**：sub2api v0.1.139–v0.1.144 的 Grok 订阅、OpenAI WS `http_bridge`、Spark 影子账号、IP 地理位置、高峰倍率、恢复撤销订阅、列设置等偏 SaaS / 多上游生态能力，暂不纳入 model-bridge 轻量主线。usage log 队列溢出问题不适用：model-bridge 当前 usage 写入为同步数据库事务，没有异步队列静默丢弃路径。
 
 ### 06-23~06-26 提交核查（2026-07-02，跟踪至 commit df99b94）
 

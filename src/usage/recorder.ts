@@ -12,6 +12,8 @@ export interface UsageRecord {
   provider: string
   model: string
   requestInput?: string | null
+  sessionKeyHash?: string | null
+  sessionSource?: string | null
   usage: UsageData
   status: string
   latencyMs: number
@@ -44,9 +46,10 @@ export async function recordUsage(record: UsageRecord): Promise<boolean> {
     await client.query(
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
+          session_key_hash, session_source,
           input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
           cost, base_cost, bill_to, status, latency_ms, first_token_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
       [
         id,
         record.apiKeyId,
@@ -55,6 +58,8 @@ export async function recordUsage(record: UsageRecord): Promise<boolean> {
         record.provider,
         record.model || null,
         record.requestInput ?? null,
+        record.sessionKeyHash ?? null,
+        record.sessionSource ?? null,
         record.usage.inputTokens,
         record.usage.outputTokens,
         record.usage.reasoningTokens,

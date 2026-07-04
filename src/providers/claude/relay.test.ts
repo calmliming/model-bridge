@@ -96,4 +96,47 @@ describe('normalizeClaudeMessagesBody', () => {
       BILLING_BLOCK,
     ])
   })
+
+  it('normalizes fingerprinted datelines in system text', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: "Today\u2019s date is 2026/07/04.",
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+
+    expect(body.system).toEqual([
+      { type: 'text', text: IDENTITY },
+      { type: 'text', text: "Today's date is 2026-07-04.", cache_control: { type: 'ephemeral' } },
+    ])
+  })
+
+  it('normalizes datelines only inside system-reminder message blocks', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: [{ type: 'text', text: IDENTITY, cache_control: { type: 'ephemeral' } }],
+      messages: [
+        {
+          role: 'user',
+          content:
+            "User prose: Today\u2019s date is 2026/07/04.\n<system-reminder>Today\u02bcs date is 2026/07/04.</system-reminder>",
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: "<system-reminder>Today\u02b9s date is 2026/07/05.</system-reminder>",
+            },
+          ],
+        },
+      ],
+    })
+
+    expect((body.messages as Array<{ content: string }>)[0].content).toBe(
+      "User prose: Today\u2019s date is 2026/07/04.\n<system-reminder>Today's date is 2026-07-04.</system-reminder>",
+    )
+    expect((body.messages as Array<{ content: Array<{ text: string }> }>)[1].content[0].text).toBe(
+      "<system-reminder>Today's date is 2026-07-05.</system-reminder>",
+    )
+  })
 })

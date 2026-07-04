@@ -1,12 +1,18 @@
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { config } from '../config'
 import { requireApiKey } from '../middleware/apiKeyAuth'
 import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
 import { getQuotaAutopausePercent } from '../db/settings'
 import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
-import { bindStickyAccount, clearStickyAccount, computeSessionKey } from '../accounts/session'
+import {
+  bindStickyAccount,
+  clearStickyAccount,
+  computeSessionInfo,
+  getStickyAccountId,
+} from '../accounts/session'
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
 import { isAllowedModel } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
@@ -66,6 +72,7 @@ import { emptyUsage, type UsageData } from '../providers/types'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
+const STICKY_SLOT_POLL_MS = 250
 const RATE_LIMIT_MARKERS = [
   'rate_limit',
   'rate limit',
@@ -405,6 +412,8 @@ interface RelayMeta {
   provider: string
   model: string
   requestInput: string | null
+  sessionKeyHash: string | null
+  sessionSource: string | null
   startedAt: number
   multiplier: number
   billTo: 'subscription' | 'balance'
@@ -467,11 +476,19 @@ function headerResetAfter(headers: Headers, name: string): number | null {
   return seconds == null || seconds < 0 ? null : Date.now() + seconds * 1000
 }
 
-function isAnthropicWindowExceeded(headers: Headers, window: '5h' | '7d'): boolean {
+function isAnthropicWindowExceeded(headers: Headers, window: '5h' | '7d' | '7d_oi'): boolean {
   const prefix = `anthropic-ratelimit-unified-${window}-`
   if (headers.get(`${prefix}surpassed-threshold`)?.toLowerCase() === 'true') return true
   const utilization = headerNumber(headers, `${prefix}utilization`)
   return utilization != null && utilization >= 1
+}
+
+export function isAnthropicFableOnlyWindowExceeded(headers: Headers): boolean {
+  return (
+    isAnthropicWindowExceeded(headers, '7d_oi') &&
+    !isAnthropicWindowExceeded(headers, '5h') &&
+    !isAnthropicWindowExceeded(headers, '7d')
+  )
 }
 
 function pickSooner(values: Array<number | null>): number | null {
@@ -605,6 +622,9 @@ async function classifyUpstreamFailure(
 ): Promise<UpstreamFailure> {
   if (response.status === 429) {
     const text = await readErrorText(response)
+    if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers)) {
+      return { penalty: null, retryable: true }
+    }
     return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
   }
   if (response.status === 401) {
@@ -927,6 +947,24 @@ function bodyWithMappedModel(body: Record<string, unknown>, model: string): Reco
   return { ...body, model }
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function acquireSlotWithStickyWait(
+  slotKey: string,
+  limit: number,
+  waitMs: number,
+): Promise<boolean> {
+  if (await acquireSlot(slotKey, limit)) return true
+  if (waitMs <= 0) return false
+
+  const deadline = Date.now() + waitMs
+  while (Date.now() < deadline) {
+    await sleep(Math.min(STICKY_SLOT_POLL_MS, Math.max(1, deadline - Date.now())))
+    if (await acquireSlot(slotKey, limit)) return true
+  }
+  return false
+}
+
 /** Provider-generic relay loop: pick → call upstream → retry → stream/buffer. */
 async function runRelayLoop(
   request: FastifyRequest,
@@ -938,7 +976,8 @@ async function runRelayLoop(
   const apiKey = request.apiKey!
   const wantStream =
     provider.forceStream || body.stream === true || parsed.action === 'streamGenerateContent'
-  const sessionKey = computeSessionKey(provider.id, apiKey.id, request.headers, body)
+  const session = computeSessionInfo(provider.id, apiKey.id, request.headers, body)
+  const sessionKey = session?.key ?? null
   const tried: string[] = []
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -951,13 +990,21 @@ async function runRelayLoop(
       })
       return
     }
-    tried.push(account.id)
 
     const accountLimit = account.concurrencyLimit
     const accountSlotKey = accountConcurrencyKey(account.id)
-    if (accountLimit != null && !(await acquireSlot(accountSlotKey, accountLimit))) {
+    const stickyAccountId = sessionKey ? await getStickyAccountId(sessionKey) : null
+    const isStickySelection = stickyAccountId === account.id
+    const acquired =
+      accountLimit == null ||
+      (isStickySelection
+        ? await acquireSlotWithStickyWait(accountSlotKey, accountLimit, config.STICKY_SESSION_WAIT_MS)
+        : await acquireSlot(accountSlotKey, accountLimit))
+    if (!acquired) {
+      tried.push(account.id)
       continue
     }
+    tried.push(account.id)
 
     let token: string
     try {
@@ -1041,6 +1088,8 @@ async function runRelayLoop(
         provider: provider.id,
         model: parsed.model,
         requestInput: summarizeRequestInput(body),
+        sessionKeyHash: session?.hash ?? null,
+        sessionSource: session?.source ?? null,
         startedAt,
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
@@ -1104,6 +1153,8 @@ async function sendStreaming(
       status: 'error',
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
+      sessionKeyHash: meta.sessionKeyHash,
+      sessionSource: meta.sessionSource,
     })
     return
   }
@@ -1217,6 +1268,8 @@ async function sendStreaming(
     latencyMs: Date.now() - meta.startedAt,
     firstTokenMs,
     requestInput: meta.requestInput,
+    sessionKeyHash: meta.sessionKeyHash,
+    sessionSource: meta.sessionSource,
   })
 }
 
@@ -1329,6 +1382,8 @@ async function sendBuffered(
       status: upstream.ok ? 'success' : 'error',
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
+      sessionKeyHash: meta.sessionKeyHash,
+      sessionSource: meta.sessionSource,
     })
     if (!recorded && upstream.ok && meta.userId) {
       await reply.code(503).send({ error: 'usage billing failed; response withheld' })
@@ -1366,6 +1421,8 @@ async function sendBuffered(
     status: upstream.ok ? 'success' : 'error',
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
+    sessionKeyHash: meta.sessionKeyHash,
+    sessionSource: meta.sessionSource,
   })
   if (!recorded && upstream.ok && meta.userId) {
     await reply.code(503).send({ error: 'usage billing failed; response withheld' })

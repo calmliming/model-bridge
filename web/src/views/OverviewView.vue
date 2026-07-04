@@ -72,6 +72,8 @@ interface DashboardRecentLog {
   apiKeyName: string | null
   accountName: string | null
   requestInput: string | null
+  sessionKeyHash: string | null
+  sessionSource: string | null
 }
 
 interface DashboardOverview {
@@ -862,6 +864,16 @@ function openRequestInput(row: DashboardRecentLog) {
       width="min(760px, calc(100vw - 32px))"
       @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
     >
+      <div v-if="selectedLog?.sessionKeyHash" class="grid grid-cols-2 gap-2 mb-3 text-xs">
+        <div class="grid gap-1 rounded-lg border border-accent-900/10 bg-accent-50 px-3 py-2">
+          <span class="text-accent-900/50 font-[650]">会话 Hash</span>
+          <strong class="font-[780] text-accent-900">{{ selectedLog.sessionKeyHash }}</strong>
+        </div>
+        <div class="grid gap-1 rounded-lg border border-accent-900/10 bg-accent-50 px-3 py-2">
+          <span class="text-accent-900/50 font-[650]">会话来源</span>
+          <strong class="font-[780] text-accent-900">{{ selectedLog.sessionSource || '未知' }}</strong>
+        </div>
+      </div>
       <UiInput
         :value="selectedLog?.requestInput || '未记录输入内容'"
         type="textarea"

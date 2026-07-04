@@ -91,6 +91,8 @@ export interface DashboardRecentLog {
   apiKeyName: string | null
   accountName: string | null
   requestInput: string | null
+  sessionKeyHash: string | null
+  sessionSource: string | null
 }
 
 export interface DashboardOverview {
@@ -263,6 +265,8 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
     requestInput: (row.requestinput as string | null) ?? null,
+    sessionKeyHash: (row.sessionkeyhash as string | null) ?? null,
+    sessionSource: (row.sessionsource as string | null) ?? null,
   }
 }
 
@@ -546,6 +550,8 @@ export async function dashboardRecentLogs(
               usage_logs.base_cost AS baseCost,
               usage_logs.bill_to AS billTo,
               usage_logs.request_input AS requestInput,
+              usage_logs.session_key_hash AS sessionKeyHash,
+              usage_logs.session_source AS sessionSource,
               api_keys.name AS apiKeyName,
               accounts.name AS accountName
        FROM usage_logs

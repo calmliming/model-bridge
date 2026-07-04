@@ -47,6 +47,10 @@ JWT_SECRET=$(openssl rand -hex 32)
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin
 
+# Optional Redis backend for shared rate limits, concurrency gates, and sticky sessions.
+REDIS_URL=
+STICKY_SESSION_WAIT_MS=15000
+
 # Internal updater token used only between model-bridge and model-bridge-updater.
 UPDATE_TOKEN=$(openssl rand -hex 32)
 EOF
@@ -74,6 +78,21 @@ EOF
 
 # Internal updater token used only between model-bridge and model-bridge-updater.
 UPDATE_TOKEN=$(openssl rand -hex 32)
+EOF
+  fi
+  if ! grep -q '^REDIS_URL=' .env; then
+    echo "  → .env is missing optional Redis settings, appending defaults"
+    cat >> .env <<EOF
+
+# Optional Redis backend for shared rate limits, concurrency gates, and sticky sessions.
+REDIS_URL=
+STICKY_SESSION_WAIT_MS=15000
+EOF
+  elif ! grep -q '^STICKY_SESSION_WAIT_MS=' .env; then
+    echo "  → .env is missing STICKY_SESSION_WAIT_MS, appending default"
+    cat >> .env <<EOF
+
+STICKY_SESSION_WAIT_MS=15000
 EOF
   fi
 fi

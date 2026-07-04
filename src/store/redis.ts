@@ -18,6 +18,10 @@ let client: Redis | null | undefined
 /** 返回共享的 Redis 客户端；未配置 REDIS_URL 时返回 null。 */
 export function getRedis(): Redis | null {
   if (client !== undefined) return client
+  if (process.env.NODE_ENV === 'test') {
+    client = null
+    return null
+  }
   if (!config.REDIS_URL) {
     client = null
     return null

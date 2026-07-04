@@ -2,7 +2,7 @@ import { and, eq, inArray, lte, ne, notExists, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accounts } from '../db/schema'
 import { getStickyAccountId } from './session'
-import { accountQuotaFromMetadata } from './quota'
+import { accountQuotaFromMetadata, isAccountScopedQuotaWindow } from './quota'
 import { getOpenAiSchedulingStrategy } from '../db/settings'
 
 /** How long an account stays in cooldown after a failure, by kind. */
@@ -138,6 +138,7 @@ export function soonestReset(metadata: unknown, now: number): number {
   const quota = accountQuotaFromMetadata(metadata)
   if (!quota) return Number.POSITIVE_INFINITY
   const future = quota.windows
+    .filter(isAccountScopedQuotaWindow)
     .map((w) => w.resetAt)
     .filter((t): t is number => typeof t === 'number' && t > now)
   return future.length ? Math.min(...future) : Number.POSITIVE_INFINITY

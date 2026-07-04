@@ -187,6 +187,8 @@ export async function initDb(): Promise<void> {
       provider TEXT NOT NULL,
       model TEXT,
       request_input TEXT,
+      session_key_hash TEXT,
+      session_source TEXT,
       ts BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
       input_tokens BIGINT NOT NULL DEFAULT 0,
       output_tokens BIGINT NOT NULL DEFAULT 0,
@@ -235,6 +237,8 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS allowed_models JSONB;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS model_mappings JSONB;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS request_input TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS session_key_hash TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS session_source TEXT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS user_id TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS user_id TEXT;`)
@@ -246,6 +250,7 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS base_cost DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS bill_to TEXT NOT NULL DEFAULT 'balance';`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS reasoning_tokens BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key_hash ON usage_logs (session_key_hash);`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (
     id TEXT PRIMARY KEY,

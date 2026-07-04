@@ -41,12 +41,35 @@ describe('extractAccountQuota', () => {
     ])
   })
 
+  it('extracts Claude Fable 7d_oi as a model-scoped quota window', () => {
+    const quota = extractAccountQuota(
+      'claude',
+      new Headers({
+        'anthropic-ratelimit-unified-7d_oi-utilization': '1',
+        'anthropic-ratelimit-unified-7d_oi-reset': '1800200000',
+        'anthropic-ratelimit-unified-7d_oi-surpassed-threshold': 'true',
+      }),
+      1700000000000,
+    )
+
+    expect(quota?.windows).toEqual([
+      {
+        key: 'weekly_fable',
+        label: '7天 Fable',
+        usedPercent: 100,
+        resetAt: 1800200000000,
+        exceeded: true,
+      },
+    ])
+  })
+
   it('extracts Claude OAuth usage from the usage endpoint response', () => {
     const quota = extractClaudeOAuthUsageQuota(
       {
         five_hour: { utilization: 12.5, resets_at: '2026-05-25T12:00:00Z' },
         seven_day: { utilization: 45, resets_at: '2026-05-26T12:00:00Z' },
         seven_day_sonnet: { utilization: 67, resets_at: '2026-05-27T12:00:00Z' },
+        seven_day_overage_included: { utilization: 89, resets_at: '2026-05-28T12:00:00Z' },
       },
       1700000000000,
     )
@@ -55,6 +78,7 @@ describe('extractAccountQuota', () => {
       ['hourly', '5小时', 12.5, 1779710400000],
       ['weekly', '7天', 45, 1779796800000],
       ['weekly_sonnet', '7天 Sonnet', 67, 1779883200000],
+      ['weekly_fable', '7天 Fable', 89, 1779969600000],
     ])
   })
 
@@ -208,6 +232,21 @@ describe('quotaCooldownUntil', () => {
           windows: [
             { key: 'hourly', label: '5小时', usedPercent: 100, resetAt: null, exceeded: true },
             { key: 'weekly', label: '7天', usedPercent: 100, resetAt: 1699999999999, exceeded: true },
+          ],
+        },
+        1700000000000,
+      ),
+    ).toBeNull()
+  })
+
+  it('does not account-cooldown on Fable-only model-scoped windows', () => {
+    expect(
+      quotaCooldownUntil(
+        {
+          source: 'claude',
+          updatedAt: 1700000000000,
+          windows: [
+            { key: 'weekly_fable', label: '7天 Fable', usedPercent: 100, resetAt: 1700604800000, exceeded: true },
           ],
         },
         1700000000000,

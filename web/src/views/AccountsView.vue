@@ -9,7 +9,7 @@ import { formatTime } from '../utils'
 import ImportAccountsModal from '../components/ImportAccountsModal.vue'
 
 interface AccountQuotaWindow {
-  key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'primary' | 'secondary'
+  key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'weekly_fable' | 'primary' | 'secondary'
   label: string
   usedPercent: number | null
   resetAt: number | null
@@ -316,6 +316,7 @@ function quotaPercent(window: AccountQuotaWindow) {
 function quotaLabel(window: AccountQuotaWindow) {
   if (window.key === 'hourly' || window.key === 'secondary') return '5小时'
   if (window.key === 'weekly_sonnet') return '7天 Sonnet'
+  if (window.key === 'weekly_fable') return '7天 Fable'
   if (window.key === 'weekly' || window.key === 'primary') return '7天'
   if (['主', '主额', '主额度', 'primary'].includes(window.label)) return '7天'
   if (['次', '次额', '次额度', 'secondary'].includes(window.label)) return '5小时'

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   bindStickyAccount,
+  computeSessionInfo,
   clearStickyAccount,
   computeSessionKey,
   getStickyAccountId,
@@ -43,6 +44,30 @@ describe('computeSessionKey', () => {
   it('prefers an explicit session header', () => {
     const key = computeSessionKey('claude', 'k1', { 'x-session-id': 'conv-42' }, {})
     expect(key).toBe('claude:k1:h:conv-42')
+  })
+
+  it('accepts OpenAI-style conversation_id as an explicit session header', () => {
+    const info = computeSessionInfo('openai', 'k1', { conversation_id: 'conv-99' }, {})
+    expect(info).toMatchObject({
+      key: 'openai:k1:h:conv-99',
+      source: 'header',
+    })
+    expect(info?.hash).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('uses prompt_cache_key when no explicit header is present', () => {
+    const key = computeSessionKey('openai', 'k1', {}, {
+      prompt_cache_key: 'cache-session-1',
+      input: 'hello',
+    })
+    expect(key).toBe('openai:k1:p:cache-session-1')
+  })
+
+  it('keeps explicit headers ahead of prompt_cache_key', () => {
+    const key = computeSessionKey('openai', 'k1', { session_id: 'header-session' }, {
+      prompt_cache_key: 'body-session',
+    })
+    expect(key).toBe('openai:k1:h:header-session')
   })
 
   it('is stable across turns of the same Anthropic conversation', () => {
@@ -93,6 +118,45 @@ describe('computeSessionKey', () => {
     })
     expect(strKey).toMatch(/^openai:k1:f:/)
     expect(arrKey).toMatch(/^openai:k1:f:/)
+  })
+
+  it('uses OpenAI developer/system messages and the first user as a stable content anchor', () => {
+    const turn1 = computeSessionKey('openai', 'k1', {}, {
+      model: 'gpt-5',
+      messages: [
+        { role: 'developer', content: 'follow repo style' },
+        { role: 'user', content: 'fix scheduler' },
+      ],
+      tools: [{ type: 'function', function: { name: 'search' } }],
+    })
+    const turn2 = computeSessionKey('openai', 'k1', {}, {
+      model: 'gpt-5',
+      messages: [
+        { role: 'developer', content: 'follow repo style' },
+        { role: 'user', content: 'fix scheduler' },
+        { role: 'assistant', content: 'done' },
+        { role: 'user', content: 'continue' },
+      ],
+      tools: [{ function: { name: 'search' }, type: 'function' }],
+    })
+    expect(turn1).toMatch(/^openai:k1:f:/)
+    expect(turn1).toBe(turn2)
+  })
+
+  it('separates otherwise identical conversations when model or tools differ', () => {
+    const base = {
+      messages: [{ role: 'user', content: 'same task' }],
+      tools: [{ type: 'function', function: { name: 'search' } }],
+    }
+    const modelA = computeSessionKey('openai', 'k1', {}, { ...base, model: 'gpt-5' })
+    const modelB = computeSessionKey('openai', 'k1', {}, { ...base, model: 'gpt-5-mini' })
+    const toolsB = computeSessionKey('openai', 'k1', {}, {
+      ...base,
+      model: 'gpt-5',
+      tools: [{ type: 'function', function: { name: 'shell' } }],
+    })
+    expect(modelA).not.toBe(modelB)
+    expect(modelA).not.toBe(toolsB)
   })
 
   it('fingerprints Gemini contents / systemInstruction', () => {

@@ -207,6 +207,8 @@ export const usageLogs = pgTable('usage_logs', {
   provider: text('provider').notNull(),
   model: text('model'),
   requestInput: text('request_input'),
+  sessionKeyHash: text('session_key_hash'),
+  sessionSource: text('session_source'),
   ts: epochMs('ts'),
   inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
   outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),

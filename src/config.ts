@@ -83,6 +83,13 @@ const schema = z.object({
       return 'UTC'
     }
   }),
+  // When a sticky session is already bound to an account but that account's
+  // concurrency slot is full, wait briefly before falling back to another
+  // account. Set to 0 to keep the old immediate-fallback behavior.
+  STICKY_SESSION_WAIT_MS: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(0).max(120_000).default(15_000),
+  ),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers

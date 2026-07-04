@@ -1,4 +1,10 @@
-export type AccountQuotaWindowKey = 'hourly' | 'weekly' | 'weekly_sonnet' | 'primary' | 'secondary'
+export type AccountQuotaWindowKey =
+  | 'hourly'
+  | 'weekly'
+  | 'weekly_sonnet'
+  | 'weekly_fable'
+  | 'primary'
+  | 'secondary'
 
 export interface AccountQuotaWindow {
   key: AccountQuotaWindowKey
@@ -67,6 +73,7 @@ function parseClaudeQuota(headers: Headers, now: number): AccountQuotaSnapshot |
   const specs = [
     { key: 'hourly' as const, label: '5小时', prefix: 'anthropic-ratelimit-unified-5h-' },
     { key: 'weekly' as const, label: '7天', prefix: 'anthropic-ratelimit-unified-7d-' },
+    { key: 'weekly_fable' as const, label: '7天 Fable', prefix: 'anthropic-ratelimit-unified-7d_oi-' },
   ]
   const windows = specs.flatMap<AccountQuotaWindow>((spec) => {
     const utilization = headerNumber(headers, `${spec.prefix}utilization`)
@@ -119,7 +126,7 @@ interface ClaudeOAuthUsageWindow {
 function readClaudeOAuthWindow(
   body: Record<string, unknown>,
   field: string,
-  key: Extract<AccountQuotaWindowKey, 'hourly' | 'weekly' | 'weekly_sonnet'>,
+  key: Extract<AccountQuotaWindowKey, 'hourly' | 'weekly' | 'weekly_sonnet' | 'weekly_fable'>,
   label: string,
 ): AccountQuotaWindow[] {
   const raw = body[field]
@@ -150,6 +157,7 @@ export function extractClaudeOAuthUsageQuota(
     ...readClaudeOAuthWindow(row, 'five_hour', 'hourly', '5小时'),
     ...readClaudeOAuthWindow(row, 'seven_day', 'weekly', '7天'),
     ...readClaudeOAuthWindow(row, 'seven_day_sonnet', 'weekly_sonnet', '7天 Sonnet'),
+    ...readClaudeOAuthWindow(row, 'seven_day_overage_included', 'weekly_fable', '7天 Fable'),
   ]
   return windows.length ? { source: 'claude', updatedAt: now, windows } : null
 }
@@ -229,6 +237,15 @@ export function extractAccountQuota(
 }
 
 /**
+ * True when a quota window applies to the whole account. Fable's 7d_oi window
+ * is model-scoped, so it is useful for display but must not pause an account
+ * that can still serve non-Fable Claude models.
+ */
+export function isAccountScopedQuotaWindow(window: AccountQuotaWindow): boolean {
+  return window.key !== 'weekly_fable'
+}
+
+/**
  * Earliest future window reset that should pause the account, given a usage
  * threshold. A window pauses when the upstream already marks it `exceeded`, or
  * when its `usedPercent` has reached `thresholdPercent`. Returns null if none.
@@ -245,6 +262,7 @@ export function quotaPauseUntil(
   if (!quota) return null
   const threshold = Number.isFinite(thresholdPercent) ? thresholdPercent : 100
   const resetTimes = quota.windows
+    .filter(isAccountScopedQuotaWindow)
     .filter((window) => {
       if (window.resetAt == null || window.resetAt <= now) return false
       if (window.exceeded) return true
@@ -283,7 +301,14 @@ export function resolveAutopausePercent(metadata: unknown, globalPercent: number
 function isQuotaWindow(value: unknown): value is AccountQuotaWindow {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as Partial<AccountQuotaWindow>
-  const keys: AccountQuotaWindowKey[] = ['hourly', 'weekly', 'weekly_sonnet', 'primary', 'secondary']
+  const keys: AccountQuotaWindowKey[] = [
+    'hourly',
+    'weekly',
+    'weekly_sonnet',
+    'weekly_fable',
+    'primary',
+    'secondary',
+  ]
   return (
     typeof row.key === 'string' &&
     keys.includes(row.key as AccountQuotaWindowKey) &&

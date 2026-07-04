@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { newResponsesStreamState, noteResponsesTerminal, responsesStreamStatus } from './relay'
+import {
+  isAnthropicFableOnlyWindowExceeded,
+  newResponsesStreamState,
+  noteResponsesTerminal,
+  responsesStreamStatus,
+} from './relay'
 
 describe('responsesStreamStatus', () => {
   it('records response.completed as success', () => {
@@ -46,5 +51,31 @@ describe('responsesStreamStatus', () => {
     const state = newResponsesStreamState()
     noteResponsesTerminal({ type: 'response.completed', response: {} }, state)
     expect(responsesStreamStatus(false, true, state)).toBe('error')
+  })
+})
+
+describe('isAnthropicFableOnlyWindowExceeded', () => {
+  it('detects a model-scoped Fable 7d_oi limit without account-window exhaustion', () => {
+    expect(
+      isAnthropicFableOnlyWindowExceeded(
+        new Headers({
+          'anthropic-ratelimit-unified-7d_oi-utilization': '1',
+          'anthropic-ratelimit-unified-7d_oi-surpassed-threshold': 'true',
+          'anthropic-ratelimit-unified-5h-utilization': '0.2',
+          'anthropic-ratelimit-unified-7d-utilization': '0.4',
+        }),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not classify mixed account-window exhaustion as Fable-only', () => {
+    expect(
+      isAnthropicFableOnlyWindowExceeded(
+        new Headers({
+          'anthropic-ratelimit-unified-7d_oi-utilization': '1',
+          'anthropic-ratelimit-unified-5h-surpassed-threshold': 'true',
+        }),
+      ),
+    ).toBe(false)
   })
 })
