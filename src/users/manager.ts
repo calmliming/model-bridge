@@ -368,14 +368,35 @@ export async function listUserUsage(
   userId: string,
   page = 1,
   pageSize = 20,
+  opts?: { startDate?: number; endDate?: number },
 ): Promise<{ page: number; pageSize: number; total: number; logs: UserUsageLog[] }> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
   const safePageSize = Math.max(1, Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 20)))
   const offset = (safePage - 1) * safePageSize
+
+  const startDate = opts?.startDate != null && Number.isFinite(opts.startDate) ? opts.startDate : null
+  const endDate = opts?.endDate != null && Number.isFinite(opts.endDate) ? opts.endDate : null
+
+  const dateConditions: string[] = []
+  const dateValues: unknown[] = []
+  if (startDate != null) {
+    dateValues.push(startDate)
+    dateConditions.push(`l.ts >= $${dateValues.length}`)
+  }
+  if (endDate != null) {
+    dateValues.push(endDate)
+    dateConditions.push(`l.ts < $${dateValues.length}`)
+  }
+  const dateClause = dateConditions.length > 0 ? `AND ${dateConditions.join(' AND ')}` : ''
+
+  const baseValues: unknown[] = [userId, ...dateValues]
+  const countValues = [...baseValues]
+  const dataValues = [...baseValues, safePageSize, offset]
+
   const [total, logs] = await Promise.all([
     pool.query<Record<string, unknown>>(
-      'SELECT COUNT(*) AS total FROM usage_logs WHERE user_id = $1',
-      [userId],
+      `SELECT COUNT(*) AS total FROM usage_logs l WHERE l.user_id = $1 ${dateClause}`,
+      countValues,
     ),
     pool.query<Record<string, unknown>>(
       `SELECT l.id, l.ts, l.provider, l.model, l.status, l.latency_ms,
@@ -384,10 +405,10 @@ export async function listUserUsage(
               k.name AS api_key_name
        FROM usage_logs l
        LEFT JOIN api_keys k ON k.id = l.api_key_id
-       WHERE l.user_id = $1
+       WHERE l.user_id = $1 ${dateClause}
        ORDER BY l.ts DESC, l.id DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, safePageSize, offset],
+       LIMIT $${dataValues.length - 1} OFFSET $${dataValues.length}`,
+      dataValues,
     ),
   ])
   return {

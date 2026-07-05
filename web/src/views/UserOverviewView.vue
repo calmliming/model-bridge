@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { UiTag } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
@@ -96,6 +96,47 @@ const usageLogs = ref<UsageLog[]>([])
 const paymentOrders = ref<PaymentOrder[]>([])
 const summary = ref<UsageSummary | null>(null)
 
+// Date filter for usage logs
+const dateFrom = ref<string>('')
+const dateEnd = ref<string>('')
+
+const datePresets = [
+  { label: '全部', value: null as null | [string, string] },
+  { label: '近7天', value: [daysAgoStr(6), todayStr()] as [string, string] },
+  { label: '近30天', value: [daysAgoStr(29), todayStr()] as [string, string] },
+]
+
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function daysAgoStr(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function pad2(v: number) { return String(v).padStart(2, '0') }
+
+function toStartOfDayMs(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00.000`).getTime()
+}
+
+function toEndOfDayMs(dateStr: string): number {
+  return new Date(`${dateStr}T23:59:59.999`).getTime()
+}
+
+function applyPreset(preset: (typeof datePresets)[number]) {
+  if (preset.value) {
+    dateFrom.value = preset.value[0]
+    dateEnd.value = preset.value[1]
+  } else {
+    dateFrom.value = ''
+    dateEnd.value = ''
+  }
+}
+
 const emptySummary: UsageSummary = {
   requests24h: 0,
   tokens24h: 0,
@@ -169,12 +210,23 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
 
+async function loadUsage() {
+  try {
+    const params: Record<string, unknown> = { pageSize: 8 }
+    if (dateFrom.value) params.startDate = toStartOfDayMs(dateFrom.value)
+    if (dateEnd.value) params.endDate = toEndOfDayMs(dateEnd.value)
+    const usageRes = await api.get('/users/usage', { params })
+    usageLogs.value = usageRes.data.logs
+  } catch (e) {
+    message.error(errMsg(e))
+  }
+}
+
 async function load() {
   loading.value = true
   try {
-    const [walletRes, usageRes, ordersRes, providersRes, subsRes, summaryRes] = await Promise.all([
+    const [walletRes, ordersRes, providersRes, subsRes, summaryRes] = await Promise.all([
       api.get('/users/wallet'),
-      api.get('/users/usage', { params: { pageSize: 8 } }),
       api.get('/users/payment-orders', { params: { pageSize: 8 } }),
       api.get('/users/payment-providers'),
       api.get('/users/subscriptions'),
@@ -182,7 +234,6 @@ async function load() {
     ])
     user.value = walletRes.data.user
     transactions.value = walletRes.data.transactions
-    usageLogs.value = usageRes.data.logs
     paymentOrders.value = ordersRes.data.orders
     availableProviders.value = providersRes.data.providers
     subscriptions.value = subsRes.data.subscriptions
@@ -190,12 +241,17 @@ async function load() {
     if (availableProviders.value.length > 0) {
       selectedProvider.value = availableProviders.value[0]!
     }
+    await loadUsage()
   } catch (e) {
     message.error(errMsg(e))
   } finally {
     loading.value = false
   }
 }
+
+watch([dateFrom, dateEnd], () => {
+  loadUsage()
+})
 
 async function createRechargeOrder() {
   if (!Number.isFinite(rechargeAmount.value) || rechargeAmount.value <= 0) {
@@ -364,6 +420,23 @@ onMounted(load)
         </UiGi>
         <UiGi span="2 m:1">
           <UiCard title="近期用量" :bordered="false">
+            <template #header-extra>
+              <div class="usage-filter">
+                <button
+                  v-for="preset in datePresets"
+                  :key="preset.label"
+                  type="button"
+                  class="preset-btn"
+                  :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
+                  @click="applyPreset(preset)"
+                >
+                  {{ preset.label }}
+                </button>
+                <input type="date" v-model="dateFrom" class="date-input" title="开始日期" />
+                <span class="date-sep">—</span>
+                <input type="date" v-model="dateEnd" class="date-input" title="结束日期" />
+              </div>
+            </template>
             <UiDataTable :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
           </UiCard>
         </UiGi>
@@ -462,6 +535,56 @@ onMounted(load)
 </template>
 
 <style scoped>
+.usage-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--n-border-color, #e5e7eb);
+  border-radius: 4px;
+  background: var(--n-color, #fff);
+  color: var(--n-text-color-2, #6b7280);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.preset-btn:hover {
+  border-color: var(--n-primary-color, #6366f1);
+  color: var(--n-primary-color, #6366f1);
+}
+
+.preset-btn.active {
+  background: var(--n-primary-color, #6366f1);
+  border-color: var(--n-primary-color, #6366f1);
+  color: #fff;
+}
+
+.date-input {
+  padding: 2px 6px;
+  border: 1px solid var(--n-border-color, #e5e7eb);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--n-text-color, #374151);
+  background: var(--n-color, #fff);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.date-input:focus {
+  border-color: var(--n-primary-color, #6366f1);
+}
+
+.date-sep {
+  color: var(--n-text-color-3, #9ca3af);
+  font-size: 11px;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -70,6 +70,11 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 })
 
+const usageQuerySchema = paginationQuerySchema.extend({
+  startDate: z.coerce.number().int().positive().optional(),
+  endDate: z.coerce.number().int().positive().optional(),
+})
+
 const createPaymentOrderSchema = z.object({
   amount: z.number().refine((v) => Number.isFinite(v) && v > 0, {
     message: 'amount must be positive',
@@ -230,15 +235,18 @@ export function registerUserRoutes(app: FastifyInstance): void {
     },
   )
 
-  app.get<{ Querystring: { page?: string; pageSize?: string } }>(
+  app.get<{ Querystring: { page?: string; pageSize?: string; startDate?: string; endDate?: string } }>(
     '/api/users/usage',
     { preHandler: requireUser },
     async (request, reply) => {
-      const query = paginationQuerySchema.safeParse(request.query)
+      const query = usageQuerySchema.safeParse(request.query)
       if (!query.success) {
-        return reply.code(400).send({ error: 'invalid pagination query' })
+        return reply.code(400).send({ error: 'invalid query' })
       }
-      return listUserUsage(request.currentUser!.id, query.data.page, query.data.pageSize)
+      return listUserUsage(request.currentUser!.id, query.data.page, query.data.pageSize, {
+        startDate: query.data.startDate,
+        endDate: query.data.endDate,
+      })
     },
   )
 

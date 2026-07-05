@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { h, onMounted, ref, watch } from 'vue'
 import { UiTag, UiTooltip } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
@@ -39,6 +39,56 @@ const walletLoading = ref(true)
 const usageRows = ref<UsageLog[]>([])
 const walletRows = ref<WalletTransaction[]>([])
 
+// Date filter — stored as "YYYY-MM-DD" strings for the native date inputs,
+// converted to epoch-ms range when calling the API.
+const dateFrom = ref<string>('')
+const dateEnd = ref<string>('')
+
+const datePresets = [
+  { label: '全部', value: null as null | [string, string] },
+  { label: '今天', value: [todayStr(), todayStr()] as [string, string] },
+  { label: '近7天', value: [daysAgoStr(6), todayStr()] as [string, string] },
+  { label: '近30天', value: [daysAgoStr(29), todayStr()] as [string, string] },
+]
+
+function todayStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function daysAgoStr(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+function pad2(v: number) {
+  return String(v).padStart(2, '0')
+}
+
+function toEndOfDayMs(dateStr: string): number {
+  return new Date(`${dateStr}T23:59:59.999`).getTime()
+}
+
+function toStartOfDayMs(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00.000`).getTime()
+}
+
+function applyPreset(preset: (typeof datePresets)[number]) {
+  if (preset.value) {
+    dateFrom.value = preset.value[0]
+    dateEnd.value = preset.value[1]
+  } else {
+    dateFrom.value = ''
+    dateEnd.value = ''
+  }
+}
+
+// Reload when date range changes
+watch([dateFrom, dateEnd], () => {
+  loadUsage()
+})
+
 function formatUsd(value: number): string {
   return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
@@ -72,22 +122,35 @@ function totalTokens(row: UsageLog) {
   )
 }
 
-async function load() {
+async function loadUsage() {
   usageLoading.value = true
-  walletLoading.value = true
   try {
-    const [usageRes, walletRes] = await Promise.all([
-      api.get('/users/usage', { params: { pageSize: 100 } }),
-      api.get('/users/wallet/transactions', { params: { pageSize: 100 } }),
-    ])
+    const params: Record<string, unknown> = { pageSize: 100 }
+    if (dateFrom.value) params.startDate = toStartOfDayMs(dateFrom.value)
+    if (dateEnd.value) params.endDate = toEndOfDayMs(dateEnd.value)
+    const usageRes = await api.get('/users/usage', { params })
     usageRows.value = usageRes.data.logs
-    walletRows.value = walletRes.data.transactions
   } catch (e) {
     message.error(errMsg(e))
   } finally {
     usageLoading.value = false
+  }
+}
+
+async function load() {
+  usageLoading.value = true
+  walletLoading.value = true
+  try {
+    const [walletRes] = await Promise.all([
+      api.get('/users/wallet/transactions', { params: { pageSize: 100 } }),
+    ])
+    walletRows.value = walletRes.data.transactions
+  } catch (e) {
+    message.error(errMsg(e))
+  } finally {
     walletLoading.value = false
   }
+  await loadUsage()
 }
 
 const usageColumns: TableColumn<UsageLog>[] = [
@@ -115,6 +178,25 @@ onMounted(load)
 <template>
   <UiTabs type="line" animated>
     <UiTabPane name="usage" tab="用量">
+      <div class="filter-bar">
+        <div class="filter-presets">
+          <button
+            v-for="preset in datePresets"
+            :key="preset.label"
+            type="button"
+            class="preset-btn"
+            :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
+            @click="applyPreset(preset)"
+          >
+            {{ preset.label }}
+          </button>
+        </div>
+        <div class="filter-dates">
+          <input type="date" v-model="dateFrom" class="date-input" title="开始日期" />
+          <span class="date-sep">—</span>
+          <input type="date" v-model="dateEnd" class="date-input" title="结束日期" />
+        </div>
+      </div>
       <UiCard class="table-card" :bordered="false">
         <UiDataTable :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="940" />
       </UiCard>
@@ -128,6 +210,69 @@ onMounted(load)
 </template>
 
 <style scoped>
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.filter-presets {
+  display: flex;
+  gap: 4px;
+}
+
+.preset-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--n-border-color, #e5e7eb);
+  border-radius: 6px;
+  background: var(--n-color, #fff);
+  color: var(--n-text-color-2, #6b7280);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.preset-btn:hover {
+  border-color: var(--n-primary-color, #6366f1);
+  color: var(--n-primary-color, #6366f1);
+}
+
+.preset-btn.active {
+  background: var(--n-primary-color, #6366f1);
+  border-color: var(--n-primary-color, #6366f1);
+  color: #fff;
+}
+
+.filter-dates {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-input {
+  padding: 4px 10px;
+  border: 1px solid var(--n-border-color, #e5e7eb);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--n-text-color, #374151);
+  background: var(--n-color, #fff);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.date-input:focus {
+  border-color: var(--n-primary-color, #6366f1);
+}
+
+.date-sep {
+  color: var(--n-text-color-3, #9ca3af);
+  font-size: 13px;
+}
+
 :deep(.token-total) {
   cursor: help;
   text-decoration: underline dotted;

@@ -314,6 +314,11 @@ const paginationQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
+const usageQuerySchema = paginationQuerySchema.extend({
+  startDate: z.coerce.number().int().positive().optional(),
+  endDate: z.coerce.number().int().positive().optional(),
+})
+
 const optionalTrimmedQuery = (max: number) =>
   z.preprocess(
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -580,16 +585,19 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     },
   )
 
-  app.get<{ Params: { id: string }; Querystring: { page?: string; pageSize?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { page?: string; pageSize?: string; startDate?: string; endDate?: string } }>(
     '/api/admin/users/:id/usage',
     { preHandler: requireAdmin },
     async (request, reply) => {
       const params = idParamSchema.safeParse(request.params)
-      const query = paginationQuerySchema.safeParse(request.query)
+      const query = usageQuerySchema.safeParse(request.query)
       if (!params.success || !query.success) {
         return reply.code(400).send({ error: 'invalid request' })
       }
-      return listUserUsage(params.data.id, query.data.page, query.data.pageSize)
+      return listUserUsage(params.data.id, query.data.page, query.data.pageSize, {
+        startDate: query.data.startDate,
+        endDate: query.data.endDate,
+      })
     },
   )
 
