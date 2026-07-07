@@ -73,6 +73,11 @@ const PROVIDER_COLOR: Record<string, string> = {
   claude: '#d97757',
   openai: '#10a37f',
   gemini: '#4285f4',
+  deepseek: '#6366f1',
+  xiaomi: '#ff6900',
+  zhipu: '#7c3aed',
+  qwen: '#06b6d4',
+  sub2api: '#059669',
 }
 
 const MODEL_COLOR = ['#2563eb', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4']

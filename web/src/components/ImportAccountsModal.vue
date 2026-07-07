@@ -161,6 +161,7 @@ function resetAndClose() {
       "name": "Claude Account 1",
       "accessToken": "sk-ant-xxx",
       "refreshToken": "optional",
+      "baseUrl": "https://sub2api.example.com",
       "expiresAt": 1234567890000,
       "weight": 10,
       "concurrencyLimit": 2,
@@ -194,10 +195,11 @@ function resetAndClose() {
 
           <p class="import-note">
             <strong>标准格式字段：</strong><br>
-            • provider: claude | openai | gemini | deepseek | xiaomi | zhipu | qwen<br>
+            • provider: claude | openai | gemini | deepseek | xiaomi | zhipu | qwen | sub2api<br>
             • name: 账号名称（必填）<br>
             • accessToken: 访问令牌（必填）<br>
             • refreshToken: 刷新令牌（可选）<br>
+            • baseUrl: Sub2API 部署地址（provider=sub2api 时必填）<br>
             • expiresAt: 过期时间戳，毫秒（可选）<br>
             • weight: 优先级 1-100（可选，默认 1）<br>
             • concurrencyLimit: 账号级并发上限 1-1000（可选，留空不限）<br>

@@ -151,6 +151,18 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
   return 'max'
 }
 
+function sub2apiPrice(model: string): TierPrice {
+  const m = model.toLowerCase()
+  if (m.startsWith('claude-')) return claudePrice(model)
+  if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return openaiPrice(model)
+  if (m.startsWith('gemini-')) return geminiPrice(model)
+  if (m.startsWith('deepseek-')) return DEEPSEEK_TIERS[deepseekTier(model)]
+  if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
+  if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
+  if (m.startsWith('qwen')) return QWEN_TIERS[qwenTier(model)]
+  return CLAUDE_SONNET
+}
+
 /** Returns the built-in fallback price for a (provider, model) pair. */
 function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'claude') return claudePrice(model)
@@ -160,6 +172,7 @@ function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
+  if (provider === 'sub2api') return sub2apiPrice(model)
   return null
 }
 

@@ -26,6 +26,8 @@ export interface CreateAccountInput {
   provider: string
   name: string
   tokens: TokenSet
+  /** Optional upstream base URL for relay-style API-key providers. */
+  proxyUrl?: string | null
   /** Provider-specific data needed at relay time (e.g. Gemini's project id). */
   metadata?: Record<string, unknown> | null
   /** Optional groups this account joins; empty = default pool. */
@@ -104,6 +106,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
+      proxyUrl: input.proxyUrl?.trim().replace(/\/+$/, '') || null,
       concurrencyLimit: normalizeConcurrencyLimit(input.concurrencyLimit),
       notes: input.notes?.trim() || null,
       metadata,
@@ -125,6 +128,7 @@ export async function listAccounts() {
       status: accounts.status,
       tokenExpiresAt: accounts.tokenExpiresAt,
       cooldownUntil: accounts.cooldownUntil,
+      proxyUrl: accounts.proxyUrl,
       weight: accounts.weight,
       concurrencyLimit: accounts.concurrencyLimit,
       lastUsedAt: accounts.lastUsedAt,

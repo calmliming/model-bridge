@@ -148,6 +148,7 @@ const providerOptions = [
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
   { label: 'Tongyi Qwen', value: 'qwen' },
+  { label: 'Sub2API', value: 'sub2api' },
 ]
 
 const providerLabel: Record<string, string> = {
@@ -158,6 +159,7 @@ const providerLabel: Record<string, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  sub2api: 'Sub2API',
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -168,6 +170,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  sub2api: 'success',
 }
 
 const commonModelOptions = [
@@ -186,6 +189,7 @@ const commonModelOptions = [
   'qwen*',
   'qwen3-coder-plus',
   'qwen-plus',
+  'sub2api-*',
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [

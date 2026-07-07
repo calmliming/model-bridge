@@ -38,9 +38,10 @@ const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
+  sub2api: ['claude-sonnet-5', 'gpt-5.4', 'gemini-2.5-pro', 'deepseek-v4-pro', 'qwen3-coder-plus'],
 }
 
-const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']
+const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
@@ -128,7 +129,7 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   const ids: string[] = []
   for (const provider of providers) {
     for (const model of DEFAULT_MODELS[provider]) {
-      if (isAllowedModel(model, key.allowedModels)) ids.push(model)
+      if (isAllowedModel(model, key.allowedModels) && !ids.includes(model)) ids.push(model)
     }
   }
   includeMappedModels(ids, key, providers, requested)

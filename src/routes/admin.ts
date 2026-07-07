@@ -86,6 +86,15 @@ const loginSchema = z.object({
   turnstileToken: z.string().optional(),
 })
 
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api'])
+
+const optionalBaseUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((value) => value.startsWith('https://') || value.startsWith('http://'), 'baseUrl must be http(s)')
+  .optional()
+
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(6),
@@ -116,7 +125,7 @@ const createKeySchema = z.object({
   userId: z.string().trim().min(1).nullable().optional(),
   name: z.string().min(1),
   ownerLabel: z.string().optional(),
-  allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen'])).optional(),
+  allowedProviders: z.array(providerSchema).optional(),
   allowedModels: z.array(z.string().trim().min(1)).optional(),
   modelMappings: z.record(z.string()).optional(),
   accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -132,7 +141,7 @@ const updateKeySchema = z
     enabled: z.boolean().optional(),
     name: z.string().min(1).optional(),
     ownerLabel: z.string().nullable().optional(),
-    allowedProviders: z.array(z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen'])).nullable().optional(),
+    allowedProviders: z.array(providerSchema).nullable().optional(),
     allowedModels: z.array(z.string().trim().min(1)).nullable().optional(),
     modelMappings: z.record(z.string()).nullable().optional(),
     accountGroupId: z.string().trim().min(1).nullable().optional(),
@@ -266,10 +275,11 @@ const assignSubscriptionSchema = z.object({
 })
 
 const importTokenSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']),
+  provider: providerSchema,
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
+  baseUrl: optionalBaseUrlSchema,
   expiresAt: z.number().int().positive().optional(),
   concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
   notes: z.string().trim().max(1000).nullable().optional(),
@@ -277,10 +287,11 @@ const importTokenSchema = z.object({
 
 // Standard format: model-bridge native format
 const batchImportAccountSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']),
+  provider: providerSchema,
   name: z.string().min(1),
   accessToken: z.string().min(1),
   refreshToken: z.string().optional(),
+  baseUrl: optionalBaseUrlSchema,
   expiresAt: z.number().int().positive().optional(),
   weight: z.number().int().min(1).max(100).optional(),
   concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
@@ -1078,10 +1089,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      const { provider, name, accessToken, refreshToken, expiresAt, concurrencyLimit, notes } = body.data
+      const { provider, name, accessToken, refreshToken, baseUrl, expiresAt, concurrencyLimit, notes } = body.data
+      if (provider === 'sub2api' && !baseUrl) {
+        return reply.code(400).send({ error: 'baseUrl is required for sub2api accounts' })
+      }
       const created = await createAccount({
         provider,
         name,
+        proxyUrl: baseUrl ?? null,
         tokens: {
           accessToken,
           refreshToken: refreshToken ?? '',
@@ -1122,6 +1137,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         let refreshToken: string
         let expiresAt: number
         let weight: number | undefined
+        let baseUrl: string | undefined
         let concurrencyLimit: number | null | undefined
         let groupIds: string[]
         let notes: string | null | undefined
@@ -1133,6 +1149,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           accessToken = raw.access_token
           refreshToken = raw.refresh_token ?? ''
           weight = raw.weight
+          baseUrl = undefined
           concurrencyLimit = raw.concurrencyLimit
           groupIds = raw.groupIds ?? []
           notes = raw.notes
@@ -1150,6 +1167,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
             name: string
             accessToken: string
             refreshToken?: string
+            baseUrl?: string
             expiresAt?: number
             weight?: number
             concurrencyLimit?: number | null
@@ -1160,6 +1178,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           name = std.name
           accessToken = std.accessToken
           refreshToken = std.refreshToken ?? ''
+          baseUrl = std.baseUrl
           expiresAt = std.expiresAt ?? 0
           weight = std.weight
           concurrencyLimit = std.concurrencyLimit
@@ -1168,9 +1187,13 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         }
 
         try {
+          if (provider === 'sub2api' && !baseUrl) {
+            throw new Error('baseUrl is required for sub2api accounts')
+          }
           const created = await createAccount({
             provider,
             name,
+            proxyUrl: baseUrl ?? null,
             tokens: { accessToken, refreshToken, expiresAt },
             metadata: null,
             groupIds,

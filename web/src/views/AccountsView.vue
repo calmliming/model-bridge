@@ -37,6 +37,7 @@ interface Account {
   status: string
   tokenExpiresAt: number | null
   cooldownUntil: number | null
+  proxyUrl: string | null
   weight: number
   concurrencyLimit: number | null
   currentConcurrency: number
@@ -69,7 +70,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'sub2api'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -157,6 +158,7 @@ const showImportToken = ref(false)
 const importAccessToken = ref('')
 const importRefreshToken = ref('')
 const apiKeyInput = ref('')
+const baseUrlInput = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
 
@@ -188,8 +190,9 @@ const providerLabel: Record<Provider, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  sub2api: 'Sub2API',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
@@ -198,6 +201,7 @@ const providerTagType: Record<Provider, TagType> = {
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  sub2api: 'success',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
@@ -207,11 +211,12 @@ const authorizeHost: Record<Provider, string> = {
   xiaomi: 'platform.xiaomimimo.com',
   zhipu: 'open.bigmodel.cn',
   qwen: 'bailian.console.aliyun.com',
+  sub2api: 'sub2api',
 }
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
@@ -220,6 +225,7 @@ const apiKeyConsoleHint: Record<string, string> = {
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
   zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
   qwen: '在 bailian.console.aliyun.com 阿里云百炼控制台「API-KEY」创建后粘贴到上方。',
+  sub2api: '填写 Sub2API 部署地址和它生成的 API Key，例如 https://sub2api.example.com。',
 }
 
 const statusMeta: Record<string, { label: string; type: TagType }> = {
@@ -758,6 +764,7 @@ function openAdd() {
   importAccessToken.value = ''
   importRefreshToken.value = ''
   apiKeyInput.value = ''
+  baseUrlInput.value = ''
   showAdd.value = true
 }
 
@@ -952,13 +959,19 @@ async function finishApiKeyImport() {
     message.warning(`请填写 ${label} API Key`)
     return
   }
+  if (provider === 'sub2api' && !baseUrlInput.value.trim()) {
+    message.warning('请填写 Sub2API Base URL')
+    return
+  }
   busy.value = true
   try {
-    await api.post('/admin/accounts/import/token', {
+    const payload: Record<string, unknown> = {
       provider,
       name: form.value.name.trim(),
       accessToken: apiKeyInput.value.trim(),
-    })
+    }
+    if (provider === 'sub2api') payload.baseUrl = baseUrlInput.value.trim()
+    await api.post('/admin/accounts/import/token', payload)
     message.success(`${label} 账户已添加`)
     showAdd.value = false
     await load()
@@ -1554,6 +1567,9 @@ onBeforeUnmount(() => {
               <UiRadioButton value="gemini">Gemini</UiRadioButton>
               <UiRadioButton value="deepseek">DeepSeek</UiRadioButton>
               <UiRadioButton value="xiaomi">Xiaomi MiMo</UiRadioButton>
+              <UiRadioButton value="zhipu">Zhipu GLM</UiRadioButton>
+              <UiRadioButton value="qwen">Tongyi Qwen</UiRadioButton>
+              <UiRadioButton value="sub2api">Sub2API</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>
           <UiFormItem label="账户名称">
@@ -1568,6 +1584,12 @@ onBeforeUnmount(() => {
               placeholder="sk-..."
               type="password"
               show-password-on="click"
+            />
+          </UiFormItem>
+          <UiFormItem v-if="form.provider === 'sub2api'" label="Base URL">
+            <UiInput
+              v-model:value="baseUrlInput"
+              placeholder="https://sub2api.example.com"
             />
           </UiFormItem>
         </UiForm>

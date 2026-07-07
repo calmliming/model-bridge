@@ -62,6 +62,11 @@ import * as qwenResponsesUsage from '../providers/qwen/responses-usage'
 import { createQwenResponsesStreamTransform } from '../providers/qwen/stream'
 import { mapModel as mapQwenResponsesModel } from '../providers/qwen/converter'
 import {
+  relaySub2ApiChatCompletions,
+  relaySub2ApiMessages,
+  relaySub2ApiResponses,
+} from '../providers/sub2api/relay'
+import {
   isProviderAllowed,
   listGeminiModels,
   listOpenAIStyleModels,
@@ -95,7 +100,7 @@ interface ParsedRoute {
 interface UpstreamContext {
   model: string
   action: string
-  account: { id: string; metadata: unknown }
+  account: { id: string; metadata: unknown; proxyUrl: string | null }
 }
 
 interface StreamTransform {
@@ -403,6 +408,40 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: qwenResponsesUsage.parseJsonUsage,
     createStreamTransform: createQwenResponsesStreamTransform,
   },
+  sub2api: {
+    id: 'sub2api',
+    forceStream: false,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, ctx) => relaySub2ApiMessages(token, ctx.account.proxyUrl, body),
+    createStreamParser: claudeUsage.createStreamParser,
+    parseJsonUsage: claudeUsage.parseJsonUsage,
+  },
+  'sub2api-chat': {
+    id: 'sub2api',
+    forceStream: false,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, ctx) => relaySub2ApiChatCompletions(token, ctx.account.proxyUrl, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  'sub2api-responses': {
+    id: 'sub2api',
+    forceStream: true,
+    responsesProtocol: true,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, ctx) => relaySub2ApiResponses(token, ctx.account.proxyUrl, body),
+    createStreamParser: openaiUsage.createStreamParser,
+    parseJsonUsage: openaiUsage.parseJsonUsage,
+  },
 }
 
 interface RelayMeta {
@@ -689,6 +728,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['qwen-chat']!)
   const qwenResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['qwen-responses']!)
+  const sub2apiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.sub2api!)
+  const sub2apiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['sub2api-chat']!)
+  const sub2apiResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['sub2api-responses']!)
 
   app.post('/api/claude/v1/messages', { preHandler: requireApiKey }, claudeHandler)
   // Claude via the OpenAI Chat Completions surface: OpenAI clients can point
@@ -739,6 +784,11 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/qwen
   app.post('/api/qwen/v1/responses', { preHandler: requireApiKey }, qwenResponsesHandler)
+  // Sub2API: relay-to-relay upstream. Configure each account with the target
+  // Sub2API Base URL and API Key; requests are forwarded without model rewrites.
+  app.post('/api/sub2api/v1/messages', { preHandler: requireApiKey }, sub2apiHandler)
+  app.post('/api/sub2api/v1/chat/completions', { preHandler: requireApiKey }, sub2apiChatHandler)
+  app.post('/api/sub2api/v1/responses', { preHandler: requireApiKey }, sub2apiResponsesHandler)
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
@@ -759,6 +809,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   )
   app.get('/api/qwen/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'qwen'),
+  )
+  app.get('/api/sub2api/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'sub2api'),
   )
   app.get('/api/gemini/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
   app.get('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
@@ -1031,7 +1084,7 @@ async function runRelayLoop(
       upstream = await provider.callUpstream(token, body, {
         model: parsed.model,
         action: parsed.action,
-        account: { id: account.id, metadata: account.metadata },
+        account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
       })
     } catch (err) {
       request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)

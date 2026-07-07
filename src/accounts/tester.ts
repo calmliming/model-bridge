@@ -15,6 +15,7 @@ import {
 import { getQuotaAutopausePercent } from '../db/settings'
 import { markAccountUsed, penalizeAccount } from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
+import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
 
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -31,6 +32,7 @@ interface AccountRow {
   name: string
   oauthAccessToken: string | null
   tokenExpiresAt: number | null
+  proxyUrl: string | null
 }
 
 export interface AccountTestResult {
@@ -277,6 +279,23 @@ async function testQwen(apiKey: string): Promise<ProviderTestOutcome> {
   return { message: 'Qwen 通义千问 Anthropic 端点可访问' }
 }
 
+function sub2ApiEndpoint(baseUrl: string | null): string {
+  return `${normalizeSub2ApiBaseUrl(baseUrl)}/v1/models`
+}
+
+async function testSub2Api(apiKey: string, baseUrl: string | null): Promise<ProviderTestOutcome> {
+  const response = await fetchWithTimeout(sub2ApiEndpoint(baseUrl), {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'x-api-key': apiKey,
+      accept: 'application/json',
+    },
+  })
+  await assertOk(response)
+  return { message: 'Sub2API /v1/models 端点可访问' }
+}
+
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
@@ -286,6 +305,7 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
   else if (account.provider === 'xiaomi') result = await testXiaomi(accessToken)
   else if (account.provider === 'zhipu') result = await testZhipu(accessToken)
   else if (account.provider === 'qwen') result = await testQwen(accessToken)
+  else if (account.provider === 'sub2api') result = await testSub2Api(accessToken, account.proxyUrl)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 
   if (result.metadata) await updateAccountMetadata(account.id, result.metadata)

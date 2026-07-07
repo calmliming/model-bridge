@@ -4,7 +4,7 @@ import * as geminiOauth from './gemini/oauth'
 import type { TokenSet } from './types'
 
 function notSupported(method: string): never {
-  throw new Error(`DeepSeek does not use OAuth (called: ${method})`)
+  throw new Error(`API-key providers do not use OAuth (called: ${method})`)
 }
 
 /** OAuth surface every provider exposes for account onboarding. */
@@ -104,6 +104,18 @@ const registry: Record<string, OAuthProvider> = {
     async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
     async refreshToken(token: string): Promise<TokenSet> {
       // API keys don't expire — return unchanged.
+      return { accessToken: token, refreshToken: '', expiresAt: 0 }
+    },
+  },
+  sub2api: {
+    id: 'sub2api',
+    // Sub2API is another relay upstream. Model-bridge stores its API key as an
+    // access token and its Base URL on the account row; no OAuth refresh.
+    mode: 'paste' as const,
+    generatePkce(): never { return notSupported('generatePkce') },
+    buildAuthorizeUrl(): never { return notSupported('buildAuthorizeUrl') },
+    async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
+    async refreshToken(token: string): Promise<TokenSet> {
       return { accessToken: token, refreshToken: '', expiresAt: 0 }
     },
   },
