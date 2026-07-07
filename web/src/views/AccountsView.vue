@@ -1278,7 +1278,7 @@ function accountRowKey(row: Account) {
 
 const columns = computed<TableColumn<Account>[]>(() => [
   { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
-  { title: '分组', key: 'group', width: 140, render: renderGroupCell },
+  { title: '分组', key: 'group', width: 240, render: renderGroupCell },
   {
     title: '状态',
     key: 'status',
@@ -2316,7 +2316,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.group-select) {
-  min-width: 120px;
+  min-width: 210px;
 }
 
 .groups-manager {

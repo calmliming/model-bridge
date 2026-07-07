@@ -178,10 +178,10 @@ const hasValue = computed(() =>
         <span
           v-for="val in selectedArray"
           :key="val"
-          class="inline-flex items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200"
+          class="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200"
         >
-          {{ labelOf(val) }}
-          <button class="text-gray-400 hover:text-gray-700 dark:hover:text-gray-100" @click.stop="removeTag(val)">
+          <span class="truncate">{{ labelOf(val) }}</span>
+          <button class="flex-shrink-0 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100" @click.stop="removeTag(val)">
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
