@@ -34,7 +34,7 @@ export interface CcSwitchTarget {
     opusModel?: string
   }
   /** Which key provider this target maps to, for filtering by a key's allowedProviders. */
-  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
+  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'sub2api'
 }
 
 /** All supported import targets, in display order. */
@@ -156,6 +156,34 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     endpoint: (origin) => origin,
     provider: 'gemini',
   },
+  // Sub2API aggregates multiple model families behind one bare-domain endpoint,
+  // routed by model name. A sub2api-only key hitting the origin therefore works
+  // for Claude Code / Codex / Gemini alike, so expose one target per client.
+  {
+    id: 'claude-sub2api',
+    app: 'claude',
+    label: 'Claude Code · Sub2API',
+    vendor: 'Sub2API',
+    endpoint: (origin) => origin,
+    provider: 'sub2api',
+  },
+  {
+    id: 'codex-sub2api',
+    app: 'codex',
+    label: 'Codex CLI · Sub2API',
+    vendor: 'Sub2API',
+    endpoint: (origin) => origin,
+    models: { model: 'gpt-5.4' },
+    provider: 'sub2api',
+  },
+  {
+    id: 'gemini-sub2api',
+    app: 'gemini',
+    label: 'Gemini CLI · Sub2API',
+    vendor: 'Sub2API',
+    endpoint: (origin) => origin,
+    provider: 'sub2api',
+  },
 ]
 
 /** Brand prefix for provider names imported into CC Switch. */
@@ -182,7 +210,11 @@ export function ccSwitchTarget(id: string): CcSwitchTarget | undefined {
 export function targetsForProviders(allowed: string[] | null | undefined): CcSwitchTarget[] {
   if (!allowed || allowed.length === 0) return CC_SWITCH_TARGETS
   const set = new Set(allowed)
-  return CC_SWITCH_TARGETS.filter((t) => set.has(t.provider))
+  const matched = CC_SWITCH_TARGETS.filter((t) => set.has(t.provider))
+  // Safety net: a key restricted to a provider with no dedicated target (e.g. a
+  // future upstream not yet mapped here) would otherwise yield an empty picker.
+  // Fall back to all targets so the modal is never blank.
+  return matched.length > 0 ? matched : CC_SWITCH_TARGETS
 }
 
 /**

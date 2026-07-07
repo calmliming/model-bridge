@@ -1586,7 +1586,11 @@ onBeforeUnmount(() => {
               show-password-on="click"
             />
           </UiFormItem>
-          <UiFormItem v-if="form.provider === 'sub2api'" label="Base URL">
+          <UiFormItem
+            v-if="form.provider === 'sub2api'"
+            label="Base URL"
+            hint="填部署根地址即可，末尾带不带 /v1 都行（会自动归一化后拼 /v1/messages、/v1/chat/completions、/v1/responses）。若上游是 OpenAI 兼容中转且报路径错误，通常是它的实际路径与标准 /v1/* 不一致，需按其文档调整地址结尾。"
+          >
             <UiInput
               v-model:value="baseUrlInput"
               placeholder="https://sub2api.example.com"
