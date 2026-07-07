@@ -837,20 +837,20 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
     { test: /^glm/i, handler: PROVIDERS.zhipu! },
     { test: /^qwen/i, handler: PROVIDERS.qwen! },
-  ])
+  ], PROVIDERS.sub2api!)
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
-  ])
+  ], PROVIDERS['sub2api-responses']!)
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
     { test: /^claude/i, handler: PROVIDERS['claude-chat']! },
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-chat']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
-  ])
+  ], PROVIDERS['sub2api-chat']!)
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
   app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
@@ -872,11 +872,24 @@ export function registerRelayRoutes(app: FastifyInstance): void {
 function dispatchByModel(
   defaultHandler: ProviderHandler,
   routed: Array<{ test: RegExp; handler: ProviderHandler }>,
+  sub2apiHandler?: ProviderHandler,
 ) {
   return (request: FastifyRequest, reply: FastifyReply) => {
+    const apiKey = request.apiKey!
+    // A key scoped exclusively to sub2api routes every bare-domain request to
+    // its sub2api upstream. Sub2API forwards model names verbatim and they
+    // overlap with the native providers, so there is no way to tell them apart
+    // by model name — the key's allow-list is the only unambiguous signal.
+    if (
+      sub2apiHandler &&
+      apiKey.allowedProviders?.length === 1 &&
+      apiKey.allowedProviders[0] === 'sub2api'
+    ) {
+      return executeRelay(request, reply, sub2apiHandler)
+    }
     const body = (request.body ?? {}) as Record<string, unknown>
     const raw = typeof body.model === 'string' ? body.model : ''
-    const mapped = mapRequestedModel(raw, request.apiKey!.modelMappings)
+    const mapped = mapRequestedModel(raw, apiKey.modelMappings)
     const match = routed.find((r) => r.test.test(raw) || r.test.test(mapped))
     return executeRelay(request, reply, match ? match.handler : defaultHandler)
   }
