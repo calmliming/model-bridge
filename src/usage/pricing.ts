@@ -65,11 +65,26 @@ const OPENAI_CODEX: TierPrice = { input: 1.5, output: 12, cacheWrite: 0, cacheRe
 const OPENAI_MINI: TierPrice = { input: 0.25, output: 2, cacheWrite: 0, cacheRead: 0.025 }
 // gpt-5 / gpt-5.1 base tier; also the fallback for unrecognised gpt-* / o* models.
 const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
+// gpt-5.6 family (public 2026-07-09): Sol flagship, Terra workhorse, Luna
+// budget. Sol/Terra carry the same list prices as gpt-5.5 / gpt-5.4 ("more
+// capability at the same price"); Luna is a new low-cost 1/6 production tier.
+// Output is 6× input across all three; cacheRead is the standard 0.1× input and
+// cacheWrite is unbilled, matching the other OpenAI tiers above.
+const OPENAI_GPT56_SOL: TierPrice = OPENAI_GPT55
+const OPENAI_GPT56_TERRA: TierPrice = OPENAI_GPT54
+const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 0, cacheRead: 0.1 }
 
 function openaiPrice(model: string): TierPrice {
   const m = model.toLowerCase()
   if (m.includes('codex')) return OPENAI_CODEX
   if (m.includes('mini') || m.includes('nano')) return OPENAI_MINI
+  // gpt-5.6 family: luna (budget) / terra (workhorse) / sol (flagship, and the
+  // default for a bare "gpt-5.6"). Checked before the 5.5/5.4 tiers below.
+  if (m.includes('5.6') || m.includes('5-6')) {
+    if (m.includes('luna')) return OPENAI_GPT56_LUNA
+    if (m.includes('terra')) return OPENAI_GPT56_TERRA
+    return OPENAI_GPT56_SOL
+  }
   if (m.includes('5.5') || m.includes('5-5')) return OPENAI_GPT55
   if (m.includes('5.4') || m.includes('5-4')) return OPENAI_GPT54
   return OPENAI_GPT5
@@ -198,6 +213,9 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'haiku', price: CLAUDE_HAIKU },
   { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
+  { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
+  { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
+  { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
   { provider: 'openai', model: 'gpt-5.5', price: OPENAI_GPT55 },
   { provider: 'openai', model: 'gpt-5.4', price: OPENAI_GPT54 },
   { provider: 'openai', model: 'gpt-5.4-mini', price: OPENAI_MINI },

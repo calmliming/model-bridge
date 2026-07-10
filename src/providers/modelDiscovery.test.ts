@@ -12,12 +12,23 @@ describe('model discovery', () => {
     const key = { allowedProviders: ['openai'] as const, allowedModels: null }
     expect(isProviderAllowed('openai', key)).toBe(true)
     expect(isProviderAllowed('deepseek', key)).toBe(false)
-    expect(listModelIdsForKey(key)).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'])
+    expect(listModelIdsForKey(key)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.3-codex',
+    ])
   })
 
   it('honors exact and wildcard model restrictions', () => {
     const key = { allowedProviders: null, allowedModels: ['gpt-*', 'deepseek-v4-pro'] }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
       'gpt-5.5',
       'gpt-5.4',
       'gpt-5.4-mini',
@@ -38,6 +49,9 @@ describe('model discovery', () => {
       modelMappings: { 'gpt-public': 'gpt-5.4' },
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
       'gpt-5.5',
       'gpt-5.4',
       'gpt-5.4-mini',

@@ -30,15 +30,23 @@ const CREATED_AT = 1_704_067_200
 // untouched, so a model missing here can still be called directly (unless a
 // key pins an exact allowedModels allow-list). Keep the current flagship of
 // each tier here; pricing.ts resolves any other version via substring tiers.
-const DEFAULT_MODELS: Record<ProviderId, string[]> = {
+// Native upstreams each surface their own tier flagships.
+const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   claude: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
-  openai: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
+  openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
   gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
-  sub2api: ['claude-sonnet-5', 'gpt-5.4', 'gemini-2.5-pro', 'deepseek-v4-pro', 'qwen3-coder-plus'],
+}
+
+const DEFAULT_MODELS: Record<ProviderId, string[]> = {
+  ...NATIVE_MODELS,
+  // Sub2API is an aggregator upstream that forwards model names verbatim and
+  // has access to every model, so its discovery list is the union of all
+  // native providers' lists — no separate list to keep in sync.
+  sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())],
 }
 
 const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
