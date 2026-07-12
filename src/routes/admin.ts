@@ -86,7 +86,7 @@ const loginSchema = z.object({
   turnstileToken: z.string().optional(),
 })
 
-const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api'])
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'grok', 'sub2api'])
 
 const optionalBaseUrlSchema = z
   .string()
@@ -157,7 +157,7 @@ const idParamSchema = z.object({
 })
 
 const oauthStartSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'grok']),
   name: z.string().min(1),
 })
 

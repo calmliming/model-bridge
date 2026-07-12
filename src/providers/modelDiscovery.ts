@@ -39,6 +39,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
+  grok: ['grok-4.5', 'grok-4.3', 'grok-build-0.1'],
 }
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
@@ -49,7 +50,7 @@ const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())],
 }
 
-const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
+const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'grok', 'sub2api']
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
@@ -60,6 +61,7 @@ function inferProvider(model: string): ProviderId | null {
   if (lower.startsWith('mimo-')) return 'xiaomi'
   if (lower.startsWith('glm-')) return 'zhipu'
   if (lower.startsWith('qwen')) return 'qwen'
+  if (lower.startsWith('grok')) return 'grok'
   return null
 }
 

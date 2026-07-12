@@ -70,7 +70,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'sub2api'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'grok' | 'sub2api'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -190,9 +190,10 @@ const providerLabel: Record<Provider, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  grok: 'Grok (xAI)',
   sub2api: 'Sub2API',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'grok', 'sub2api']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
@@ -201,6 +202,7 @@ const providerTagType: Record<Provider, TagType> = {
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  grok: 'default',
   sub2api: 'success',
 }
 const authorizeHost: Record<Provider, string> = {
@@ -211,6 +213,7 @@ const authorizeHost: Record<Provider, string> = {
   xiaomi: 'platform.xiaomimimo.com',
   zhipu: 'open.bigmodel.cn',
   qwen: 'bailian.console.aliyun.com',
+  grok: 'auth.x.ai',
   sub2api: 'sub2api',
 }
 

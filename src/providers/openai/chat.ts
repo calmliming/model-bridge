@@ -29,8 +29,13 @@ interface ChatToolCall {
 interface ResponsesUsage {
   input_tokens?: number
   output_tokens?: number
-  input_tokens_details?: { cached_tokens?: number }
+  input_tokens_details?: {
+    cached_tokens?: number
+    cache_write_tokens?: number
+    cache_creation_tokens?: number
+  }
   cached_tokens?: number
+  cache_creation_tokens?: number
 }
 
 interface ResponsesStreamEvent {
@@ -46,6 +51,7 @@ interface ResponsesStreamEvent {
     created_at?: number
     usage?: ResponsesUsage
     output?: ResponsesOutputItem[]
+    error?: { message?: unknown; code?: unknown; type?: unknown }
   }
 }
 
@@ -63,7 +69,11 @@ interface ChatUsage {
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
-  prompt_tokens_details?: { cached_tokens: number }
+  prompt_tokens_details?: {
+    cached_tokens: number
+    cache_write_tokens?: number
+    cache_creation_tokens?: number
+  }
   completion_tokens_details?: { reasoning_tokens?: number }
 }
 
@@ -179,10 +189,13 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
 }
 
 function usageDataFromResponses(usage: ResponsesUsage | undefined): UsageData {
+  const d = usage?.input_tokens_details
   return usageWithCachedInput(
     usage?.input_tokens,
     usage?.output_tokens,
-    usage?.input_tokens_details?.cached_tokens ?? usage?.cached_tokens,
+    d?.cached_tokens ?? usage?.cached_tokens,
+    undefined,
+    d?.cache_write_tokens ?? d?.cache_creation_tokens ?? usage?.cache_creation_tokens,
   )
 }
 
@@ -202,11 +215,13 @@ function chatUsageFromResponses(usage: ResponsesUsage | undefined): ChatUsage | 
 export function parseChatCompletionUsage(body: unknown): UsageData {
   const usage = (body as { usage?: ChatUsage } | null)?.usage
   if (!usage) return emptyUsage()
+  const d = usage.prompt_tokens_details
   return usageWithCachedInput(
     usage.prompt_tokens,
     usage.completion_tokens,
-    usage.prompt_tokens_details?.cached_tokens,
+    d?.cached_tokens,
     usage.completion_tokens_details?.reasoning_tokens,
+    d?.cache_write_tokens ?? d?.cache_creation_tokens,
   )
 }
 
@@ -313,7 +328,7 @@ function toolCallsFromOutputItems(output: ResponsesOutputItem[] | undefined): Ch
 export function responsesSseToChatCompletion(
   text: string,
   fallbackModel: string,
-): { body: Record<string, unknown>; usage: UsageData } {
+): { body: Record<string, unknown>; usage: UsageData; status?: 'error' } {
   const id = `chatcmpl-${randomUUID()}`
   let upstreamId = id
   let model = fallbackModel
@@ -321,6 +336,7 @@ export function responsesSseToChatCompletion(
   let content = ''
   let output: ResponsesOutputItem[] | undefined
   let rawUsage: ResponsesUsage | undefined
+  let failure: { code: string; message: string } | undefined
 
   for (const event of parseResponsesSseEvents(text)) {
     const e = event as ResponsesStreamEvent
@@ -335,11 +351,36 @@ export function responsesSseToChatCompletion(
       output = e.response.output
       if (!content) content = textFromOutputItems(e.response.output)
     }
+    // A mid-stream terminal failure (upstream sent 200 then failed/incomplete).
+    // Capture it so we don't return an empty, successful-looking completion.
+    if (e.type === 'response.failed' || e.type === 'response.incomplete') {
+      if (e.response?.usage) rawUsage = e.response.usage
+      const err = e.response?.error
+      const message =
+        typeof err?.message === 'string' && err.message
+          ? err.message
+          : e.type === 'response.failed'
+            ? 'Upstream response failed.'
+            : 'Upstream response incomplete.'
+      const rawCode = err?.code ?? err?.type
+      failure = { code: typeof rawCode === 'string' && rawCode ? rawCode : e.type, message }
+    }
   }
 
   const chatUsage = chatUsageFromResponses(rawUsage)
   const toolCalls = toolCallsFromOutputItems(output)
   const hasToolCalls = toolCalls.length > 0
+
+  // Failure with no usable content/tool output: surface an OpenAI-style error
+  // body instead of a hollow success, and flag the usage record as an error.
+  if (failure && !content && !hasToolCalls) {
+    return {
+      body: { error: { message: failure.message, type: failure.code, code: failure.code } },
+      usage: usageDataFromResponses(rawUsage),
+      status: 'error',
+    }
+  }
+
   return {
     body: {
       id: upstreamId,

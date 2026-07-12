@@ -6,10 +6,10 @@ import type {
   OpenAIResetCreditResult,
   OpenAIUsageResponse,
 } from './types'
+import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 
 const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage'
 const RESET_CREDIT_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume'
-const USER_AGENT = 'codex_cli_rs/0.20.0'
 const REQUEST_TIMEOUT_MS = 20_000
 
 /** Raised when a ChatGPT quota/reset call cannot be completed. */
@@ -36,8 +36,8 @@ function quotaHeaders(accessToken: string, chatgptAccountId: string): Record<str
   return {
     authorization: `Bearer ${accessToken}`,
     'chatgpt-account-id': chatgptAccountId,
-    'user-agent': USER_AGENT,
-    originator: 'codex_cli_rs',
+    'user-agent': CODEX_USER_AGENT,
+    originator: CODEX_ORIGINATOR,
     'oai-language': 'en-US',
     accept: 'application/json',
   }

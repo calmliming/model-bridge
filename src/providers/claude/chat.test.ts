@@ -191,6 +191,24 @@ describe('createClaudeChatCompletionsStreamTransform', () => {
     expect(chunks[2].choices[0].delta.tool_calls[0]).toEqual({ index: 0, function: { arguments: '1}' } })
     expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('tool_calls')
   })
+
+  it('surfaces a mid-stream error event instead of silently ending', () => {
+    const out = runTransform([
+      { type: 'message_start', message: { id: 'msg_1', model: 'claude' } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hi' } },
+      { type: 'error', error: { type: 'overloaded_error', message: 'overloaded' } },
+    ])
+    expect(out[out.length - 1]).toBe('[DONE]')
+    const errorEvent = out.find(
+      (c): c is Record<string, any> => c !== '[DONE]' && !!(c as Record<string, unknown>).error,
+    )
+    expect(errorEvent?.error).toEqual({
+      message: 'overloaded',
+      type: 'overloaded_error',
+      code: 'overloaded_error',
+    })
+  })
 })
 
 describe('claudeSseToChatCompletion', () => {

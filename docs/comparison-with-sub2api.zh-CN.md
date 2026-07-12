@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.144**，2026-07-04）
-> 更新日期：2026-07-04
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.151**，2026-07-10）
+> 更新日期：2026-07-11
 
 ## 一句话定位
 
@@ -103,6 +103,27 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api 至 v0.1.151（2026-07-11）
+
+对照 sub2api v0.1.145–v0.1.151 的发布，逐项核查 model-bridge 实际代码。核查确认多数 sub2api 修复的现网 bug（originator/UA 错配、透传规则恒不命中、compact 无限重连、下游重复扣费、response.failed 硬编码 502）在本仓库**不存在同构形态**；识别出 **2 项真实计费/稳定性差距 + 1 项相关缺口 + 1 项维护性加固**并已落地。
+
+**已落地改动：**
+
+- **GPT-5.6 缓存写入计费**（对应 v0.1.150/151「cache write 独立计价 + 官方定价对齐」）：GPT-5.6 引入了 explicit cache breakpoints，cache write 按 1.25× input 计费（Sol 6.25 / Terra 3.125 / Luna 1.25），不同于其他仍不计 cache write 的 OpenAI tier。此前 model-bridge 三档 `cacheWrite` 均为 0 且 `usageWithCachedInput` 硬编码不解析 cache write token，会少算成本。改动：`src/usage/pricing.ts` 三档拆为独立 `TierPrice` 并填非零 cacheWrite（不再复用 gpt-5.5/5.4 引用，避免误伤）；`src/providers/types.ts` 的 `usageWithCachedInput` 加可选 `cacheWriteTokens` 参数、把总输入拆成互斥三桶（对齐 sub2api `InputTokens - CacheRead - CacheCreation` 语义），未传时行为不变；`src/providers/openai/{usage,chat}.ts` 从上游 usage 的 `input_tokens_details.cache_write_tokens`/`cache_creation_tokens` 提取。**部署要点**：老库 gpt-5.6 行已被播种成 cacheWrite=0，补了 3 条 `SEED_CORRECTIONS` 并将修正 flag `pricing_seed_v3`→`pricing_seed_v4`，让修正在现有部署重跑一次（幂等，admin 改过的价保留）。含单测。
+- **remote compact 稳定性**（对应 v0.1.149/150「200+JSON 合成 + 心跳保活」，#3887）：`src/routes/relay.ts` 的 `sendStreaming` 加两处——① responsesProtocol 上游返回非 SSE 的 200 JSON 时，缓冲并合成 `response.completed`（成功）或错误终结事件，避免被当坏流处理导致 compact 失败、客户端重试消耗上游配额；② SSE 输出流在上游静默期每 15s 写 `: keepalive` 注释帧防反代空闲超时断连，收到数据即重置计时。（无限重连此前已由「末尾必补终结事件」兜底，下游按 cost>0 计费不会重复扣费。）
+- **协议转换静默吞错**（v0.1.149 #2 的近亲缺口）：上游 200 后流中途出错的错误事件此前在协议转换器被静默丢弃。`src/providers/claude/chat.ts` transform 加 `case 'error'`，把 Anthropic error 转为 OpenAI 风格 error chunk + `[DONE]`；`src/providers/openai/chat.ts` 的 `responsesSseToChatCompletion` 捕获 `response.failed`/`incomplete`，无有效内容时返回 error body 并回传 `status:'error'`，让 `sendBuffered` 记为 error 而非空的假成功。含单测。
+- **Codex 请求头单一来源**（对应 v0.1.151 originator/UA 404 修复的预防性加固）：核查确认本仓库四处 UA/originator **已统一**（均 `codex_cli_rs/0.20.0` + `codex_cli_rs`），无错配现网 bug；但版本号在 4 个文件硬编码有升级漂移风险。新建 `src/providers/openai/constants.ts` 导出 `CODEX_USER_AGENT`/`CODEX_ORIGINATOR`，relay/quota/oauth/tester 四处改为引用。
+
+**核查确认无同类问题（未改代码）：**
+
+- **originator/UA 错配 404**（v0.1.151）：四处头部已统一，无错配；仓库无 WebSocket 转发路径，该子项不适用。
+- **response.failed 硬编码 502 / 透传规则恒不命中**（v0.1.149）：本仓库无「可配置错误透传规则」这套机制，走默认透明透传 + `classifyUpstreamFailure` 硬编码分类（按 `provider.id` 正确区分平台）；合成 `response.failed` 用 `extractUpstreamError` 保留真实 code/message，无硬编码 502。
+- **effort 识别 / 带后缀丢元数据**（v0.1.150/151）：本仓库用量元数据取自上游 `response.usage`，不从模型名反推，故这两个 effort bug 不存在。gpt-5.6 别名匹配（sol/terra/luna + 裸 gpt-5.6→Sol）已对齐并有测试覆盖。
+
+**待验证：** gpt-5.6-luna 404（v0.1.150 靠升级 Codex 客户端版本修复）—— 本仓库 UA 固定 `0.20.0`，是否受上游按 UA 版本 gate luna 影响需实测，暂未改版本号（已抽成单一常量，将来升级只需改一处）。
+
+**不适用 / 暂不追：** v0.1.149–v0.1.151 的用户级 Fast/Flex 规则、版本一键回退、用户角色管理、用户 Token 排行、用量页布局重构、Grok 系列（Responses reasoning effort、OAuth、图像、配额探测）、Windows WebSocket 修复等，属偏 SaaS / 多上游生态或本仓库无对应路径，暂不纳入轻量主线。
 
 ### 跟踪 sub2api 至 v0.1.144（2026-07-04）
 

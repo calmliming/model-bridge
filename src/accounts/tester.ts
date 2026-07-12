@@ -16,6 +16,8 @@ import { getQuotaAutopausePercent } from '../db/settings'
 import { markAccountUsed, penalizeAccount } from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
+import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
+import { GROK_MODELS_URL, GROK_USER_AGENT } from '../providers/grok/constants'
 
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -147,9 +149,9 @@ async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
-      'user-agent': 'codex_cli_rs/0.20.0',
+      'user-agent': CODEX_USER_AGENT,
       'openai-beta': 'responses=experimental',
-      originator: 'codex_cli_rs',
+      originator: CODEX_ORIGINATOR,
       session_id: randomUUID(),
     },
     body: JSON.stringify({
@@ -296,6 +298,21 @@ async function testSub2Api(apiKey: string, baseUrl: string | null): Promise<Prov
   return { message: 'Sub2API /v1/models 端点可访问' }
 }
 
+async function testGrok(accessToken: string): Promise<ProviderTestOutcome> {
+  // Lightweight GET /models probe — reachable with just the OAuth token, no
+  // token spend. api.x.ai is the official API, so no spoofing headers needed.
+  const response = await fetchWithTimeout(GROK_MODELS_URL, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'user-agent': GROK_USER_AGENT,
+      accept: 'application/json',
+    },
+  })
+  await assertOk(response)
+  return { message: 'xAI /v1/models 端点可访问' }
+}
+
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
@@ -305,6 +322,7 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
   else if (account.provider === 'xiaomi') result = await testXiaomi(accessToken)
   else if (account.provider === 'zhipu') result = await testZhipu(accessToken)
   else if (account.provider === 'qwen') result = await testQwen(accessToken)
+  else if (account.provider === 'grok') result = await testGrok(accessToken)
   else if (account.provider === 'sub2api') result = await testSub2Api(accessToken, account.proxyUrl)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 

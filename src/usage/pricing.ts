@@ -66,13 +66,15 @@ const OPENAI_MINI: TierPrice = { input: 0.25, output: 2, cacheWrite: 0, cacheRea
 // gpt-5 / gpt-5.1 base tier; also the fallback for unrecognised gpt-* / o* models.
 const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
 // gpt-5.6 family (public 2026-07-09): Sol flagship, Terra workhorse, Luna
-// budget. Sol/Terra carry the same list prices as gpt-5.5 / gpt-5.4 ("more
-// capability at the same price"); Luna is a new low-cost 1/6 production tier.
-// Output is 6× input across all three; cacheRead is the standard 0.1× input and
-// cacheWrite is unbilled, matching the other OpenAI tiers above.
-const OPENAI_GPT56_SOL: TierPrice = OPENAI_GPT55
-const OPENAI_GPT56_TERRA: TierPrice = OPENAI_GPT54
-const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 0, cacheRead: 0.1 }
+// budget. Sol/Terra carry the same input/output list prices as gpt-5.5 / gpt-5.4
+// ("more capability at the same price"); Luna is a new low-cost 1/6 production
+// tier. Output is 6× input across all three; cacheRead is the standard 0.1×
+// input. Unlike the older OpenAI tiers, gpt-5.6 introduces explicit prompt-cache
+// breakpoints and bills cache writes at 1.25× the input rate, so cacheWrite is
+// non-zero here (kept as its own object so gpt-5.5 / gpt-5.4 stay uncharged).
+const OPENAI_GPT56_SOL: TierPrice = { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 }
+const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 }
+const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
 
 function openaiPrice(model: string): TierPrice {
   const m = model.toLowerCase()
@@ -166,6 +168,20 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
   return 'max'
 }
 
+// xAI (Grok) list prices per 1M tokens (docs.x.ai, mid-2026). No separate
+// cache-write fee — cacheWrite is 0; cacheRead is the cached-input rate.
+const GROK_45: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 }
+const GROK_43: TierPrice = { input: 1.25, output: 2.5, cacheWrite: 0, cacheRead: 0.2 }
+const GROK_BUILD: TierPrice = { input: 1, output: 2, cacheWrite: 0, cacheRead: 0.2 }
+
+function grokPrice(model: string): TierPrice {
+  const m = model.toLowerCase()
+  if (m.includes('build') || m.includes('code')) return GROK_BUILD
+  if (m.includes('4.3') || m.includes('4-3')) return GROK_43
+  // grok-4.5 flagship, and the default for a bare "grok".
+  return GROK_45
+}
+
 function sub2apiPrice(model: string): TierPrice {
   const m = model.toLowerCase()
   if (m.startsWith('claude-')) return claudePrice(model)
@@ -175,6 +191,7 @@ function sub2apiPrice(model: string): TierPrice {
   if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
   if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
   if (m.startsWith('qwen')) return QWEN_TIERS[qwenTier(model)]
+  if (m.startsWith('grok')) return grokPrice(model)
   return CLAUDE_SONNET
 }
 
@@ -187,6 +204,7 @@ function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
+  if (provider === 'grok') return grokPrice(model)
   if (provider === 'sub2api') return sub2apiPrice(model)
   return null
 }
@@ -243,13 +261,18 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.coder },
   { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.max },
   { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.plus },
+  // Grok (xAI) — exact rows for the discoverable models; grokPrice() covers
+  // other grok-* variants via substring tiers.
+  { provider: 'grok', model: 'grok-4.5', price: GROK_45 },
+  { provider: 'grok', model: 'grok-4.3', price: GROK_43 },
+  { provider: 'grok', model: 'grok-build-0.1', price: GROK_BUILD },
 ]
 
 /**
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v3` settings flag.
+ * gated by the `pricing_seed_v4` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -293,6 +316,27 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'fable',
     from: { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
     to: CLAUDE_FABLE,
+  },
+  // gpt-5.6 introduced billed cache writes (1.25× input); the tiers were seeded
+  // with cacheWrite=0 before that. Only rows still at the zero-write default are
+  // corrected, so admin-set prices persist.
+  {
+    provider: 'openai',
+    model: 'gpt-5.6-sol',
+    from: { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 },
+    to: OPENAI_GPT56_SOL,
+  },
+  {
+    provider: 'openai',
+    model: 'gpt-5.6-terra',
+    from: { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 },
+    to: OPENAI_GPT56_TERRA,
+  },
+  {
+    provider: 'openai',
+    model: 'gpt-5.6-luna',
+    from: { input: 1, output: 6, cacheWrite: 0, cacheRead: 0.1 },
+    to: OPENAI_GPT56_LUNA,
   },
 ]
 
@@ -358,7 +402,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v3'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v4'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -385,7 +429,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v3', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v4', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }

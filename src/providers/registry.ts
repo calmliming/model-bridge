@@ -1,6 +1,7 @@
 import * as claudeOauth from './claude/oauth'
 import * as openaiOauth from './openai/oauth'
 import * as geminiOauth from './gemini/oauth'
+import * as grokOauth from './grok/oauth'
 import type { TokenSet } from './types'
 
 function notSupported(method: string): never {
@@ -53,6 +54,16 @@ const registry: Record<string, OAuthProvider> = {
     exchangeCode: geminiOauth.exchangeCode,
     refreshToken: geminiOauth.refreshToken,
     fetchAccountMetadata: geminiOauth.fetchAccountMetadata,
+  },
+  grok: {
+    id: 'grok',
+    // xAI subscription via the grok-cli OAuth client. Redirects to a localhost
+    // callback; on a remote server the admin pastes the full callback URL.
+    mode: 'callback',
+    generatePkce: grokOauth.generatePkce,
+    buildAuthorizeUrl: grokOauth.buildAuthorizeUrl,
+    exchangeCode: grokOauth.exchangeCode,
+    refreshToken: grokOauth.refreshToken,
   },
   deepseek: {
     id: 'deepseek',

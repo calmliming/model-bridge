@@ -302,6 +302,7 @@ interface AnthropicStreamEvent {
   index?: number
   content_block?: AnthropicContentBlock
   delta?: { type?: string; text?: string; partial_json?: string; stop_reason?: unknown }
+  error?: { type?: unknown; message?: unknown }
 }
 
 /**
@@ -398,6 +399,16 @@ export function createClaudeChatCompletionsStreamTransform(): {
             chatChunk(state.id, state.created, state.model, {}, state.finishReason),
             '[DONE]',
           ]
+        }
+        case 'error': {
+          // Anthropic emitted a mid-stream error (upstream sent 200 then failed).
+          // Surface it as an OpenAI-style error chunk and terminate, instead of
+          // silently ending with an empty, successful-looking finish.
+          if (state.completed) return []
+          state.completed = true
+          const message = typeof e.error?.message === 'string' ? e.error.message : 'Upstream error.'
+          const type = typeof e.error?.type === 'string' ? e.error.type : 'upstream_error'
+          return [{ error: { message, type, code: type } }, '[DONE]']
         }
         default:
           return []

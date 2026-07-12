@@ -20,6 +20,25 @@ describe('OpenAI usage parsing', () => {
     })
   })
 
+  it('carves gpt-5.6 cache writes out of total input into cacheCreateTokens', () => {
+    // input_tokens is the total: 40 fresh + 35 cache read + 25 cache write.
+    expect(
+      parseJsonUsage({
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          input_tokens_details: { cached_tokens: 35, cache_write_tokens: 25 },
+        },
+      }),
+    ).toEqual({
+      inputTokens: 40,
+      outputTokens: 20,
+      reasoningTokens: 0,
+      cacheCreateTokens: 25,
+      cacheReadTokens: 35,
+    })
+  })
+
   it('reports reasoning_tokens from output_tokens_details', () => {
     expect(
       parseJsonUsage({

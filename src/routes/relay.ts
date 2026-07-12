@@ -66,6 +66,7 @@ import {
   relaySub2ApiMessages,
   relaySub2ApiResponses,
 } from '../providers/sub2api/relay'
+import { mapGrokModel, relayGrokChatCompletions, relayGrokResponses } from '../providers/grok/relay'
 import {
   isProviderAllowed,
   listGeminiModels,
@@ -139,7 +140,10 @@ interface ProviderHandler {
    */
   parseStreamEventsFrom?: 'upstream' | 'downstream'
   /** Optional converter for a streaming upstream that must become one JSON response. */
-  bufferSseResponse?: (text: string, meta: RelayMeta) => { body: unknown; usage: UsageData }
+  bufferSseResponse?: (
+    text: string,
+    meta: RelayMeta,
+  ) => { body: unknown; usage: UsageData; status?: 'error' }
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
   transformEventData?: (data: unknown) => unknown
   /**
@@ -207,6 +211,34 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseStreamEventsFrom: 'upstream',
     bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
     createStreamTransform: createOpenaiChatCompletionsStreamTransform,
+  },
+  // Grok (xAI) subscription upstream. Native OpenAI Responses + Chat Completions
+  // at api.x.ai, so it reuses the OpenAI usage parsers. Responses is the primary
+  // surface (Codex CLI); the -chat handler serves OpenAI-compatible clients.
+  grok: {
+    id: 'grok',
+    forceStream: true,
+    responsesProtocol: true,
+    normalizeModel: mapGrokModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayGrokResponses(token, body),
+    createStreamParser: openaiUsage.createStreamParser,
+    parseJsonUsage: openaiUsage.parseJsonUsage,
+  },
+  'grok-chat': {
+    id: 'grok',
+    forceStream: false,
+    normalizeModel: mapGrokModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayGrokChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
   },
   gemini: {
     id: 'gemini',
@@ -728,6 +760,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['qwen-chat']!)
   const qwenResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['qwen-responses']!)
+  const grokHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.grok!)
+  const grokChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['grok-chat']!)
   const sub2apiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.sub2api!)
   const sub2apiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
@@ -784,6 +820,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/qwen
   app.post('/api/qwen/v1/responses', { preHandler: requireApiKey }, qwenResponsesHandler)
+  // Grok (xAI): OpenAI Responses-API surface for Codex CLI.
+  // Codex: configure base_url=https://your-host/api/grok
+  app.post('/api/grok/v1/responses', { preHandler: requireApiKey }, grokHandler)
+  // Grok: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/grok/v1
+  app.post('/api/grok/v1/chat/completions', { preHandler: requireApiKey }, grokChatHandler)
   // Sub2API: relay-to-relay upstream. Configure each account with the target
   // Sub2API Base URL and API Key; requests are forwarded without model rewrites.
   app.post('/api/sub2api/v1/messages', { preHandler: requireApiKey }, sub2apiHandler)
@@ -843,6 +885,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
+    { test: /^grok/i, handler: PROVIDERS.grok! },
   ], PROVIDERS['sub2api-responses']!)
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
     { test: /^claude/i, handler: PROVIDERS['claude-chat']! },
@@ -850,6 +893,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
+    { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
   ], PROVIDERS['sub2api-chat']!)
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
@@ -1182,6 +1226,33 @@ async function runRelayLoop(
  *   - `transformEventData` (Gemini): 1:1 payload rewrite per event.
  *   - neither: raw byte passthrough with side-channel usage parsing.
  */
+// Interval for keepalive comment frames on an SSE stream while the upstream is
+// silent, short enough to stay under typical reverse-proxy idle timeouts (~60s).
+const STREAM_HEARTBEAT_MS = 15_000
+
+/** True when a content-type is present and is not an SSE stream. */
+function isNonStreamContentType(contentType: string | null): boolean {
+  return !!contentType && !contentType.includes('text/event-stream')
+}
+
+/**
+ * Parses a Responses-API JSON body into the response object for a synthesized
+ * `response.completed` event, or null if it doesn't look like one. Accepts a
+ * bare response object or a `{ response: {...} }` envelope.
+ */
+function parseResponseObject(text: string): Record<string, unknown> | null {
+  try {
+    const body = JSON.parse(text) as Record<string, unknown>
+    if (!body || typeof body !== 'object') return null
+    const resp = (body.response ?? body) as Record<string, unknown>
+    if (!resp || typeof resp !== 'object') return null
+    if ('output' in resp || 'usage' in resp || resp.object === 'response') return resp
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function sendStreaming(
   reply: FastifyReply,
   upstream: Response,
@@ -1225,6 +1296,57 @@ async function sendStreaming(
     return
   }
 
+  // Responses-protocol upstream that answers 200 with a non-stream (JSON) body
+  // instead of an SSE stream — e.g. Codex remote-compact. Streaming the raw JSON
+  // would look like a broken stream (no terminal event) and make the client
+  // retry, burning upstream quota. Buffer it and synthesize a proper Responses
+  // SSE terminal so the client sees a completed (or cleanly failed) response.
+  if (
+    responsesProtocol &&
+    upstream.ok &&
+    isNonStreamContentType(upstream.headers.get('content-type'))
+  ) {
+    const bodyText = await upstream.text().catch(() => '')
+    raw.writeHead(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+    })
+    const jsonParser = provider.createStreamParser()
+    const jsonState = newResponsesStreamState()
+    const responseObject = parseResponseObject(bodyText)
+    if (responseObject) {
+      const event = { type: 'response.completed', response: responseObject }
+      jsonParser.feed(event)
+      noteResponsesTerminal(event, jsonState)
+      writeSseData(raw, event)
+    } else {
+      const { code, message } = extractUpstreamError(bodyText, upstream.status)
+      for (const event of buildResponsesErrorEvents(message, code)) {
+        noteResponsesTerminal(event, jsonState)
+        writeSseData(raw, event)
+      }
+    }
+    raw.end()
+    void recordUsage({
+      apiKeyId: meta.apiKeyId,
+      userId: meta.userId,
+      accountId: meta.accountId,
+      provider: meta.provider,
+      model: meta.model,
+      multiplier: meta.multiplier,
+      billTo: meta.billTo,
+      subscriptionId: meta.subscriptionId,
+      usage: jsonParser.result(),
+      status: responsesStreamStatus(upstream.ok, responsesProtocol, jsonState),
+      latencyMs: Date.now() - meta.startedAt,
+      requestInput: meta.requestInput,
+      sessionKeyHash: meta.sessionKeyHash,
+      sessionSource: meta.sessionSource,
+    })
+    return
+  }
+
   const useStreamTransform = provider.createStreamTransform && upstream.ok
   raw.writeHead(upstream.status, {
     'content-type':
@@ -1234,6 +1356,13 @@ async function sendStreaming(
     'cache-control': 'no-cache',
     connection: 'keep-alive',
   })
+  // SSE output means we can safely inject keepalive comment frames while the
+  // upstream is silent (e.g. Codex processing a remote-compact) so idle-timeout
+  // proxies don't drop the connection. Raw non-SSE passthrough can't take them.
+  const sseOutput =
+    responsesProtocol ||
+    !!useStreamTransform ||
+    (upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
 
   const parser = provider.createStreamParser()
   const transform = provider.transformEventData
@@ -1252,10 +1381,24 @@ async function sendStreaming(
   if (upstream.body) {
     const reader = upstream.body.getReader()
     const decoder = new TextDecoder()
+    let lastActivity = Date.now()
+    const heartbeat = sseOutput
+      ? setInterval(() => {
+          if (Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
+            try {
+              raw.write(': keepalive\n\n')
+              lastActivity = Date.now()
+            } catch {
+              // downstream gone; the read loop will settle it
+            }
+          }
+        }, STREAM_HEARTBEAT_MS)
+      : null
     try {
       for (;;) {
         const { done, value } = await reader.read()
         if (done) break
+        lastActivity = Date.now()
         buffer += decoder.decode(value, { stream: true })
         if (streamTransform) {
           // Stateful multi-event transform: drain whole SSE blocks, feed
@@ -1294,6 +1437,8 @@ async function sendStreaming(
       }
     } catch {
       // Client disconnected or upstream aborted — stop quietly.
+    } finally {
+      if (heartbeat) clearInterval(heartbeat)
     }
   }
   if (streamTransform) {
@@ -1429,11 +1574,13 @@ async function sendBuffered(
     let responseText = sseText
     let usage: UsageData = emptyUsage()
     let responseContentType = contentType
+    let convertedStatus: 'error' | undefined
     if (upstream.ok) {
       const converted = provider.bufferSseResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
       usage = converted.usage
       responseContentType = 'application/json'
+      convertedStatus = converted.status
     }
     const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,
@@ -1445,7 +1592,7 @@ async function sendBuffered(
       billTo: meta.billTo,
       subscriptionId: meta.subscriptionId,
       usage,
-      status: upstream.ok ? 'success' : 'error',
+      status: convertedStatus ?? (upstream.ok ? 'success' : 'error'),
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,

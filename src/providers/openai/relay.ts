@@ -1,10 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { chatCompletionsToResponses } from './chat'
+import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
-
-// Mimics the official Codex CLI so requests are not flagged as bot traffic.
-const USER_AGENT = 'codex_cli_rs/0.20.0'
 
 // The Codex backend at /backend-api/codex/responses has known quirks:
 //   - requires `stream: true`, `store: false`, and `instructions`
@@ -76,9 +74,9 @@ export function relayOpenaiResponses(
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
       accept: 'text/event-stream',
-      'user-agent': USER_AGENT,
+      'user-agent': CODEX_USER_AGENT,
       'openai-beta': 'responses=experimental',
-      originator: 'codex_cli_rs',
+      originator: CODEX_ORIGINATOR,
       session_id: randomUUID(),
     },
     body: JSON.stringify(normalizeOpenaiResponsesBody(body)),

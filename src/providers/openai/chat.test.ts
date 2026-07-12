@@ -128,6 +128,23 @@ describe('responsesSseToChatCompletion', () => {
       ],
     })
   })
+
+  it('surfaces a mid-stream response.failed as an error body, not a hollow success', () => {
+    const sse = [
+      'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.6-sol","created_at":123}}',
+      '',
+      'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}',
+      '',
+      '',
+    ].join('\n')
+
+    const result = responsesSseToChatCompletion(sse, 'fallback')
+
+    expect(result.status).toBe('error')
+    expect(result.body).toEqual({
+      error: { message: 'boom', type: 'server_error', code: 'server_error' },
+    })
+  })
 })
 
 describe('createOpenaiChatCompletionsStreamTransform', () => {
