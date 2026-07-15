@@ -245,7 +245,8 @@ async function waitForHealth() {
       try {
         const res = await fetch('/health', { cache: 'no-store' })
         if (res.ok) {
-          message.success('服务已恢复，可以刷新页面')
+          message.success('服务已恢复，正在刷新页面')
+          window.setTimeout(() => window.location.reload(), 800)
           return
         }
       } catch {
