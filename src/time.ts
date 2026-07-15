@@ -31,3 +31,21 @@ export function startOfTodayMs(timeZone: string = config.STATS_TIMEZONE): number
   // True UTC instant for today's local midnight in the target timezone.
   return Date.UTC(y, mo - 1, d, 0, 0, 0) - offset
 }
+
+/**
+ * Calendar day ('YYYY-MM-DD') of the given instant in the configured stats
+ * timezone. Used to bucket daily usage stats so the day boundaries match the
+ * "today" window computed by {@link startOfTodayMs} — rather than UTC or the
+ * Postgres session timezone, which drift apart from the dashboard's notion of
+ * "today" on non-UTC deployments.
+ */
+export function dayKeyInTz(timestampMs: number, timeZone: string = config.STATS_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(timestampMs))
+  const get = (type: string) => parts.find((p) => p.type === type)!.value
+  return `${get('year')}-${get('month')}-${get('day')}`
+}

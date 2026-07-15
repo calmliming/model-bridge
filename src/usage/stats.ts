@@ -1,10 +1,11 @@
 import { pool } from '../db/index'
+import { config } from '../config'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
 import { resolvePrice } from './pricing'
-import { startOfTodayMs } from '../time'
+import { dayKeyInTz, startOfTodayMs } from '../time'
 
 export interface DailyStat {
-  day: string // YYYY-MM-DD (UTC)
+  day: string // YYYY-MM-DD (STATS_TIMEZONE, matches the dashboard "today" window)
   requests: number
   inputTokens: number
   outputTokens: number
@@ -139,18 +140,15 @@ export interface DashboardRecentLogsFilter {
 
 const MS_PER_DAY = 86_400_000
 
-function utcDayKey(timestampMs: number): string {
-  return new Date(timestampMs).toISOString().slice(0, 10)
-}
-
-function utcDayStart(timestampMs: number): number {
-  const d = new Date(timestampMs)
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-}
+// All day-based stats bucket by config.STATS_TIMEZONE so the daily series, the
+// range boundaries, and the dashboard "today" window (startOfTodayMs) share the
+// same calendar-day definition. Passed to Postgres via `AT TIME ZONE` so the DB
+// session timezone doesn't matter.
+const STATS_TZ = config.STATS_TIMEZONE
 
 function rangeStart(days: number): number {
   const range = clampDays(days)
-  return utcDayStart(Date.now()) - (range - 1) * MS_PER_DAY
+  return startOfTodayMs() - (range - 1) * MS_PER_DAY
 }
 
 function clampDays(days: number): number {
@@ -278,7 +276,7 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
   const range = clampDays(days)
   const since = rangeStart(range)
   const { rows } = await pool.query<Record<string, unknown>>(
-    `SELECT to_char(to_timestamp(ts / 1000), 'YYYY-MM-DD') AS day,
+    `SELECT to_char(to_timestamp(ts / 1000) AT TIME ZONE $2, 'YYYY-MM-DD') AS day,
             COUNT(*) AS requests,
             COALESCE(SUM(input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens), 0) AS outputTokens,
@@ -289,12 +287,12 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
      WHERE ts >= $1
      GROUP BY day
      ORDER BY day`,
-    [since],
+    [since, STATS_TZ],
   )
   const byDay = new Map(rows.map((r) => [r.day as string, asDaily(r)]))
   const out: DailyStat[] = []
   for (let i = range - 1; i >= 0; i--) {
-    const day = utcDayKey(Date.now() - i * MS_PER_DAY)
+    const day = dayKeyInTz(Date.now() - i * MS_PER_DAY, STATS_TZ)
     out.push(
       byDay.get(day) ?? {
         day,

@@ -12,7 +12,8 @@ vi.mock('./pricing', () => ({
   resolvePrice: vi.fn(() => null),
 }))
 
-import { dashboardRecentLogs } from './stats'
+import { dailyStats, dashboardRecentLogs } from './stats'
+import { config } from '../config'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -36,5 +37,25 @@ describe('dashboardRecentLogs', () => {
     expect(mocks.query.mock.calls[0][1]).toEqual(['openai', '%gpt-5%', '%workstation%'])
     expect(mocks.query.mock.calls[1][0]).toContain('LIMIT $4 OFFSET $5')
     expect(mocks.query.mock.calls[1][1]).toEqual(['openai', '%gpt-5%', '%workstation%', 25, 25])
+  })
+})
+
+describe('dailyStats', () => {
+  it('buckets days by the configured stats timezone, not the DB session timezone', async () => {
+    mocks.query.mockResolvedValue({ rows: [] })
+
+    const out = await dailyStats(7)
+
+    // The grouping must convert to the stats timezone via AT TIME ZONE so the
+    // day boundaries match the dashboard "today" window regardless of the
+    // Postgres session timezone.
+    const sql = mocks.query.mock.calls[0][0] as string
+    expect(sql).toContain("AT TIME ZONE $2, 'YYYY-MM-DD'")
+    expect(mocks.query.mock.calls[0][1][1]).toBe(config.STATS_TIMEZONE)
+
+    // Contiguous, zero-filled series of exactly `range` days.
+    expect(out).toHaveLength(7)
+    expect(out.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.day))).toBe(true)
+    expect(out[0].day < out[out.length - 1].day).toBe(true)
   })
 })
