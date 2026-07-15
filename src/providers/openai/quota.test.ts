@@ -44,10 +44,39 @@ describe('snapshotFromUsage', () => {
 
   it('derives resetAt from reset_after_seconds when reset_at is absent', () => {
     const usage: OpenAIUsageResponse = {
-      rate_limit: { primary_window: { used_percent: 50, reset_after_seconds: 600 } },
+      rate_limit: {
+        primary_window: { used_percent: 50, limit_window_seconds: 18_000, reset_after_seconds: 600 },
+      },
     }
     const [hourly] = snapshotFromUsage(usage, NOW).windows
     expect(hourly.resetAt).toBe(NOW + 600_000)
+  })
+
+  it('labels a lone length-less primary window as the 7d bucket, not 5小时', () => {
+    // Real wham/usage responses can omit limit_window_seconds and return only
+    // the 7d window as primary_window. It must not be mislabeled as hourly with
+    // a 7-day reset (the "5小时 … 7d" bug).
+    const usage: OpenAIUsageResponse = {
+      rate_limit: { primary_window: { used_percent: 0, reset_after_seconds: 7 * 24 * 3600 } },
+    }
+    const snapshot = snapshotFromUsage(usage, NOW)
+    expect(snapshot.windows).toEqual([
+      { key: 'weekly', label: '7天', usedPercent: 0, resetAt: NOW + 7 * 24 * 3600 * 1000, exceeded: false },
+    ])
+  })
+
+  it('orders two length-less windows as primary=7d, secondary=5h', () => {
+    const usage: OpenAIUsageResponse = {
+      rate_limit: {
+        primary_window: { used_percent: 10, reset_after_seconds: 7 * 24 * 3600 },
+        secondary_window: { used_percent: 80, reset_after_seconds: 600 },
+      },
+    }
+    const snapshot = snapshotFromUsage(usage, NOW)
+    expect(snapshot.windows.map((w) => [w.key, w.usedPercent])).toEqual([
+      ['hourly', 80],
+      ['weekly', 10],
+    ])
   })
 
   it('marks a window exceeded at 100% and clamps used percent', () => {

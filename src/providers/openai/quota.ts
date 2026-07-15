@@ -86,6 +86,11 @@ function mapWindow(
   }
 }
 
+// Windows at or below this length are the 5h (hourly) bucket; longer ones are
+// the 7d (weekly) bucket. Matches the 360-minute boundary used by the relay
+// header-scrape path in accounts/quota.ts.
+const FIVE_HOUR_MAX_SECONDS = 6 * 3600
+
 /** Decides which window is the 5h (hourly) bucket from its window length. */
 function classifyWindows(
   primary: OpenAIRateLimitWindow | null | undefined,
@@ -93,14 +98,28 @@ function classifyWindows(
 ): { hourly: OpenAIRateLimitWindow | null | undefined; weekly: OpenAIRateLimitWindow | null | undefined } {
   const primarySeconds = typeof primary?.limit_window_seconds === 'number' ? primary.limit_window_seconds : null
   const secondarySeconds = typeof secondary?.limit_window_seconds === 'number' ? secondary.limit_window_seconds : null
-  // ChatGPT returns the short (5h) window first as `primary`; fall back to that
-  // ordering when window lengths are missing.
+  // Preferred: both lengths known — the shorter window is the 5h bucket.
   if (primarySeconds != null && secondarySeconds != null) {
     return primarySeconds <= secondarySeconds
       ? { hourly: primary, weekly: secondary }
       : { hourly: secondary, weekly: primary }
   }
-  return { hourly: primary, weekly: secondary }
+  // Only one length known — classify that window and place the other opposite.
+  if (primarySeconds != null) {
+    return primarySeconds <= FIVE_HOUR_MAX_SECONDS
+      ? { hourly: primary, weekly: secondary }
+      : { hourly: secondary, weekly: primary }
+  }
+  if (secondarySeconds != null) {
+    return secondarySeconds <= FIVE_HOUR_MAX_SECONDS
+      ? { hourly: secondary, weekly: primary }
+      : { hourly: primary, weekly: secondary }
+  }
+  // No lengths at all: ChatGPT/Codex order the 7d window first as
+  // `primary_window` and the 5h window as `secondary_window`. This mirrors the
+  // relay header-scrape path (accounts/quota.ts). The previous primary→5h
+  // fallback mislabeled a lone 7d window as "5小时" with a 7d reset.
+  return { hourly: secondary, weekly: primary }
 }
 
 /** Builds an AccountQuotaSnapshot from a parsed `wham/usage` response. */
