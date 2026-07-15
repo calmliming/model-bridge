@@ -78,6 +78,12 @@ import { emptyUsage, type UsageData } from '../providers/types'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
+
+// Relay-to-relay upstreams (sub2api) rotate their own backend pool, so a
+// transient failure isn't tied to our key. When retries are exhausted we apply
+// only this brief back-off instead of the multi-minute OAuth cooldown, so a
+// single in-group sub2api account doesn't blank the pool for minutes.
+const RELAY_TO_RELAY_COOLDOWN_MS = 15_000
 const STICKY_SLOT_POLL_MS = 250
 const RATE_LIMIT_MARKERS = [
   'rate_limit',
@@ -124,6 +130,15 @@ interface ProviderHandler {
    * "stream closed before response.completed" and reconnects in a loop.
    */
   responsesProtocol?: boolean
+  /**
+   * Upstream is itself another relay/gateway (sub2api) rather than a single
+   * OAuth/API-key credential. Such a gateway rotates its own backend pool, so a
+   * transient 429/5xx from it is not tied to our specific key. The relay loop
+   * therefore retries the SAME account on a transient failure (instead of
+   * blackballing it) and, when it finally gives up, applies only a short
+   * cooldown — so a single in-group account doesn't blank the pool for minutes.
+   */
+  relayToRelay?: boolean
   parseRoute(request: FastifyRequest, body: Record<string, unknown>): ParsedRoute
   normalizeModel?: (model: string) => string
   callUpstream(
@@ -443,6 +458,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   sub2api: {
     id: 'sub2api',
     forceStream: false,
+    relayToRelay: true,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
@@ -454,6 +470,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   'sub2api-chat': {
     id: 'sub2api',
     forceStream: false,
+    relayToRelay: true,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'chat.completions',
@@ -466,6 +483,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     id: 'sub2api',
     forceStream: true,
     responsesProtocol: true,
+    relayToRelay: true,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
@@ -1089,6 +1107,9 @@ async function runRelayLoop(
   const session = computeSessionInfo(provider.id, apiKey.id, request.headers, body)
   const sessionKey = session?.key ?? null
   const tried: string[] = []
+  // sub2api & friends: a transient upstream error means "retry the same account"
+  // (the gateway rotates its own backends), not "blackball this credential".
+  const relayToRelay = provider.relayToRelay === true
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const account = await pickAccount(provider.id, tried, sessionKey, apiKey.accountGroupId ?? null)
@@ -1145,7 +1166,19 @@ async function runRelayLoop(
       })
     } catch (err) {
       request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
-      await penalizeAccount(account.id, 'error')
+      if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
+        // Transient network error reaching the sub2api gateway: retry the same
+        // account (don't cool it down or exclude it) so the next attempt can
+        // land on a healthy backend behind the gateway.
+        if (accountLimit != null) await releaseSlot(accountSlotKey)
+        tried.pop()
+        continue
+      }
+      await penalizeAccount(
+        account.id,
+        'error',
+        relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : undefined,
+      )
       if (accountLimit != null) await releaseSlot(accountSlotKey)
       continue
     }
@@ -1161,6 +1194,10 @@ async function runRelayLoop(
         if (failure.disable) {
           await disableAccount(account.id)
           if (sessionKey) await clearStickyAccount(sessionKey)
+        } else if (relayToRelay) {
+          // Retry the same sub2api account: the gateway may route the retry to
+          // a healthy backend. Don't cool it down or exclude it from the pool.
+          tried.pop()
         } else if (failure.penalty) {
           await penalizeAccount(account.id, failure.penalty, failure.resetAt)
         }
@@ -1172,7 +1209,11 @@ async function runRelayLoop(
         await disableAccount(account.id)
         if (sessionKey) await clearStickyAccount(sessionKey)
       } else if (failure.penalty) {
-        await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+        // Relay-to-relay retries are exhausted here: apply only a short back-off
+        // so subsequent turns recover quickly instead of hitting a multi-minute
+        // "no sub2api account" window on a single-account group.
+        const cooldownUntil = relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : failure.resetAt
+        await penalizeAccount(account.id, failure.penalty, cooldownUntil)
       } else if (upstream.ok) {
         // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
         // the configured threshold, until the breaching window resets. Only costs
