@@ -192,6 +192,17 @@
   .data-table tbody tr:hover td.is-fixed-left {
     @apply bg-gray-50 dark:bg-dark-800;
   }
+  .data-table th.is-fixed-right {
+    @apply bg-gray-50 dark:bg-dark-800;
+    box-shadow: -8px 0 12px -12px rgba(15, 23, 42, 0.45);
+  }
+  .data-table td.is-fixed-right {
+    @apply bg-white dark:bg-dark-900;
+    box-shadow: -8px 0 12px -12px rgba(15, 23, 42, 0.35);
+  }
+  .data-table tbody tr:hover td.is-fixed-right {
+    @apply bg-gray-50 dark:bg-dark-800;
+  }
   .data-table tbody tr {
     @apply transition-colors duration-150 hover:bg-gray-50/70 dark:hover:bg-dark-800/40;
   }

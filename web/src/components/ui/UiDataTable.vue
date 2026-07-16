@@ -64,6 +64,10 @@ function isFixedLeft(col: TableColumn<T>): boolean {
   return col.fixed === true || col.fixed === 'left'
 }
 
+function isFixedRight(col: TableColumn<T>): boolean {
+  return col.fixed === 'right'
+}
+
 function cellStyle(col: TableColumn<T>, section: 'head' | 'body') {
   const style: Record<string, string> = {}
   if (col.width != null) style.width = typeof col.width === 'number' ? `${col.width}px` : col.width
@@ -75,11 +79,18 @@ function cellStyle(col: TableColumn<T>, section: 'head' | 'body') {
     style.left = '0'
     style.zIndex = section === 'head' ? '4' : '3'
   }
+  if (isFixedRight(col)) {
+    style.position = 'sticky'
+    style.right = '0'
+    style.zIndex = section === 'head' ? '4' : '3'
+  }
   return style
 }
 
 function cellClass(col: TableColumn<T>) {
-  return isFixedLeft(col) ? 'is-fixed-left' : undefined
+  if (isFixedLeft(col)) return 'is-fixed-left'
+  if (isFixedRight(col)) return 'is-fixed-right'
+  return undefined
 }
 
 const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}px` } : {}))

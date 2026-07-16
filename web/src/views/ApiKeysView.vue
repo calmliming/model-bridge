@@ -867,6 +867,7 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
     title: '操作',
     key: 'actions',
     width: 250,
+    fixed: 'right',
     render: (row) =>
       h(
         UiSpace,
