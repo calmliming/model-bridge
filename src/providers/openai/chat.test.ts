@@ -129,6 +129,44 @@ describe('responsesSseToChatCompletion', () => {
     })
   })
 
+  it('maps a truncated response.incomplete with content to finish_reason length', () => {
+    const sse = [
+      'data: {"type":"response.output_text.delta","delta":"partial answer"}',
+      '',
+      'data: {"type":"response.incomplete","response":{"id":"resp_1","model":"gpt-5.6-sol","created_at":123,"incomplete_details":{"reason":"max_output_tokens"}}}',
+      '',
+      '',
+    ].join('\n')
+
+    const result = responsesSseToChatCompletion(sse, 'fallback')
+
+    expect(result.status).toBeUndefined()
+    expect(result.body).toMatchObject({
+      choices: [
+        {
+          message: { role: 'assistant', content: 'partial answer' },
+          finish_reason: 'length',
+        },
+      ],
+    })
+  })
+
+  it('maps a content_filter response.incomplete to finish_reason content_filter', () => {
+    const sse = [
+      'data: {"type":"response.output_text.delta","delta":"cut"}',
+      '',
+      'data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}',
+      '',
+      '',
+    ].join('\n')
+
+    const result = responsesSseToChatCompletion(sse, 'fallback')
+
+    expect(result.body).toMatchObject({
+      choices: [{ finish_reason: 'content_filter' }],
+    })
+  })
+
   it('surfaces a mid-stream response.failed as an error body, not a hollow success', () => {
     const sse = [
       'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5.6-sol","created_at":123}}',
@@ -212,6 +250,39 @@ describe('createOpenaiChatCompletionsStreamTransform', () => {
       choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"q":"hi"}' } }] } }],
     })
     expect(done[0]).toMatchObject({ choices: [{ finish_reason: 'tool_calls' }] })
+  })
+
+  it('finishes a streamed response.incomplete with the mapped finish_reason', () => {
+    const transform = createOpenaiChatCompletionsStreamTransform()
+    transform.transform({
+      type: 'response.created',
+      response: { id: 'resp_1', model: 'gpt-5.6-sol', created_at: 123 },
+    })
+    transform.transform({ type: 'response.output_text.delta', delta: 'partial' })
+    const done = transform.transform({
+      type: 'response.incomplete',
+      response: { incomplete_details: { reason: 'max_output_tokens' } },
+    })
+
+    expect(done[0]).toMatchObject({ choices: [{ delta: {}, finish_reason: 'length' }] })
+    expect(done[1]).toBe('[DONE]')
+    expect(transform.flush()).toEqual([])
+  })
+
+  it('surfaces a streamed response.failed as an error chunk, not a clean stop', () => {
+    const transform = createOpenaiChatCompletionsStreamTransform()
+    transform.transform({
+      type: 'response.created',
+      response: { id: 'resp_1', model: 'gpt-5.6-sol', created_at: 123 },
+    })
+    const failed = transform.transform({
+      type: 'response.failed',
+      response: { error: { code: 'server_error', message: 'boom' } },
+    })
+
+    expect(failed[0]).toEqual({ error: { message: 'boom', type: 'server_error', code: 'server_error' } })
+    expect(failed[1]).toBe('[DONE]')
+    expect(transform.flush()).toEqual([])
   })
 })
 

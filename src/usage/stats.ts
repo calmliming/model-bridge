@@ -269,8 +269,8 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
 }
 
 /**
- * Per-day usage for the last `days` days (UTC). Returns a contiguous
- * series with zero-filled gaps so the chart has no holes.
+ * Per-day usage for the last `days` days, bucketed by STATS_TIMEZONE. Returns
+ * a contiguous series with zero-filled gaps so the chart has no holes.
  */
 export async function dailyStats(days: number): Promise<DailyStat[]> {
   const range = clampDays(days)
@@ -408,7 +408,7 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
 export async function dashboardOverview(): Promise<DashboardOverview> {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
-  // "Today" = since local midnight (server timezone), not a rolling 24h window.
+  // "Today" = since midnight in STATS_TIMEZONE, not a rolling 24h window.
   // The *24h field names are kept as-is; they now carry calendar-today figures.
   const sinceToday = startOfTodayMs()
   const since5m = now - 5 * 60_000

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { soonestReset } from './scheduler'
+import { modelCooldownUntil, soonestReset } from './scheduler'
 
 const NOW = 1_700_000_000_000
 
@@ -44,5 +44,34 @@ describe('soonestReset (prefer_soonest_reset ordering)', () => {
     ]
     accounts.sort((a, b) => soonestReset(a.metadata, NOW) - soonestReset(b.metadata, NOW))
     expect(accounts.map((a) => a.id)).toEqual(['soon', 'late', 'none'])
+  })
+})
+
+describe('modelCooldownUntil (model-scoped cooldowns)', () => {
+  it('reads the stored cooldown for the requested model only', () => {
+    const metadata = { modelCooldowns: { 'gpt-5.6-luna': NOW + 60_000 } }
+    expect(modelCooldownUntil(metadata, 'gpt-5.6-luna')).toBe(NOW + 60_000)
+    expect(modelCooldownUntil(metadata, 'gpt-5.6-sol')).toBeNull()
+  })
+
+  it('returns null for missing/invalid metadata shapes', () => {
+    expect(modelCooldownUntil(null, 'gpt-5.6-luna')).toBeNull()
+    expect(modelCooldownUntil({}, 'gpt-5.6-luna')).toBeNull()
+    expect(modelCooldownUntil({ modelCooldowns: 'bad' }, 'gpt-5.6-luna')).toBeNull()
+    expect(modelCooldownUntil({ modelCooldowns: { 'gpt-5.6-luna': 'soon' } }, 'gpt-5.6-luna')).toBeNull()
+    expect(modelCooldownUntil({ modelCooldowns: { 'gpt-5.6-luna': NOW } }, '')).toBeNull()
+  })
+
+  it('filters accounts the way pickAccount does', () => {
+    const accounts = [
+      { id: 'cooling', metadata: { modelCooldowns: { m1: NOW + 5_000 } } },
+      { id: 'expired', metadata: { modelCooldowns: { m1: NOW - 5_000 } } },
+      { id: 'other-model', metadata: { modelCooldowns: { m2: NOW + 5_000 } } },
+      { id: 'clean', metadata: {} },
+    ]
+    const available = accounts.filter(
+      (a) => !((modelCooldownUntil(a.metadata, 'm1') ?? 0) > NOW),
+    )
+    expect(available.map((a) => a.id)).toEqual(['expired', 'other-model', 'clean'])
   })
 })

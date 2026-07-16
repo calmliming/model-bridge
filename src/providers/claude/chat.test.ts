@@ -99,6 +99,11 @@ describe('mapStopReason', () => {
     expect(mapStopReason('max_tokens')).toBe('length')
     expect(mapStopReason('tool_use')).toBe('tool_calls')
   })
+
+  it('maps refusal to content_filter and keeps pause_turn as stop', () => {
+    expect(mapStopReason('refusal')).toBe('content_filter')
+    expect(mapStopReason('pause_turn')).toBe('stop')
+  })
 })
 
 describe('claudeMessageToChatCompletion', () => {

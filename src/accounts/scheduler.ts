@@ -35,12 +35,16 @@ export async function clearExpiredAccountCooldowns(now = Date.now()): Promise<vo
  * `groupId` scopes the pool: a key bound to a group only reaches that group's
  * accounts; an unbound key (null) only reaches ungrouped accounts (the default
  * pool). Existing data is all-null, so unbound keys keep seeing every account.
+ *
+ * `model` additionally skips accounts whose metadata carries an unexpired
+ * model-scoped cooldown for that model (see `penalizeAccountModel`).
  */
 export async function pickAccount(
   provider: string,
   exclude: string[] = [],
   sessionKey?: string | null,
   groupId?: string | null,
+  model?: string | null,
 ) {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
@@ -95,7 +99,10 @@ export async function pickAccount(
         ))
 
   const available = rows.filter(
-    (a) => !exclude.includes(a.id) && (!a.cooldownUntil || a.cooldownUntil < now),
+    (a) =>
+      !exclude.includes(a.id) &&
+      (!a.cooldownUntil || a.cooldownUntil < now) &&
+      !(model && (modelCooldownUntil(a.metadata, model) ?? 0) > now),
   )
   if (available.length === 0) return null
 
@@ -183,4 +190,59 @@ export async function penalizeAccount(
   await db.update(accounts)
     .set({ status: kind, cooldownUntil: until })
     .where(eq(accounts.id, id))
+}
+
+/**
+ * The unexpired model-scoped cooldown for `model` from an account's metadata
+ * (`metadata.modelCooldowns[model]`, epoch ms), or null when none is stored.
+ * Exported for unit testing the pickAccount filter.
+ */
+export function modelCooldownUntil(metadata: unknown, model: string): number | null {
+  if (!model || !metadata || typeof metadata !== 'object') return null
+  const map = (metadata as { modelCooldowns?: Record<string, unknown> }).modelCooldowns
+  if (!map || typeof map !== 'object') return null
+  const value = map[model]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+/**
+ * Cools down a single model on an account, leaving the account itself active
+ * so its other models keep being scheduled. Used for failures attributable to
+ * one model only (e.g. a plan-gated OpenAI model's rate limit) — an account-
+ * wide `penalizeAccount` there would blank the whole account for every model.
+ *
+ * Stored in `accounts.metadata.modelCooldowns`; expired entries are pruned on
+ * each write and ignored on read, so no background cleanup is needed. The
+ * read-modify-write can race a concurrent metadata update (e.g. a quota
+ * snapshot) and occasionally lose one entry — acceptable for a short cooldown.
+ */
+export async function penalizeAccountModel(
+  id: string,
+  model: string,
+  kind: 'rate_limited' | 'error',
+  cooldownUntil?: number | null,
+): Promise<void> {
+  if (!model) return penalizeAccount(id, kind, cooldownUntil)
+  const now = Date.now()
+  const fallbackUntil = now + COOLDOWN_MS[kind]
+  const until = cooldownUntil && cooldownUntil > now ? cooldownUntil : fallbackUntil
+  const [row] = await db
+    .select({ metadata: accounts.metadata })
+    .from(accounts)
+    .where(eq(accounts.id, id))
+  if (!row) return
+  const metadata =
+    row.metadata && typeof row.metadata === 'object'
+      ? { ...(row.metadata as Record<string, unknown>) }
+      : ({} as Record<string, unknown>)
+  const existing = metadata.modelCooldowns
+  const pruned: Record<string, number> = {}
+  if (existing && typeof existing === 'object') {
+    for (const [key, value] of Object.entries(existing as Record<string, unknown>)) {
+      if (typeof value === 'number' && value > now) pruned[key] = value
+    }
+  }
+  pruned[model] = until
+  metadata.modelCooldowns = pruned
+  await db.update(accounts).set({ metadata }).where(eq(accounts.id, id))
 }

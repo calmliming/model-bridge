@@ -6,7 +6,13 @@ import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../
 import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
 import { getQuotaAutopausePercent } from '../db/settings'
-import { disableAccount, markAccountUsed, penalizeAccount, pickAccount } from '../accounts/scheduler'
+import {
+  disableAccount,
+  markAccountUsed,
+  penalizeAccount,
+  penalizeAccountModel,
+  pickAccount,
+} from '../accounts/scheduler'
 import {
   bindStickyAccount,
   clearStickyAccount,
@@ -515,6 +521,13 @@ interface UpstreamFailure {
   resetAt?: number | null
   /** When true the account token is permanently invalid — disable it instead of cooldown. */
   disable?: boolean
+  /**
+   * When true the failure is attributable to the requested model only, so the
+   * cooldown applies to that model (metadata.modelCooldowns) instead of the
+   * whole account. Set for OpenAI rate-limit shapes that carry no account-wide
+   * Codex quota-window evidence (e.g. a plan-gated model's limit).
+   */
+  modelScoped?: boolean
 }
 
 function textLooksRateLimited(text: string): boolean {
@@ -705,7 +718,8 @@ function isWorkspaceDeactivated(text: string): boolean {
   }
 }
 
-async function classifyUpstreamFailure(
+/** Exported for unit testing the failure classification / model-scope rules. */
+export async function classifyUpstreamFailure(
   provider: string,
   response: Response,
 ): Promise<UpstreamFailure> {
@@ -714,7 +728,12 @@ async function classifyUpstreamFailure(
     if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers)) {
       return { penalty: null, retryable: true }
     }
-    return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
+    return {
+      penalty: 'rate_limited',
+      retryable: true,
+      resetAt: parseRateLimitReset(provider, response, text),
+      modelScoped: isOpenaiModelScopedLimit(provider, response),
+    }
   }
   if (response.status === 401) {
     const text = await readErrorText(response)
@@ -736,10 +755,29 @@ async function classifyUpstreamFailure(
   if (response.status === 400 || response.status === 403) {
     const text = await readErrorText(response)
     if (textLooksRateLimited(text)) {
-      return { penalty: 'rate_limited', retryable: true, resetAt: parseRateLimitReset(provider, response, text) }
+      return {
+        penalty: 'rate_limited',
+        retryable: true,
+        resetAt: parseRateLimitReset(provider, response, text),
+        modelScoped: isOpenaiModelScopedLimit(provider, response),
+      }
     }
   }
   return { penalty: null, retryable: false }
+}
+
+/**
+ * OpenAI rate-limit scope heuristic: the Codex backend reports account-wide
+ * 5h/weekly quota windows via response headers. A rate-limit response WITHOUT
+ * that evidence (e.g. a plan-gated model's 400/429) is most likely scoped to
+ * the requested model, so we cool down only that model instead of blanking
+ * the whole account for every other model. The trade-off leans deliberately
+ * toward availability: a mis-scoped account-wide limit just retries other
+ * models against the same account, while the reverse (account-wide cooldown
+ * for a model-only limit) takes the account out of rotation entirely.
+ */
+function isOpenaiModelScopedLimit(provider: string, response: Response): boolean {
+  return provider === 'openai' && parseCodexReset(response.headers) == null
 }
 
 /** Registers the provider relay endpoints. */
@@ -1111,8 +1149,27 @@ async function runRelayLoop(
   // (the gateway rotates its own backends), not "blackball this credential".
   const relayToRelay = provider.relayToRelay === true
 
+  // A vanished client shouldn't burn more upstream quota: note the disconnect
+  // and stop before starting the NEXT attempt. In-flight upstream requests are
+  // deliberately left alone — they complete and their usage is recorded
+  // normally, so billing never sees a half-aborted request.
+  let clientGone = false
+  reply.raw.once('close', () => {
+    if (!reply.raw.writableEnded) clientGone = true
+  })
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const account = await pickAccount(provider.id, tried, sessionKey, apiKey.accountGroupId ?? null)
+    if (clientGone) {
+      request.log.info(`client disconnected; skipping further ${provider.id} attempts`)
+      return
+    }
+    const account = await pickAccount(
+      provider.id,
+      tried,
+      sessionKey,
+      apiKey.accountGroupId ?? null,
+      parsed.model,
+    )
     if (!account) {
       await reply.code(503).send({
         error: tried.length
@@ -1199,7 +1256,11 @@ async function runRelayLoop(
           // a healthy backend. Don't cool it down or exclude it from the pool.
           tried.pop()
         } else if (failure.penalty) {
-          await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+          if (failure.modelScoped) {
+            await penalizeAccountModel(account.id, parsed.model, failure.penalty, failure.resetAt)
+          } else {
+            await penalizeAccount(account.id, failure.penalty, failure.resetAt)
+          }
         }
         await upstream.body?.cancel().catch(() => {})
         continue
@@ -1212,8 +1273,12 @@ async function runRelayLoop(
         // Relay-to-relay retries are exhausted here: apply only a short back-off
         // so subsequent turns recover quickly instead of hitting a multi-minute
         // "no sub2api account" window on a single-account group.
-        const cooldownUntil = relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : failure.resetAt
-        await penalizeAccount(account.id, failure.penalty, cooldownUntil)
+        if (!relayToRelay && failure.modelScoped) {
+          await penalizeAccountModel(account.id, parsed.model, failure.penalty, failure.resetAt)
+        } else {
+          const cooldownUntil = relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : failure.resetAt
+          await penalizeAccount(account.id, failure.penalty, cooldownUntil)
+        }
       } else if (upstream.ok) {
         // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
         // the configured threshold, until the breaching window resets. Only costs
@@ -1245,6 +1310,15 @@ async function runRelayLoop(
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
         subscriptionId: apiKey.subscriptionId,
+      }
+      // Relay-to-relay upstreams are third-party gateways: their error bodies
+      // can embed backend hosts, channel names or other internal config. Send
+      // this gateway's own sanitized envelope instead of the verbatim body
+      // (the Responses-protocol path sanitizes inside sendStreaming). The full
+      // upstream body stays server-side in the log for troubleshooting.
+      if (relayToRelay && !upstream.ok && !provider.responsesProtocol) {
+        await sendSanitizedRelayError(request, reply, upstream, meta)
+        return
       }
       if (wantStream) {
         await sendStreaming(reply, upstream, meta, provider)
@@ -1310,7 +1384,17 @@ async function sendStreaming(
   // stream carrying the real error message instead.
   if (responsesProtocol && !upstream.ok) {
     const errorText = await upstream.text().catch(() => '')
-    const { code, message } = extractUpstreamError(errorText, upstream.status)
+    const extracted = extractUpstreamError(errorText, upstream.status)
+    const code = extracted.code
+    // Relay-to-relay: the gateway's error text may name internal backends —
+    // log the original server-side, forward a URL-redacted message.
+    let message = extracted.message
+    if (provider.relayToRelay) {
+      reply.log.warn(
+        `sub2api upstream error for account ${meta.accountId}: HTTP ${upstream.status} ${errorText.slice(0, 2_000)}`,
+      )
+      message = redactUrls(message)
+    }
     raw.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
@@ -1363,7 +1447,8 @@ async function sendStreaming(
       writeSseData(raw, event)
     } else {
       const { code, message } = extractUpstreamError(bodyText, upstream.status)
-      for (const event of buildResponsesErrorEvents(message, code)) {
+      const safeMessage = provider.relayToRelay ? redactUrls(message) : message
+      for (const event of buildResponsesErrorEvents(safeMessage, code)) {
         noteResponsesTerminal(event, jsonState)
         writeSseData(raw, event)
       }
@@ -1582,6 +1667,51 @@ export function responsesStreamStatus(
   if (!upstreamOk) return 'error'
   if (!responsesProtocol) return 'success'
   return state.sawTerminal && !state.sawFailure ? 'success' : 'error'
+}
+
+/** Redacts URLs from a message so upstream hosts/paths never reach clients. */
+export function redactUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s"'<>)\]]+/gi, '[redacted-url]')
+}
+
+/**
+ * Final-failure response for relay-to-relay (sub2api) upstreams: keep the HTTP
+ * status plus a URL-redacted code/message extracted from the error body, and
+ * rewrite everything else into this gateway's own envelope. The envelope
+ * carries both Anthropic-style (`type`/`error.type`) and OpenAI-style
+ * (`error.code`/`error.message`) fields so either client family can render it.
+ */
+async function sendSanitizedRelayError(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  upstream: Response,
+  meta: RelayMeta,
+): Promise<void> {
+  const text = await upstream.text().catch(() => '')
+  request.log.warn(
+    `sub2api upstream error for account ${meta.accountId}: HTTP ${upstream.status} ${text.slice(0, 2_000)}`,
+  )
+  const { code, message } = extractUpstreamError(text, upstream.status)
+  void recordUsage({
+    apiKeyId: meta.apiKeyId,
+    userId: meta.userId,
+    accountId: meta.accountId,
+    provider: meta.provider,
+    model: meta.model,
+    multiplier: meta.multiplier,
+    billTo: meta.billTo,
+    subscriptionId: meta.subscriptionId,
+    usage: emptyUsage(),
+    status: 'error',
+    latencyMs: Date.now() - meta.startedAt,
+    requestInput: meta.requestInput,
+    sessionKeyHash: meta.sessionKeyHash,
+    sessionSource: meta.sessionSource,
+  })
+  await reply.code(upstream.status).send({
+    type: 'error',
+    error: { type: code, code, message: redactUrls(message) },
+  })
 }
 
 /** Extracts a displayable error code + message from an upstream error body. */

@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.151**，2026-07-10）
-> 更新日期：2026-07-11
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.157**，2026-07-16）
+> 更新日期：2026-07-16
 
 ## 一句话定位
 
@@ -103,6 +103,20 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api 至 v0.1.157（2026-07-16）
+
+对照 sub2api v0.1.152–v0.1.157（3 天 5 版，v0.1.154 缺号）逐项核查 model-bridge 实际代码，方法与结论详见 [sub2api v0.1.152-157 实施计划](./sub2api-v0.1.152-157-实施计划.md)。核查确认 10 项 sub2api 修复在本仓库**无同构形态**（Haiku 伪装缺口、cache_creation 丢失、幻影 content_block_delta、长上下文重复计费、调度重建风暴等）；识别出 5 项真实差距并已全部落地：
+
+**已落地改动：**
+
+- **sub2api 透传错误净化**（对应 v0.1.156 passthrough 错误净化）：relay-to-relay 提供方（sub2api / sub2api-chat）最终失败响应此前把上游网关错误体逐字回传客户端，可能泄露上游后端地址、渠道名等内部信息。现改为重写成本网关自有 envelope（保留 HTTP 状态码 + `extractUpstreamError` 提取的 code/message，message 做 URL 脱敏），兼容 Anthropic/OpenAI 两种客户端解析；sub2api-responses 的合成 `response.failed` 路径同样对 message 做 URL 脱敏。完整原始错误体只进服务端日志。见 `src/routes/relay.ts` 的 `sendSanitizedRelayError` / `redactUrls`，含单测。
+- **OpenAI 临时冷却按模型隔离**（对应 v0.1.157）：此前 cooldown 是账号级，单模型限流（如 plan-gated 模型的 400/429）会把整个账号停调。现在 OpenAI 的限流响应若**不带**账号级 Codex 配额窗口头（`x-codex-*`），判定为模型级限制，只冷却 `metadata.modelCooldowns[model]`，账号本身保持 active，其他模型继续调度；带账号窗口证据的 429 仍走账号级。不新增表，过期项写时清理、读时过滤。见 `src/accounts/scheduler.ts` 的 `penalizeAccountModel` / `modelCooldownUntil` 与 `relay.ts` 的 `isOpenaiModelScopedLimit`，含单测。
+- **stop_reason / finish_reason 映射补全**（对应 v0.1.153 同类修复）：Anthropic `refusal` 此前被映射为 `stop`，现映射为 `content_filter`（`pause_turn` 维持 `stop`）；Responses→Chat 方向新增 `response.incomplete` 处理——`incomplete_details.reason` 为 `max_output_tokens` 时 finish_reason 记 `length`、`content_filter` 记 `content_filter`（缓冲与流式两条路径），流式 `response.failed` 也补了 error chunk 终止（对齐 claude→chat 已有模式），不再以假 `stop` 结尾。见 `src/providers/claude/chat.ts` 的 `mapStopReason` 与 `src/providers/openai/chat.ts` 的 `finishReasonFromIncomplete`，含单测。
+- **客户端断开中止重试**（v0.1.156 failover 修复的反向加固）：本仓库不存在 sub2api 的「断开导致 failover 静默中止」bug，但此前完全未感知断开——客户端取消后仍会把 3 轮换号重试跑完，浪费上游配额。现在 `runRelayLoop` 监听响应连接提前关闭，只在**重试边界**（下一轮取号前）终止循环；在途上游请求不 abort，照常完成并正常落账，计费安全不受影响。
+- **时区收尾**（d9a523e 残留）：前端 `formatTime` 此前用浏览器本地时区渲染，与 `STATS_TIMEZONE` 日桶可能跨天不一致。新增公开端点 `GET /api/auth/display-config` 下发 `statsTimezone`，前端启动时拉取后所有时间戳按该时区渲染（拉取失败回退浏览器本地）；同时修正 `stats.ts` 两处过时注释（"(UTC)"/"server timezone"）。
+
+**暂缓 / 不适用**（详见实施计划）：Grok 增强包（xAI API Key 账号、账号级自定义 URL、健康监控、免费额度、prompt caching）、操作审计日志、会话 IP/UA 绑定、step-up 2FA、异步生图、Codex web 搜索按次计费、长上下文分档计费（待确认上游真实计费行为）、被拒字段自动剥离重试等。
 
 ### 跟踪 sub2api 至 v0.1.151（2026-07-11）
 

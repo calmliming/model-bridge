@@ -52,6 +52,7 @@ interface ResponsesStreamEvent {
     usage?: ResponsesUsage
     output?: ResponsesOutputItem[]
     error?: { message?: unknown; code?: unknown; type?: unknown }
+    incomplete_details?: { reason?: unknown }
   }
 }
 
@@ -325,6 +326,16 @@ function toolCallsFromOutputItems(output: ResponsesOutputItem[] | undefined): Ch
   return calls
 }
 
+/**
+ * Maps a Responses `incomplete_details.reason` to an OpenAI finish_reason, or
+ * null when the reason has no Chat Completions equivalent.
+ */
+function finishReasonFromIncomplete(reason: unknown): 'length' | 'content_filter' | null {
+  if (reason === 'max_output_tokens' || reason === 'max_tokens') return 'length'
+  if (reason === 'content_filter') return 'content_filter'
+  return null
+}
+
 export function responsesSseToChatCompletion(
   text: string,
   fallbackModel: string,
@@ -337,6 +348,7 @@ export function responsesSseToChatCompletion(
   let output: ResponsesOutputItem[] | undefined
   let rawUsage: ResponsesUsage | undefined
   let failure: { code: string; message: string } | undefined
+  let incompleteFinish: 'length' | 'content_filter' | null = null
 
   for (const event of parseResponsesSseEvents(text)) {
     const e = event as ResponsesStreamEvent
@@ -355,6 +367,13 @@ export function responsesSseToChatCompletion(
     // Capture it so we don't return an empty, successful-looking completion.
     if (e.type === 'response.failed' || e.type === 'response.incomplete') {
       if (e.response?.usage) rawUsage = e.response.usage
+      if (e.type === 'response.incomplete') {
+        // Truncation with usable content isn't an error: it becomes a normal
+        // completion whose finish_reason says why it stopped (length / filter).
+        if (!output && e.response?.output) output = e.response.output
+        if (!content) content = textFromOutputItems(e.response?.output)
+        incompleteFinish = finishReasonFromIncomplete(e.response?.incomplete_details?.reason)
+      }
       const err = e.response?.error
       const message =
         typeof err?.message === 'string' && err.message
@@ -395,7 +414,7 @@ export function responsesSseToChatCompletion(
             content: hasToolCalls && !content ? null : content,
             ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
           },
-          finish_reason: hasToolCalls ? 'tool_calls' : 'stop',
+          finish_reason: hasToolCalls ? 'tool_calls' : (incompleteFinish ?? 'stop'),
         },
       ],
       ...(chatUsage ? { usage: chatUsage } : {}),
@@ -503,6 +522,31 @@ export function createOpenaiChatCompletionsStreamTransform(): {
         const hasToolCalls = state.hasToolCalls || toolCallsFromOutputItems(output).length > 0
         const delta = state.sentRole ? {} : { role: 'assistant' }
         return [chatChunk(state.id, state.created, state.model, delta, hasToolCalls ? 'tool_calls' : 'stop'), '[DONE]']
+      }
+
+      // Truncated-but-usable terminal: finish with the mapped reason (length /
+      // content_filter) instead of letting flush() fake a clean 'stop'.
+      if (event.type === 'response.incomplete') {
+        state.completed = true
+        const finish =
+          finishReasonFromIncomplete(event.response?.incomplete_details?.reason) ?? 'stop'
+        const delta = state.sentRole ? {} : { role: 'assistant' }
+        return [chatChunk(state.id, state.created, state.model, delta, finish), '[DONE]']
+      }
+
+      // Mid-stream terminal failure (upstream sent 200 then failed). Surface it
+      // as an OpenAI-style error chunk and terminate, instead of silently
+      // ending with an empty, successful-looking finish.
+      if (event.type === 'response.failed') {
+        state.completed = true
+        const err = event.response?.error
+        const message =
+          typeof err?.message === 'string' && err.message
+            ? err.message
+            : 'Upstream response failed.'
+        const rawCode = err?.code ?? err?.type
+        const code = typeof rawCode === 'string' && rawCode ? rawCode : 'response.failed'
+        return [{ error: { message, type: code, code } }, '[DONE]']
       }
 
       return []

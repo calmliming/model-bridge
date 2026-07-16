@@ -178,14 +178,18 @@ export function chatCompletionsToClaudeMessages(
 // ── Response: Anthropic Messages → Chat Completions ─────────────────────────
 
 /** Maps an Anthropic stop_reason to an OpenAI finish_reason. */
-export function mapStopReason(stopReason: unknown): 'stop' | 'length' | 'tool_calls' {
+export function mapStopReason(
+  stopReason: unknown,
+): 'stop' | 'length' | 'tool_calls' | 'content_filter' {
   switch (stopReason) {
     case 'tool_use':
       return 'tool_calls'
     case 'max_tokens':
       return 'length'
+    case 'refusal':
+      return 'content_filter'
     default:
-      return 'stop' // end_turn, stop_sequence, null
+      return 'stop' // end_turn, stop_sequence, pause_turn, null
   }
 }
 

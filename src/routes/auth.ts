@@ -4,6 +4,7 @@ import { getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { checkLoginRateLimit, getTurnstileSiteKey, verifyTurnstileToken } from '../auth/security'
 import { registerUser, UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
 import { isRegistrationEnabled } from '../db/settings'
+import { config } from '../config'
 import { checkRateLimit } from '../middleware/limits'
 import { db } from '../db'
 import { accounts, usageLogs } from '../db/schema'
@@ -65,6 +66,13 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       enabled: await isRegistrationEnabled(),
       turnstileSiteKey: getTurnstileSiteKey(),
     }
+  })
+
+  // Public: display hints for the web console. The stats timezone drives
+  // client-side timestamp rendering so a log row's date always matches the
+  // STATS_TIMEZONE day bucket / "today" card it was counted into.
+  app.get('/api/auth/display-config', async () => {
+    return { statsTimezone: config.STATS_TIMEZONE }
   })
 
   // Public: system summary for the landing page.
