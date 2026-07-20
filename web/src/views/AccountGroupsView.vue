@@ -47,6 +47,7 @@ const providerLabel: Record<string, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  kimi: 'Kimi (Moonshot)',
   sub2api: 'Sub2API',
 }
 
@@ -58,6 +59,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  kimi: 'default',
   sub2api: 'success',
 }
 

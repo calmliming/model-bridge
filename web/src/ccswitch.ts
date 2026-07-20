@@ -34,7 +34,7 @@ export interface CcSwitchTarget {
     opusModel?: string
   }
   /** Which key provider this target maps to, for filtering by a key's allowedProviders. */
-  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'sub2api'
+  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'sub2api'
 }
 
 /** All supported import targets, in display order. */
@@ -147,6 +147,29 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     endpoint: (origin) => origin,
     models: { model: 'qwen3-coder-plus' },
     provider: 'qwen',
+  },
+  {
+    id: 'claude-kimi',
+    app: 'claude',
+    label: 'Claude Code · Kimi',
+    vendor: 'Kimi',
+    endpoint: (origin) => origin,
+    models: {
+      model: 'kimi-k3',
+      sonnetModel: 'kimi-k3',
+      haikuModel: 'kimi-k2.6',
+      opusModel: 'kimi-k3',
+    },
+    provider: 'kimi',
+  },
+  {
+    id: 'codex-kimi',
+    app: 'codex',
+    label: 'Codex CLI · Kimi',
+    vendor: 'Kimi',
+    endpoint: (origin) => origin,
+    models: { model: 'kimi-k2.7-code' },
+    provider: 'kimi',
   },
   {
     id: 'gemini',

@@ -195,7 +195,7 @@ function resetAndClose() {
 
           <p class="import-note">
             <strong>标准格式字段：</strong><br>
-            • provider: claude | openai | gemini | deepseek | xiaomi | zhipu | qwen | sub2api<br>
+            • provider: claude | openai | gemini | deepseek | xiaomi | zhipu | qwen | kimi | sub2api<br>
             • name: 账号名称（必填）<br>
             • accessToken: 访问令牌（必填）<br>
             • refreshToken: 刷新令牌（可选）<br>

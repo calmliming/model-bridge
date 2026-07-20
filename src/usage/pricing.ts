@@ -168,6 +168,23 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
   return 'max'
 }
 
+// Kimi (月之暗面 / Moonshot) list prices (per 1M tokens), quoted in CNY on the
+// platform.kimi.com pricing pages and converted to USD. No separate cache-write
+// fee — cacheWrite is 0; cacheRead is the cache-hit input price. kimi-k3 is the
+// 1M-context flagship (¥20 / ¥100, cache-hit ¥2); the k2 family (k2.7-code /
+// k2.6 / k2.5, and the retiring moonshot-v1-*) is the cheaper tier
+// (¥6.5 / ¥27, cache-hit ~¥1.3).
+const KIMI_TIERS: Record<'k3' | 'k2', TierPrice> = {
+  k3: { input: cny(20), output: cny(100), cacheWrite: 0, cacheRead: cny(2) },
+  k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) },
+}
+
+function kimiTier(model: string): keyof typeof KIMI_TIERS {
+  // kimi-k3 (incl. the kimi-k3[1m] 1M-context form) → flagship; everything else
+  // (kimi-k2.x, moonshot-v1-*) → the cheaper k2 tier.
+  return model.toLowerCase().includes('k3') ? 'k3' : 'k2'
+}
+
 // xAI (Grok) list prices per 1M tokens (docs.x.ai, mid-2026). No separate
 // cache-write fee — cacheWrite is 0; cacheRead is the cached-input rate.
 const GROK_45: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 }
@@ -191,6 +208,7 @@ function sub2apiPrice(model: string): TierPrice {
   if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
   if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
   if (m.startsWith('qwen')) return QWEN_TIERS[qwenTier(model)]
+  if (m.startsWith('kimi') || m.startsWith('moonshot')) return KIMI_TIERS[kimiTier(model)]
   if (m.startsWith('grok')) return grokPrice(model)
   return CLAUDE_SONNET
 }
@@ -204,6 +222,7 @@ function builtinPrice(provider: string, model: string): TierPrice | null {
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
+  if (provider === 'kimi') return KIMI_TIERS[kimiTier(model)]
   if (provider === 'grok') return grokPrice(model)
   if (provider === 'sub2api') return sub2apiPrice(model)
   return null
@@ -261,6 +280,11 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.coder },
   { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.max },
   { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.plus },
+  // Kimi — exact rows for the discoverable models; kimiTier() covers other
+  // kimi-* / moonshot-* variants via substring tiers.
+  { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
+  { provider: 'kimi', model: 'kimi-k2.7-code', price: KIMI_TIERS.k2 },
+  { provider: 'kimi', model: 'kimi-k2.6', price: KIMI_TIERS.k2 },
   // Grok (xAI) — exact rows for the discoverable models; grokPrice() covers
   // other grok-* variants via substring tiers.
   { provider: 'grok', model: 'grok-4.5', price: GROK_45 },

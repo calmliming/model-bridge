@@ -70,7 +70,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'grok' | 'sub2api'
+type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'grok' | 'sub2api'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -190,10 +190,11 @@ const providerLabel: Record<Provider, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  kimi: 'Kimi (Moonshot)',
   grok: 'Grok (xAI)',
   sub2api: 'Sub2API',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'grok', 'sub2api']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'grok', 'sub2api']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
@@ -202,6 +203,7 @@ const providerTagType: Record<Provider, TagType> = {
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  kimi: 'default',
   grok: 'default',
   sub2api: 'success',
 }
@@ -213,13 +215,14 @@ const authorizeHost: Record<Provider, string> = {
   xiaomi: 'platform.xiaomimimo.com',
   zhipu: 'open.bigmodel.cn',
   qwen: 'bailian.console.aliyun.com',
+  kimi: 'platform.moonshot.cn',
   grok: 'auth.x.ai',
   sub2api: 'sub2api',
 }
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'sub2api']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'sub2api']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
@@ -228,6 +231,7 @@ const apiKeyConsoleHint: Record<string, string> = {
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
   zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
   qwen: '在 bailian.console.aliyun.com 阿里云百炼控制台「API-KEY」创建后粘贴到上方。',
+  kimi: '在 platform.moonshot.cn 控制台「API Key 管理」创建 API Key 后粘贴到上方。',
   sub2api: '填写 Sub2API 部署地址和它生成的 API Key，例如 https://sub2api.example.com。',
 }
 
@@ -1572,6 +1576,7 @@ onBeforeUnmount(() => {
               <UiRadioButton value="xiaomi">Xiaomi MiMo</UiRadioButton>
               <UiRadioButton value="zhipu">Zhipu GLM</UiRadioButton>
               <UiRadioButton value="qwen">Tongyi Qwen</UiRadioButton>
+              <UiRadioButton value="kimi">Kimi (Moonshot)</UiRadioButton>
               <UiRadioButton value="sub2api">Sub2API</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>

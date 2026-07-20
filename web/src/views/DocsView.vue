@@ -76,11 +76,12 @@ const isSecureContext = computed(() => {
 export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
 claude</code></pre>
           <p class="doc-p mt-3">
-            DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen 的 Anthropic 兼容入口分别是
+            DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen / Kimi 的 Anthropic 兼容入口分别是
             <code class="code-inline">{{ baseOrigin }}/api/deepseek</code>、
             <code class="code-inline">{{ baseOrigin }}/api/xiaomi</code>、
-            <code class="code-inline">{{ baseOrigin }}/api/zhipu</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/qwen</code>。
+            <code class="code-inline">{{ baseOrigin }}/api/zhipu</code>、
+            <code class="code-inline">{{ baseOrigin }}/api/qwen</code> 和
+            <code class="code-inline">{{ baseOrigin }}/api/kimi</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="codex" tab="Codex CLI">
@@ -100,11 +101,12 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge</code></pre>
           <p class="doc-p mt-3">Codex 的 base URL 填到 <code class="code-inline">/v1</code>，客户端会自动请求 <code class="code-inline">/v1/responses</code>。</p>
           <p class="doc-p mt-2">
-            DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen 专用入口分别使用
+            DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen / Kimi 专用入口分别使用
             <code class="code-inline">{{ baseOrigin }}/api/deepseek/v1</code>、
             <code class="code-inline">{{ baseOrigin }}/api/xiaomi/v1</code>、
-            <code class="code-inline">{{ baseOrigin }}/api/zhipu/v1</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/qwen/v1</code>。
+            <code class="code-inline">{{ baseOrigin }}/api/zhipu/v1</code>、
+            <code class="code-inline">{{ baseOrigin }}/api/qwen/v1</code> 和
+            <code class="code-inline">{{ baseOrigin }}/api/kimi/v1</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="cherry" tab="Cherry Studio">
@@ -136,6 +138,10 @@ codex --profile model-bridge</code></pre>
             <div class="grid gap-1.5">
               <span class="text-sm text-gray-900 dark:text-white">Tongyi Qwen (OpenAI)</span>
               <code class="code-inline w-fit">{{ baseOrigin }}/api/qwen/v1</code>
+            </div>
+            <div class="grid gap-1.5">
+              <span class="text-sm text-gray-900 dark:text-white">Kimi (OpenAI)</span>
+              <code class="code-inline w-fit">{{ baseOrigin }}/api/kimi/v1</code>
             </div>
           </div>
           <p class="doc-p mt-3">

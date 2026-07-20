@@ -67,6 +67,13 @@ import { relayQwenResponses } from '../providers/qwen/responses-relay'
 import * as qwenResponsesUsage from '../providers/qwen/responses-usage'
 import { createQwenResponsesStreamTransform } from '../providers/qwen/stream'
 import { mapModel as mapQwenResponsesModel } from '../providers/qwen/converter'
+import { relayKimiMessages } from '../providers/kimi/relay'
+import * as kimiUsage from '../providers/kimi/usage'
+import { relayKimiChatCompletions } from '../providers/kimi/chat-relay'
+import { relayKimiResponses } from '../providers/kimi/responses-relay'
+import * as kimiResponsesUsage from '../providers/kimi/responses-usage'
+import { createKimiResponsesStreamTransform } from '../providers/kimi/stream'
+import { mapModel as mapKimiResponsesModel } from '../providers/kimi/converter'
 import {
   relaySub2ApiChatCompletions,
   relaySub2ApiMessages,
@@ -461,6 +468,51 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: qwenResponsesUsage.parseJsonUsage,
     createStreamTransform: createQwenResponsesStreamTransform,
   },
+  // Kimi (月之暗面 / Moonshot) — same shape as DeepSeek/Xiaomi/Zhipu/Qwen:
+  // Anthropic-compatible /v1/messages (https://api.moonshot.cn/anthropic), plus
+  // OpenAI Chat-Completions and a Responses-API adapter for Codex CLI.
+  kimi: {
+    id: 'kimi',
+    forceStream: false,
+    normalizeModel: mapKimiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'messages',
+    }),
+    callUpstream: (token, body, _ctx) => relayKimiMessages(token, body),
+    createStreamParser: kimiUsage.createStreamParser,
+    parseJsonUsage: kimiUsage.parseJsonUsage,
+  },
+  'kimi-chat': {
+    id: 'kimi',
+    forceStream: false,
+    normalizeModel: mapKimiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'chat.completions',
+    }),
+    callUpstream: (token, body, _ctx) => relayKimiChatCompletions(token, body),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  // Route key only — provider.id stays 'kimi' so account pool, allowed-provider
+  // checks, and usage records all reuse the existing kimi setup. Backed by
+  // Moonshot's OpenAI-compatible chat/completions endpoint with a Responses-API
+  // ↔ Chat-Completions stream converter for Codex CLI.
+  'kimi-responses': {
+    id: 'kimi',
+    forceStream: true,
+    responsesProtocol: true,
+    normalizeModel: mapKimiResponsesModel,
+    parseRoute: (_req, body) => ({
+      model: typeof body.model === 'string' ? body.model : '',
+      action: 'responses',
+    }),
+    callUpstream: (token, body, _ctx) => relayKimiResponses(token, body),
+    createStreamParser: kimiResponsesUsage.createStreamParser,
+    parseJsonUsage: kimiResponsesUsage.parseJsonUsage,
+    createStreamTransform: createKimiResponsesStreamTransform,
+  },
   sub2api: {
     id: 'sub2api',
     forceStream: false,
@@ -816,6 +868,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS['qwen-chat']!)
   const qwenResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['qwen-responses']!)
+  const kimiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS.kimi!)
+  const kimiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['kimi-chat']!)
+  const kimiResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['kimi-responses']!)
   const grokHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.grok!)
   const grokChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
@@ -876,6 +934,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/qwen
   app.post('/api/qwen/v1/responses', { preHandler: requireApiKey }, qwenResponsesHandler)
+  // Kimi (月之暗面): Anthropic-compatible endpoint under /api/kimi prefix.
+  // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/kimi
+  app.post('/api/kimi/v1/messages', { preHandler: requireApiKey }, kimiHandler)
+  // Kimi: OpenAI-compatible Chat Completions endpoint.
+  // OpenAI clients: base URL=https://your-host/api/kimi/v1
+  app.post('/api/kimi/v1/chat/completions', { preHandler: requireApiKey }, kimiChatHandler)
+  // Kimi: OpenAI Responses-API surface for Codex CLI. The relay rewrites
+  // requests into chat/completions and translates the SSE stream back.
+  // Codex: configure base_url=https://your-host/api/kimi
+  app.post('/api/kimi/v1/responses', { preHandler: requireApiKey }, kimiResponsesHandler)
   // Grok (xAI): OpenAI Responses-API surface for Codex CLI.
   // Codex: configure base_url=https://your-host/api/grok
   app.post('/api/grok/v1/responses', { preHandler: requireApiKey }, grokHandler)
@@ -908,6 +976,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.get('/api/qwen/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'qwen'),
   )
+  app.get('/api/kimi/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'kimi'),
+  )
   app.get('/api/sub2api/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'sub2api'),
   )
@@ -935,12 +1006,14 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
     { test: /^glm/i, handler: PROVIDERS.zhipu! },
     { test: /^qwen/i, handler: PROVIDERS.qwen! },
+    { test: /^(kimi|moonshot)/i, handler: PROVIDERS.kimi! },
   ], PROVIDERS.sub2api!)
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
+    { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-responses']! },
     { test: /^grok/i, handler: PROVIDERS.grok! },
   ], PROVIDERS['sub2api-responses']!)
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
@@ -949,6 +1022,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
+    { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-chat']! },
     { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
   ], PROVIDERS['sub2api-chat']!)
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)

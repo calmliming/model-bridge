@@ -101,6 +101,7 @@ const providerOptions = [
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
   { label: 'Tongyi Qwen', value: 'qwen' },
+  { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
 
@@ -112,11 +113,12 @@ const providerLabel: Record<string, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  kimi: 'Kimi (Moonshot)',
   sub2api: 'Sub2API',
 }
 
-const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*', 'glm-*', 'qwen*', 'sub2api-*'].map((value) => ({ label: value, value }))
-const commonMappingOptions = ['gpt-public=gpt-5.4', 'deepseek-pro=deepseek-v4-pro', 'mimo-pro=mimo-v2.5-pro', 'glm-pro=glm-5.2', 'qwen-coder=qwen3-coder-plus'].map((value) => ({ label: value, value }))
+const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*', 'glm-*', 'qwen*', 'kimi-*', 'sub2api-*'].map((value) => ({ label: value, value }))
+const commonMappingOptions = ['gpt-public=gpt-5.4', 'deepseek-pro=deepseek-v4-pro', 'mimo-pro=mimo-v2.5-pro', 'glm-pro=glm-5.2', 'qwen-coder=qwen3-coder-plus', 'kimi-pro=kimi-k3'].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
   const out: Record<string, string> = {}

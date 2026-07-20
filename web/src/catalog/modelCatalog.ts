@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -87,6 +87,12 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     label: '通义 Qwen',
     initials: '通',
     chipClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300',
+  },
+  kimi: {
+    id: 'kimi',
+    label: 'Kimi 月之暗面',
+    initials: 'K',
+    chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200',
   },
 }
 
@@ -396,5 +402,41 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '128K',
     inputPrice: 0.11,
     outputPrice: 0.28,
+  },
+
+  // --- Kimi 月之暗面 -------------------------------------------------------
+  {
+    id: 'kimi-k3',
+    name: 'Kimi K3',
+    provider: 'kimi',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['旗舰', '1M 上下文', '默认开启思考'],
+    description: 'Kimi 旗舰模型，原生 1M token 超长上下文，默认开启深度思考，长文档与复杂 Agent 首选。',
+    context: '1M',
+    inputPrice: 2.8,
+    outputPrice: 14.0,
+    badge: 'recommended',
+  },
+  {
+    id: 'kimi-k2.7-code',
+    name: 'Kimi K2.7 Code',
+    provider: 'kimi',
+    categories: ['code', 'reasoning'],
+    tags: ['编码', '高性价比', 'Agent'],
+    description: '面向编码与 Agent 场景的模型，写码、Debug、工具调用表现稳定，性价比高。',
+    context: '256K',
+    inputPrice: 0.91,
+    outputPrice: 3.78,
+  },
+  {
+    id: 'kimi-k2.6',
+    name: 'Kimi K2.6',
+    provider: 'kimi',
+    categories: ['chat', 'multimodal'],
+    tags: ['通用', '视觉', '高性价比'],
+    description: '支持文本与视觉输入的通用模型，日常对话与多模态任务的高性价比之选。',
+    context: '256K',
+    inputPrice: 0.91,
+    outputPrice: 3.78,
   },
 ]

@@ -77,6 +77,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   xiaomi: '#ff6900',
   zhipu: '#7c3aed',
   qwen: '#06b6d4',
+  kimi: '#475569',
   sub2api: '#059669',
 }
 

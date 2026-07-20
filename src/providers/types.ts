@@ -6,6 +6,7 @@ export type ProviderId =
   | 'xiaomi'
   | 'zhipu'
   | 'qwen'
+  | 'kimi'
   | 'grok'
   | 'sub2api'
 

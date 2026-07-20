@@ -160,6 +160,7 @@ const providerLabels: Record<string, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  kimi: 'Kimi (Moonshot)',
   sub2api: 'Sub2API',
 }
 
@@ -171,6 +172,7 @@ const providerColors: Record<string, string> = {
   xiaomi: '#ff6900',
   zhipu: '#7c3aed',
   qwen: '#06b6d4',
+  kimi: '#475569',
   sub2api: '#059669',
 }
 

@@ -148,6 +148,7 @@ const providerOptions = [
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
   { label: 'Tongyi Qwen', value: 'qwen' },
+  { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
 
@@ -159,6 +160,7 @@ const providerLabel: Record<string, string> = {
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
+  kimi: 'Kimi (Moonshot)',
   sub2api: 'Sub2API',
 }
 
@@ -170,6 +172,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
+  kimi: 'default',
   sub2api: 'success',
 }
 
@@ -189,6 +192,9 @@ const commonModelOptions = [
   'qwen*',
   'qwen3-coder-plus',
   'qwen-plus',
+  'kimi-*',
+  'kimi-k3',
+  'kimi-k2.7-code',
   'sub2api-*',
 ].map((value) => ({ label: value, value }))
 
@@ -199,6 +205,7 @@ const commonMappingOptions = [
   'deepseek-fast=deepseek-v4-flash',
   'glm-pro=glm-5.2',
   'qwen-coder=qwen3-coder-plus',
+  'kimi-pro=kimi-k3',
 ].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
@@ -632,6 +639,33 @@ POST ${baseOrigin.value}/api/qwen/v1/chat/completions
 
 # Model list:
 GET ${baseOrigin.value}/api/qwen/v1/models`,
+    kimi: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/kimi
+export ANTHROPIC_AUTH_TOKEN=${key}
+export ANTHROPIC_MODEL=kimi-k3
+export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.6
+claude`,
+    codexKimi: `[profiles.model-bridge-kimi]
+model_provider = "model-bridge-kimi"
+model = "kimi-k2.7-code"
+
+[model_providers.model-bridge-kimi]
+name = "model-bridge-kimi"
+base_url = "${baseOrigin.value}/api/kimi/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=${key}
+codex --profile model-bridge-kimi`,
+    kimiOpenai: `Base URL: ${baseOrigin.value}/api/kimi/v1
+API Key:  ${key}
+
+# Chat Completions endpoint:
+POST ${baseOrigin.value}/api/kimi/v1/chat/completions
+
+# Model list:
+GET ${baseOrigin.value}/api/kimi/v1/models`,
   }
 })
 
@@ -1083,6 +1117,18 @@ onMounted(() => {
         <UiTabPane name="qwen-openai" tab="Qwen (OpenAI)">
           <pre><code>{{ snippets.qwenOpenai }}</code></pre>
           <UiButton size="small" secondary @click="copyKey(snippets.qwenOpenai)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="kimi" tab="Kimi (Claude Code)">
+          <pre><code>{{ snippets.kimi }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.kimi)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="codex-kimi" tab="Codex CLI (Kimi)">
+          <pre><code>{{ snippets.codexKimi }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.codexKimi)">复制</UiButton>
+        </UiTabPane>
+        <UiTabPane name="kimi-openai" tab="Kimi (OpenAI)">
+          <pre><code>{{ snippets.kimiOpenai }}</code></pre>
+          <UiButton size="small" secondary @click="copyKey(snippets.kimiOpenai)">复制</UiButton>
         </UiTabPane>
       </UiTabs>
       <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
