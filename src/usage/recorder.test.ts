@@ -37,7 +37,7 @@ vi.mock('../subscriptions/manager', () => ({
   incrementSubscriptionUsage: mocks.incrementSubscriptionUsage,
 }))
 
-import { recordUsage } from './recorder'
+import { recordUsage, waitForPendingUsage } from './recorder'
 
 const USAGE = {
   inputTokens: 100,
@@ -185,5 +185,29 @@ describe('recordUsage', () => {
 
     expect(mocks.query).toHaveBeenCalledWith('ROLLBACK')
     errorSpy.mockRestore()
+  })
+
+  it('drains usage writes that are still pending', async () => {
+    mocks.estimateCost.mockReturnValue(0)
+    let unblockConnect!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      unblockConnect = resolve
+    })
+    mocks.connect.mockImplementationOnce(async () => {
+      await blocked
+      return { query: mocks.query, release: mocks.release }
+    })
+
+    const write = recordUsage(baseRecord())
+    let drained = false
+    const drain = waitForPendingUsage().then(() => {
+      drained = true
+    })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+
+    unblockConnect()
+    await Promise.all([write, drain])
+    expect(drained).toBe(true)
   })
 })

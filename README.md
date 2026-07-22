@@ -81,6 +81,11 @@ Optional login hardening:
 - `SECURITY_HEADERS_ENABLED=true` is the default and sends CSP plus common
   browser security headers. Set it to `false` only if a reverse proxy owns
   those headers.
+- The service automatically trusts directly connected reverse proxies from
+  loopback, RFC1918 private, and IPv6 ULA ranges, then resolves
+  `X-Forwarded-For`. Forwarded headers from public direct peers are ignored.
+  Do not expose the origin directly to untrusted private-network clients, which
+  could otherwise spoof their source IP.
 
 Stop and view logs:
 
@@ -298,6 +303,11 @@ For non-Docker runs, copy `.env.example` to `.env`; `ENCRYPTION_KEY` and
 `JWT_SECRET` are auto-generated on first start. Set `PG_PASSWORD` and
 `DATABASE_URL` before the first boot — the bundled `postgres` container
 stores its data under `./data/pg/`, so back up that folder.
+
+On `SIGTERM`/`SIGINT`, the service stops accepting new requests and waits for
+in-flight requests, OAuth callbacks, background jobs, and usage billing writes
+before closing PostgreSQL/Redis. The shutdown timeout is fixed at 30 seconds;
+Docker Compose grants a 35-second stop grace period.
 
 ### Upgrading from the old SQLite version (one-click)
 

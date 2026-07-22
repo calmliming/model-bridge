@@ -1476,7 +1476,7 @@ async function sendStreaming(
     })
     for (const event of buildResponsesErrorEvents(message, code)) writeSseData(raw, event)
     raw.end()
-    void recordUsage({
+    await recordUsage({
       apiKeyId: meta.apiKeyId,
       userId: meta.userId,
       accountId: meta.accountId,
@@ -1528,7 +1528,7 @@ async function sendStreaming(
       }
     }
     raw.end()
-    void recordUsage({
+    await recordUsage({
       apiKeyId: meta.apiKeyId,
       userId: meta.userId,
       accountId: meta.accountId,
@@ -1662,7 +1662,7 @@ async function sendStreaming(
   }
   raw.end()
 
-  void recordUsage({
+  await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
     accountId: meta.accountId,
@@ -1766,7 +1766,7 @@ async function sendSanitizedRelayError(
     `sub2api upstream error for account ${meta.accountId}: HTTP ${upstream.status} ${text.slice(0, 2_000)}`,
   )
   const { code, message } = extractUpstreamError(text, upstream.status)
-  void recordUsage({
+  const usageWrite = recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
     accountId: meta.accountId,
@@ -1786,6 +1786,7 @@ async function sendSanitizedRelayError(
     type: 'error',
     error: { type: code, code, message: redactUrls(message) },
   })
+  await usageWrite
 }
 
 /** Extracts a displayable error code + message from an upstream error body. */

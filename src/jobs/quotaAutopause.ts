@@ -65,8 +65,21 @@ async function sweepQuotaAutopause(now = Date.now()): Promise<void> {
 }
 
 /** 启动后台循环，持续按阈值自动停调超额账号。 */
-export function startQuotaAutopauseJob(): void {
-  setInterval(() => {
-    void sweepQuotaAutopause()
+export function startQuotaAutopauseJob(): () => Promise<void> {
+  let running: Promise<void> | null = null
+  const timer = setInterval(() => {
+    if (running) return
+    running = sweepQuotaAutopause()
+      .catch((err) => {
+        console.error('[quota-autopause] job failed:', (err as Error).message)
+      })
+      .finally(() => {
+        running = null
+      })
   }, CHECK_INTERVAL_MS)
+
+  return async () => {
+    clearInterval(timer)
+    await running
+  }
 }

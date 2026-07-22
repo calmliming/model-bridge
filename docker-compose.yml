@@ -28,6 +28,7 @@ services:
     image: model-bridge:latest
     container_name: model-bridge
     restart: unless-stopped
+    stop_grace_period: 35s
     depends_on:
       postgres:
         condition: service_healthy

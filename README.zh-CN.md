@@ -73,6 +73,9 @@ Docker 部署会同时启动内部 `model-bridge-updater` 服务。登录后台�
   Cloudflare Turnstile 人机验证。
 - `SECURITY_HEADERS_ENABLED=true` 为默认值，会发送 CSP 和常见浏览器安全响应头。
   只有在反向代理统一管理这些响应头时，才建议改成 `false`。
+- 服务自动信任来自回环、RFC1918 私网和 IPv6 ULA 网段的直连反向代理，并据此解析
+  `X-Forwarded-For`；公网直连请求携带的转发头会被忽略。源站不要直接开放给不可信的
+  内网客户端，否则对方可能伪造来源 IP。
 
 停止 / 查看日志：
 
@@ -267,6 +270,10 @@ Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 
 把 `.env.example` 复制为 `.env`，`ENCRYPTION_KEY` 与 `JWT_SECRET` 在首次运行
 时自动生成。首次启动前请设置 `PG_PASSWORD` 和 `DATABASE_URL`——内置的
 `postgres` 容器把数据存放在 `./data/pg/` 下，请备份这个目录。
+
+服务收到 `SIGTERM`/`SIGINT` 后会停止接收新请求，等待在途请求、OAuth 回调、后台任务
+和用量扣费落库，再关闭 PostgreSQL/Redis 连接。关停超时固定为 30 秒；Docker Compose
+预留 35 秒停止宽限期。
 
 ### 从旧版 SQLite 升级到 PostgreSQL（一键迁移）
 

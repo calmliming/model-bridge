@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.157**，2026-07-16）
-> 更新日期：2026-07-16
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.162**，2026-07-20）
+> 更新日期：2026-07-21
 
 ## 一句话定位
 
@@ -45,7 +45,7 @@
 | # | 功能 | sub2api | model-bridge | 状态 |
 |---|---|:---:|:---:|---|
 | 1 | **账号分组隔离**（账号编组 + Key 绑定组，调度限定组内）| ✅ | ✅ 已实现（账号分组 + Key 绑定 + 隔离式调度）| ✅ 已完成 · 实现见 [account-groups-plan](./account-groups-plan.zh-CN.md) |
-| 2 | **登录与接口安全加固**（2FA/TOTP、Turnstile 验证码、CSP 安全响应头、出站 URL allowlist/SSRF、计费失败熔断）| ✅ | ⚠️ 已部分实现（Turnstile、登录限流、CSP/安全响应头、非流式计费失败 fail-closed）| 进行中 · 剩余 2FA/TOTP、出站 URL allowlist/SSRF、流式计费熔断 |
+| 2 | **登录与接口安全加固**（2FA/TOTP、Turnstile 验证码、可信代理 IP、CSP 安全响应头、出站 URL allowlist/SSRF、计费失败熔断）| ✅ | ⚠️ 已部分实现（Turnstile、登录限流、零配置本机/私网代理信任、CSP/安全响应头、非流式计费失败 fail-closed）| 进行中 · 剩余 2FA/TOTP、出站 URL allowlist/SSRF、流式计费熔断 |
 | 3 | **Web 一键升级 + 回滚** | ✅ | ⚠️ 已实现检查 / 一键升级，回滚待扩展 | 进行中 · 运维体验 |
 | 4 | **内置在线收款**（支付宝 / 微信扫码）| ✅ | ✅ 已实现（扫码 + 异步回调 + RSA2/MD5 验签 + 幂等 + 自动入账）| ✅ 已完成（Alipay / WeChat）|
 | 5 | **Stripe / EasyPay 国际支付** | ✅ | ❌ | 低优先级 · 国内收款已覆盖 |
@@ -103,6 +103,19 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api 至 v0.1.162（2026-07-20）
+
+对照 sub2api v0.1.158–v0.1.162 及 v0.1.162 后的关键稳定性提交逐项核查。五个正式版本主要集中在 Grok 媒体/缓存生态、提示词安全审计、会话与 step-up 2FA 开关、Responses/WS 兼容、反向代理客户端 IP 和异步生图存储。多数能力依赖 sub2api 的 SaaS、Grok 媒体或 Go 调度架构，本仓库没有同构路径；本轮落地两项会直接影响现有部署安全或计费完整性的改动：
+
+**已落地改动：**
+
+- **零配置可信代理与真实客户端 IP**（对应 v0.1.159/v0.1.162）：按 sub2api 曾采用的本机/容器默认信任思路，Fastify 固定信任回环、RFC1918 私网和 IPv6 ULA 网段；仅当直连来源命中这些范围时解析 `X-Forwarded-For`，登录限流、注册限流和 Turnstile 的 `request.ip` 因而在常见 Nginx/Docker 反代后仍指向真实客户端。公网直连来源的转发头会被忽略，不新增部署配置；代价是源站不能直接开放给不可信内网客户端。
+- **优雅关停与计费写入排空**（对应 v0.1.162 后 `304fcb0` 的关停清理修复，按本仓库架构加固）：流式响应原先在 `raw.end()` 后以 `void recordUsage()` 后台落库，进程收到 Docker `SIGTERM` 时可能直接退出并丢失末尾 usage/钱包扣费。现将流式写入纳入待完成集合并在请求处理器中等待；`SIGTERM`/`SIGINT` 触发 Fastify 关停后，依次停止后台任务、关闭 OAuth 回调服务、排空 usage、关闭 Redis/PostgreSQL。关停硬超时固定为 30 秒，Compose `stop_grace_period` 为 35 秒，不新增环境变量。
+
+**已覆盖 / 无需重复实现：** OpenAI 临时冷却按模型隔离已在上一轮完成；DeepSeek/Qwen/Kimi/Xiaomi/Zhipu 的 Responses 转换已发送 `response.content_part.added/done` 和完整终态；本仓库重试失败响应不会逐次调用 `recordUsage`，不存在 sub2api 的同账号重试重复缓存计费路径。
+
+**暂缓 / 不适用：** 用户并发/RPM 批量修改与分组复制属于管理效率增强，后续按实际运营规模补；提示词审计控制台、step-up 2FA、会话 IP/UA 绑定继续归入 SaaS/合规安全路线；Grok 媒体代理、Free 工具缓存、OpenAI WS、异步生图对象存储、Agent Identity Team 隔离等与当前轻量主路径不同构，不跟进。
 
 ### 跟踪 sub2api 至 v0.1.157（2026-07-16）
 

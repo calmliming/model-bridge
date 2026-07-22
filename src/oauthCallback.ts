@@ -1,4 +1,4 @@
-import { createServer } from 'node:http'
+import { createServer, type Server } from 'node:http'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index'
 import { oauthSessions } from './db/schema'
@@ -30,7 +30,7 @@ p{margin:0;opacity:.72;font-size:14px;line-height:1.7}
  * as a redirect URI, so a small dedicated server has to listen there to
  * complete the flow. Other providers using a redirect-style flow can share it.
  */
-export function startOauthCallbackServer(): void {
+export function startOauthCallbackServer(): Server {
   const server = createServer(async (req, res) => {
     if (!req.url) {
       res.writeHead(400).end()
@@ -88,5 +88,17 @@ export function startOauthCallbackServer(): void {
   })
   server.listen(PORT, HOST, () => {
     console.log(`[oauth-callback] listening on http://${HOST}:${PORT}/auth/callback`)
+  })
+  return server
+}
+
+/** Stops accepting OAuth callbacks and waits for any callback in flight. */
+export async function closeOauthCallbackServer(server: Server | null): Promise<void> {
+  if (!server?.listening) return
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => {
+      if (err) reject(err)
+      else resolve()
+    })
   })
 }

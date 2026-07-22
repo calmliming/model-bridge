@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
 import { estimateCost } from './pricing'
 import type { UsageData } from '../providers/types'
@@ -26,22 +27,26 @@ export interface UsageRecord {
   subscriptionId?: string | null
 }
 
+const pendingUsageWrites = new Set<Promise<boolean>>()
+
 /**
  * Writes one usage-log row, bumps key quota, and charges the chosen budget.
  * Returns false when persistence failed; streaming callers can only log that
  * failure, while buffered relay paths may fail closed before sending upstream
  * success responses to clients.
  */
-export async function recordUsage(record: UsageRecord): Promise<boolean> {
-  const baseCost = estimateCost(record.provider, record.model, record.usage)
-  const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
-  const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
-  // Charge the subscription only when the gate selected it and a sub is present.
-  const billTo: 'subscription' | 'balance' =
-    record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
-  const id = randomBytes(12).toString('hex')
-  const client = await pool.connect()
+async function persistUsage(record: UsageRecord): Promise<boolean> {
+  let client: PoolClient | null = null
   try {
+    const baseCost = estimateCost(record.provider, record.model, record.usage)
+    const multiplier =
+      Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
+    const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
+    // Charge the subscription only when the gate selected it and a sub is present.
+    const billTo: 'subscription' | 'balance' =
+      record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
+    const id = randomBytes(12).toString('hex')
+    client = await pool.connect()
     await client.query('BEGIN')
     await client.query(
       `INSERT INTO usage_logs
@@ -90,10 +95,27 @@ export async function recordUsage(record: UsageRecord): Promise<boolean> {
     await client.query('COMMIT')
     return true
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {})
+    await client?.query('ROLLBACK').catch(() => {})
     console.error('[usage] failed to record usage:', (err as Error).message)
     return false
   } finally {
-    client.release()
+    client?.release()
+  }
+}
+
+export function recordUsage(record: UsageRecord): Promise<boolean> {
+  const write = persistUsage(record)
+  pendingUsageWrites.add(write)
+  void write.then(
+    () => pendingUsageWrites.delete(write),
+    () => pendingUsageWrites.delete(write),
+  )
+  return write
+}
+
+/** Waits until every usage write started before or during the drain has settled. */
+export async function waitForPendingUsage(): Promise<void> {
+  while (pendingUsageWrites.size > 0) {
+    await Promise.allSettled([...pendingUsageWrites])
   }
 }

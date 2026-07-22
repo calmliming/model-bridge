@@ -59,8 +59,21 @@ async function refreshExpiringTokens(): Promise<void> {
 }
 
 /** 启动后台循环，持续保持账户 token 新鲜。 */
-export function startTokenRefreshJob(): void {
-  setInterval(() => {
-    void refreshExpiringTokens()
+export function startTokenRefreshJob(): () => Promise<void> {
+  let running: Promise<void> | null = null
+  const timer = setInterval(() => {
+    if (running) return
+    running = refreshExpiringTokens()
+      .catch((err) => {
+        console.error('[token-refresh] job failed:', (err as Error).message)
+      })
+      .finally(() => {
+        running = null
+      })
   }, CHECK_INTERVAL_MS)
+
+  return async () => {
+    clearInterval(timer)
+    await running
+  }
 }
