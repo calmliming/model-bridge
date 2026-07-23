@@ -39,6 +39,13 @@ interface Sub2ApiBalanceSnapshot {
   updatedAt: number
 }
 
+interface BatchQuotaRefreshResult {
+  id: string
+  success: boolean
+  message?: string
+  error?: string
+}
+
 interface AccountGroupRef {
   id: string
   name: string
@@ -120,6 +127,8 @@ const loading = ref(true)
 const searchQuery = ref('')
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
+const sub2ApiBalanceRefreshingIds = ref<Set<string>>(new Set())
+const sub2ApiBalanceErrors = ref<Record<string, string>>({})
 const resettingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
 const savingConcurrencyId = ref<string | null>(null)
@@ -177,6 +186,11 @@ const apiKeyInput = ref('')
 const baseUrlInput = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
+const sub2ApiBalanceLastAttemptAt = new Map<string, number>()
+const SUB2API_BALANCE_MAX_AGE_MS = 5 * 60_000
+const SUB2API_BALANCE_RETRY_DELAY_MS = 5 * 60_000
+let sub2ApiBalanceRefreshRunning = false
+let viewUnmounted = false
 
 // Batch import modal state.
 const showBatchImport = ref(false)
@@ -504,13 +518,43 @@ function renderQuotaWindow(window: AccountQuotaWindow) {
   ])
 }
 
-function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
-  const refreshing = refreshingQuotaId.value === row.id
+function sub2ApiBalanceRefreshError(row: Account): string | null {
+  return row.provider === 'sub2api' ? sub2ApiBalanceErrors.value[row.id] ?? null : null
+}
+
+function isSub2ApiBalanceRefreshing(row: Account): boolean {
+  return row.provider === 'sub2api' && sub2ApiBalanceRefreshingIds.value.has(row.id)
+}
+
+function setSub2ApiBalanceError(id: string, error: string | null) {
+  const next = { ...sub2ApiBalanceErrors.value }
+  if (error) next[id] = error
+  else delete next[id]
+  sub2ApiBalanceErrors.value = next
+}
+
+function applySub2ApiBalanceRefreshResults(ids: string[], results: BatchQuotaRefreshResult[]) {
+  const resultsById = new Map(results.map((result) => [result.id, result]))
+  for (const id of ids) {
+    const result = resultsById.get(id)
+    setSub2ApiBalanceError(
+      id,
+      result?.success ? null : result?.error || result?.message || '第三方站点未返回余额查询结果',
+    )
+  }
+}
+
+function renderQuotaRefresh(row: Account, updatedAt?: number | null, showError = true) {
+  const refreshing = refreshingQuotaId.value === row.id || isSub2ApiBalanceRefreshing(row)
+  const refreshError = sub2ApiBalanceRefreshError(row)
   return h(
     'div',
     { class: 'quota-refresh-wrap' },
     [
       updatedAt ? h('span', { class: 'quota-updated' }, formatRelativePast(updatedAt)) : null,
+      showError && refreshError
+        ? h('span', { class: 'quota-refresh-error', title: refreshError }, '查询失败')
+        : null,
       h(
         UiButton,
         {
@@ -560,9 +604,21 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
 function renderSub2ApiBalance(row: Account) {
   const balance = row.sub2apiBalance
   if (!balance) {
+    const refreshError = sub2ApiBalanceRefreshError(row)
+    const refreshing = refreshingQuotaId.value === row.id || isSub2ApiBalanceRefreshing(row)
+    const label = refreshing ? '正在查询第三方余额...' : refreshError ? '查询失败' : '等待查询'
     return h('div', { class: 'quota-cell' }, [
-      h('div', { class: 'quota-line' }, [h('span', { class: 'muted-cell' }, '未更新')]),
-      renderQuotaRefresh(row),
+      h('div', { class: 'quota-line' }, [
+        h(
+          'span',
+          {
+            class: ['sub2api-balance-state', { 'is-error': Boolean(refreshError) }],
+            title: refreshError ?? undefined,
+          },
+          label,
+        ),
+      ]),
+      renderQuotaRefresh(row, undefined, false),
     ])
   }
 
@@ -731,12 +787,51 @@ function renderGroupCell(row: Account) {
   })
 }
 
+function shouldRefreshSub2ApiBalance(account: Account, now: number): boolean {
+  if (account.provider !== 'sub2api') return false
+  const updatedAt = account.sub2apiBalance?.updatedAt
+  if (updatedAt && now - updatedAt < SUB2API_BALANCE_MAX_AGE_MS) return false
+  const lastAttemptAt = sub2ApiBalanceLastAttemptAt.get(account.id)
+  return lastAttemptAt == null || now - lastAttemptAt >= SUB2API_BALANCE_RETRY_DELAY_MS
+}
+
+async function refreshStaleSub2ApiBalances(loadedAccounts: Account[]) {
+  if (sub2ApiBalanceRefreshRunning || viewUnmounted) return
+
+  const now = Date.now()
+  const targets = loadedAccounts.filter((account) => shouldRefreshSub2ApiBalance(account, now))
+  if (!targets.length) return
+
+  sub2ApiBalanceRefreshRunning = true
+  sub2ApiBalanceRefreshingIds.value = new Set(targets.map((account) => account.id))
+  for (const account of targets) {
+    sub2ApiBalanceLastAttemptAt.set(account.id, now)
+    setSub2ApiBalanceError(account.id, null)
+  }
+
+  try {
+    const { data } = await api.post('/admin/accounts/batch-quota-refresh', {
+      ids: targets.map((account) => account.id),
+    })
+    const results: BatchQuotaRefreshResult[] = Array.isArray(data?.results) ? data.results : []
+    applySub2ApiBalanceRefreshResults(targets.map((account) => account.id), results)
+    if (!viewUnmounted) await load()
+  } catch (e) {
+    const error = errMsg(e, '查询第三方余额失败')
+    for (const account of targets) setSub2ApiBalanceError(account.id, error)
+  } finally {
+    sub2ApiBalanceRefreshingIds.value = new Set()
+    sub2ApiBalanceRefreshRunning = false
+  }
+}
+
 async function load() {
   loading.value = true
   try {
     const { data } = await api.get('/admin/accounts')
     accounts.value = data.accounts
     pruneSelectedAccounts()
+    void refreshStaleSub2ApiBalances(accounts.value)
   } catch (e) {
     message.error(errMsg(e))
   } finally {
@@ -1016,13 +1111,25 @@ async function batchTestSelected() {
 async function batchRefreshQuotaSelected() {
   const ids = requireSelectedIds()
   if (!ids) return
+  const sub2ApiIds = selectedAccounts.value
+    .filter((account) => account.provider === 'sub2api')
+    .map((account) => account.id)
+  const attemptedAt = Date.now()
+  for (const id of sub2ApiIds) {
+    sub2ApiBalanceLastAttemptAt.set(id, attemptedAt)
+    setSub2ApiBalanceError(id, null)
+  }
   bulkBusy.value = true
   try {
     const { data } = await api.post('/admin/accounts/batch-quota-refresh', { ids })
+    const results: BatchQuotaRefreshResult[] = Array.isArray(data?.results) ? data.results : []
+    applySub2ApiBalanceRefreshResults(sub2ApiIds, results)
     notifyBatchResult('批量刷新余额/配额', data)
     await load()
   } catch (e) {
-    message.error(errMsg(e, '批量刷新余额/配额失败'))
+    const error = errMsg(e, '批量刷新余额/配额失败')
+    for (const id of sub2ApiIds) setSub2ApiBalanceError(id, error)
+    message.error(error)
   } finally {
     bulkBusy.value = false
   }
@@ -1310,6 +1417,11 @@ async function testConnectivity(row: Account) {
 
 async function refreshQuota(row: Account) {
   refreshingQuotaId.value = row.id
+  const isSub2Api = row.provider === 'sub2api'
+  if (isSub2Api) {
+    sub2ApiBalanceLastAttemptAt.set(row.id, Date.now())
+    setSub2ApiBalanceError(row.id, null)
+  }
   try {
     // OpenAI OAuth accounts have a dedicated endpoint that also returns the
     // reset-credit balance. Sub2API uses the generic route backed by /v1/usage.
@@ -1324,7 +1436,8 @@ async function refreshQuota(row: Account) {
       return
     }
     const { data } = await api.post(`/admin/accounts/${row.id}/quota/refresh`)
-    if (data.success && row.provider === 'sub2api') {
+    if (data.success && isSub2Api) {
+      setSub2ApiBalanceError(row.id, null)
       message.success('余额已更新')
       await load()
       return
@@ -1335,10 +1448,14 @@ async function refreshQuota(row: Account) {
       return
     }
     const label = row.provider === 'sub2api' ? '余额' : '配额'
-    message.error(data.message || `刷新${label}失败`)
+    const error = data.message || `刷新${label}失败`
+    if (isSub2Api) setSub2ApiBalanceError(row.id, error)
+    message.error(error)
   } catch (e) {
     const label = row.provider === 'sub2api' ? '余额' : '配额'
-    message.error(errMsg(e, `刷新${label}失败`))
+    const error = errMsg(e, `刷新${label}失败`)
+    if (isSub2Api) setSub2ApiBalanceError(row.id, error)
+    message.error(error)
   } finally {
     refreshingQuotaId.value = null
   }
@@ -1404,7 +1521,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
   },
   { title: '健康', key: 'health', width: 84, render: renderHealth },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
-  { title: '配额', key: 'quota', minWidth: 330, render: renderQuota },
+  { title: '余额 / 配额', key: 'quota', minWidth: 330, render: renderQuota },
   { title: '停调阈值', key: 'autopause', width: 116, render: renderAutopause },
   { title: '并发', key: 'concurrencyLimit', width: 132, render: renderConcurrency },
   { title: '优先级', key: 'weight', width: 110, render: renderPriority },
@@ -1549,6 +1666,7 @@ watch(showGroups, (open) => {
 })
 
 onBeforeUnmount(() => {
+  viewUnmounted = true
   if (refreshTimer != null) window.clearInterval(refreshTimer)
 })
 </script>
@@ -2397,6 +2515,33 @@ onBeforeUnmount(() => {
 
 :deep(.quota-updated) {
   font-size: 10px;
+}
+
+:deep(.sub2api-balance-state) {
+  color: rgba(15, 23, 42, 0.52);
+  font-size: 12px;
+}
+
+:deep(.sub2api-balance-state.is-error),
+:deep(.quota-refresh-error) {
+  color: #d03050;
+}
+
+:deep(.quota-refresh-error) {
+  max-width: 54px;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.dark) .sub2api-balance-state {
+  color: rgba(226, 232, 240, 0.62);
+}
+
+:global(.dark) .sub2api-balance-state.is-error,
+:global(.dark) .quota-refresh-error {
+  color: #f87171;
 }
 
 :deep(.quota-refresh-wrap) {
