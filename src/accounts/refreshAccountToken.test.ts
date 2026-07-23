@@ -6,14 +6,32 @@ import { PermanentRefreshError } from './refreshErrors'
  * test only ever touches one account, so we ignore WHERE predicates and operate
  * on a single mutable row held in `state.account`.
  * `select(...).from(...).where(...)` resolves to `[state.account]`;
- * `update(...).set(patch).where(...)` shallow-merges `patch`.
+ * `update(...).set(patch).where(...)` shallow-merges `patch`, including the
+ * JSONB merge expression used by updateAccountMetadata.
  */
 const state = vi.hoisted(() => ({ account: {} as Record<string, any> }))
 
 const fakeDb = vi.hoisted(() => ({
   select: () => ({ from: () => ({ where: async () => [state.account] }) }),
   update: () => ({
-    set: (patch: Record<string, unknown>) => ({ where: async () => { Object.assign(state.account, patch) } }),
+    set: (patch: Record<string, unknown>) => ({
+      where: async () => {
+        const chunks = (patch.metadata as { queryChunks?: unknown[] } | undefined)?.queryChunks
+        const encodedMetadataPatch = chunks?.find(
+          (chunk): chunk is string => typeof chunk === 'string' && chunk.startsWith('{'),
+        )
+        const nextPatch = encodedMetadataPatch
+          ? {
+              ...patch,
+              metadata: {
+                ...(state.account.metadata ?? {}),
+                ...JSON.parse(encodedMetadataPatch),
+              },
+            }
+          : patch
+        Object.assign(state.account, nextPatch)
+      },
+    }),
   }),
 }))
 
@@ -65,6 +83,7 @@ beforeEach(() => {
 
 describe('refreshAccountToken', () => {
   it('disables the account and records a reauth marker on a permanent failure', async () => {
+    state.account.metadata = { quota: { updatedAt: 123 } }
     registry.getProvider.mockReturnValue({
       id: 'openai',
       refreshToken: vi.fn().mockRejectedValue(new Error('{"error":"invalid_grant"}')),
@@ -80,6 +99,7 @@ describe('refreshAccountToken', () => {
       provider: 'openai',
     })
     expect(typeof state.account.metadata.reauth.at).toBe('number')
+    expect(state.account.metadata.quota).toEqual({ updatedAt: 123 })
   })
 
   it('leaves the account untouched and rethrows the original error on a transient failure', async () => {

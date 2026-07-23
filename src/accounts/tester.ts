@@ -16,6 +16,10 @@ import { getQuotaAutopausePercent } from '../db/settings'
 import { markAccountUsed, penalizeAccount } from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
+import {
+  fetchSub2ApiBalance,
+  type Sub2ApiBalanceSnapshot,
+} from '../providers/sub2api/balance'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
 import { GROK_MODELS_URL, GROK_USER_AGENT } from '../providers/grok/constants'
 
@@ -44,6 +48,7 @@ export interface AccountTestResult {
   message: string
   latencyMs: number
   checkedAt: number
+  balance?: Sub2ApiBalanceSnapshot
 }
 
 export class AccountTestError extends Error {
@@ -385,5 +390,50 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
     message: result.message,
     latencyMs,
     checkedAt: Date.now(),
+  }
+}
+
+/**
+ * Refreshes the provider-specific quota shown in the accounts table.  Most
+ * providers expose rate-limit headers through their connectivity probe; the
+ * official Sub2API gateway instead exposes a separate `/v1/usage` endpoint,
+ * so its monetary balance is queried and persisted independently.
+ */
+export async function refreshAccountQuota(id: string): Promise<AccountTestResult> {
+  const account = await getAccount(id)
+  if (!account) throw new AccountTestError('account not found', 404)
+  if (account.provider !== 'sub2api') return testAccountConnectivity(id)
+
+  const startedAt = Date.now()
+  let accessToken: string
+  try {
+    // `oauthAccessToken` is encrypted at rest; always use the decrypted token
+    // returned by ensureFreshToken (and refresh it when it is near expiry).
+    accessToken = await ensureFreshToken(account)
+  } catch (err) {
+    if (err instanceof PermanentRefreshError) {
+      throw new AccountTestError('refresh token 已失效，请重新授权该账号')
+    }
+    throw err
+  }
+
+  const balance = await fetchSub2ApiBalance(accessToken, account.proxyUrl)
+  if (!balance) {
+    throw new AccountTestError('Sub2API 余额接口不可用，请确认上游支持 GET /v1/usage', 502)
+  }
+
+  const checkedAt = Date.now()
+  const snapshot: Sub2ApiBalanceSnapshot = {
+    ...balance,
+    updatedAt: checkedAt,
+  }
+  await updateAccountMetadata(id, { sub2apiBalance: snapshot })
+  return {
+    success: true,
+    provider: account.provider,
+    message: 'Sub2API 余额已更新',
+    latencyMs: checkedAt - startedAt,
+    checkedAt,
+    balance: snapshot,
   }
 }

@@ -1,233 +1,80 @@
-# Sub2API 余额查询功能
+# Sub2API 余额查询
 
-## 功能说明
+Sub2API 账户的余额在管理后台的“配额”列中显示。对 Sub2API 账户，点击该列右侧的刷新按钮会查询上游并保存最近一次成功结果；页面重新加载后仍会显示缓存快照。
 
-Sub2API 账户余额查询功能允许你查看上游中转站的剩余额度、总额度、已使用额度等信息。
+## 查询接口
 
-## 实现文件
+首选接口是官方的：
 
-- **`src/providers/sub2api/balance.ts`** - 余额查询核心模块
-- **`check-sub2api-balance.ts`** - 命令行查询工具
-
-## 使用方法
-
-### 方法 1：命令行工具（推荐用于测试）
-
-```bash
-# 启动数据库（如果未运行）
-docker compose up -d postgres
-
-# 运行余额查询工具
-npx tsx check-sub2api-balance.ts
+```text
+GET /v1/usage
+Authorization: Bearer <API key>
+x-api-key: <API key>
 ```
 
-**输出示例：**
-```
---- MagicAI ---
-ID: a4ce2f862f64a85e6f8ec511
-状态: active
-Proxy URL: https://sky1818.com
-🔍 查询余额中...
-✅ 余额信息:
-   剩余: $15.23 | 总额: $20.00 | 已用: $4.77
-   ✅ 剩余额度: $15.2300
-   💰 总额度: $20.00
-   📊 已使用: $4.77
-   📈 使用率: 23.9%
-   🔄 重置时间: 2026/8/1 00:00:00
-```
+兼容旧版中转部署时，程序还会依次尝试 `/api/usage`、`/user/balance`、`/v1/user/balance`、`/api/balance` 和 `/v1/balance`。Base URL 可以填写根地址，也可以填写末尾带 `/v1` 的地址，程序会自动归一化。
 
-### 方法 2：集成到管理后台
+## 官方响应
 
-你可以将余额查询功能集成到管理后台的账户详情页面。
+钱包模式示例：
 
-#### 步骤 1：添加后端路由
-
-在 `src/routes/admin.ts` 中添加：
-
-```typescript
-import { fetchSub2ApiBalance } from '../providers/sub2api/balance'
-
-// 查询单个账户余额
-app.get('/api/admin/accounts/:id/balance', async (request, reply) => {
-  await requireAdmin(request)
-  const { id } = request.params as { id: string }
-
-  const [account] = await db
-    .select({
-      id: accounts.id,
-      name: accounts.name,
-      provider: accounts.provider,
-      proxyUrl: accounts.proxyUrl,
-      oauthAccessToken: accounts.oauthAccessToken,
-    })
-    .from(accounts)
-    .where(eq(accounts.id, id))
-
-  if (!account) {
-    return reply.code(404).send({ error: 'account not found' })
-  }
-
-  if (account.provider !== 'sub2api') {
-    return reply.code(400).send({ error: 'only sub2api accounts support balance query' })
-  }
-
-  if (!account.oauthAccessToken || !account.proxyUrl) {
-    return reply.code(400).send({ error: 'account missing credentials' })
-  }
-
-  const balance = await fetchSub2ApiBalance(account.oauthAccessToken, account.proxyUrl)
-
-  if (!balance) {
-    return reply.code(503).send({ error: 'failed to fetch balance from upstream' })
-  }
-
-  return { accountId: id, accountName: account.name, balance }
-})
-```
-
-#### 步骤 2：前端调用
-
-在前端账户详情页面添加"查询余额"按钮：
-
-```typescript
-async function queryBalance(accountId: string) {
-  const response = await fetch(`/api/admin/accounts/${accountId}/balance`, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  
-  if (response.ok) {
-    const data = await response.json()
-    // 显示余额信息
-    console.log(data.balance)
-  }
+```json
+{
+  "mode": "unrestricted",
+  "remaining": 12.34,
+  "balance": 12.34,
+  "unit": "USD"
 }
 ```
 
-## 支持的余额查询端点
+Key 限额模式示例：
 
-程序会自动尝试以下常见的余额查询端点：
-
-1. `/v1/dashboard/billing/subscription` - OpenAI 兼容格式
-2. `/api/balance` - 简单余额格式
-3. `/v1/balance` - 另一种常见格式
-
-## 余额信息字段
-
-```typescript
-interface Sub2ApiBalanceInfo {
-  totalBalance?: number      // 总额度（美元）
-  used?: number             // 已使用（美元）
-  remaining?: number        // 剩余额度（美元）
-  resetAt?: number          // 重置时间（Unix 毫秒）
-  hasSubscription?: boolean // 是否有订阅
-  planName?: string         // 订阅计划名称
+```json
+{
+  "mode": "quota_limited",
+  "quota": {
+    "limit": 100,
+    "used": 40,
+    "remaining": 60,
+    "unit": "USD"
+  },
+  "remaining": 60
 }
 ```
 
-## 注意事项
+订阅模式会在 `subscription` 中返回日、周、月窗口。程序选择剩余额度最小的已配置窗口作为当前余额，并按窗口起点计算下一次重置时间。订阅没有任何金额窗口时，官方会返回 `remaining: -1`，后台会将其显示为“无限额”，不会显示成负数美元。
 
-### 1. 并非所有 sub2api 服务都支持余额查询
+如果官方只返回 `mode` 或速率窗口而没有金额字段，查询仍会被记录为成功，并显示“上游未返回金额”；这表示上游没有提供可显示的美元余额，不等同于余额为零。
 
-- 某些自建的 sub2api 中转站可能没有实现余额查询 API
-- 如果查询失败，不代表账户有问题，只是该服务不支持
+## 数据安全与缓存
 
-### 2. API Key 权限
-
-- 确保账户的 `oauth_access_token` 字段已正确配置
-- 某些服务可能需要特殊权限才能查询余额
-
-### 3. 自定义端点
-
-如果你的 sub2api 服务使用自定义的余额查询端点，可以修改 `balance.ts` 中的 `endpoints` 数组：
-
-```typescript
-const endpoints = [
-  '/v1/dashboard/billing/subscription',
-  '/api/balance',
-  '/v1/balance',
-  '/your/custom/endpoint',  // 添加你的自定义端点
-]
-```
+- 查询使用账号保存的 API Key；加密字段会先由服务端解密，API Key 不会写入响应或日志。
+- 只保存数值、币种、模式、计划、重置/到期时间和更新时间等白名单字段，不保存上游原始响应。
+- 查询失败时不会覆盖上一次成功的快照。
+- 余额为 `0` 是有效结果，会正常显示为零并标记为耗尽。
 
 ## 常见问题
 
-### Q1: 查询返回"无法获取余额信息"
+### 一直显示“未更新”
 
-**可能原因：**
-1. Sub2API 服务不支持余额查询 API
-2. API Key 权限不足
-3. Proxy URL 配置错误
+部署包含本次改动的后端和前端后，在账户页点击 Sub2API 行的刷新图标。若仍失败，查看按钮返回的错误信息并确认：
 
-**解决方法：**
-1. 联系 sub2api 服务提供商确认是否支持余额查询
-2. 检查 API Key 是否有效
-3. 确认 proxy_url 配置正确
+1. Base URL 指向 Sub2API 部署根地址；
+2. 账号的 API Key 有效，且能访问 `GET /v1/usage`；
+3. 反向代理没有拦截 `Authorization` 或 `x-api-key` 请求头。
 
-### Q2: 能否定时自动查询余额？
+### 显示“上游未返回金额”
 
-可以！添加一个定时任务：
+这通常是只配置了速率窗口的 Key，或订阅信息未被上游鉴权上下文加载。此时接口连通且鉴权成功，但没有可用的金额字段，程序不会自行推算余额。
 
-```typescript
-// src/jobs/balanceCheck.ts
-import { fetchSub2ApiBalance } from '../providers/sub2api/balance'
+### 查询是否消耗额度
 
-export function startBalanceCheckJob() {
-  const interval = setInterval(async () => {
-    // 查询所有 sub2api 账户的余额
-    // 如果余额低于阈值，发送通知
-  }, 24 * 60 * 60 * 1000) // 每天检查一次
+官方 `/v1/usage` 是只读查询，不会发起模型请求。
 
-  return async () => clearInterval(interval)
-}
-```
+## 相关代码
 
-### Q3: 余额查询会消耗配额吗？
-
-不会。余额查询是查看性操作，不消耗 API 调用配额。
-
-## 示例代码
-
-### 在代码中使用
-
-```typescript
-import { fetchSub2ApiBalance, formatBalanceInfo } from './src/providers/sub2api/balance'
-
-const balance = await fetchSub2ApiBalance(
-  'your-api-key',
-  'https://your-sub2api-endpoint.com'
-)
-
-if (balance) {
-  console.log('余额:', formatBalanceInfo(balance))
-  
-  if (balance.remaining && balance.remaining < 1) {
-    console.log('⚠️  余额不足！')
-  }
-}
-```
-
-### 批量查询所有账户
-
-```typescript
-const accounts = await db.select().from(accounts).where(eq(accounts.provider, 'sub2api'))
-
-for (const account of accounts) {
-  if (account.oauthAccessToken && account.proxyUrl) {
-    const balance = await fetchSub2ApiBalance(account.oauthAccessToken, account.proxyUrl)
-    console.log(`${account.name}: ${formatBalanceInfo(balance)}`)
-  }
-}
-```
-
-## 下一步
-
-1. **测试功能** - 运行 `check-sub2api-balance.ts` 查看是否能获取余额
-2. **集成到后台** - 如果测试成功，可以添加到管理后台界面
-3. **设置告警** - 当余额低于阈值时发送通知
-
----
-
-**创建时间:** 2026-07-22  
-**功能状态:** ✅ 已实现，待测试  
-**相关文件:** `src/providers/sub2api/balance.ts`, `check-sub2api-balance.ts`
+- `src/providers/sub2api/balance.ts`：接口请求、响应解析和快照校验；
+- `src/accounts/tester.ts`：刷新并持久化账户余额；
+- `src/routes/admin.ts`：单个/批量刷新管理接口；
+- `web/src/views/AccountsView.vue`：账户列表展示和刷新按钮；
+- `src/providers/sub2api/balance.test.ts`：余额解析与回退行为测试。

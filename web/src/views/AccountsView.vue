@@ -24,6 +24,21 @@ interface AccountQuotaSnapshot {
   resetCredits?: number | null
 }
 
+interface Sub2ApiBalanceSnapshot {
+  totalBalance?: number
+  used?: number
+  remaining?: number
+  resetAt?: number
+  expiresAt?: number
+  unlimited?: boolean
+  hasSubscription?: boolean
+  planName?: string
+  currency?: string
+  mode?: string
+  endpoint?: string
+  updatedAt: number
+}
+
 interface AccountGroupRef {
   id: string
   name: string
@@ -46,6 +61,7 @@ interface Account {
   notes: string | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
+  sub2apiBalance: Sub2ApiBalanceSnapshot | null
   // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
   autopausePercent: number | null
   // Set when the refresh token permanently failed and the account was auto-disabled.
@@ -307,6 +323,47 @@ function formatRateMultiplier(value: number | null | undefined) {
   return `${normalized.toFixed(4).replace(/\.?0+$/, '')}x`
 }
 
+function isFiniteBalance(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function formatSub2ApiAmount(value: number | null | undefined, currency?: string): string {
+  if (!isFiniteBalance(value)) return '—'
+  const unit = currency?.trim().toUpperCase() || 'USD'
+  try {
+    return new Intl.NumberFormat('zh-CN', {
+      style: 'currency',
+      currency: unit,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)
+  } catch {
+    return `${value.toFixed(2)} ${unit}`
+  }
+}
+
+function sub2ApiBalanceStatus(snapshot: Sub2ApiBalanceSnapshot): TagType {
+  if (snapshot.unlimited) return 'success'
+  if (!isFiniteBalance(snapshot.remaining)) return 'default'
+  if (snapshot.remaining <= 0) return 'error'
+  if (
+    isFiniteBalance(snapshot.totalBalance) &&
+    snapshot.totalBalance > 0 &&
+    snapshot.remaining / snapshot.totalBalance <= 0.2
+  ) {
+    return 'warning'
+  }
+  return 'success'
+}
+
+function sub2ApiModeLabel(snapshot: Sub2ApiBalanceSnapshot): string | null {
+  if (snapshot.hasSubscription) return '订阅'
+  if (snapshot.mode === 'unrestricted') return '钱包'
+  if (snapshot.mode === 'quota_limited') return 'Key 限额'
+  return snapshot.mode ?? null
+}
+
 function rateMultiplierType(value: number | null | undefined): TagType {
   const normalized = typeof value === 'number' && Number.isFinite(value) ? value : 1
   if (normalized < 1) return 'success'
@@ -460,8 +517,8 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
           size: 'tiny',
           quaternary: true,
           circle: true,
-          title: '刷新配额',
-          'aria-label': '刷新配额',
+          title: row.provider === 'sub2api' ? '刷新余额' : '刷新配额',
+          'aria-label': row.provider === 'sub2api' ? '刷新余额' : '刷新配额',
           // Don't use `loading`: UiButton renders its own generic spinner *next
           // to* the slot icon. Instead spin the ↻ glyph itself and just disable
           // the button while the request is in flight.
@@ -500,6 +557,51 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null) {
   )
 }
 
+function renderSub2ApiBalance(row: Account) {
+  const balance = row.sub2apiBalance
+  if (!balance) {
+    return h('div', { class: 'quota-cell' }, [
+      h('div', { class: 'quota-line' }, [h('span', { class: 'muted-cell' }, '未更新')]),
+      renderQuotaRefresh(row),
+    ])
+  }
+
+  const status = sub2ApiBalanceStatus(balance)
+  const hasRemaining = isFiniteBalance(balance.remaining)
+  const primaryText = balance.unlimited
+    ? '不限额'
+    : hasRemaining
+      ? `剩余 ${formatSub2ApiAmount(balance.remaining, balance.currency)}`
+      : '上游未返回金额'
+  const details: string[] = []
+  const modeLabel = sub2ApiModeLabel(balance)
+  if (modeLabel) details.push(modeLabel)
+  if (balance.planName && balance.planName !== '钱包余额') details.push(balance.planName)
+  if (isFiniteBalance(balance.totalBalance)) {
+    details.push(`总额 ${formatSub2ApiAmount(balance.totalBalance, balance.currency)}`)
+  }
+  if (isFiniteBalance(balance.used)) {
+    details.push(`已用 ${formatSub2ApiAmount(balance.used, balance.currency)}`)
+  }
+  if (isFiniteBalance(balance.resetAt)) details.push(`重置 ${formatShortTime(balance.resetAt)}`)
+  if (isFiniteBalance(balance.expiresAt)) details.push(`到期 ${formatShortTime(balance.expiresAt)}`)
+  const detailText = details.join(' · ')
+
+  return h('div', { class: 'quota-cell sub2api-balance-cell' }, [
+    h('div', { class: 'quota-line' }, [
+      h(
+        'span',
+        { class: ['sub2api-balance-remaining', `is-${status}`] },
+        primaryText,
+      ),
+      detailText
+        ? h('span', { class: 'sub2api-balance-detail', title: detailText }, detailText)
+        : null,
+    ]),
+    renderQuotaRefresh(row, balance.updatedAt),
+  ])
+}
+
 function renderResetCredits(row: Account) {
   // OpenAI-only: surface the reset-credit balance, when known, next to the
   // quota windows. `null`/undefined means we haven't queried it yet.
@@ -514,6 +616,7 @@ function renderResetCredits(row: Account) {
 }
 
 function renderQuota(row: Account) {
+  if (row.provider === 'sub2api') return renderSub2ApiBalance(row)
   const quota = row.quota
   const credits = renderResetCredits(row)
   if (!quota || !quota.windows.length) {
@@ -916,10 +1019,10 @@ async function batchRefreshQuotaSelected() {
   bulkBusy.value = true
   try {
     const { data } = await api.post('/admin/accounts/batch-quota-refresh', { ids })
-    notifyBatchResult('批量刷新配额', data)
+    notifyBatchResult('批量刷新余额/配额', data)
     await load()
   } catch (e) {
-    message.error(errMsg(e, '批量刷新配额失败'))
+    message.error(errMsg(e, '批量刷新余额/配额失败'))
   } finally {
     bulkBusy.value = false
   }
@@ -1209,7 +1312,7 @@ async function refreshQuota(row: Account) {
   refreshingQuotaId.value = row.id
   try {
     // OpenAI OAuth accounts have a dedicated endpoint that also returns the
-    // reset-credit balance; other providers use the generic connectivity probe.
+    // reset-credit balance. Sub2API uses the generic route backed by /v1/usage.
     if (row.provider === 'openai') {
       const { data } = await api.get(`/admin/accounts/${row.id}/openai/quota`)
       if (data.success) {
@@ -1221,14 +1324,21 @@ async function refreshQuota(row: Account) {
       return
     }
     const { data } = await api.post(`/admin/accounts/${row.id}/quota/refresh`)
+    if (data.success && row.provider === 'sub2api') {
+      message.success('余额已更新')
+      await load()
+      return
+    }
     if (data.success) {
       message.success('配额已刷新')
       await load()
       return
     }
-    message.error(data.message || '刷新配额失败')
+    const label = row.provider === 'sub2api' ? '余额' : '配额'
+    message.error(data.message || `刷新${label}失败`)
   } catch (e) {
-    message.error(errMsg(e, '刷新配额失败'))
+    const label = row.provider === 'sub2api' ? '余额' : '配额'
+    message.error(errMsg(e, `刷新${label}失败`))
   } finally {
     refreshingQuotaId.value = null
   }
@@ -1508,7 +1618,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="bulk-buttons">
           <UiButton size="small" secondary :disabled="bulkBusy" @click="batchTestSelected">批量测试</UiButton>
-          <UiButton size="small" secondary :disabled="bulkBusy" @click="batchRefreshQuotaSelected">刷新配额</UiButton>
+          <UiButton size="small" secondary :disabled="bulkBusy" @click="batchRefreshQuotaSelected">刷新余额/配额</UiButton>
           <div class="h-4 w-px bg-gray-200 dark:bg-dark-700 mx-1"></div>
           <UiButton size="small" type="success" secondary :disabled="bulkBusy" @click="bulkSetStatus('active')">启用</UiButton>
           <UiButton size="small" type="warning" secondary :disabled="bulkBusy" @click="bulkSetStatus('disabled')">禁用</UiButton>
@@ -2155,6 +2265,39 @@ onBeforeUnmount(() => {
   gap: 5px;
   flex: 1;
   min-width: 0;
+}
+
+:deep(.sub2api-balance-remaining) {
+  color: #18a058;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+:deep(.sub2api-balance-remaining.is-error) {
+  color: #d03050;
+}
+
+:deep(.sub2api-balance-remaining.is-warning) {
+  color: #d97706;
+}
+
+:deep(.sub2api-balance-remaining.is-default) {
+  color: #64748b;
+}
+
+:deep(.sub2api-balance-detail) {
+  overflow: hidden;
+  color: rgba(15, 23, 42, 0.56);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.dark) .sub2api-balance-detail {
+  color: rgba(226, 232, 240, 0.62);
 }
 
 :deep(.quota-credits) {

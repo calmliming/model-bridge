@@ -23,7 +23,7 @@ import {
   updateAccounts,
 } from '../accounts/manager'
 import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
-import { AccountTestError, testAccountConnectivity } from '../accounts/tester'
+import { AccountTestError, refreshAccountQuota, testAccountConnectivity } from '../accounts/tester'
 import {
   OpenAIQuotaError,
   queryOpenAIAccountQuota,
@@ -391,6 +391,50 @@ async function batchTestAccounts(ids: string[]) {
         const id = targetIds[index++]
         try {
           const result = await testAccountConnectivity(id)
+          results.push({
+            id,
+            success: result.success,
+            message: result.message,
+            latencyMs: result.latencyMs,
+            checkedAt: result.checkedAt,
+          })
+        } catch (err) {
+          results.push({
+            id,
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+    }),
+  )
+  const successCount = results.filter((r) => r.success).length
+  return {
+    total: results.length,
+    successCount,
+    failureCount: results.length - successCount,
+    results,
+  }
+}
+
+async function batchRefreshQuotaAccounts(ids: string[]) {
+  const targetIds = [...new Set(ids)]
+  const results: Array<{
+    id: string
+    success: boolean
+    message?: string
+    latencyMs?: number
+    checkedAt?: number
+    error?: string
+  }> = []
+  let index = 0
+  const workerCount = Math.min(3, targetIds.length)
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (index < targetIds.length) {
+        const id = targetIds[index++]
+        try {
+          const result = await refreshAccountQuota(id)
           results.push({
             id,
             success: result.success,
@@ -1272,7 +1316,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body', details: body.error.errors })
       }
-      return batchTestAccounts(body.data.ids)
+      return batchRefreshQuotaAccounts(body.data.ids)
     },
   )
 
@@ -1323,7 +1367,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     { preHandler: requireAdmin },
     async (request, reply) => {
       try {
-        return await testAccountConnectivity(request.params.id)
+        return await refreshAccountQuota(request.params.id)
       } catch (err) {
         if (err instanceof AccountTestError && err.statusCode === 404) {
           return reply.code(404).send({ success: false, error: err.message })

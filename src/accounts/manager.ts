@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { desc, eq, inArray } from 'drizzle-orm'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
@@ -10,6 +10,7 @@ import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSna
 import { accountHealth, emptyHealth } from './health'
 import { clearExpiredAccountCooldowns, disableAccount } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
+import { sub2ApiBalanceFromMetadata } from '../providers/sub2api/balance'
 import {
   matchPermanentRefreshSignal,
   PermanentRefreshError,
@@ -165,6 +166,7 @@ export async function listAccounts() {
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
+    sub2apiBalance: sub2ApiBalanceFromMetadata(metadata),
     autopausePercent: accountAutopausePercent(metadata),
     reauth: reauthStateFromMetadata(metadata),
     health: health.get(account.id) ?? emptyHealth(),
@@ -257,9 +259,12 @@ export async function deleteAccounts(ids: string[]): Promise<AccountBatchResult>
 
 /** Updates provider-specific metadata cached on an account. */
 export async function updateAccountMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
-  const [row] = await db.select({ metadata: accounts.metadata }).from(accounts).where(eq(accounts.id, id))
+  const patch = JSON.stringify(metadata)
   await db.update(accounts)
-    .set({ metadata: { ...metadataObject(row?.metadata), ...metadata } })
+    // PostgreSQL performs the same shallow merge as object spread, atomically.
+    // This prevents concurrent quota, identity, and balance refreshes from
+    // overwriting one another after reading an older metadata snapshot.
+    .set({ metadata: sql`COALESCE(${accounts.metadata}, '{}'::jsonb) || ${patch}::jsonb` })
     .where(eq(accounts.id, id))
 }
 
