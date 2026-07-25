@@ -16,19 +16,26 @@ const CNY_TO_USD = 0.14
 const cny = (yuan: number) => Math.round(yuan * CNY_TO_USD * 1e6) / 1e6
 
 // ---------------------------------------------------------------------------
-// Anthropic (Claude) list prices.
+// Anthropic (Claude) list prices (as of 2026-07-25).
 //
 // Opus 4.5 cut list prices to 5 / 25; Opus 4.1 (and earlier 4.0 / Claude 3
 // Opus) stay on the old 15 / 75. We therefore price Opus per version instead
 // of as a single flat tier — otherwise every opus-4-5+ request bills 3× high.
+//
+// Prompt caching: Anthropic offers two cache durations (5-min at 1.25x write,
+// 1-hour at 2x write). We use the 5-min rate (1.25x) as the default, which
+// matches most usage patterns. Cache reads are 0.1x input across all models.
 // ---------------------------------------------------------------------------
 const CLAUDE_OPUS_REDUCED: TierPrice = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }
 const CLAUDE_OPUS_LEGACY: TierPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }
+// Sonnet 5 introductory pricing ($2/$10) through August 31, 2026, then $3/$15.
+// Using standard pricing here since the promo ends soon; admins can override
+// the model_pricing table for the discounted rate during the promo period.
 const CLAUDE_SONNET: TierPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 }
 const CLAUDE_HAIKU: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
 // Fable 5 (Mythos-class flagship) — Anthropic's most capable widely released
 // model, priced above the Opus tier at 10 / 50. Claude Mythos 5 shares the
-// same list price.
+// same list price. Official pricing confirmed 2026-07-25.
 const CLAUDE_FABLE: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
@@ -54,10 +61,14 @@ function claudePrice(model: string): TierPrice {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI (ChatGPT / Codex) list prices, per 1M tokens.
+// OpenAI (ChatGPT / Codex) list prices, per 1M tokens (as of 2026-07-25).
 //
 // These feed estimateCost(), which charges the customer's wallet / subscription
 // in recordUsage() — so they track the gpt-5.x list prices, not a flat rate.
+//
+// Note: gpt-5.6 introduced explicit prompt-cache billing at 1.25× input for
+// cache writes and 0.1× input for cache reads. Earlier models (5.5, 5.4, 5.1)
+// have cacheWrite: 0 (no separate write fee) but support cacheRead discounts.
 // ---------------------------------------------------------------------------
 const OPENAI_GPT55: TierPrice = { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 }
 const OPENAI_GPT54: TierPrice = { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 }
@@ -69,9 +80,8 @@ const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRe
 // budget. Sol/Terra carry the same input/output list prices as gpt-5.5 / gpt-5.4
 // ("more capability at the same price"); Luna is a new low-cost 1/6 production
 // tier. Output is 6× input across all three; cacheRead is the standard 0.1×
-// input. Unlike the older OpenAI tiers, gpt-5.6 introduces explicit prompt-cache
-// breakpoints and bills cache writes at 1.25× the input rate, so cacheWrite is
-// non-zero here (kept as its own object so gpt-5.5 / gpt-5.4 stay uncharged).
+// input. gpt-5.6 bills cache writes at 1.25× the input rate (first OpenAI
+// tier to charge for cache writes explicitly).
 const OPENAI_GPT56_SOL: TierPrice = { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 }
 const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 }
 const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
