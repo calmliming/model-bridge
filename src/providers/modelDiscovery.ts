@@ -32,7 +32,7 @@ const CREATED_AT = 1_704_067_200
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
-  claude: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
+  claude: ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex'],
   gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
   deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],

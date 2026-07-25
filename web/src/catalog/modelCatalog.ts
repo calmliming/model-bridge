@@ -108,16 +108,27 @@ export const CATEGORIES: CategoryMeta[] = [
 export const MODEL_CATALOG: PlazaModel[] = [
   // --- Anthropic / Claude --------------------------------------------------
   {
-    id: 'claude-opus-4-8',
-    name: 'Claude Opus 4.8',
+    id: 'claude-opus-5',
+    name: 'Claude Opus 5',
     provider: 'claude',
     categories: ['chat', 'reasoning', 'code'],
-    tags: ['旗舰', '复杂推理', '长文本'],
-    description: 'Anthropic 当前最强旗舰模型，擅长复杂推理、长上下文理解与高质量代码生成。',
+    tags: ['旗舰', '复杂推理', 'Agent'],
+    description: 'Anthropic 最新旗舰模型，擅长复杂 Agent 编码与企业级任务，长上下文理解与推理能力出色。',
     context: '1M',
     inputPrice: 5,
     outputPrice: 25,
     badge: 'recommended',
+  },
+  {
+    id: 'claude-opus-4-8',
+    name: 'Claude Opus 4.8',
+    provider: 'claude',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['稳定', '复杂推理', '长文本'],
+    description: 'Anthropic 上一代旗舰模型，擅长复杂推理、长上下文理解与高质量代码生成。',
+    context: '1M',
+    inputPrice: 5,
+    outputPrice: 25,
   },
   {
     id: 'claude-sonnet-5',

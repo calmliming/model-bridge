@@ -13,7 +13,9 @@
 
 export type CcSwitchApp = 'claude' | 'codex' | 'gemini'
 
-export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5'
+// Default model for Codex CLI: gpt-5.6-sol is the recommended flagship for
+// agent coding tasks, offering the best reasoning and coding capabilities.
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.6-sol'
 
 export interface CcSwitchTarget {
   /** Stable id, also matches the snippet tab names in the views. */
@@ -46,6 +48,13 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     vendor: 'Claude',
     endpoint: (origin) => origin,
     provider: 'claude',
+    // Claude Code defaults: Opus 5 for complex reasoning, Sonnet 5 for balanced
+    // tasks, Haiku 4.5 for lightweight work. Using latest recommended models.
+    models: {
+      opusModel: 'claude-opus-5',
+      sonnetModel: 'claude-sonnet-5',
+      haikuModel: 'claude-haiku-4-5',
+    },
   },
   {
     id: 'claude-deepseek',
@@ -196,7 +205,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI · Sub2API',
     vendor: 'Sub2API',
     endpoint: (origin) => origin,
-    models: { model: 'gpt-5.4' },
+    models: { model: 'gpt-5.6-sol' },
     provider: 'sub2api',
   },
   {
