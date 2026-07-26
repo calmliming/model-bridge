@@ -299,15 +299,16 @@ function openCcSwitchForNew() {
 }
 
 /** Builds the deep link for the chosen target and hands off to CC Switch. */
-function triggerCcSwitch(target: CcSwitchTarget) {
+async function triggerCcSwitch(target: CcSwitchTarget) {
   if (!ccSwitchSecret.value) return
   const url = buildCcSwitchUrl(target, {
     origin: baseOrigin.value,
     apiKey: ccSwitchSecret.value,
     name: ccSwitchProviderName(target),
   })
-  launchCcSwitch(url)
-  message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
+  const launched = await launchCcSwitch(url)
+  if (launched) message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
+  else message.warning('未能唤起 CC Switch，请确认已安装（https://ccswitch.io）')
 }
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [

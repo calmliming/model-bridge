@@ -1,0 +1,10 @@
+# 图片生成提示词示例
+# 每行一个提示词，# 开头的行会被忽略
+
+A small orange cat sitting on a blue cushion, digital art style
+A red sports car on a mountain road at sunset, photorealistic
+A futuristic city skyline with flying cars, sci-fi concept art
+A peaceful zen garden with cherry blossoms, watercolor painting
+A chocolate cake with strawberries on top, food photography
+A golden retriever playing in a park, professional portrait
+A cozy coffee shop interior with warm lighting, architectural visualization

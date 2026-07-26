@@ -5,6 +5,9 @@ node_modules/
 dist/
 web/dist/
 
+# generated image-test output
+output/
+
 # runtime data (SQLite database + WAL files)
 data/
 

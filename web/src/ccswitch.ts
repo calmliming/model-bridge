@@ -5,8 +5,8 @@
  * provider into Claude Code / Codex / Gemini CLI. We turn a model-bridge API Key
  * into such a link so users can hand it to CC Switch without editing config files.
  *
- * Format (provider import):
- *   ccswitch://v1/import?resource=provider&app=<app>&name=<name>&endpoint=<url>&apiKey=<key>[&model=...&sonnetModel=...&haikuModel=...&opusModel=...]
+ * Format (provider import, aligned with sub2api's implementation):
+ *   ccswitch://v1/import?resource=provider&app=<app>&name=<name>&homepage=<origin>&endpoint=<url>&apiKey=<key>&configFormat=json[&model=...&sonnetModel=...&haikuModel=...&opusModel=...]
  *
  * `app` accepts claude / codex / gemini (CC Switch also supports opencode / openclaw).
  */
@@ -250,8 +250,6 @@ export function targetsForProviders(allowed: string[] | null | undefined): CcSwi
 }
 
 /**
- * Builds a `ccswitch://v1/import` provider deep link.
-/**
  * CC Switch usage-query script. CC Switch runs this against the provider to show
  * "剩余 X USD" on the card — it GETs model-bridge's /api/usage with the provider
  * API key and maps `balance` → remaining. See docs 2.5 用量查询.
@@ -267,8 +265,8 @@ const CC_SWITCH_USAGE_INTERVAL = 30
  * Base64-encodes a UTF-8 string. CC Switch Base64-decodes the `usageScript`
  * parameter (after URL-decoding the query), so the raw JS must be Base64'd
  * first — otherwise it rejects the link with "usage_script ... Base64 解码失败:
- * Invalid symbol 40" (the script starts with '('). encodeURIComponent at the
- * call site then percent-escapes '+' '/' '=' so the Base64 survives the URL.
+ * Invalid symbol 40" (the script starts with '('). URLSearchParams then
+ * percent-escapes '+' '/' '=' so the Base64 survives the URL.
  */
 function toBase64(input: string): string {
   const bytes = new TextEncoder().encode(input)
@@ -278,39 +276,55 @@ function toBase64(input: string): string {
 }
 
 /*
- * Query values are encoded with encodeURIComponent (spaces as %20) to match the
- * format CC Switch documents and parses.
+ * Query values are encoded with URLSearchParams, matching sub2api's deep link
+ * builder (CC Switch parses both %20 and '+' for spaces).
  */
 export function buildCcSwitchUrl(
   target: CcSwitchTarget,
   opts: { origin: string; apiKey: string; name: string },
 ): string {
-  const parts = [
-    'resource=provider',
-    `app=${encodeURIComponent(target.app)}`,
-    `name=${encodeURIComponent(opts.name)}`,
-    `endpoint=${encodeURIComponent(target.endpoint(opts.origin))}`,
-    `apiKey=${encodeURIComponent(opts.apiKey)}`,
+  const entries: [string, string][] = [
+    ['resource', 'provider'],
+    ['app', target.app],
+    ['name', opts.name],
+    ['homepage', opts.origin],
+    ['endpoint', target.endpoint(opts.origin)],
+    ['apiKey', opts.apiKey],
+    ['configFormat', 'json'],
   ]
   const models = target.models
   if (models) {
-    if (models.model) parts.push(`model=${encodeURIComponent(models.model)}`)
-    if (models.sonnetModel) parts.push(`sonnetModel=${encodeURIComponent(models.sonnetModel)}`)
-    if (models.haikuModel) parts.push(`haikuModel=${encodeURIComponent(models.haikuModel)}`)
-    if (models.opusModel) parts.push(`opusModel=${encodeURIComponent(models.opusModel)}`)
+    if (models.model) entries.push(['model', models.model])
+    if (models.sonnetModel) entries.push(['sonnetModel', models.sonnetModel])
+    if (models.haikuModel) entries.push(['haikuModel', models.haikuModel])
+    if (models.opusModel) entries.push(['opusModel', models.opusModel])
   }
   // Balance display: enable CC Switch's usage query against /api/usage. Pass the
   // key explicitly as usageApiKey so {{apiKey}} resolves even on CC Switch builds
   // that don't auto-fill it from the provider key.
-  parts.push('usageEnabled=true')
-  parts.push(`usageAutoInterval=${CC_SWITCH_USAGE_INTERVAL}`)
-  parts.push(`usageApiKey=${encodeURIComponent(opts.apiKey)}`)
-  parts.push(`usageScript=${encodeURIComponent(toBase64(CC_SWITCH_USAGE_SCRIPT))}`)
-  return `ccswitch://v1/import?${parts.join('&')}`
+  entries.push(['usageEnabled', 'true'])
+  entries.push(['usageAutoInterval', String(CC_SWITCH_USAGE_INTERVAL)])
+  entries.push(['usageApiKey', opts.apiKey])
+  entries.push(['usageScript', toBase64(CC_SWITCH_USAGE_SCRIPT)])
+  return `ccswitch://v1/import?${new URLSearchParams(entries).toString()}`
 }
 
-/** Launches the deep link, handing the provider config off to CC Switch. */
-export function launchCcSwitch(url: string): void {
-  if (typeof window === 'undefined') return
-  window.location.href = url
+/**
+ * Launches the deep link, handing the provider config off to CC Switch.
+ * Returns a promise resolving to false when the protocol handler likely failed
+ * (page still focused shortly after the attempt — sub2api's detection trick),
+ * so callers can tell the user CC Switch isn't installed.
+ */
+export function launchCcSwitch(url: string): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false)
+  try {
+    window.open(url, '_self')
+  } catch {
+    return Promise.resolve(false)
+  }
+  return new Promise((resolve) => {
+    // If the OS handed the link to CC Switch, the browser loses focus; if no
+    // handler is registered we typically keep focus. Heuristic, same as sub2api.
+    setTimeout(() => resolve(!document.hasFocus()), 100)
+  })
 }
