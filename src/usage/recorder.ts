@@ -52,9 +52,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
           session_key_hash, session_source,
-          input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
-          cost, base_cost, bill_to, status, latency_ms, first_token_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+           input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
+           image_input_tokens, image_output_tokens, image_count, image_size, image_model,
+           cost, base_cost, bill_to, status, latency_ms, first_token_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
       [
         id,
         record.apiKeyId,
@@ -70,6 +72,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         record.usage.reasoningTokens,
         record.usage.cacheCreateTokens,
         record.usage.cacheReadTokens,
+        record.usage.imageInputTokens ?? 0,
+        record.usage.imageOutputTokens ?? 0,
+        record.usage.imageCount ?? 0,
+        record.usage.imageSize ?? null,
+        record.usage.imageModel ?? null,
         cost,
         baseCost,
         billTo,

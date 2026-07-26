@@ -1,12 +1,41 @@
 import { describe, expect, it } from 'vitest'
+import Fastify from 'fastify'
 import {
   classifyUpstreamFailure,
   isAnthropicFableOnlyWindowExceeded,
   newResponsesStreamState,
   noteResponsesTerminal,
   redactUrls,
+  registerRelayRoutes,
   responsesStreamStatus,
 } from './relay'
+
+describe('OpenAI Images route registration', () => {
+  it('registers both clean and provider-prefixed endpoints plus multipart parsing', async () => {
+    const app = Fastify()
+    registerRelayRoutes(app)
+    app.post('/multipart-parser-probe', async (request) => ({
+      bytes: Buffer.isBuffer(request.body) ? request.body.byteLength : -1,
+    }))
+    await app.ready()
+
+    expect(app.hasRoute({ method: 'POST', url: '/v1/images/generations' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/v1/images/edits' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/api/openai/v1/images/generations' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/api/openai/v1/images/edits' })).toBe(true)
+
+    const boundary = 'route-test-boundary'
+    const payload = `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\ndraw\r\n--${boundary}--\r\n`
+    const response = await app.inject({
+      method: 'POST',
+      url: '/multipart-parser-probe',
+      headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+      payload,
+    })
+    expect(response.json()).toEqual({ bytes: Buffer.byteLength(payload) })
+    await app.close()
+  })
+})
 
 describe('responsesStreamStatus', () => {
   it('records response.completed as success', () => {

@@ -48,4 +48,16 @@ describe('normalizeOpenaiResponsesBody', () => {
     expect(body).not.toHaveProperty('tools')
     expect(body).not.toHaveProperty('tool_choice')
   })
+
+  it('preserves explicit image_generation tools when enabled', () => {
+    const body = normalizeOpenaiResponsesBody({
+      model: 'gpt-5.4',
+      input: 'draw',
+      tools: [{ type: 'image_generation', model: 'gpt-image-2' }],
+      tool_choice: { type: 'image_generation' },
+    }, { allowImageGeneration: true })
+
+    expect(body.tools).toEqual([{ type: 'image_generation', model: 'gpt-image-2' }])
+    expect(body.tool_choice).toEqual({ type: 'image_generation' })
+  })
 })

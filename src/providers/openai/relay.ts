@@ -45,13 +45,13 @@ function stripImageGenerationTools(body: Record<string, unknown>): void {
 }
 
 /** Normalises an incoming Responses-API body to what the Codex backend accepts. */
-export function normalizeOpenaiResponsesBody(body: Record<string, unknown>): Record<string, unknown> {
+export function normalizeOpenaiResponsesBody(
+  body: Record<string, unknown>,
+  options: { allowImageGeneration?: boolean } = {},
+): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
-  // The Codex backend rejects client-advertised image_generation tools in some
-  // model paths. model-bridge does not implement the image bridge, so dropping
-  // the explicit tool is safer than forwarding a request that becomes a 400/502.
-  stripImageGenerationTools(out)
+  if (!options.allowImageGeneration) stripImageGenerationTools(out)
   if (typeof out.input === 'string') {
     out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]
   }
@@ -67,6 +67,7 @@ export function normalizeOpenaiResponsesBody(body: Record<string, unknown>): Rec
 export function relayOpenaiResponses(
   accessToken: string,
   body: Record<string, unknown>,
+  options: { allowImageGeneration?: boolean } = {},
 ): Promise<Response> {
   return fetch(CODEX_RESPONSES_URL, {
     method: 'POST',
@@ -79,7 +80,27 @@ export function relayOpenaiResponses(
       originator: CODEX_ORIGINATOR,
       session_id: randomUUID(),
     },
-    body: JSON.stringify(normalizeOpenaiResponsesBody(body)),
+    body: JSON.stringify(normalizeOpenaiResponsesBody(body, options)),
+  })
+}
+
+/** Relays a Responses request that intentionally uses the image_generation tool. */
+export function relayOpenaiImageResponses(
+  accessToken: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(CODEX_RESPONSES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      accept: 'text/event-stream',
+      'user-agent': CODEX_USER_AGENT,
+      'openai-beta': 'responses=experimental',
+      originator: CODEX_ORIGINATOR,
+      session_id: randomUUID(),
+    },
+    body: JSON.stringify(normalizeOpenaiResponsesBody(body, { allowImageGeneration: true })),
   })
 }
 

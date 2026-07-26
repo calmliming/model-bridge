@@ -30,6 +30,17 @@ import {
 } from '../providers/claude/chat'
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
 import {
+  convertOpenAIImagesSse,
+  createOpenAIImagesStreamTransform,
+  createOpenAIImagesUsageParser,
+  parseOpenAIImagesRequest,
+  relayOpenaiImages,
+  summarizeOpenAIImagesRequest,
+  validateOpenAIImagesRequestModel,
+  type OpenAIImagesEndpoint,
+  type OpenAIImagesRequestBody,
+} from '../providers/openai/images'
+import {
   buildResponsesErrorEvents,
   createChatCompletionStreamParser,
   createOpenaiChatCompletionsStreamTransform,
@@ -128,6 +139,8 @@ interface StreamTransform {
   transform(data: unknown): unknown[]
   /** Emit closing / completion events once the upstream stream ends. */
   flush(): unknown[]
+  /** Final transformed-stream status, when success cannot be inferred from HTTP. */
+  status?(): 'success' | 'error'
 }
 
 interface ProviderHandler {
@@ -171,7 +184,7 @@ interface ProviderHandler {
   bufferSseResponse?: (
     text: string,
     meta: RelayMeta,
-  ) => { body: unknown; usage: UsageData; status?: 'error' }
+  ) => { body: unknown; usage: UsageData; status?: 'error'; httpStatus?: number }
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
   transformEventData?: (data: unknown) => unknown
   /**
@@ -181,6 +194,8 @@ interface ProviderHandler {
    * a Responses-API event sequence.
    */
   createStreamTransform?: () => StreamTransform
+  /** Provider-aware request summary used for usage logs. */
+  summarizeRequestInput?: (body: Record<string, unknown>) => string | null
 }
 
 const PROVIDERS: Record<string, ProviderHandler> = {
@@ -222,7 +237,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
     }),
-    callUpstream: (token, body, _ctx) => relayOpenaiResponses(token, body),
+    callUpstream: (token, body, _ctx) => relayOpenaiResponses(token, body, {
+      allowImageGeneration: config.OPENAI_IMAGE_GENERATION_ENABLED,
+    }),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
   },
@@ -834,6 +851,10 @@ function isOpenaiModelScopedLimit(provider: string, response: Response): boolean
 
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
+  const imageBodyLimit = 64 * 1024 * 1024
+  app.addContentTypeParser(/^multipart\/form-data\b/i, { parseAs: 'buffer' }, (_request, body, done) => {
+    done(null, body)
+  })
   const claudeHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.claude!)
   const claudeChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
@@ -842,6 +863,62 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.openai!)
   const openaiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['openai-chat']!)
+  const openaiImagesHandler = (endpoint: OpenAIImagesEndpoint) =>
+    async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+      if (!config.OPENAI_IMAGE_GENERATION_ENABLED) {
+        await reply.code(403).send({
+          error: {
+            type: 'permission_error',
+            code: 'image_generation_disabled',
+            message: 'OpenAI image generation is disabled on this gateway.',
+          },
+        })
+        return
+      }
+      let body: OpenAIImagesRequestBody
+      try {
+        const contentType = Array.isArray(request.headers['content-type'])
+          ? request.headers['content-type'][0] ?? ''
+          : request.headers['content-type'] ?? ''
+        body = parseOpenAIImagesRequest(request.body, contentType, endpoint, {
+          deferModelValidation: true,
+        })
+        validateOpenAIImagesRequestModel(
+          body,
+          mapRequestedModel(body.model, request.apiKey!.modelMappings),
+        )
+      } catch (error) {
+        await reply.code(400).send({
+          error: {
+            type: 'invalid_request_error',
+            code: 'invalid_image_request',
+            message: (error as Error).message,
+          },
+        })
+        return
+      }
+      const requestedModel = body.model
+      const mappedRequest: OpenAIImagesRequestBody = {
+        ...body,
+        model: mapRequestedModel(requestedModel, request.apiKey!.modelMappings),
+      }
+      const provider: ProviderHandler = {
+        id: 'openai',
+        forceStream: false,
+        parseRoute: () => ({
+          model: requestedModel,
+          action: `images.${endpoint}`,
+        }),
+        callUpstream: (token, input) => relayOpenaiImages(token, input),
+        createStreamParser: () => createOpenAIImagesUsageParser(mappedRequest),
+        parseJsonUsage: () => emptyUsage(),
+        parseStreamEventsFrom: 'upstream',
+        bufferSseResponse: (text) => convertOpenAIImagesSse(text, mappedRequest),
+        createStreamTransform: () => createOpenAIImagesStreamTransform(mappedRequest),
+        summarizeRequestInput: summarizeOpenAIImagesRequest,
+      }
+      await executeRelay(request, reply, provider, body)
+    }
   const geminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.gemini!)
   const deepseekHandler = (request: FastifyRequest, reply: FastifyReply) =>
@@ -891,6 +968,8 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/claude/v1/chat/completions', { preHandler: requireApiKey }, claudeChatHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
   app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
+  app.post('/api/openai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
+  app.post('/api/openai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
@@ -1028,6 +1107,8 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
   app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
+  app.post('/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
+  app.post('/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
   // Codex appends `/responses` to its base_url; OpenAI-compatible clients hit
   // `/chat/completions`. Register the un-prefixed forms too so the base URL can
   // be the bare domain (no trailing /v1).
@@ -1118,9 +1199,10 @@ async function executeRelay(
   request: FastifyRequest,
   reply: FastifyReply,
   provider: ProviderHandler,
+  bodyOverride?: Record<string, unknown>,
 ): Promise<void> {
   const apiKey = request.apiKey!
-  const body = (request.body ?? {}) as Record<string, unknown>
+  const body = bodyOverride ?? (request.body ?? {}) as Record<string, unknown>
   const route = provider.parseRoute(request, body)
   const mappedModel = mapRequestedModel(route.model, apiKey.modelMappings)
   const parsed: ParsedRoute = {
@@ -1377,7 +1459,9 @@ async function runRelayLoop(
         accountId: account.id,
         provider: provider.id,
         model: parsed.model,
-        requestInput: summarizeRequestInput(body),
+        requestInput: provider.summarizeRequestInput
+          ? provider.summarizeRequestInput(body)
+          : summarizeRequestInput(body),
         sessionKeyHash: session?.hash ?? null,
         sessionSource: session?.source ?? null,
         startedAt,
@@ -1600,6 +1684,9 @@ async function sendStreaming(
         if (done) break
         lastActivity = Date.now()
         buffer += decoder.decode(value, { stream: true })
+        // Normalise CRLF so SSE block splitting and multi-line data handling
+        // work regardless of the upstream server's newline convention.
+        buffer = buffer.replace(/\r\n/g, '\n')
         if (streamTransform) {
           // Stateful multi-event transform: drain whole SSE blocks, feed
           // upstream JSON events to the transform, write each result as its
@@ -1675,7 +1762,7 @@ async function sendStreaming(
     // Responses-protocol success requires a `response.completed` terminal. A
     // `response.failed` / `response.incomplete` (incl. `cyber_policy` blocks) or
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
-    status: responsesStreamStatus(upstream.ok, responsesProtocol, streamState),
+    status: streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState),
     latencyMs: Date.now() - meta.startedAt,
     firstTokenMs,
     requestInput: meta.requestInput,
@@ -1821,12 +1908,14 @@ async function sendBuffered(
     let usage: UsageData = emptyUsage()
     let responseContentType = contentType
     let convertedStatus: 'error' | undefined
+    let convertedHttpStatus: number | undefined
     if (upstream.ok) {
       const converted = provider.bufferSseResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
       usage = converted.usage
       responseContentType = 'application/json'
       convertedStatus = converted.status
+      convertedHttpStatus = converted.httpStatus
     }
     const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,
@@ -1849,7 +1938,7 @@ async function sendBuffered(
       return
     }
     await reply
-      .code(upstream.status)
+      .code(convertedHttpStatus ?? upstream.status)
       .header('content-type', responseContentType)
       .send(responseText)
     return
@@ -1932,18 +2021,20 @@ function feedSseBlock(
   parser: { feed(event: unknown): void },
   state: ResponsesStreamState,
 ): void {
+  const dataLines: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
-    const payload = trimmed.slice(5).trim()
-    if (!payload || payload === '[DONE]') continue
-    try {
-      const parsed = JSON.parse(payload)
-      parser.feed(parsed)
-      noteResponsesTerminal(parsed, state)
-    } catch {
-      // Ignore non-JSON data lines.
-    }
+    dataLines.push(trimmed.slice(5).trimStart())
+  }
+  const payload = dataLines.join('\n').trim()
+  if (!payload || payload === '[DONE]') return
+  try {
+    const parsed = JSON.parse(payload)
+    parser.feed(parsed)
+    noteResponsesTerminal(parsed, state)
+  } catch {
+    // Ignore non-JSON data blocks.
   }
 }
 
@@ -1962,30 +2053,44 @@ function emitFromStreamTransform(
   onEmit: (() => void) | undefined,
   state: ResponsesStreamState,
 ): void {
+  const dataLines: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
     if (!trimmed.startsWith('data:')) continue
-    const payload = trimmed.slice(5).trim()
-    if (!payload || payload === '[DONE]') continue
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(payload)
-    } catch {
-      continue
-    }
-    if (parseUpstream) parser.feed(parsed)
-    for (const event of xform.transform(parsed)) {
-      if (!parseUpstream && event !== '[DONE]') parser.feed(event)
-      noteResponsesTerminal(event, state)
-      onEmit?.()
-      writeSseData(raw, event)
-    }
+    dataLines.push(trimmed.slice(5).trimStart())
+  }
+  const payload = dataLines.join('\n').trim()
+  if (!payload || payload === '[DONE]') return
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return
+  }
+  if (parseUpstream) parser.feed(parsed)
+  for (const event of xform.transform(parsed)) {
+    if (!parseUpstream && event !== '[DONE]') parser.feed(event)
+    noteResponsesTerminal(event, state)
+    onEmit?.()
+    writeSseData(raw, event)
   }
 }
 
 function writeSseData(raw: ServerResponse, event: unknown): void {
   if (event === '[DONE]') {
     raw.write('data: [DONE]\n\n')
+    return
+  }
+  if (
+    event &&
+    typeof event === 'object' &&
+    (event as { __modelBridgeSseEvent?: unknown }).__modelBridgeSseEvent === true
+  ) {
+    const named = event as { event?: unknown; data?: unknown }
+    if (typeof named.event === 'string' && named.event.trim()) {
+      raw.write(`event: ${named.event.trim()}\n`)
+    }
+    raw.write(`data: ${JSON.stringify(named.data)}\n\n`)
     return
   }
   raw.write(`data: ${JSON.stringify(event)}\n\n`)

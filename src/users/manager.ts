@@ -54,6 +54,11 @@ export interface UserUsageLog {
   reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
+  imageInputTokens: number
+  imageOutputTokens: number
+  imageCount: number
+  imageSize: string | null
+  imageModel: string | null
   cost: number
   apiKeyName: string | null
   requestInput: string | null
@@ -118,6 +123,11 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     reasoningTokens: Number(row.reasoning_tokens ?? 0),
     cacheCreateTokens: Number(row.cache_create_tokens),
     cacheReadTokens: Number(row.cache_read_tokens),
+    imageInputTokens: Number(row.image_input_tokens ?? 0),
+    imageOutputTokens: Number(row.image_output_tokens ?? 0),
+    imageCount: Number(row.image_count ?? 0),
+    imageSize: (row.image_size as string | null) ?? null,
+    imageModel: (row.image_model as string | null) ?? null,
     cost: Number(row.cost),
     apiKeyName: (row.api_key_name as string | null) ?? null,
     requestInput: (row.request_input as string | null) ?? null,
@@ -401,7 +411,8 @@ export async function listUserUsage(
     pool.query<Record<string, unknown>>(
       `SELECT l.id, l.ts, l.provider, l.model, l.status, l.latency_ms,
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
-              l.cache_read_tokens, l.cost, l.request_input,
+              l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
+              l.image_count, l.image_size, l.image_model, l.cost, l.request_input,
               k.name AS api_key_name
        FROM usage_logs l
        LEFT JOIN api_keys k ON k.id = l.api_key_id
@@ -439,7 +450,8 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
   const since24h = startOfTodayMs()
   const since30d = now - 30 * USAGE_MS_PER_DAY
   const tokenSum =
-    'input_tokens + output_tokens + cache_create_tokens + cache_read_tokens'
+    `input_tokens + output_tokens + cache_create_tokens + cache_read_tokens +
+     image_input_tokens + image_output_tokens`
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS requests24h,

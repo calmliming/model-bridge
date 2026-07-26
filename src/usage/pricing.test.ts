@@ -89,3 +89,35 @@ describe('grok (xAI) pricing', () => {
     expect(resolvePrice('sub2api', 'grok-4.3')).toMatchObject({ input: 1.25, output: 2.5 })
   })
 })
+
+describe('OpenAI image pricing', () => {
+  it('uses gpt-image-2 text and image token rates', () => {
+    expect(resolvePrice('openai', 'gpt-image-2')).toMatchObject({
+      input: 5,
+      output: 10,
+      cacheRead: 1.25,
+      imageInput: 8,
+      imageOutput: 30,
+    })
+  })
+
+  it('prices image tokens separately from text tokens', () => {
+    expect(estimateCost('openai', 'gpt-image-2', {
+      ...emptyUsage(),
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      imageInputTokens: 1_000_000,
+      imageOutputTokens: 1_000_000,
+      imageModel: 'gpt-image-2',
+    })).toBe(53)
+  })
+
+  it('keeps Responses text on the main model and image output on the tool model', () => {
+    expect(estimateCost('openai', 'gpt-5.4', {
+      ...emptyUsage(),
+      inputTokens: 1_000_000,
+      imageOutputTokens: 1_000_000,
+      imageModel: 'gpt-image-2',
+    })).toBe(32.5)
+  })
+})

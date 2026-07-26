@@ -161,8 +161,33 @@ codex --profile model-bridge
 中转暴露 OpenAI 的 **Responses** API（`/v1/responses`）供 Codex CLI 使用，
 同时提供兼容 OpenAI 客户端的 **Chat Completions** 入口
 （`/v1/chat/completions`）。Chat Completions 内部仍走同一套 Responses
-后端转换，所以文本对话可用；embeddings 和图片生成暂未暴露。`GET /v1/models`
+后端转换，所以文本对话可用；embeddings 暂未暴露。`GET /v1/models`
 会返回兼容格式的模型列表，并按 API Key 的服务商和模型限制过滤。
+
+OpenAI 图片生成现已通过 ChatGPT OAuth 账号桥接到 Responses
+`image_generation` 工具，支持 `/v1/images/generations`、`/v1/images/edits`
+及对应的 `/api/openai/v1/...` 路径。embeddings 仍未暴露。默认图片模型为
+`gpt-image-2`；可用 `OPENAI_IMAGE_GENERATION_ENABLED=false` 关闭图片入口和
+Responses 中显式声明的图片工具。
+
+```bash
+curl http://localhost:3000/v1/images/generations \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"一只坐在窗边的橘猫","size":"1024x1024"}'
+```
+
+```bash
+curl http://localhost:3000/v1/images/edits \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -F "model=gpt-image-2" \
+  -F "prompt=把天空替换成极光" \
+  -F "image=@./source.png"
+```
+
+请求加上 `"stream":true` 可接收 `image_generation.partial_image` /
+`image_generation.completed`（编辑时为 `image_edit.*`）SSE 事件。尺寸和格式参数
+遵循 [OpenAI Image Generation 指南](https://developers.openai.com/api/docs/guides/image-generation)。
 
 ### Codex CLI 接 DeepSeek
 

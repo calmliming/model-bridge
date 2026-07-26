@@ -7,6 +7,10 @@ export interface TierPrice {
   output: number
   cacheWrite: number
   cacheRead: number
+  /** USD per 1M image-input tokens, for GPT Image edits/variations. */
+  imageInput?: number
+  /** USD per 1M image-output tokens. */
+  imageOutput?: number
 }
 
 // Fixed CNY→USD conversion for DeepSeek list prices (DeepSeek quotes CNY only).
@@ -85,9 +89,45 @@ const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRe
 const OPENAI_GPT56_SOL: TierPrice = { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 }
 const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 }
 const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
+const OPENAI_IMAGE_2: TierPrice = {
+  input: 5,
+  output: 10,
+  cacheWrite: 0,
+  cacheRead: 1.25,
+  imageInput: 8,
+  imageOutput: 30,
+}
+const OPENAI_IMAGE_15: TierPrice = {
+  input: 5,
+  output: 10,
+  cacheWrite: 0,
+  cacheRead: 1.25,
+  imageInput: 8,
+  imageOutput: 32,
+}
+const OPENAI_IMAGE_1: TierPrice = {
+  input: 5,
+  output: 0,
+  cacheWrite: 0,
+  cacheRead: 1.25,
+  imageInput: 10,
+  imageOutput: 40,
+}
+const OPENAI_IMAGE_MINI: TierPrice = {
+  input: 2,
+  output: 0,
+  cacheWrite: 0,
+  cacheRead: 0.2,
+  imageInput: 2.5,
+  imageOutput: 8,
+}
 
 function openaiPrice(model: string): TierPrice {
   const m = model.toLowerCase()
+  if (m.startsWith('gpt-image-2')) return OPENAI_IMAGE_2
+  if (m.startsWith('gpt-image-1.5')) return OPENAI_IMAGE_15
+  if (m.startsWith('gpt-image-1-mini')) return OPENAI_IMAGE_MINI
+  if (m.startsWith('gpt-image-1')) return OPENAI_IMAGE_1
   if (m.includes('codex')) return OPENAI_CODEX
   if (m.includes('mini') || m.includes('nano')) return OPENAI_MINI
   // gpt-5.6 family: luna (budget) / terra (workhorse) / sol (flagship, and the
@@ -263,6 +303,10 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
+  { provider: 'openai', model: 'gpt-image-2', price: OPENAI_IMAGE_2 },
+  { provider: 'openai', model: 'gpt-image-1.5', price: OPENAI_IMAGE_15 },
+  { provider: 'openai', model: 'gpt-image-1', price: OPENAI_IMAGE_1 },
+  { provider: 'openai', model: 'gpt-image-1-mini', price: OPENAI_IMAGE_MINI },
   { provider: 'openai', model: 'gpt-5.5', price: OPENAI_GPT55 },
   { provider: 'openai', model: 'gpt-5.4', price: OPENAI_GPT54 },
   { provider: 'openai', model: 'gpt-5.4-mini', price: OPENAI_MINI },
@@ -392,8 +436,12 @@ export async function loadPricing(): Promise<void> {
     output_price: number
     cache_write_price: number
     cache_read_price: number
+    image_input_price: number
+    image_output_price: number
   }>(
-    'SELECT provider, model, input_price, output_price, cache_write_price, cache_read_price FROM model_pricing',
+    `SELECT provider, model, input_price, output_price, cache_write_price, cache_read_price,
+            image_input_price, image_output_price
+       FROM model_pricing`,
   )
   priceCache.clear()
   for (const row of res.rows) {
@@ -402,6 +450,8 @@ export async function loadPricing(): Promise<void> {
       output: Number(row.output_price),
       cacheWrite: Number(row.cache_write_price),
       cacheRead: Number(row.cache_read_price),
+      imageInput: Number(row.image_input_price),
+      imageOutput: Number(row.image_output_price),
     })
   }
   loaded = true
@@ -419,8 +469,10 @@ export async function reloadPricing(): Promise<void> {
 export async function initPricing(): Promise<void> {
   for (const row of SEED_ROWS) {
     await pool.query(
-      `INSERT INTO model_pricing (id, provider, model, input_price, output_price, cache_write_price, cache_read_price)
-       SELECT $1, $2, $3, $4, $5, $6, $7
+      `INSERT INTO model_pricing
+         (id, provider, model, input_price, output_price, cache_write_price, cache_read_price,
+          image_input_price, image_output_price)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
        WHERE NOT EXISTS (SELECT 1 FROM model_pricing WHERE provider = $2 AND model = $3)`,
       [
         `${row.provider}-${row.model}`,
@@ -430,6 +482,8 @@ export async function initPricing(): Promise<void> {
         row.price.output,
         row.price.cacheWrite,
         row.price.cacheRead,
+        row.price.imageInput ?? 0,
+        row.price.imageOutput ?? 0,
       ],
     )
   }
@@ -510,11 +564,14 @@ export function resolvePrice(provider: string, model: string): TierPrice | null 
 export function estimateCost(provider: string, model: string, usage: UsageData): number {
   const p = resolvePrice(provider, model)
   if (!p) return 0
+  const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel) : p
   const cost =
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +
       usage.cacheCreateTokens * p.cacheWrite +
-      usage.cacheReadTokens * p.cacheRead) /
+      usage.cacheReadTokens * p.cacheRead +
+      (usage.imageInputTokens ?? 0) * (imagePrice?.imageInput ?? 0) +
+      (usage.imageOutputTokens ?? 0) * (imagePrice?.imageOutput ?? 0)) /
     1_000_000
   return Math.round(cost * 1e6) / 1e6
 }

@@ -90,6 +90,10 @@ const schema = z.object({
     blankToUndefined,
     z.coerce.number().int().min(0).max(120_000).default(15_000),
   ),
+  // Enables the OpenAI Images API bridge and preserves explicitly requested
+  // image_generation tools on the Responses endpoint. Disable this when the
+  // configured ChatGPT OAuth accounts do not have image-generation access.
+  OPENAI_IMAGE_GENERATION_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers

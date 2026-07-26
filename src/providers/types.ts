@@ -36,6 +36,16 @@ export interface UsageData {
   reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
+  /** Image input tokens billed by a GPT Image tool/model, when reported. */
+  imageInputTokens?: number
+  /** Image output tokens billed by a GPT Image tool/model, when reported. */
+  imageOutputTokens?: number
+  /** Number of final images produced by the request. */
+  imageCount?: number
+  /** Requested or upstream-reported image dimensions. */
+  imageSize?: string
+  /** GPT Image model that produced the output. */
+  imageModel?: string
 }
 
 export function emptyUsage(): UsageData {

@@ -195,6 +195,11 @@ export async function initDb(): Promise<void> {
       reasoning_tokens BIGINT NOT NULL DEFAULT 0,
       cache_create_tokens BIGINT NOT NULL DEFAULT 0,
       cache_read_tokens BIGINT NOT NULL DEFAULT 0,
+      image_input_tokens BIGINT NOT NULL DEFAULT 0,
+      image_output_tokens BIGINT NOT NULL DEFAULT 0,
+      image_count BIGINT NOT NULL DEFAULT 0,
+      image_size TEXT,
+      image_model TEXT,
       cost DOUBLE PRECISION NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'success',
       latency_ms BIGINT,
@@ -210,7 +215,9 @@ export async function initDb(): Promise<void> {
       input_price DOUBLE PRECISION NOT NULL DEFAULT 0,
       output_price DOUBLE PRECISION NOT NULL DEFAULT 0,
       cache_write_price DOUBLE PRECISION NOT NULL DEFAULT 0,
-      cache_read_price DOUBLE PRECISION NOT NULL DEFAULT 0
+      cache_read_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+      image_input_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+      image_output_price DOUBLE PRECISION NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS oauth_sessions (
@@ -250,6 +257,13 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS base_cost DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS bill_to TEXT NOT NULL DEFAULT 'balance';`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS reasoning_tokens BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_input_tokens BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_output_tokens BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_count BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_size TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_model TEXT;`)
+  await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_input_price DOUBLE PRECISION NOT NULL DEFAULT 0;`)
+  await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_output_price DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key_hash ON usage_logs (session_key_hash);`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (

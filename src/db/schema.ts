@@ -215,6 +215,11 @@ export const usageLogs = pgTable('usage_logs', {
   reasoningTokens: bigint('reasoning_tokens', { mode: 'number' }).notNull().default(0), // thinking/reasoning tokens, a subset of output_tokens
   cacheCreateTokens: bigint('cache_create_tokens', { mode: 'number' }).notNull().default(0),
   cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }).notNull().default(0),
+  imageInputTokens: bigint('image_input_tokens', { mode: 'number' }).notNull().default(0),
+  imageOutputTokens: bigint('image_output_tokens', { mode: 'number' }).notNull().default(0),
+  imageCount: bigint('image_count', { mode: 'number' }).notNull().default(0),
+  imageSize: text('image_size'),
+  imageModel: text('image_model'),
   cost: doublePrecision('cost').notNull().default(0), // amount charged to the user (base_cost × group multiplier)
   baseCost: doublePrecision('base_cost').notNull().default(0), // list-price cost before markup
   billTo: text('bill_to').notNull().default('balance'), // subscription | balance — which budget paid
@@ -232,6 +237,8 @@ export const modelPricing = pgTable('model_pricing', {
   outputPrice: doublePrecision('output_price').notNull().default(0),
   cacheWritePrice: doublePrecision('cache_write_price').notNull().default(0),
   cacheReadPrice: doublePrecision('cache_read_price').notNull().default(0),
+  imageInputPrice: doublePrecision('image_input_price').notNull().default(0),
+  imageOutputPrice: doublePrecision('image_output_price').notNull().default(0),
 })
 
 /** Transient state for an in-progress OAuth authorization. */

@@ -187,9 +187,33 @@ codex --profile model-bridge
 The relay exposes OpenAI **Responses** (`/v1/responses`) for Codex CLI and a
 compatibility **Chat Completions** surface (`/v1/chat/completions`) for
 OpenAI-compatible clients. The Chat Completions path is translated through
-the same Responses backend, so text chat works while embeddings and image
-generation are still not exposed. `GET /v1/models` returns a compatibility
-model list filtered by the API key's provider and model allow-lists.
+the same Responses backend. OpenAI image generation is also exposed through
+`/v1/images/generations` and `/v1/images/edits` (plus the matching
+`/api/openai/v1/...` paths), bridged through ChatGPT OAuth accounts to the
+Responses `image_generation` tool. Embeddings are still not exposed.
+`GET /v1/models` returns a compatibility model list filtered by the API key's
+provider and model allow-lists.
+
+```bash
+curl http://localhost:3000/v1/images/generations \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"an orange cat beside a window","size":"1024x1024"}'
+```
+
+```bash
+curl http://localhost:3000/v1/images/edits \
+  -H "Authorization: Bearer mb-xxxxxxxx" \
+  -F "model=gpt-image-2" \
+  -F "prompt=replace the sky with an aurora" \
+  -F "image=@./source.png"
+```
+
+Set `stream:true` for `image_generation.partial_image` and
+`image_generation.completed` SSE events (`image_edit.*` for edits). The default
+image model is `gpt-image-2`; set `OPENAI_IMAGE_GENERATION_ENABLED=false` to
+disable the Images endpoints and explicit image tools on Responses. Image
+options follow the [OpenAI Image Generation guide](https://developers.openai.com/api/docs/guides/image-generation).
 
 ### Codex CLI on DeepSeek
 

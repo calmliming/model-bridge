@@ -78,4 +78,30 @@ describe('OpenAI usage parsing', () => {
       cacheReadTokens: 5,
     })
   })
+
+  it('separates image tokens and records image tool metadata', () => {
+    expect(parseJsonUsage({
+      response: {
+        usage: {
+          input_tokens: 20,
+          output_tokens: 100,
+          input_tokens_details: { image_tokens: 8 },
+          output_tokens_details: { image_tokens: 90 },
+        },
+        tools: [{ type: 'image_generation', model: 'gpt-image-2', size: '1024x1024' }],
+        output: [{ type: 'image_generation_call', result: 'aGVsbG8=' }],
+      },
+    })).toEqual({
+      inputTokens: 12,
+      outputTokens: 10,
+      reasoningTokens: 0,
+      cacheCreateTokens: 0,
+      cacheReadTokens: 0,
+      imageInputTokens: 8,
+      imageOutputTokens: 90,
+      imageCount: 1,
+      imageSize: '1024x1024',
+      imageModel: 'gpt-image-2',
+    })
+  })
 })
