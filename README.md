@@ -218,9 +218,9 @@ options follow the [OpenAI Image Generation guide](https://developers.openai.com
 ### Codex CLI on DeepSeek
 
 Run Codex CLI against your DeepSeek API key. The relay exposes a
-Responses-API surface at `/api/deepseek/v1/responses` that rewrites incoming
-requests into DeepSeek's `chat/completions` format and translates the
-streamed reply back into Responses events. The same DeepSeek account pool is
+Responses-API surface at `/api/deepseek/v1/responses` that forwards natively to
+DeepSeek's `/v1/responses` endpoint. This preserves the official `web_search`,
+`apply_patch`, thinking-mode, and 1M-context capabilities. The same DeepSeek account pool is
 shared with `/api/deepseek/v1/messages` (used by Claude Code), so **one
 DeepSeek API key serves both clients**. OpenAI-compatible clients can also use
 DeepSeek directly with base URL `http://localhost:3000/api/deepseek/v1` and
@@ -236,7 +236,7 @@ the `chat/completions` endpoint.
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-pro"   # or "deepseek-v4-flash" for the cheaper, lighter variant
+model = "deepseek-v4-flash"  # the only model currently supported by Responses
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -264,7 +264,7 @@ If you're unsure the route works, smoke-test it with curl:
 curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
   -H "Authorization: Bearer mb-xxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-pro","input":"say hi","stream":true}'
+  -d '{"model":"deepseek-v4-flash","input":"say hi","stream":true}'
 ```
 
 A healthy response is an SSE stream: `response.created` → several
@@ -272,7 +272,8 @@ A healthy response is an SSE stream: `response.created` → several
 
 #### Notes
 
-- **Model-name rewrite**: anything starting with `deepseek-` is passed through (`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-reasoner` etc.); everything else (including Codex's default `gpt-5-codex`) is forced to `deepseek-v4-pro`, so the route works even if `model` is wrong or absent in your toml.
+- **Model-name rewrite**: the Responses API always uses `deepseek-v4-flash`, the only V4 model currently supported there. Chat/Anthropic keeps `deepseek-v4-pro` available and maps the legacy `deepseek-chat` / `deepseek-reasoner` aliases to V4 Flash / V4 Pro.
+- **Isolation**: the relay derives an anonymous `user_id` / `user` from the tenant and optional client identity for DeepSeek content-safety, KV-cache, and scheduling isolation.
 - **Always streams**: this endpoint ignores the client's `stream` field and always returns `text/event-stream`.
 - **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.
 

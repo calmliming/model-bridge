@@ -55,8 +55,8 @@ import * as deepseekUsage from '../providers/deepseek/usage'
 import { relayDeepseekChatCompletions } from '../providers/deepseek/chat-relay'
 import { relayDeepseekResponses } from '../providers/deepseek/responses-relay'
 import * as deepseekResponsesUsage from '../providers/deepseek/responses-usage'
-import { createDeepseekResponsesStreamTransform } from '../providers/deepseek/stream'
-import { mapModel as mapDeepseekResponsesModel } from '../providers/deepseek/converter'
+import { mapModel as mapDeepseekModel, mapResponsesModel as mapDeepseekResponsesModel } from '../providers/deepseek/converter'
+import { withDeepseekUserIsolation } from '../providers/deepseek/isolation'
 import { relayXiaomiMessages } from '../providers/xiaomi/relay'
 import * as xiaomiUsage from '../providers/xiaomi/usage'
 import { relayXiaomiChatCompletions } from '../providers/xiaomi/chat-relay'
@@ -312,7 +312,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   deepseek: {
     id: 'deepseek',
     forceStream: false,
-    normalizeModel: mapDeepseekResponsesModel,
+    normalizeModel: mapDeepseekModel,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
@@ -324,7 +324,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   'deepseek-chat': {
     id: 'deepseek',
     forceStream: false,
-    normalizeModel: mapDeepseekResponsesModel,
+    normalizeModel: mapDeepseekModel,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'chat.completions',
@@ -335,8 +335,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   },
   // Route key only — provider.id stays 'deepseek' so account pool, allowed-
   // provider checks, and usage records all reuse the existing deepseek setup.
-  // Backed by DeepSeek's OpenAI-compatible chat/completions endpoint with a
-  // Responses-API ↔ Chat-Completions stream converter for Codex CLI.
+  // Backed by DeepSeek's native Responses endpoint. DeepSeek currently
+  // supports this surface on V4 Flash; the model normalizer enforces that.
   'deepseek-responses': {
     id: 'deepseek',
     forceStream: true,
@@ -349,7 +349,6 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, _ctx) => relayDeepseekResponses(token, body),
     createStreamParser: deepseekResponsesUsage.createStreamParser,
     parseJsonUsage: deepseekResponsesUsage.parseJsonUsage,
-    createStreamTransform: createDeepseekResponsesStreamTransform,
   },
   // Xiaomi MiMo — same shape as DeepSeek: Anthropic-compatible /v1/messages,
   // plus OpenAI Chat-Completions and a Responses-API adapter for Codex CLI.
@@ -1248,7 +1247,21 @@ async function executeRelay(
     return
   }
   try {
-    await runRelayLoop(request, reply, provider, bodyWithMappedModel(body, parsed.model), parsed)
+    const mappedBody = bodyWithMappedModel(body, parsed.model)
+    const preparedBody =
+      provider.id === 'deepseek'
+        ? withDeepseekUserIsolation(
+            mappedBody,
+            parsed.action === 'responses'
+              ? 'responses'
+              : parsed.action === 'chat.completions'
+                ? 'chat.completions'
+                : 'messages',
+            apiKey.id,
+            apiKey.userId,
+          )
+        : mappedBody
+    await runRelayLoop(request, reply, provider, preparedBody, parsed)
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
     if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)

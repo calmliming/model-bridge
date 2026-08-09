@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { mapModel, responsesToChatCompletions } from './converter'
+import { mapModel, mapResponsesModel, responsesToChatCompletions } from './converter'
 
 describe('mapModel', () => {
   it('rewrites non-deepseek model names to deepseek-v4-pro', () => {
@@ -9,10 +9,18 @@ describe('mapModel', () => {
     expect(mapModel('o3-mini')).toBe('deepseek-v4-pro')
   })
 
-  it('passes through any deepseek-prefixed model name', () => {
+  it('maps legacy aliases while preserving concrete DeepSeek names', () => {
     expect(mapModel('deepseek-v4-pro')).toBe('deepseek-v4-pro')
-    expect(mapModel('deepseek-reasoner')).toBe('deepseek-reasoner')
+    expect(mapModel('deepseek-chat')).toBe('deepseek-v4-flash')
+    expect(mapModel('deepseek-reasoner')).toBe('deepseek-v4-pro')
     expect(mapModel('deepseek-anything-else')).toBe('deepseek-anything-else')
+  })
+
+  it('maps every Responses request to the only supported V4 Flash model', () => {
+    expect(mapResponsesModel('deepseek-v4-flash')).toBe('deepseek-v4-flash')
+    expect(mapResponsesModel('deepseek-v4-pro')).toBe('deepseek-v4-flash')
+    expect(mapResponsesModel('gpt-5.5')).toBe('deepseek-v4-flash')
+    expect(mapResponsesModel(undefined)).toBe('deepseek-v4-flash')
   })
 
   it('falls back to deepseek-v4-pro for empty / non-string input', () => {

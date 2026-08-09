@@ -3,9 +3,11 @@ import { isProviderAllowed, listGeminiModels, listModelIdsForKey } from './model
 
 describe('model discovery', () => {
   it('returns all default models for unrestricted keys', () => {
-    expect(listModelIdsForKey({ allowedProviders: null, allowedModels: null })).toEqual(
+    const models = listModelIdsForKey({ allowedProviders: null, allowedModels: null })
+    expect(models).toEqual(
       expect.arrayContaining(['gpt-5.5', 'claude-sonnet-5', 'gemini-2.5-flash', 'deepseek-v4-pro']),
     )
+    expect(models).not.toEqual(expect.arrayContaining(['deepseek-chat', 'deepseek-reasoner']))
   })
 
   it('honors provider restrictions', () => {

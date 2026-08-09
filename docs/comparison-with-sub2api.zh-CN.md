@@ -31,7 +31,7 @@
 ## 二、model-bridge 独有 / 更强的地方 ✅
 
 1. **DeepSeek / Xiaomi MiMo 支持** —— 本项目支持 messages / chat completions / responses 三种协议，并可用 API key 接入国产上游。
-2. **更细的协议兼容层** —— 显式实现了 OpenAI Responses API、DeepSeek 格式转换、流式终止事件保证。
+2. **更细的协议兼容层** —— 显式实现了 OpenAI Responses API、DeepSeek 原生 Responses、流式终止事件保证。
 3. **轻量、零外部依赖默认值** —— 不强制 Redis，单进程内存即可跑通限流 / 并发 / 粘性会话，部署更简单；需要扩展时再开 Redis。
 4. **TypeScript 全栈** —— 对 JS / TS 团队更友好，二次开发门槛低。
 5. **首 Token 延迟观测** —— usage 日志新增 `first_token_ms`，管理后台可同时查看总耗时和流式首 Token 延迟。
@@ -124,7 +124,7 @@
 - **零配置可信代理与真实客户端 IP**（对应 v0.1.159/v0.1.162）：按 sub2api 曾采用的本机/容器默认信任思路，Fastify 固定信任回环、RFC1918 私网和 IPv6 ULA 网段；仅当直连来源命中这些范围时解析 `X-Forwarded-For`，登录限流、注册限流和 Turnstile 的 `request.ip` 因而在常见 Nginx/Docker 反代后仍指向真实客户端。公网直连来源的转发头会被忽略，不新增部署配置；代价是源站不能直接开放给不可信内网客户端。
 - **优雅关停与计费写入排空**（对应 v0.1.162 后 `304fcb0` 的关停清理修复，按本仓库架构加固）：流式响应原先在 `raw.end()` 后以 `void recordUsage()` 后台落库，进程收到 Docker `SIGTERM` 时可能直接退出并丢失末尾 usage/钱包扣费。现将流式写入纳入待完成集合并在请求处理器中等待；`SIGTERM`/`SIGINT` 触发 Fastify 关停后，依次停止后台任务、关闭 OAuth 回调服务、排空 usage、关闭 Redis/PostgreSQL。关停硬超时固定为 30 秒，Compose `stop_grace_period` 为 35 秒，不新增环境变量。
 
-**已覆盖 / 无需重复实现：** OpenAI 临时冷却按模型隔离已在上一轮完成；DeepSeek/Qwen/Kimi/Xiaomi/Zhipu 的 Responses 转换已发送 `response.content_part.added/done` 和完整终态；本仓库重试失败响应不会逐次调用 `recordUsage`，不存在 sub2api 的同账号重试重复缓存计费路径。
+**已覆盖 / 无需重复实现：** OpenAI 临时冷却按模型隔离已在上一轮完成；DeepSeek Responses 已原生透传并保留 `web_search` / `apply_patch`，Qwen/Kimi/Xiaomi/Zhipu 的 Responses 转换已发送 `response.content_part.added/done` 和完整终态；本仓库重试失败响应不会逐次调用 `recordUsage`，不存在 sub2api 的同账号重试重复缓存计费路径。
 
 **暂缓 / 不适用：** 用户并发/RPM 批量修改与分组复制属于管理效率增强，后续按实际运营规模补；提示词审计控制台、step-up 2FA、会话 IP/UA 绑定继续归入 SaaS/合规安全路线；Grok 媒体代理、Free 工具缓存、OpenAI WS、异步生图对象存储、Agent Identity Team 隔离等与当前轻量主路径不同构，不跟进。
 

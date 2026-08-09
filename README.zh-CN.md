@@ -192,8 +192,8 @@ curl http://localhost:3000/v1/images/edits \
 ### Codex CLI 接 DeepSeek
 
 让 Codex CLI 用 DeepSeek 的 API key 跑——网关在 `/api/deepseek/v1/responses`
-暴露一个 Responses API 入口，内部把请求改写成 DeepSeek 的 `chat/completions`
-协议，再把响应流转换回 Codex 期望的 Responses 事件。账号池和 `/api/deepseek/v1/messages`
+暴露一个 Responses API 入口，原生转发到 DeepSeek `/v1/responses`，保留官方的
+`web_search`、`apply_patch`、思考模式和 1M 上下文能力。账号池和 `/api/deepseek/v1/messages`
 （Claude Code 路径）共享，**同一份 DeepSeek API key 同时服务两端**。OpenAI
 兼容客户端也可以直接把 base URL 填成 `http://localhost:3000/api/deepseek/v1`，
 走 `chat/completions` 入口。
@@ -208,7 +208,7 @@ curl http://localhost:3000/v1/images/edits \
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-pro"   # 或 "deepseek-v4-flash" 用更便宜的轻量模型
+model = "deepseek-v4-flash"  # Responses API 当前官方支持的模型
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -236,14 +236,15 @@ codex --profile model-bridge-deepseek
 curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
   -H "Authorization: Bearer mb-xxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-pro","input":"say hi","stream":true}'
+  -d '{"model":"deepseek-v4-flash","input":"say hi","stream":true}'
 ```
 
 正常会看到 SSE：`response.created` → 若干 `response.output_text.delta` → `response.completed`。
 
 #### 说明
 
-- **模型名重写**：以 `deepseek-` 开头的透传（`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-reasoner` 等），其它（包括 Codex 默认的 `gpt-5-codex`）一律强制改为 `deepseek-v4-pro`，所以即使 toml 里 `model` 写错或不写也能跑通
+- **模型名重写**：Responses API 按官方限制统一使用 `deepseek-v4-flash`；Chat/Anthropic 仍支持 `deepseek-v4-pro`，并把旧别名 `deepseek-chat` / `deepseek-reasoner` 分别映射到 V4 Flash / V4 Pro
+- **隔离标识**：网关按租户和客户端身份生成匿名 `user_id` / `user`，用于 DeepSeek 内容安全、KV Cache 和调度隔离
 - **始终 SSE**：该端点忽略客户端的 `stream` 字段，永远以 text/event-stream 返回
 - **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计
 

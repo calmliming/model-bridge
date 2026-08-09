@@ -153,13 +153,14 @@ function geminiPrice(model: string): TierPrice {
   return model.toLowerCase().includes('flash') ? GEMINI_FLASH : GEMINI_PRO
 }
 
-// DeepSeek list prices in CNY/1M, converted to USD. DeepSeek has no separate
-// cache-write fee — cacheWrite is 0; cacheRead is the cached-input price.
-// Pro shown at the 2.5-折 / "1/4 of original" rate, which the docs describe as
-// the current effective price.
+// DeepSeek list prices per 1M tokens. Flash is quoted in CNY and converted to
+// USD; V4 Pro uses the official USD list values. There is no separate
+// cache-write fee — cacheRead is the cached-input price.
 const DEEPSEEK_TIERS: Record<'flash' | 'pro', TierPrice> = {
   flash: { input: cny(1), output: cny(2), cacheWrite: 0, cacheRead: cny(0.02) },
-  pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) },
+  // V4 Pro's current USD list price is 0.435 / 0.87 with a 0.003625 cache hit.
+  // Keep the published decimals instead of rounding through the CNY helper.
+  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.003625 },
 }
 
 function deepseekTier(model: string): keyof typeof DEEPSEEK_TIERS {
@@ -350,7 +351,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v4` settings flag.
+ * gated by the `pricing_seed_v5` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -415,6 +416,12 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'gpt-5.6-luna',
     from: { input: 1, output: 6, cacheWrite: 0, cacheRead: 0.1 },
     to: OPENAI_GPT56_LUNA,
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-v4-pro',
+    from: { input: 0.42, output: 0.84, cacheWrite: 0, cacheRead: 0.0035 },
+    to: DEEPSEEK_TIERS.pro,
   },
 ]
 
@@ -490,7 +497,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v4'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v5'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -517,7 +524,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v4', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v5', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }

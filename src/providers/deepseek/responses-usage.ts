@@ -1,11 +1,9 @@
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 /**
- * Usage parser for the DeepSeek → Responses adapter. It consumes events
- * AFTER the StreamTransform in `stream.ts` has rewritten Chat Completions
- * chunks into Responses-API events, so the relevant payload is the same
- * shape as the OpenAI Responses upstream: `response.completed` carries the
- * final `response.usage` object.
+ * Usage parser for DeepSeek's native Responses API. The relevant payload is
+ * the same shape as the OpenAI Responses protocol: `response.completed`
+ * carries the final `response.usage` object.
  */
 
 interface ResponsesUsage {
@@ -45,9 +43,8 @@ export function createStreamParser() {
 }
 
 /**
- * Non-stream path is not exercised in practice — the relay handler is
- * `forceStream: true` so /api/deepseek/v1/responses always streams. Kept
- * for interface symmetry with other providers.
+ * The relay currently forces streaming for Codex compatibility. This parser
+ * also accepts a non-stream response for callers that use the helper directly.
  */
 export function parseJsonUsage(body: unknown): UsageData {
   const root = body as { response?: { usage?: ResponsesUsage }; usage?: ResponsesUsage } | null

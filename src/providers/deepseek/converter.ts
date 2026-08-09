@@ -42,17 +42,21 @@ export interface ChatCompletionsRequest {
 }
 
 /**
- * Codex defaults to model names like `gpt-5.5` which DeepSeek does not
- * recognise. Rewrite anything that doesn't already look like a DeepSeek model
- * to `deepseek-v4-pro` (the highest-quality V4 model). Anything starting
- * with `deepseek-` is passed through, so users can set
- * `model="deepseek-v4-flash"` for the cheaper variant or
- * `model="deepseek-reasoner"` for the legacy reasoning model in their Codex
- * config.
+ * Rewrite client aliases to the current DeepSeek Chat/Anthropic model ids.
+ * The legacy names remain accepted for existing clients, but are no longer
+ * exposed by model discovery.
  */
 export function mapModel(input: unknown): string {
   if (typeof input !== 'string' || !input) return 'deepseek-v4-pro'
+  if (input === 'deepseek-chat') return 'deepseek-v4-flash'
+  if (input === 'deepseek-reasoner') return 'deepseek-v4-pro'
   return input.startsWith('deepseek-') ? input : 'deepseek-v4-pro'
+}
+
+/** DeepSeek's Responses API currently supports V4 Flash only. */
+export function mapResponsesModel(input: unknown): string {
+  if (typeof input === 'string' && input === 'deepseek-v4-flash') return input
+  return 'deepseek-v4-flash'
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

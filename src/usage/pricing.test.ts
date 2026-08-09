@@ -90,6 +90,24 @@ describe('grok (xAI) pricing', () => {
   })
 })
 
+describe('DeepSeek V4 pricing', () => {
+  it('uses the current official Flash price', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash')).toMatchObject({
+      input: 0.14,
+      output: 0.28,
+      cacheRead: 0.0028,
+    })
+  })
+
+  it('uses the current official Pro price without CNY rounding drift', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro')).toMatchObject({
+      input: 0.435,
+      output: 0.87,
+      cacheRead: 0.003625,
+    })
+  })
+})
+
 describe('OpenAI image pricing', () => {
   it('uses gpt-image-2 text and image token rates', () => {
     expect(resolvePrice('openai', 'gpt-image-2')).toMatchObject({

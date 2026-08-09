@@ -1,24 +1,26 @@
-import { responsesToChatCompletions } from './converter'
+import { mapResponsesModel } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
-const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/v1/chat/completions'
+const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/v1/responses'
 
 /**
- * Relays a Responses-API request (from Codex CLI) to DeepSeek's OpenAI-compatible
- * chat/completions endpoint. The body is rewritten by `responsesToChatCompletions`;
- * the SSE response is then translated event-by-event back to Responses format
- * by the StreamTransform registered in routes/relay.ts.
- *
- * The upstream is always invoked with `stream: true` regardless of the client's
- * preference — the relay handler for this provider has `forceStream: true`, so
- * the response will always be streamed back to the client as well.
+ * Normalises a Responses request for DeepSeek's native Responses endpoint.
+ * DeepSeek currently accepts V4 Flash on this surface and supports streaming,
+ * web_search, and custom function tools such as apply_patch directly.
  */
+export function normalizeDeepseekResponsesBody(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...body, model: mapResponsesModel(body.model), stream: true }
+}
+
+/** Relays a Responses request to DeepSeek's native `/v1/responses` endpoint. */
 export function relayDeepseekResponses(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
-  return fetchWithConnectTimeout(DEEPSEEK_CHAT_COMPLETIONS_URL, {
+  const upstreamBody = normalizeDeepseekResponsesBody(body)
+  return fetchWithConnectTimeout(DEEPSEEK_RESPONSES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
