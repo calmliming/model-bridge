@@ -134,6 +134,12 @@ interface UpstreamContext {
   account: { id: string; metadata: unknown; proxyUrl: string | null }
 }
 
+interface PrepareBodyContext {
+  apiKeyId: string
+  userId: string | null
+  action: string
+}
+
 interface StreamTransform {
   /** Translate one upstream SSE event into zero or more downstream events. */
   transform(data: unknown): unknown[]
@@ -167,6 +173,10 @@ interface ProviderHandler {
   relayToRelay?: boolean
   parseRoute(request: FastifyRequest, body: Record<string, unknown>): ParsedRoute
   normalizeModel?: (model: string) => string
+  prepareBody?: (
+    body: Record<string, unknown>,
+    ctx: PrepareBodyContext,
+  ) => Record<string, unknown>
   callUpstream(
     token: string,
     body: Record<string, unknown>,
@@ -317,6 +327,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
     }),
+    prepareBody: (body, ctx) =>
+      withDeepseekUserIsolation(body, 'messages', ctx.apiKeyId, ctx.userId),
     callUpstream: (token, body, _ctx) => relayDeepseekMessages(token, body),
     createStreamParser: deepseekUsage.createStreamParser,
     parseJsonUsage: deepseekUsage.parseJsonUsage,
@@ -329,6 +341,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'chat.completions',
     }),
+    prepareBody: (body, ctx) =>
+      withDeepseekUserIsolation(body, 'chat.completions', ctx.apiKeyId, ctx.userId),
     callUpstream: (token, body, _ctx) => relayDeepseekChatCompletions(token, body),
     createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
@@ -346,6 +360,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
     }),
+    prepareBody: (body, ctx) =>
+      withDeepseekUserIsolation(body, 'responses', ctx.apiKeyId, ctx.userId),
     callUpstream: (token, body, _ctx) => relayDeepseekResponses(token, body),
     createStreamParser: deepseekResponsesUsage.createStreamParser,
     parseJsonUsage: deepseekResponsesUsage.parseJsonUsage,
@@ -1248,19 +1264,13 @@ async function executeRelay(
   }
   try {
     const mappedBody = bodyWithMappedModel(body, parsed.model)
-    const preparedBody =
-      provider.id === 'deepseek'
-        ? withDeepseekUserIsolation(
-            mappedBody,
-            parsed.action === 'responses'
-              ? 'responses'
-              : parsed.action === 'chat.completions'
-                ? 'chat.completions'
-                : 'messages',
-            apiKey.id,
-            apiKey.userId,
-          )
-        : mappedBody
+    const preparedBody = provider.prepareBody
+      ? provider.prepareBody(mappedBody, {
+          apiKeyId: apiKey.id,
+          userId: apiKey.userId,
+          action: parsed.action,
+        })
+      : mappedBody
     await runRelayLoop(request, reply, provider, preparedBody, parsed)
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
