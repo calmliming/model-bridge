@@ -1,4 +1,5 @@
 import { mapModel } from './converter'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const KIMI_CHAT_COMPLETIONS_URL = 'https://api.moonshot.cn/v1/chat/completions'
 
@@ -26,7 +27,7 @@ export function relayKimiChatCompletions(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = normalizeKimiChatCompletionsBody(body)
-  return fetch(KIMI_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(KIMI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

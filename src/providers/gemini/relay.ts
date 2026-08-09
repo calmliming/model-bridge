@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com/v1internal'
 
 // JSON Schema fields the Gemini / Code Assist tool API rejects or ignores.
@@ -115,7 +117,7 @@ export function relayGemini(
   ctx: GeminiRelayContext,
 ): Promise<Response> {
   const cleaned = sanitizeGeminiBody(body)
-  return fetch(endpointFor(ctx.action), {
+  return fetchWithConnectTimeout(endpointFor(ctx.action), {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,

@@ -60,4 +60,16 @@ describe('normalizeOpenaiResponsesBody', () => {
     expect(body.tools).toEqual([{ type: 'image_generation', model: 'gpt-image-2' }])
     expect(body.tool_choice).toEqual({ type: 'image_generation' })
   })
+
+  it('normalizes null function parameters in native Responses tools', () => {
+    const body = normalizeOpenaiResponsesBody({
+      model: 'gpt-5.5',
+      input: 'hello',
+      tools: [{ type: 'function', name: 'lookup', parameters: null }],
+    })
+
+    expect(body.tools).toEqual([
+      { type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } },
+    ])
+  })
 })

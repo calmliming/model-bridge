@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { chatCompletionsToResponses } from './chat'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 
@@ -11,6 +12,7 @@ const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 const DEFAULT_INSTRUCTIONS = 'You are Codex, a helpful AI coding assistant.'
 const FORBIDDEN_FIELDS = ['max_output_tokens', 'parallel_tool_calls'] as const
 const IMAGE_GENERATION_TOOL_TYPE = 'image_generation'
+const EMPTY_TOOL_PARAMETERS = { type: 'object', properties: {} }
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -44,6 +46,17 @@ function stripImageGenerationTools(body: Record<string, unknown>): void {
   if (toolChoiceSelectsImageGeneration(body.tool_choice)) delete body.tool_choice
 }
 
+function normalizeResponseTools(body: Record<string, unknown>): void {
+  if (!Array.isArray(body.tools)) return
+  body.tools = body.tools.map((tool) => {
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool
+    const row = tool as Record<string, unknown>
+    if (row.type !== 'function') return tool
+    if (row.parameters && typeof row.parameters === 'object') return tool
+    return { ...row, parameters: EMPTY_TOOL_PARAMETERS }
+  })
+}
+
 /** Normalises an incoming Responses-API body to what the Codex backend accepts. */
 export function normalizeOpenaiResponsesBody(
   body: Record<string, unknown>,
@@ -51,6 +64,7 @@ export function normalizeOpenaiResponsesBody(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
+  normalizeResponseTools(out)
   if (!options.allowImageGeneration) stripImageGenerationTools(out)
   if (typeof out.input === 'string') {
     out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]
@@ -69,7 +83,7 @@ export function relayOpenaiResponses(
   body: Record<string, unknown>,
   options: { allowImageGeneration?: boolean } = {},
 ): Promise<Response> {
-  return fetch(CODEX_RESPONSES_URL, {
+  return fetchWithConnectTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -89,7 +103,7 @@ export function relayOpenaiImageResponses(
   accessToken: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(CODEX_RESPONSES_URL, {
+  return fetchWithConnectTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,

@@ -1,4 +1,5 @@
 import { responsesToChatCompletions } from './converter'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const QWEN_CHAT_COMPLETIONS_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
 
@@ -17,7 +18,7 @@ export function relayQwenResponses(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
-  return fetch(QWEN_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(QWEN_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

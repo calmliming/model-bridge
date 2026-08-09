@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const ZHIPU_MESSAGES_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -11,7 +13,7 @@ export function relayZhipuMessages(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(ZHIPU_MESSAGES_URL, {
+  return fetchWithConnectTimeout(ZHIPU_MESSAGES_URL, {
     method: 'POST',
     headers: {
       'x-api-key': apiKey,

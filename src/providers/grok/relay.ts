@@ -4,6 +4,7 @@ import {
   GROK_RESPONSES_URL,
   GROK_USER_AGENT,
 } from './constants'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 // Bare/aliased Grok names → concrete xAI model ids. Anything already concrete
 // (e.g. "grok-4.3", "grok-build-0.1") passes through untouched.
@@ -43,7 +44,7 @@ export function relayGrokResponses(
   accessToken: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(GROK_RESPONSES_URL, {
+  return fetchWithConnectTimeout(GROK_RESPONSES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -77,7 +78,7 @@ export function relayGrokChatCompletions(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = normalizeGrokChatCompletionsBody(body)
-  return fetch(GROK_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(GROK_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,

@@ -1,4 +1,5 @@
 import { mapModel } from './converter'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/v1/chat/completions'
 
@@ -26,7 +27,7 @@ export function relayDeepseekChatCompletions(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = normalizeDeepseekChatCompletionsBody(body)
-  return fetch(DEEPSEEK_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(DEEPSEEK_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

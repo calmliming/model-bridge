@@ -1,4 +1,5 @@
 import { responsesToChatCompletions } from './converter'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const XIAOMI_CHAT_COMPLETIONS_URL = 'https://api.xiaomimimo.com/v1/chat/completions'
 
@@ -17,7 +18,7 @@ export function relayXiaomiResponses(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
-  return fetch(XIAOMI_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(XIAOMI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const KIMI_MESSAGES_URL = 'https://api.moonshot.cn/anthropic/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -11,7 +13,7 @@ export function relayKimiMessages(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(KIMI_MESSAGES_URL, {
+  return fetchWithConnectTimeout(KIMI_MESSAGES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

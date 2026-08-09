@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const DEEPSEEK_MESSAGES_URL = 'https://api.deepseek.com/anthropic/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -6,7 +8,7 @@ export function relayDeepseekMessages(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(DEEPSEEK_MESSAGES_URL, {
+  return fetchWithConnectTimeout(DEEPSEEK_MESSAGES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

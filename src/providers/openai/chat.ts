@@ -111,11 +111,15 @@ function convertChatToolCall(toolCall: ChatToolCall): Record<string, unknown> | 
 
 function convertTool(tool: ChatTool): Record<string, unknown> | null {
   if (tool.type !== 'function' || !tool.function?.name) return null
+  const parameters =
+    tool.function.parameters && typeof tool.function.parameters === 'object'
+      ? tool.function.parameters
+      : { type: 'object', properties: {} }
   return {
     type: 'function',
     name: tool.function.name,
     description: tool.function.description,
-    parameters: tool.function.parameters,
+    parameters,
   }
 }
 

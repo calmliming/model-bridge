@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 
 export function normalizeSub2ApiBaseUrl(raw: string | null | undefined): string {
@@ -33,7 +35,7 @@ export function relaySub2ApiMessages(
   baseUrl: string | null,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(endpoint(baseUrl, '/v1/messages'), {
+  return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/messages'), {
     method: 'POST',
     headers: {
       ...jsonHeaders(apiKey, body.stream === true ? 'text/event-stream' : 'application/json'),
@@ -57,7 +59,7 @@ export function relaySub2ApiChatCompletions(
     upstreamBody.stream_options = { ...streamOptions, include_usage: true }
   }
 
-  return fetch(endpoint(baseUrl, '/v1/chat/completions'), {
+  return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/chat/completions'), {
     method: 'POST',
     headers: jsonHeaders(
       apiKey,
@@ -73,7 +75,7 @@ export function relaySub2ApiResponses(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = { ...body, stream: true }
-  return fetch(endpoint(baseUrl, '/v1/responses'), {
+  return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/responses'), {
     method: 'POST',
     headers: jsonHeaders(apiKey, 'text/event-stream'),
     body: JSON.stringify(upstreamBody),

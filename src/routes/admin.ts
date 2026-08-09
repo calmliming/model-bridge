@@ -1086,9 +1086,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'missing code or state' })
     }
     const [session] = await db
-      .select()
-      .from(oauthSessions)
+      .delete(oauthSessions)
       .where(eq(oauthSessions.state, state))
+      .returning()
     if (!session) {
       return reply.code(400).send({ error: 'OAuth session expired — please restart authorization' })
     }
@@ -1112,7 +1112,6 @@ export function registerAdminRoutes(app: FastifyInstance): void {
           .send({ error: `account setup failed: ${(err as Error).message}` })
       }
     }
-    await db.delete(oauthSessions).where(eq(oauthSessions.state, state))
     const created = await createAccount({
       provider: session.provider,
       name: session.accountName ?? `${session.provider} account`,

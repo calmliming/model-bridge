@@ -1,4 +1,5 @@
 import { chatCompletionsToClaudeMessages } from './chat'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
@@ -230,7 +231,7 @@ export function relayClaudeMessages(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const payload = normalizeClaudeMessagesBody(body)
-  return fetch(ANTHROPIC_MESSAGES_URL, {
+  return fetchWithConnectTimeout(ANTHROPIC_MESSAGES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,

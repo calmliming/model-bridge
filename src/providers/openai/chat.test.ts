@@ -60,6 +60,18 @@ describe('chatCompletionsToResponses', () => {
       { type: 'function_call_output', call_id: 'call_1', output: 'result' },
     ])
   })
+
+  it('normalizes null tool parameters for the Codex schema', () => {
+    const out = chatCompletionsToResponses({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'use the tool' }],
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: null } }],
+    })
+
+    expect(out.tools).toEqual([
+      { type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } },
+    ])
+  })
 })
 
 describe('responsesSseToChatCompletion', () => {

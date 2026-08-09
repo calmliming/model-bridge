@@ -105,6 +105,16 @@
 
 ## 六、本次更新整理
 
+### 跟踪 sub2api 至 v0.1.172（2026-08-07）
+
+对照 2026-07-26 之后发布的 v0.1.166、v0.1.168、v0.1.169、v0.1.170、v0.1.171、v0.1.172，优先落地与本项目现有 relay 主路径同构的稳定性和安全修复：
+
+- **上游建连超时**：所有供应商 relay 统一经 `src/http/upstream.ts` 的 `fetchWithConnectTimeout` 发起请求，10 秒内拿不到响应头即中止并交给现有 failover；响应头到达后清理计时器，不会截断长连接 SSE。对应 sub2api v0.1.172 的 DNS/TCP/TLS 建连超时修复。
+- **Codex 工具 Schema 净化**：Chat Completions 转 Responses 时，工具 `parameters` 为 `null` 或非对象会归一为 `{ type: 'object', properties: {} }`，避免上游 400 及会话历史反复重放。对应 sub2api v0.1.172 的 `parameters.type` 修复。
+- **OAuth 状态一次性消费**：管理端 OAuth finish 由先查后删改为数据库原子 `DELETE ... RETURNING`，并发提交同一 state 只有一个请求能继续换 token，降低 OAuth 补全竞态和重复建号风险。
+
+本轮未照搬利润控制、Passkey、验证码、模型广场等 SaaS/运营功能，也未引入数据库迁移；新增行为均为兼容性加固。
+
 ### 跟踪 sub2api 至 v0.1.162（2026-07-20）
 
 对照 sub2api v0.1.158–v0.1.162 及 v0.1.162 后的关键稳定性提交逐项核查。五个正式版本主要集中在 Grok 媒体/缓存生态、提示词安全审计、会话与 step-up 2FA 开关、Responses/WS 兼容、反向代理客户端 IP 和异步生图存储。多数能力依赖 sub2api 的 SaaS、Grok 媒体或 Go 调度架构，本仓库没有同构路径；本轮落地两项会直接影响现有部署安全或计费完整性的改动：

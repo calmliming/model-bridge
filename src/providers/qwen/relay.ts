@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+
 const QWEN_MESSAGES_URL = 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -11,7 +13,7 @@ export function relayQwenMessages(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  return fetch(QWEN_MESSAGES_URL, {
+  return fetchWithConnectTimeout(QWEN_MESSAGES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,

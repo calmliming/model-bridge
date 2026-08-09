@@ -1,4 +1,5 @@
 import { responsesToChatCompletions } from './converter'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const ZHIPU_CHAT_COMPLETIONS_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
 
@@ -17,7 +18,7 @@ export function relayZhipuResponses(
   body: Record<string, unknown>,
 ): Promise<Response> {
   const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
-  return fetch(ZHIPU_CHAT_COMPLETIONS_URL, {
+  return fetchWithConnectTimeout(ZHIPU_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${apiKey}`,
