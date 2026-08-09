@@ -274,7 +274,7 @@ A healthy response is an SSE stream: `response.created` → several
 
 - **Model-name rewrite**: the Responses API always uses `deepseek-v4-flash`, the only V4 model currently supported there. Chat/Anthropic keeps `deepseek-v4-pro` available and maps the legacy `deepseek-chat` / `deepseek-reasoner` aliases to V4 Flash / V4 Pro.
 - **Isolation**: the relay derives an anonymous `user_id` / `user` from the tenant and optional client identity for DeepSeek content-safety, KV-cache, and scheduling isolation.
-- **Always streams**: this endpoint ignores the client's `stream` field and always returns `text/event-stream`.
+- **Streaming compatibility**: `stream:true` returns Responses SSE for Codex; `stream:false` or an omitted field returns native JSON.
 - **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.
 
 ### Codex CLI on Xiaomi MiMo

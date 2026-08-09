@@ -339,7 +339,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   // supports this surface on V4 Flash; the model normalizer enforces that.
   'deepseek-responses': {
     id: 'deepseek',
-    forceStream: true,
+    forceStream: false,
     responsesProtocol: true,
     normalizeModel: mapDeepseekResponsesModel,
     parseRoute: (_req, body) => ({

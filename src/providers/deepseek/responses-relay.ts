@@ -11,7 +11,7 @@ const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/v1/responses'
 export function normalizeDeepseekResponsesBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
-  return { ...body, model: mapResponsesModel(body.model), stream: true }
+  return { ...body, model: mapResponsesModel(body.model), stream: body.stream === true }
 }
 
 /** Relays a Responses request to DeepSeek's native `/v1/responses` endpoint. */
@@ -25,7 +25,7 @@ export function relayDeepseekResponses(
     headers: {
       authorization: `Bearer ${apiKey}`,
       'content-type': 'application/json',
-      accept: 'text/event-stream',
+      accept: upstreamBody.stream === true ? 'text/event-stream' : 'application/json',
     },
     body: JSON.stringify(upstreamBody),
   })

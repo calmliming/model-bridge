@@ -42,10 +42,7 @@ export function createStreamParser() {
   }
 }
 
-/**
- * The relay currently forces streaming for Codex compatibility. This parser
- * also accepts a non-stream response for callers that use the helper directly.
- */
+/** Parses usage from a native non-streaming Responses payload. */
 export function parseJsonUsage(body: unknown): UsageData {
   const root = body as { response?: { usage?: ResponsesUsage }; usage?: ResponsesUsage } | null
   return mapUsage(root?.response?.usage ?? root?.usage)

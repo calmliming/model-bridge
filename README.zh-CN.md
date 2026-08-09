@@ -245,7 +245,7 @@ curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
 
 - **模型名重写**：Responses API 按官方限制统一使用 `deepseek-v4-flash`；Chat/Anthropic 仍支持 `deepseek-v4-pro`，并把旧别名 `deepseek-chat` / `deepseek-reasoner` 分别映射到 V4 Flash / V4 Pro
 - **隔离标识**：网关按租户和客户端身份生成匿名 `user_id` / `user`，用于 DeepSeek 内容安全、KV Cache 和调度隔离
-- **始终 SSE**：该端点忽略客户端的 `stream` 字段，永远以 text/event-stream 返回
+- **流式兼容**：`stream:true` 返回完整 Responses SSE（适用于 Codex）；`stream:false` 或省略时返回原生 JSON
 - **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计
 
 ### Codex CLI 接 Xiaomi MiMo

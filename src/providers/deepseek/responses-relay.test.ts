@@ -14,13 +14,13 @@ describe('normalizeDeepseekResponsesBody', () => {
     })
     expect(out).toMatchObject({
       model: 'deepseek-v4-flash',
-      stream: true,
+      stream: false,
       tools: [{ type: 'web_search' }, { type: 'custom', name: 'apply_patch' }],
       user: 'client-user',
     })
   })
 
-  it('calls the native Responses URL with bearer auth', async () => {
+  it('calls the native Responses URL as JSON for non-streaming requests', async () => {
     const fetchMock = vi.fn(async () => new Response('data: {}\n\n', {
       headers: { 'content-type': 'text/event-stream' },
     }))
@@ -31,7 +31,24 @@ describe('normalizeDeepseekResponsesBody', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://api.deepseek.com/v1/responses')
-    expect(init.headers).toMatchObject({ authorization: 'Bearer sk-test', accept: 'text/event-stream' })
-    expect(JSON.parse(String(init.body))).toMatchObject({ model: 'deepseek-v4-flash', stream: true })
+    expect(init.headers).toMatchObject({ authorization: 'Bearer sk-test', accept: 'application/json' })
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: 'deepseek-v4-flash', stream: false })
+  })
+
+  it('requests SSE when the client enables streaming', async () => {
+    const fetchMock = vi.fn(async () => new Response('data: {}\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await relayDeepseekResponses('sk-test', {
+      model: 'deepseek-v4-flash',
+      input: 'hi',
+      stream: true,
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.headers).toMatchObject({ accept: 'text/event-stream' })
+    expect(JSON.parse(String(init.body))).toMatchObject({ stream: true })
   })
 })
