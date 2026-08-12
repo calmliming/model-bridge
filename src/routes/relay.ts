@@ -107,7 +107,7 @@ const MAX_ATTEMPTS = 3
 // transient failure isn't tied to our key. When retries are exhausted we apply
 // only this brief back-off instead of the multi-minute OAuth cooldown, so a
 // single in-group sub2api account doesn't blank the pool for minutes.
-const RELAY_TO_RELAY_COOLDOWN_MS = 15_000
+const RELAY_TO_RELAY_COOLDOWN_MS = 3_000
 const STICKY_SLOT_POLL_MS = 250
 const RATE_LIMIT_MARKERS = [
   'rate_limit',
