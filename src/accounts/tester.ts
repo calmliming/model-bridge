@@ -22,6 +22,7 @@ import {
 } from '../providers/sub2api/balance'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
 import { GROK_MODELS_URL, GROK_USER_AGENT } from '../providers/grok/constants'
+import { fetchWithConnectTimeout } from '../http/upstream'
 
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -66,23 +67,14 @@ interface ProviderTestOutcome {
   metadata?: Record<string, unknown>
 }
 
-function abortSignal(timeoutMs: number): { signal: AbortSignal; dispose: () => void } {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  return { signal: controller.signal, dispose: () => clearTimeout(timer) }
-}
-
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
-  const timeout = abortSignal(TEST_TIMEOUT_MS)
   try {
-    return await fetch(url, { ...init, signal: timeout.signal })
+    return await fetchWithConnectTimeout(url, init, TEST_TIMEOUT_MS)
   } catch (err) {
     if ((err as Error).name === 'AbortError') {
       throw new Error(`上游请求超时（${TEST_TIMEOUT_MS / 1000}s）`)
     }
     throw err
-  } finally {
-    timeout.dispose()
   }
 }
 

@@ -158,6 +158,27 @@ describe('recordUsage', () => {
     expect(insertParams().slice(14, 19)).toEqual([12, 34, 2, '1024x1024', 'gpt-image-2'])
   })
 
+  it('stores bounded failure tracing and upstream model audit fields', async () => {
+    mocks.estimateCost.mockReturnValue(0)
+    await recordUsage(baseRecord({
+      status: 'error',
+      errorCode: ' rate_limit_error ',
+      errorMessage: 'safe failure',
+      upstreamStatus: 429,
+      attemptCount: 3,
+      upstreamModel: ' gpt-5.4 ',
+      modelMismatch: true,
+    }))
+    expect(insertParams().slice(23, 29)).toEqual([
+      'rate_limit_error',
+      'safe failure',
+      429,
+      3,
+      'gpt-5.4',
+      true,
+    ])
+  })
+
   it('returns false when persistence fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     mocks.estimateCost.mockReturnValue(2)

@@ -71,6 +71,12 @@ export interface DashboardRecentLog {
   provider: string
   model: string | null
   status: string
+  errorCode: string | null
+  errorMessage: string | null
+  upstreamStatus: number | null
+  attemptCount: number
+  upstreamModel: string | null
+  modelMismatch: boolean
   latencyMs: number | null
   firstTokenMs: number | null
   inputTokens: number
@@ -100,6 +106,7 @@ export interface DashboardRecentLog {
   imageOutputPrice: number | null
   apiKeyName: string | null
   accountName: string | null
+  accountId: string | null
   requestInput: string | null
   sessionKeyHash: string | null
   sessionSource: string | null
@@ -145,6 +152,8 @@ export interface DashboardRecentLogsFilter {
   provider?: string
   model?: string
   key?: string
+  status?: 'success' | 'error'
+  modelMismatch?: boolean
 }
 
 const MS_PER_DAY = 86_400_000
@@ -255,6 +264,12 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     provider,
     model,
     status: row.status as string,
+    errorCode: (row.errorcode as string | null) ?? null,
+    errorMessage: (row.errormessage as string | null) ?? null,
+    upstreamStatus: row.upstreamstatus == null ? null : toNum(row.upstreamstatus),
+    attemptCount: Math.max(1, toNum(row.attemptcount)),
+    upstreamModel: (row.upstreammodel as string | null) ?? null,
+    modelMismatch: row.modelmismatch === true,
     latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
     firstTokenMs: row.firsttokenms == null ? null : toNum(row.firsttokenms),
     inputTokens,
@@ -284,6 +299,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     imageOutputPrice: imagePrice?.imageOutput ?? null,
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
+    accountId: (row.accountid as string | null) ?? null,
     requestInput: (row.requestinput as string | null) ?? null,
     sessionKeyHash: (row.sessionkeyhash as string | null) ?? null,
     sessionSource: (row.sessionsource as string | null) ?? null,
@@ -542,6 +558,14 @@ export async function dashboardRecentLogs(
     where.push(`(api_keys.name ILIKE ${keyParam} OR api_keys.key_prefix ILIKE ${keyParam} OR usage_logs.api_key_id ILIKE ${keyParam})`)
   }
 
+  if (filters.status) {
+    where.push(`usage_logs.status = ${addParam(filters.status)}`)
+  }
+
+  if (filters.modelMismatch !== undefined) {
+    where.push(`usage_logs.model_mismatch = ${addParam(filters.modelMismatch)}`)
+  }
+
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const logsParams = [...params, safePageSize, offset]
 
@@ -559,6 +583,13 @@ export async function dashboardRecentLogs(
               usage_logs.provider AS provider,
               usage_logs.model AS model,
               usage_logs.status AS status,
+              usage_logs.error_code AS errorCode,
+              usage_logs.error_message AS errorMessage,
+              usage_logs.upstream_status AS upstreamStatus,
+              usage_logs.attempt_count AS attemptCount,
+              usage_logs.upstream_model AS upstreamModel,
+              usage_logs.model_mismatch AS modelMismatch,
+              usage_logs.account_id AS accountId,
               usage_logs.latency_ms AS latencyMs,
               usage_logs.first_token_ms AS firstTokenMs,
               usage_logs.input_tokens AS inputTokens,
@@ -595,4 +626,13 @@ export async function dashboardRecentLogs(
     total: toNum(totalRes.rows[0]?.total),
     logs: logsRes.rows.map(asDashboardRecentLog),
   }
+}
+
+/** Convenience query for the failure-tracing API and operational tooling. */
+export async function listFailedRequests(
+  page = 1,
+  pageSize = 20,
+  filters: Omit<DashboardRecentLogsFilter, 'status'> = {},
+): Promise<DashboardRecentLogsPage> {
+  return dashboardRecentLogs(page, pageSize, { ...filters, status: 'error' })
 }

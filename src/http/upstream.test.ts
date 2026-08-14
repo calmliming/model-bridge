@@ -1,7 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchWithConnectTimeout } from './upstream'
 
+const originalHostAllowlist = process.env.UPSTREAM_HOST_ALLOWLIST
+
+beforeEach(() => {
+  process.env.UPSTREAM_HOST_ALLOWLIST = 'upstream.example'
+})
+
 afterEach(() => {
+  if (originalHostAllowlist === undefined) delete process.env.UPSTREAM_HOST_ALLOWLIST
+  else process.env.UPSTREAM_HOST_ALLOWLIST = originalHostAllowlist
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })

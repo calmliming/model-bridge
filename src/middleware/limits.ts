@@ -24,16 +24,32 @@ const CONCURRENCY_TTL_S = 15 * 60
 const rateHits = new Map<string, number[]>()
 const inflight = new Map<string, number>()
 
-function memCheckRateLimit(key: string, limitPerMin: number, now: number): boolean {
-  const cutoff = now - RATE_WINDOW_MS
-  const recent = (rateHits.get(key) ?? []).filter((t) => t > cutoff)
-  if (recent.length >= limitPerMin) {
-    rateHits.set(key, recent)
-    return false
+export interface WindowLimitResult {
+  allowed: boolean
+  /** Milliseconds until the oldest hit leaves the window; zero when allowed. */
+  retryAfterMs: number
+}
+
+function rateBucketKey(key: string, windowMs: number): string {
+  return `${windowMs}:${key}`
+}
+
+function memCheckWindowLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+  now: number,
+): WindowLimitResult {
+  const bucket = rateBucketKey(key, windowMs)
+  const cutoff = now - windowMs
+  const recent = (rateHits.get(bucket) ?? []).filter((t) => t > cutoff)
+  if (recent.length >= limit) {
+    rateHits.set(bucket, recent)
+    return { allowed: false, retryAfterMs: Math.max(1, recent[0] + windowMs - now) }
   }
   recent.push(now)
-  rateHits.set(key, recent)
-  return true
+  rateHits.set(bucket, recent)
+  return { allowed: true, retryAfterMs: 0 }
 }
 
 function memAcquireSlot(key: string, limit: number): boolean {
@@ -55,7 +71,7 @@ function memCurrentConcurrency(key: string): number {
 
 // ── Redis 后端 ───────────────────────────────────────────────────────────────
 
-const rateKey = (key: string) => `mb:rl:${key}`
+const rateKey = (key: string, windowMs: number) => `mb:rl:${windowMs}:${key}`
 const concKey = (key: string) => `mb:cc:${key}`
 
 // 用按时间戳打分的有序集合实现滑动窗口限流。原子地「检查+写入」，
@@ -69,11 +85,16 @@ local member = ARGV[4]
 redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
 local count = redis.call('ZCARD', key)
 if count >= limit then
-  return 0
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  local retry = window
+  if oldest[2] then
+    retry = math.max(1, tonumber(oldest[2]) + window - now)
+  end
+  return {0, retry}
 end
 redis.call('ZADD', key, now, member)
 redis.call('PEXPIRE', key, window)
-return 1
+return {1, 0}
 `
 
 // 并发门的原子「检查+自增」，带安全 TTL，避免持有者崩溃后把计数器
@@ -109,29 +130,41 @@ let memberSeq = 0
  * `limitPerMin`. Returns true when allowed (and counts the hit), false when
  * the per-minute limit is already reached (the hit is not counted).
  */
+export async function checkWindowLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+  now = Date.now(),
+): Promise<WindowLimitResult> {
+  const safeLimit = Math.max(1, Math.trunc(limit))
+  const safeWindow = Math.max(1, Math.trunc(windowMs))
+  const redis = getRedis()
+  if (!redis) return memCheckWindowLimit(key, safeLimit, safeWindow, now)
+  try {
+    const member = `${now}-${process.pid}-${memberSeq++}`
+    const res = await redis.eval(
+      RATE_SCRIPT,
+      1,
+      rateKey(key, safeWindow),
+      String(now),
+      String(safeWindow),
+      String(safeLimit),
+      member,
+    ) as [number, number]
+    return { allowed: res[0] === 1, retryAfterMs: Number(res[1]) || 0 }
+  } catch (err) {
+    console.error('[limits] redis rate-limit failed, allowing request:', (err as Error).message)
+    return { allowed: true, retryAfterMs: 0 } // fail open：放行
+  }
+}
+
+/** Backward-compatible one-minute boolean rate-limit API used by relay/auth. */
 export async function checkRateLimit(
   key: string,
   limitPerMin: number,
   now = Date.now(),
 ): Promise<boolean> {
-  const redis = getRedis()
-  if (!redis) return memCheckRateLimit(key, limitPerMin, now)
-  try {
-    const member = `${now}-${memberSeq++}`
-    const res = await redis.eval(
-      RATE_SCRIPT,
-      1,
-      rateKey(key),
-      String(now),
-      String(RATE_WINDOW_MS),
-      String(limitPerMin),
-      member,
-    )
-    return res === 1
-  } catch (err) {
-    console.error('[limits] redis rate-limit failed, allowing request:', (err as Error).message)
-    return true // fail open：放行
-  }
+  return (await checkWindowLimit(key, limitPerMin, RATE_WINDOW_MS, now)).allowed
 }
 
 /**

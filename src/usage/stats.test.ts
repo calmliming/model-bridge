@@ -38,6 +38,15 @@ describe('dashboardRecentLogs', () => {
     expect(mocks.query.mock.calls[1][0]).toContain('LIMIT $4 OFFSET $5')
     expect(mocks.query.mock.calls[1][1]).toEqual(['openai', '%gpt-5%', '%workstation%', 25, 25])
   })
+
+  it('filters failed and model-mismatch records without interpolating values', async () => {
+    await dashboardRecentLogs(1, 20, { status: 'error', modelMismatch: true })
+
+    expect(mocks.query.mock.calls[0][0]).toContain('usage_logs.status = $1')
+    expect(mocks.query.mock.calls[0][0]).toContain('usage_logs.model_mismatch = $2')
+    expect(mocks.query.mock.calls[0][1]).toEqual(['error', true])
+    expect(mocks.query.mock.calls[1][1]).toEqual(['error', true, 20, 0])
+  })
 })
 
 describe('dailyStats', () => {

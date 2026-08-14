@@ -1,4 +1,5 @@
 import { normalizeSub2ApiBaseUrl } from './relay'
+import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const BALANCE_TIMEOUT_MS = 15_000
 
@@ -270,36 +271,28 @@ export async function fetchSub2ApiBalance(
   baseUrl: string | null,
 ): Promise<Sub2ApiBalanceInfo | null> {
   const normalizedBase = normalizeSub2ApiBaseUrl(baseUrl)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), BALANCE_TIMEOUT_MS)
-  try {
-    for (const path of SUB2API_BALANCE_ENDPOINTS) {
-      try {
-        const response = await fetch(`${normalizedBase}${path}`, {
-          method: 'GET',
-          headers: balanceHeaders(apiKey),
-          signal: controller.signal,
-          // Never forward either credential header to a redirect target. A
-          // canonical Base URL is required for this administrative query.
-          redirect: 'error',
-        })
-        if (!response.ok) {
-          if (response.body) await response.body.cancel().catch(() => undefined)
-          continue
-        }
-        const payload: unknown = await response.json()
-        const parsed = parseSub2ApiBalanceResponse(payload, path)
-        if (parsed) return parsed
-      } catch {
-        if (controller.signal.aborted) return null
-        // A deployment may not expose every compatibility endpoint. Continue
-        // without logging response bodies or credentials.
+  for (const path of SUB2API_BALANCE_ENDPOINTS) {
+    try {
+      const response = await fetchWithConnectTimeout(`${normalizedBase}${path}`, {
+        method: 'GET',
+        headers: balanceHeaders(apiKey),
+        // Never forward either credential header to a redirect target. A
+        // canonical Base URL is required for this administrative query.
+        redirect: 'error',
+      }, BALANCE_TIMEOUT_MS)
+      if (!response.ok) {
+        if (response.body) await response.body.cancel().catch(() => undefined)
+        continue
       }
+      const payload: unknown = await response.json()
+      const parsed = parseSub2ApiBalanceResponse(payload, path)
+      if (parsed) return parsed
+    } catch {
+      // A deployment may not expose every compatibility endpoint. Continue
+      // without logging response bodies or credentials.
     }
-    return null
-  } finally {
-    clearTimeout(timer)
   }
+  return null
 }
 
 /** Validates the sanitized balance snapshot persisted under account metadata. */

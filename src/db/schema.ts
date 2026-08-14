@@ -224,6 +224,12 @@ export const usageLogs = pgTable('usage_logs', {
   baseCost: doublePrecision('base_cost').notNull().default(0), // list-price cost before markup
   billTo: text('bill_to').notNull().default('balance'), // subscription | balance — which budget paid
   status: text('status').notNull().default('success'),
+  errorCode: text('error_code'),
+  errorMessage: text('error_message'),
+  upstreamStatus: bigint('upstream_status', { mode: 'number' }),
+  attemptCount: bigint('attempt_count', { mode: 'number' }).notNull().default(1),
+  upstreamModel: text('upstream_model'),
+  modelMismatch: boolean('model_mismatch').notNull().default(false),
   latencyMs: bigint('latency_ms', { mode: 'number' }),
   firstTokenMs: bigint('first_token_ms', { mode: 'number' }),
 })

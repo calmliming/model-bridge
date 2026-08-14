@@ -73,6 +73,7 @@ const paginationQuerySchema = z.object({
 const usageQuerySchema = paginationQuerySchema.extend({
   startDate: z.coerce.number().int().positive().optional(),
   endDate: z.coerce.number().int().positive().optional(),
+  status: z.enum(['success', 'error']).optional(),
 })
 
 const createPaymentOrderSchema = z.object({
@@ -235,7 +236,7 @@ export function registerUserRoutes(app: FastifyInstance): void {
     },
   )
 
-  app.get<{ Querystring: { page?: string; pageSize?: string; startDate?: string; endDate?: string } }>(
+  app.get<{ Querystring: { page?: string; pageSize?: string; startDate?: string; endDate?: string; status?: string } }>(
     '/api/users/usage',
     { preHandler: requireUser },
     async (request, reply) => {
@@ -246,6 +247,7 @@ export function registerUserRoutes(app: FastifyInstance): void {
       return listUserUsage(request.currentUser!.id, query.data.page, query.data.pageSize, {
         startDate: query.data.startDate,
         endDate: query.data.endDate,
+        status: query.data.status,
       })
     },
   )

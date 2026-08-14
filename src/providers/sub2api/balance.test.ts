@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchSub2ApiBalance,
   parseSub2ApiBalanceResponse,
@@ -12,7 +12,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-afterEach(() => vi.unstubAllGlobals())
+const originalHostAllowlist = process.env.UPSTREAM_HOST_ALLOWLIST
+
+beforeEach(() => {
+  process.env.UPSTREAM_HOST_ALLOWLIST = 'upstream.example'
+})
+
+afterEach(() => {
+  if (originalHostAllowlist === undefined) delete process.env.UPSTREAM_HOST_ALLOWLIST
+  else process.env.UPSTREAM_HOST_ALLOWLIST = originalHostAllowlist
+  vi.unstubAllGlobals()
+})
 
 describe('parseSub2ApiBalanceResponse', () => {
   it('parses the official unrestricted wallet response', () => {

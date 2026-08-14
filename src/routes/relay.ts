@@ -600,6 +600,7 @@ interface RelayMeta {
   multiplier: number
   billTo: 'subscription' | 'balance'
   subscriptionId: string | null
+  attemptCount: number
 }
 
 interface UpstreamFailure {
@@ -1328,6 +1329,7 @@ async function runRelayLoop(
   const session = computeSessionInfo(provider.id, apiKey.id, request.headers, body)
   const sessionKey = session?.key ?? null
   const tried: string[] = []
+  let terminalFailureRecorded = false
   // sub2api & friends: a transient upstream error means "retry the same account"
   // (the gateway rotates its own backends), not "blackball this credential".
   const relayToRelay = provider.relayToRelay === true
@@ -1354,10 +1356,33 @@ async function runRelayLoop(
       parsed.model,
     )
     if (!account) {
+      const unavailableMessage = tried.length
+        ? `all ${provider.id} accounts are unavailable`
+        : `no ${provider.id} account configured`
+      await recordUsage({
+        apiKeyId: apiKey.id,
+        userId: apiKey.userId,
+        accountId: null,
+        provider: provider.id,
+        model: parsed.model,
+        multiplier: apiKey.groupMultiplier ?? 1,
+        billTo: apiKey.billTo,
+        subscriptionId: apiKey.subscriptionId,
+        usage: emptyUsage(),
+        status: 'error',
+        errorCode: 'no_available_account',
+        errorMessage: unavailableMessage,
+        upstreamStatus: 503,
+        attemptCount: Math.max(1, tried.length),
+        latencyMs: 0,
+        requestInput: provider.summarizeRequestInput
+          ? provider.summarizeRequestInput(body)
+          : summarizeRequestInput(body),
+        sessionKeyHash: session?.hash ?? null,
+        sessionSource: session?.source ?? null,
+      })
       await reply.code(503).send({
-        error: tried.length
-          ? `all ${provider.id} accounts are unavailable`
-          : `no ${provider.id} account configured`,
+        error: unavailableMessage,
       })
       return
     }
@@ -1405,7 +1430,8 @@ async function runRelayLoop(
         account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
       })
     } catch (err) {
-      request.log.warn(`upstream call failed for ${account.id}: ${(err as Error).message}`)
+      const upstreamError = err instanceof Error ? err.message : String(err)
+      request.log.warn(`upstream call failed for ${account.id}: ${upstreamError}`)
       if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
         // Transient network error reaching the sub2api gateway: retry the same
         // account (don't cool it down or exclude it) so the next attempt can
@@ -1420,6 +1446,30 @@ async function runRelayLoop(
         relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : undefined,
       )
       if (accountLimit != null) await releaseSlot(accountSlotKey)
+      if (attempt === MAX_ATTEMPTS - 1) {
+        await recordUsage({
+          apiKeyId: apiKey.id,
+          userId: apiKey.userId,
+          accountId: account.id,
+          provider: provider.id,
+          model: parsed.model,
+          multiplier: apiKey.groupMultiplier ?? 1,
+          billTo: apiKey.billTo,
+          subscriptionId: apiKey.subscriptionId,
+          usage: emptyUsage(),
+          status: 'error',
+          errorCode: 'upstream_network_error',
+          errorMessage: redactUrls(upstreamError),
+          attemptCount: attempt + 1,
+          latencyMs: Date.now() - startedAt,
+          requestInput: provider.summarizeRequestInput
+            ? provider.summarizeRequestInput(body)
+            : summarizeRequestInput(body),
+          sessionKeyHash: session?.hash ?? null,
+          sessionSource: session?.source ?? null,
+        })
+        terminalFailureRecorded = true
+      }
       continue
     }
 
@@ -1495,6 +1545,7 @@ async function runRelayLoop(
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
         subscriptionId: apiKey.subscriptionId,
+        attemptCount: attempt + 1,
       }
       // Relay-to-relay upstreams are third-party gateways: their error bodies
       // can embed backend hosts, channel names or other internal config. Send
@@ -1516,6 +1567,30 @@ async function runRelayLoop(
     }
   }
 
+  if (!terminalFailureRecorded) {
+    await recordUsage({
+      apiKeyId: apiKey.id,
+      userId: apiKey.userId,
+      accountId: tried.at(-1) ?? null,
+      provider: provider.id,
+      model: parsed.model,
+      multiplier: apiKey.groupMultiplier ?? 1,
+      billTo: apiKey.billTo,
+      subscriptionId: apiKey.subscriptionId,
+      usage: emptyUsage(),
+      status: 'error',
+      errorCode: 'all_accounts_failed',
+      errorMessage: `All ${provider.id} accounts failed before a response was available.`,
+      upstreamStatus: 503,
+      attemptCount: Math.max(1, tried.length),
+      latencyMs: 0,
+      requestInput: provider.summarizeRequestInput
+        ? provider.summarizeRequestInput(body)
+        : summarizeRequestInput(body),
+      sessionKeyHash: session?.hash ?? null,
+      sessionSource: session?.source ?? null,
+    })
+  }
   await reply.code(503).send({ error: `all ${provider.id} accounts failed` })
 }
 
@@ -1598,6 +1673,10 @@ async function sendStreaming(
       subscriptionId: meta.subscriptionId,
       usage: emptyUsage(),
       status: 'error',
+      errorCode: code,
+      errorMessage: redactUrls(message),
+      upstreamStatus: upstream.status,
+      attemptCount: meta.attemptCount,
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,
@@ -1625,6 +1704,7 @@ async function sendStreaming(
     const jsonParser = provider.createStreamParser()
     const jsonState = newResponsesStreamState()
     const responseObject = parseResponseObject(bodyText)
+    const upstreamModel = extractDeclaredModel(responseObject)
     if (responseObject) {
       const event = { type: 'response.completed', response: responseObject }
       jsonParser.feed(event)
@@ -1650,6 +1730,13 @@ async function sendStreaming(
       subscriptionId: meta.subscriptionId,
       usage: jsonParser.result(),
       status: responsesStreamStatus(upstream.ok, responsesProtocol, jsonState),
+      errorCode: jsonState.sawFailure ? 'invalid_upstream_response' : null,
+      errorMessage: jsonState.sawFailure ? 'Upstream returned an invalid non-stream response.' : null,
+      upstreamStatus: upstream.status,
+      attemptCount: meta.attemptCount,
+      upstreamModel,
+      modelMismatch: upstreamModel != null
+        && normalizeModelForAudit(upstreamModel) !== normalizeModelForAudit(meta.model),
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,
@@ -1688,6 +1775,8 @@ async function sendStreaming(
   // the client (and whether it was a failure) so we can synthesize one if the
   // stream drops early and record the right usage status.
   const streamState: ResponsesStreamState = { sawTerminal: false, sawFailure: false }
+  const modelAudit: ModelAuditState = { upstreamModel: null }
+  let streamReadFailed = false
 
   if (upstream.body) {
     const reader = upstream.body.getReader()
@@ -1728,6 +1817,7 @@ async function sendStreaming(
               parseUpstreamStream,
               markFirstToken,
               streamState,
+              modelAudit,
             )
             buffer = buffer.slice(sep + 2)
           }
@@ -1735,7 +1825,7 @@ async function sendStreaming(
           // Event-buffered: only emit complete events, rewriting payloads.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser, markFirstToken)
+            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser, markFirstToken, modelAudit)
             buffer = buffer.slice(sep + 2)
           }
         } else {
@@ -1744,13 +1834,14 @@ async function sendStreaming(
           raw.write(Buffer.from(value))
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            feedSseBlock(buffer.slice(0, sep), parser, streamState)
+            feedSseBlock(buffer.slice(0, sep), parser, streamState, modelAudit)
             buffer = buffer.slice(sep + 2)
           }
         }
       }
     } catch {
       // Client disconnected or upstream aborted — stop quietly.
+      streamReadFailed = true
     } finally {
       if (heartbeat) clearInterval(heartbeat)
     }
@@ -1776,6 +1867,9 @@ async function sendStreaming(
   }
   raw.end()
 
+  const streamStatus = streamReadFailed
+    ? 'error'
+    : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)
   await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
@@ -1789,7 +1883,24 @@ async function sendStreaming(
     // Responses-protocol success requires a `response.completed` terminal. A
     // `response.failed` / `response.incomplete` (incl. `cyber_policy` blocks) or
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
-    status: streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState),
+    status: streamStatus,
+    errorCode: streamStatus === 'error'
+      ? !upstream.ok
+        ? `upstream_${upstream.status}`
+        : streamState.sawTerminal ? 'upstream_stream_failed' : 'upstream_stream_closed'
+      : null,
+    errorMessage: streamStatus === 'error'
+      ? !upstream.ok
+        ? `Upstream returned HTTP ${upstream.status}.`
+        : streamState.sawTerminal
+          ? 'Upstream stream reported an unsuccessful terminal event.'
+          : 'Upstream stream closed before completion.'
+      : null,
+    upstreamStatus: upstream.status,
+    attemptCount: meta.attemptCount,
+    upstreamModel: modelAudit.upstreamModel,
+    modelMismatch: modelAudit.upstreamModel != null
+      && normalizeModelForAudit(modelAudit.upstreamModel) !== normalizeModelForAudit(meta.model),
     latencyMs: Date.now() - meta.startedAt,
     firstTokenMs,
     requestInput: meta.requestInput,
@@ -1891,6 +2002,10 @@ async function sendSanitizedRelayError(
     subscriptionId: meta.subscriptionId,
     usage: emptyUsage(),
     status: 'error',
+    errorCode: code,
+    errorMessage: redactUrls(message),
+    upstreamStatus: upstream.status,
+    attemptCount: meta.attemptCount,
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
     sessionKeyHash: meta.sessionKeyHash,
@@ -1936,6 +2051,7 @@ async function sendBuffered(
     let responseContentType = contentType
     let convertedStatus: 'error' | undefined
     let convertedHttpStatus: number | undefined
+    let errorDetails: { code: string; message: string } | null = null
     if (upstream.ok) {
       const converted = provider.bufferSseResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
@@ -1943,6 +2059,8 @@ async function sendBuffered(
       responseContentType = 'application/json'
       convertedStatus = converted.status
       convertedHttpStatus = converted.httpStatus
+    } else {
+      errorDetails = extractUpstreamError(sseText, upstream.status)
     }
     const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,
@@ -1955,6 +2073,10 @@ async function sendBuffered(
       subscriptionId: meta.subscriptionId,
       usage,
       status: convertedStatus ?? (upstream.ok ? 'success' : 'error'),
+      errorCode: errorDetails?.code ?? (convertedStatus ? 'upstream_response_failed' : null),
+      errorMessage: errorDetails ? redactUrls(errorDetails.message) : null,
+      upstreamStatus: upstream.status,
+      attemptCount: meta.attemptCount,
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,
@@ -1973,8 +2095,10 @@ async function sendBuffered(
 
   let text = await upstream.text()
   let usage: UsageData = emptyUsage()
+  let upstreamModel: string | null = null
   try {
     let json = JSON.parse(text) as unknown
+    upstreamModel = extractDeclaredModel(json)
     if (provider.transformEventData) {
       json = provider.transformEventData(json)
       text = JSON.stringify(json)
@@ -1983,6 +2107,7 @@ async function sendBuffered(
   } catch {
     // Error responses aren't valid JSON — leave usage empty.
   }
+  const errorDetails = upstream.ok ? null : extractUpstreamError(text, upstream.status)
   const recorded = await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
@@ -1994,6 +2119,12 @@ async function sendBuffered(
     subscriptionId: meta.subscriptionId,
     usage,
     status: upstream.ok ? 'success' : 'error',
+    errorCode: errorDetails?.code ?? null,
+    errorMessage: errorDetails ? redactUrls(errorDetails.message) : null,
+    upstreamStatus: upstream.status,
+    attemptCount: meta.attemptCount,
+    upstreamModel,
+    modelMismatch: upstreamModel != null && normalizeModelForAudit(upstreamModel) !== normalizeModelForAudit(meta.model),
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
     sessionKeyHash: meta.sessionKeyHash,
@@ -2007,6 +2138,26 @@ async function sendBuffered(
     .code(upstream.status)
     .header('content-type', contentType)
     .send(text)
+}
+
+function extractDeclaredModel(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const object = value as Record<string, unknown>
+  if (typeof object.model === 'string' && object.model.trim()) return object.model.trim()
+  return extractDeclaredModel(object.response)
+}
+
+interface ModelAuditState {
+  upstreamModel: string | null
+}
+
+function noteDeclaredModel(value: unknown, state?: ModelAuditState): void {
+  if (!state || state.upstreamModel) return
+  state.upstreamModel = extractDeclaredModel(value)
+}
+
+function normalizeModelForAudit(model: string): string {
+  return model.trim().toLowerCase()
 }
 
 function summarizeRequestInput(body: Record<string, unknown>): string | null {
@@ -2047,6 +2198,7 @@ function feedSseBlock(
   block: string,
   parser: { feed(event: unknown): void },
   state: ResponsesStreamState,
+  modelAudit?: ModelAuditState,
 ): void {
   const dataLines: string[] = []
   for (const line of block.split('\n')) {
@@ -2058,6 +2210,7 @@ function feedSseBlock(
   if (!payload || payload === '[DONE]') return
   try {
     const parsed = JSON.parse(payload)
+    noteDeclaredModel(parsed, modelAudit)
     parser.feed(parsed)
     noteResponsesTerminal(parsed, state)
   } catch {
@@ -2079,6 +2232,7 @@ function emitFromStreamTransform(
   parseUpstream: boolean,
   onEmit: (() => void) | undefined,
   state: ResponsesStreamState,
+  modelAudit?: ModelAuditState,
 ): void {
   const dataLines: string[] = []
   for (const line of block.split('\n')) {
@@ -2094,6 +2248,7 @@ function emitFromStreamTransform(
   } catch {
     return
   }
+  noteDeclaredModel(parsed, modelAudit)
   if (parseUpstream) parser.feed(parsed)
   for (const event of xform.transform(parsed)) {
     if (!parseUpstream && event !== '[DONE]') parser.feed(event)
@@ -2130,6 +2285,7 @@ function rewriteAndEmit(
   transform: (data: unknown) => unknown,
   parser: { feed(event: unknown): void },
   onEmit?: () => void,
+  modelAudit?: ModelAuditState,
 ): void {
   const out: string[] = []
   for (const line of block.split('\n')) {
@@ -2145,6 +2301,7 @@ function rewriteAndEmit(
     }
     try {
       const parsed = JSON.parse(payload)
+      noteDeclaredModel(parsed, modelAudit)
       const transformed = transform(parsed)
       parser.feed(transformed)
       out.push(`data: ${JSON.stringify(transformed)}`)
