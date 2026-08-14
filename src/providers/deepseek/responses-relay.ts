@@ -5,7 +5,7 @@ const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/v1/responses'
 
 /**
  * Normalises a Responses request for DeepSeek's native Responses endpoint.
- * DeepSeek currently accepts V4 Flash on this surface and supports streaming,
+ * DeepSeek accepts V4 Flash and V4 Pro on this surface and supports streaming,
  * web_search, and custom function tools such as apply_patch directly.
  */
 export function normalizeDeepseekResponsesBody(

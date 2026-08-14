@@ -185,6 +185,8 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
     out.max_output_tokens = body.max_tokens
   }
   if (body.tool_choice != null) out.tool_choice = body.tool_choice
+  if (typeof body.user === 'string' && body.user) out.user = body.user
+  if (typeof body.user_id === 'string' && body.user_id) out.user = body.user_id
   if (Array.isArray(body.tools)) {
     const tools = (body.tools as ChatTool[]).map(convertTool).filter((tool) => tool !== null)
     if (tools.length) out.tools = tools

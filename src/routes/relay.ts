@@ -46,13 +46,13 @@ import {
   createOpenaiChatCompletionsStreamTransform,
   parseChatCompletionUsage,
   responsesSseToChatCompletion,
+  chatCompletionsToResponses,
 } from '../providers/openai/chat'
 import * as openaiUsage from '../providers/openai/usage'
 import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
 import { relayDeepseekMessages } from '../providers/deepseek/relay'
 import * as deepseekUsage from '../providers/deepseek/usage'
-import { relayDeepseekChatCompletions } from '../providers/deepseek/chat-relay'
 import { relayDeepseekResponses } from '../providers/deepseek/responses-relay'
 import * as deepseekResponsesUsage from '../providers/deepseek/responses-usage'
 import { mapModel as mapDeepseekModel, mapResponsesModel as mapDeepseekResponsesModel } from '../providers/deepseek/converter'
@@ -343,14 +343,17 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     }),
     prepareBody: (body, ctx) =>
       withDeepseekUserIsolation(body, 'chat.completions', ctx.apiKeyId, ctx.userId),
-    callUpstream: (token, body, _ctx) => relayDeepseekChatCompletions(token, body),
-    createStreamParser: createChatCompletionStreamParser,
+    callUpstream: (token, body, _ctx) => relayDeepseekResponses(token, chatCompletionsToResponses(body)),
+    createStreamParser: deepseekResponsesUsage.createStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
+    parseStreamEventsFrom: 'upstream',
+    bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
+    createStreamTransform: createOpenaiChatCompletionsStreamTransform,
   },
   // Route key only — provider.id stays 'deepseek' so account pool, allowed-
   // provider checks, and usage records all reuse the existing deepseek setup.
-  // Backed by DeepSeek's native Responses endpoint. DeepSeek currently
-  // supports this surface on V4 Flash; the model normalizer enforces that.
+  // Backed by DeepSeek's native Responses endpoint. DeepSeek supports this
+  // surface on V4 Flash and V4 Pro; unknown model names default to V4 Flash.
   'deepseek-responses': {
     id: 'deepseek',
     forceStream: false,
@@ -991,11 +994,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey }, deepseekHandler)
-  // DeepSeek: OpenAI-compatible Chat Completions endpoint.
+  // DeepSeek: OpenAI-compatible Chat Completions compatibility endpoint. The
+  // gateway converts the request to native Responses upstream, then converts
+  // the result back for older OpenAI clients.
   // OpenAI clients: base URL=https://your-host/api/deepseek/v1
   app.post('/api/deepseek/v1/chat/completions', { preHandler: requireApiKey }, deepseekChatHandler)
-  // DeepSeek: OpenAI Responses-API surface for Codex CLI. The relay rewrites
-  // requests into chat/completions and translates the SSE stream back.
+  // DeepSeek: native OpenAI Responses-API surface for Codex CLI.
   // Codex: configure base_url=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey }, deepseekResponsesHandler)
   // Xiaomi MiMo: Anthropic-compatible endpoint under /api/xiaomi prefix.

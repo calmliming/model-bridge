@@ -4,7 +4,7 @@ import { normalizeDeepseekResponsesBody, relayDeepseekResponses } from './respon
 afterEach(() => vi.unstubAllGlobals())
 
 describe('normalizeDeepseekResponsesBody', () => {
-  it('uses V4 Flash and keeps native Responses tools intact', () => {
+  it('preserves V4 Pro and keeps native Responses tools intact', () => {
     const out = normalizeDeepseekResponsesBody({
       model: 'deepseek-v4-pro',
       input: 'search the docs',
@@ -13,7 +13,7 @@ describe('normalizeDeepseekResponsesBody', () => {
       stream: false,
     })
     expect(out).toMatchObject({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-pro',
       stream: false,
       tools: [{ type: 'web_search' }, { type: 'custom', name: 'apply_patch' }],
       user: 'client-user',
@@ -32,7 +32,7 @@ describe('normalizeDeepseekResponsesBody', () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://api.deepseek.com/v1/responses')
     expect(init.headers).toMatchObject({ authorization: 'Bearer sk-test', accept: 'application/json' })
-    expect(JSON.parse(String(init.body))).toMatchObject({ model: 'deepseek-v4-flash', stream: false })
+    expect(JSON.parse(String(init.body))).toMatchObject({ model: 'deepseek-v4-pro', stream: false })
   })
 
   it('requests SSE when the client enables streaming', async () => {

@@ -72,6 +72,14 @@ describe('chatCompletionsToResponses', () => {
       { type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } },
     ])
   })
+
+  it('carries chat user isolation into Responses user', () => {
+    expect(chatCompletionsToResponses({
+      model: 'deepseek-v4-flash',
+      user_id: 'tenant-user',
+      messages: [{ role: 'user', content: 'hi' }],
+    })).toMatchObject({ user: 'tenant-user' })
+  })
 })
 
 describe('responsesSseToChatCompletion', () => {

@@ -195,8 +195,8 @@ curl http://localhost:3000/v1/images/edits \
 暴露一个 Responses API 入口，原生转发到 DeepSeek `/v1/responses`，保留官方的
 `web_search`、`apply_patch`、思考模式和 1M 上下文能力。账号池和 `/api/deepseek/v1/messages`
 （Claude Code 路径）共享，**同一份 DeepSeek API key 同时服务两端**。OpenAI
-兼容客户端也可以直接把 base URL 填成 `http://localhost:3000/api/deepseek/v1`，
-走 `chat/completions` 入口。
+兼容客户端仍可把 base URL 填成 `http://localhost:3000/api/deepseek/v1`，
+走兼容 `chat/completions` 入口；网关会在内部转换为 DeepSeek Responses 上游。
 
 #### 1. 后台准备
 
@@ -208,7 +208,7 @@ curl http://localhost:3000/v1/images/edits \
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-flash"  # Responses API 当前官方支持的模型
+model = "deepseek-v4-flash"  # 也可使用 "deepseek-v4-pro"
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -243,7 +243,7 @@ curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
 
 #### 说明
 
-- **模型名重写**：Responses API 按官方限制统一使用 `deepseek-v4-flash`；Chat/Anthropic 仍支持 `deepseek-v4-pro`，并把旧别名 `deepseek-chat` / `deepseek-reasoner` 分别映射到 V4 Flash / V4 Pro
+- **模型名重写**：Responses 会保留 `deepseek-v4-flash` 和 `deepseek-v4-pro`；非 DeepSeek 模型名默认改写为 `deepseek-v4-flash`。Chat/Anthropic 也保留具体 V4 模型名，旧别名 `deepseek-chat` / `deepseek-reasoner` 均映射到 V4 Flash
 - **隔离标识**：网关按租户和客户端身份生成匿名 `user_id` / `user`，用于 DeepSeek 内容安全、KV Cache 和调度隔离
 - **流式兼容**：`stream:true` 返回完整 Responses SSE（适用于 Codex）；`stream:false` 或省略时返回原生 JSON
 - **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计

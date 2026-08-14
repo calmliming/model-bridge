@@ -106,6 +106,11 @@ describe('DeepSeek V4 pricing', () => {
       cacheRead: 0.003625,
     })
   })
+
+  it('prices legacy aliases as Flash-compatible models', () => {
+    expect(resolvePrice('deepseek', 'deepseek-chat')).toMatchObject({ input: 0.14, output: 0.28 })
+    expect(resolvePrice('deepseek', 'deepseek-reasoner')).toMatchObject({ input: 0.14, output: 0.28 })
+  })
 })
 
 describe('OpenAI image pricing', () => {

@@ -153,8 +153,9 @@ function geminiPrice(model: string): TierPrice {
   return model.toLowerCase().includes('flash') ? GEMINI_FLASH : GEMINI_PRO
 }
 
-// DeepSeek list prices per 1M tokens. Flash is quoted in CNY and converted to
-// USD; V4 Pro uses the official USD list values. There is no separate
+// DeepSeek list prices per 1M tokens, checked against the official API pricing
+// page on 2026-08-13. Flash is quoted in CNY and converted to USD; V4 Pro uses
+// the official USD list values. There is no separate
 // cache-write fee — cacheRead is the cached-input price.
 const DEEPSEEK_TIERS: Record<'flash' | 'pro', TierPrice> = {
   flash: { input: cny(1), output: cny(2), cacheWrite: 0, cacheRead: cny(0.02) },
@@ -165,9 +166,9 @@ const DEEPSEEK_TIERS: Record<'flash' | 'pro', TierPrice> = {
 
 function deepseekTier(model: string): keyof typeof DEEPSEEK_TIERS {
   const m = model.toLowerCase()
-  // deepseek-v4-flash, legacy deepseek-chat
-  if (m.includes('flash') || m.includes('chat')) return 'flash'
-  // deepseek-v4-pro, legacy deepseek-reasoner
+  // deepseek-v4-flash plus legacy deepseek-chat / deepseek-reasoner aliases.
+  if (m.includes('flash') || m.includes('chat') || m.includes('reasoner')) return 'flash'
+  // deepseek-v4-pro
   return 'pro'
 }
 
@@ -323,7 +324,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_TIERS.pro },
   { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_TIERS.pro },
+  { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_TIERS.flash },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
   { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
@@ -351,7 +352,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v5` settings flag.
+ * gated by the `pricing_seed_v6` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -422,6 +423,12 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'deepseek-v4-pro',
     from: { input: 0.42, output: 0.84, cacheWrite: 0, cacheRead: 0.0035 },
     to: DEEPSEEK_TIERS.pro,
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-reasoner',
+    from: { input: 0.42, output: 0.84, cacheWrite: 0, cacheRead: 0.0035 },
+    to: DEEPSEEK_TIERS.flash,
   },
 ]
 
@@ -497,7 +504,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v5'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v6'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -524,7 +531,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v5', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v6', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }

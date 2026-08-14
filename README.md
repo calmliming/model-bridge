@@ -222,9 +222,10 @@ Responses-API surface at `/api/deepseek/v1/responses` that forwards natively to
 DeepSeek's `/v1/responses` endpoint. This preserves the official `web_search`,
 `apply_patch`, thinking-mode, and 1M-context capabilities. The same DeepSeek account pool is
 shared with `/api/deepseek/v1/messages` (used by Claude Code), so **one
-DeepSeek API key serves both clients**. OpenAI-compatible clients can also use
-DeepSeek directly with base URL `http://localhost:3000/api/deepseek/v1` and
-the `chat/completions` endpoint.
+DeepSeek API key serves both clients**. OpenAI-compatible clients can still use
+the compatibility `chat/completions` endpoint at base URL
+`http://localhost:3000/api/deepseek/v1`; the relay converts those requests to
+DeepSeek Responses upstream.
 
 #### 1. Prepare the dashboard
 
@@ -236,7 +237,7 @@ the `chat/completions` endpoint.
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-flash"  # the only model currently supported by Responses
+model = "deepseek-v4-flash"  # or "deepseek-v4-pro"
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -272,7 +273,7 @@ A healthy response is an SSE stream: `response.created` → several
 
 #### Notes
 
-- **Model-name rewrite**: the Responses API always uses `deepseek-v4-flash`, the only V4 model currently supported there. Chat/Anthropic keeps `deepseek-v4-pro` available and maps the legacy `deepseek-chat` / `deepseek-reasoner` aliases to V4 Flash / V4 Pro.
+- **Model-name rewrite**: Responses preserves `deepseek-v4-flash` and `deepseek-v4-pro`; unknown non-DeepSeek model names default to `deepseek-v4-flash`. Chat/Anthropic also keeps concrete V4 model names available, while the legacy `deepseek-chat` / `deepseek-reasoner` aliases map to V4 Flash.
 - **Isolation**: the relay derives an anonymous `user_id` / `user` from the tenant and optional client identity for DeepSeek content-safety, KV-cache, and scheduling isolation.
 - **Streaming compatibility**: `stream:true` returns Responses SSE for Codex; `stream:false` or an omitted field returns native JSON.
 - **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.

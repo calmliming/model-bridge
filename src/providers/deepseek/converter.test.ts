@@ -11,7 +11,7 @@ describe('mapModel', () => {
   it('maps legacy aliases while preserving concrete DeepSeek names', () => {
     expect(mapModel('deepseek-v4-pro')).toBe('deepseek-v4-pro')
     expect(mapModel('deepseek-chat')).toBe('deepseek-v4-flash')
-    expect(mapModel('deepseek-reasoner')).toBe('deepseek-v4-pro')
+    expect(mapModel('deepseek-reasoner')).toBe('deepseek-v4-flash')
     expect(mapModel('deepseek-anything-else')).toBe('deepseek-anything-else')
   })
 
@@ -23,9 +23,9 @@ describe('mapModel', () => {
 })
 
 describe('mapResponsesModel', () => {
-  it('maps every Responses request to the only supported V4 Flash model', () => {
+  it('preserves supported Responses models and defaults to V4 Flash', () => {
     expect(mapResponsesModel('deepseek-v4-flash')).toBe('deepseek-v4-flash')
-    expect(mapResponsesModel('deepseek-v4-pro')).toBe('deepseek-v4-flash')
+    expect(mapResponsesModel('deepseek-v4-pro')).toBe('deepseek-v4-pro')
     expect(mapResponsesModel('gpt-5.5')).toBe('deepseek-v4-flash')
     expect(mapResponsesModel(undefined)).toBe('deepseek-v4-flash')
   })
