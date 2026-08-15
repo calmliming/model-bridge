@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   assertSafeUpstreamEgress,
   assertSafeUpstreamUrl,
+  guardedUpstreamLookup,
   isPublicIpAddress,
   UnsafeUpstreamUrlError,
 } from './urlGuard'
@@ -64,4 +65,24 @@ describe('isPublicIpAddress', () => {
     'classifies %s as public',
     (address) => expect(isPublicIpAddress(address)).toBe(true),
   )
+})
+
+describe('guardedUpstreamLookup', () => {
+  it('returns an address array when the caller requests all results', async () => {
+    const addresses = await new Promise<Array<{ address: string; family: number }>>((resolve, reject) => {
+      guardedUpstreamLookup('8.8.8.8', { all: true }, (error, result) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        if (!Array.isArray(result)) {
+          reject(new Error('lookup did not return all addresses'))
+          return
+        }
+        resolve(result)
+      })
+    })
+
+    expect(addresses).toEqual([{ address: '8.8.8.8', family: 4 }])
+  })
 })

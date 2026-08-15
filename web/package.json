@@ -23,5 +23,10 @@
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
     "vue-tsc": "^2.1.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "vue-demi@0.14.10": true,
+    "fsevents": false
   }
 }

@@ -237,10 +237,18 @@ export async function assertSafeUpstreamEgress(raw: string | URL): Promise<URL> 
  */
 export const guardedUpstreamLookup: LookupFunction = (hostname, options, callback) => {
   const family = typeof options === 'number' ? options : options.family
+  const returnAll = typeof options !== 'number' && options.all === true
   void lookup(hostname, { all: true, verbatim: true, family }).then(
     (addresses) => {
       if (!addresses.length || addresses.some(({ address }) => !isPublicIpAddress(address))) {
         callback(new UnsafeUpstreamUrlError('upstream URL resolves to a non-public address'), '', 0)
+        return
+      }
+      // Undici asks for all addresses on recent Node releases. Returning the
+      // single-address callback shape in that case makes node:net read an
+      // undefined address and fail every guarded request before it connects.
+      if (returnAll) {
+        callback(null, addresses)
         return
       }
       const selected = addresses[0]

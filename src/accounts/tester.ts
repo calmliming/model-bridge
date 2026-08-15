@@ -410,9 +410,6 @@ export async function refreshAccountQuota(id: string): Promise<AccountTestResult
   }
 
   const balance = await fetchSub2ApiBalance(accessToken, account.proxyUrl)
-  if (!balance) {
-    throw new AccountTestError('Sub2API 余额接口不可用，请确认上游支持 GET /v1/usage', 502)
-  }
 
   const checkedAt = Date.now()
   const snapshot: Sub2ApiBalanceSnapshot = {

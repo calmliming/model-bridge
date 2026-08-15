@@ -165,6 +165,25 @@ describe('fetchSub2ApiBalance', () => {
       'https://upstream.example/api/usage',
     ])
   })
+
+  it('reports the official endpoint status after all compatibility endpoints fail', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'not authorized' }, 401)))
+
+    await expect(fetchSub2ApiBalance('secret-key', 'https://upstream.example')).rejects.toThrow(
+      'Sub2API 余额查询失败：/v1/usage 返回 HTTP 401',
+    )
+  })
+
+  it('reports a safe network error code without exposing the upstream error body', async () => {
+    const networkError = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('socket failed'), { code: 'ECONNREFUSED' }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => { throw networkError }))
+
+    await expect(fetchSub2ApiBalance('secret-key', 'https://upstream.example')).rejects.toThrow(
+      'Sub2API 余额查询失败：/v1/usage 网络请求失败（ECONNREFUSED）',
+    )
+  })
 })
 
 describe('sub2ApiBalanceFromMetadata', () => {
