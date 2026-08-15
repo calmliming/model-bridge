@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "node scripts/db-guard.mjs generate",
-    "db:migrate-from-sqlite": "tsx scripts/migrate-sqlite-to-pg.ts"
+    "db:migrate-from-sqlite": "tsx scripts/migrate-sqlite-to-pg.ts",
+    "diagnose:sub2api": "tsx scripts/diagnose-sub2api.ts",
+    "fix:sub2api-cooldown": "tsx scripts/clear-sub2api-cooldown.ts"
   },
   "dependencies": {
     "@fastify/jwt": "^9.0.0",
