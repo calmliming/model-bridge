@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
+  resolvePrice: vi.fn(() => null),
 }))
 
 vi.mock('../db/index', () => ({
@@ -9,7 +10,7 @@ vi.mock('../db/index', () => ({
 }))
 
 vi.mock('./pricing', () => ({
-  resolvePrice: vi.fn(() => null),
+  resolvePrice: mocks.resolvePrice,
 }))
 
 import { dailyStats, dashboardRecentLogs } from './stats'
@@ -46,6 +47,27 @@ describe('dashboardRecentLogs', () => {
     expect(mocks.query.mock.calls[0][0]).toContain('usage_logs.model_mismatch = $2')
     expect(mocks.query.mock.calls[0][1]).toEqual(['error', true])
     expect(mocks.query.mock.calls[1][1]).toEqual(['error', true, 20, 0])
+  })
+
+  it('resolves historical prices at the usage-log timestamp', async () => {
+    const ts = Date.parse('2026-08-17T01:30:00Z')
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (/COUNT\(\*\)/.test(sql)) return { rows: [{ total: '1' }] }
+      return {
+        rows: [{
+          id: 'usage-1',
+          ts,
+          provider: 'deepseek',
+          model: 'deepseek-v4-pro',
+          status: 'success',
+          attemptcount: 1,
+        }],
+      }
+    })
+
+    await dashboardRecentLogs(1, 10)
+
+    expect(mocks.resolvePrice).toHaveBeenCalledWith('deepseek', 'deepseek-v4-pro', ts)
   })
 })
 

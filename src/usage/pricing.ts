@@ -13,7 +13,7 @@ export interface TierPrice {
   imageOutput?: number
 }
 
-// Fixed CNY→USD conversion for DeepSeek list prices (DeepSeek quotes CNY only).
+// Fixed CNY→USD conversion for providers that only publish CNY list prices.
 // Editable in the model_pricing table once an admin updates a row.
 const CNY_TO_USD = 0.14
 
@@ -153,23 +153,62 @@ function geminiPrice(model: string): TierPrice {
   return model.toLowerCase().includes('flash') ? GEMINI_FLASH : GEMINI_PRO
 }
 
-// DeepSeek list prices per 1M tokens, checked against the official API pricing
-// page on 2026-08-13. Flash is quoted in CNY and converted to USD; V4 Pro uses
-// the official USD list values. There is no separate
-// cache-write fee — cacheRead is the cached-input price.
-const DEEPSEEK_TIERS: Record<'flash' | 'pro', TierPrice> = {
+// DeepSeek list prices per 1M tokens. Peak/off-peak billing takes effect at
+// 2026-08-16 16:00 UTC. Peak windows are 01:00-04:00 and 06:00-10:00 UTC;
+// every other hour is off-peak. There is no separate cache-write fee.
+type DeepseekTier = 'flash' | 'pro'
+type DeepseekPricePeriod = 'pre-schedule' | 'off-peak' | 'peak'
+
+const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-16T16:00:00Z')
+const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
+  [1, 4],
+  [6, 10],
+]
+
+const DEEPSEEK_PRE_SCHEDULE_TIERS: Record<DeepseekTier, TierPrice> = {
   flash: { input: cny(1), output: cny(2), cacheWrite: 0, cacheRead: cny(0.02) },
-  // V4 Pro's current USD list price is 0.435 / 0.87 with a 0.003625 cache hit.
-  // Keep the published decimals instead of rounding through the CNY helper.
   pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.003625 },
 }
+const DEEPSEEK_STALE_PRO_PRICE: TierPrice = {
+  input: 0.42,
+  output: 0.84,
+  cacheWrite: 0,
+  cacheRead: 0.0035,
+}
 
-function deepseekTier(model: string): keyof typeof DEEPSEEK_TIERS {
+const DEEPSEEK_SCHEDULED_TIERS: Record<Exclude<DeepseekPricePeriod, 'pre-schedule'>, Record<DeepseekTier, TierPrice>> = {
+  'off-peak': {
+    flash: { input: 0.22, output: 0.66, cacheWrite: 0, cacheRead: 0.007 },
+    pro: { input: 0.66, output: 1.98, cacheWrite: 0, cacheRead: 0.022 },
+  },
+  peak: {
+    flash: { input: 0.44, output: 1.32, cacheWrite: 0, cacheRead: 0.014 },
+    pro: { input: 1.32, output: 3.96, cacheWrite: 0, cacheRead: 0.044 },
+  },
+}
+
+function deepseekTier(model: string): DeepseekTier {
   const m = model.toLowerCase()
   // deepseek-v4-flash plus legacy deepseek-chat / deepseek-reasoner aliases.
   if (m.includes('flash') || m.includes('chat') || m.includes('reasoner')) return 'flash'
   // deepseek-v4-pro
   return 'pro'
+}
+
+function deepseekPricePeriod(atMs: number): DeepseekPricePeriod {
+  if (atMs < DEEPSEEK_SCHEDULE_EFFECTIVE_AT) return 'pre-schedule'
+  const hour = new Date(atMs).getUTCHours()
+  return DEEPSEEK_PEAK_WINDOWS_UTC.some(([start, end]) => hour >= start && hour < end)
+    ? 'peak'
+    : 'off-peak'
+}
+
+function deepseekPrice(model: string, atMs: number): TierPrice {
+  const tier = deepseekTier(model)
+  const period = deepseekPricePeriod(atMs)
+  return period === 'pre-schedule'
+    ? DEEPSEEK_PRE_SCHEDULE_TIERS[tier]
+    : DEEPSEEK_SCHEDULED_TIERS[period][tier]
 }
 
 // Xiaomi MiMo V2.5 list prices (per 1M tokens). MiMo-V2.5-Pro uses the official
@@ -251,12 +290,12 @@ function grokPrice(model: string): TierPrice {
   return GROK_45
 }
 
-function sub2apiPrice(model: string): TierPrice {
+function sub2apiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
   if (m.startsWith('claude-')) return claudePrice(model)
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return openaiPrice(model)
   if (m.startsWith('gemini-')) return geminiPrice(model)
-  if (m.startsWith('deepseek-')) return DEEPSEEK_TIERS[deepseekTier(model)]
+  if (m.startsWith('deepseek-')) return deepseekPrice(model, atMs)
   if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
   if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
   if (m.startsWith('qwen')) return QWEN_TIERS[qwenTier(model)]
@@ -266,17 +305,17 @@ function sub2apiPrice(model: string): TierPrice {
 }
 
 /** Returns the built-in fallback price for a (provider, model) pair. */
-function builtinPrice(provider: string, model: string): TierPrice | null {
+function builtinPrice(provider: string, model: string, atMs: number): TierPrice | null {
   if (provider === 'claude') return claudePrice(model)
   if (provider === 'openai') return openaiPrice(model)
   if (provider === 'gemini') return geminiPrice(model)
-  if (provider === 'deepseek') return DEEPSEEK_TIERS[deepseekTier(model)]
+  if (provider === 'deepseek') return deepseekPrice(model, atMs)
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
   if (provider === 'kimi') return KIMI_TIERS[kimiTier(model)]
   if (provider === 'grok') return grokPrice(model)
-  if (provider === 'sub2api') return sub2apiPrice(model)
+  if (provider === 'sub2api') return sub2apiPrice(model, atMs)
   return null
 }
 
@@ -321,10 +360,13 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'gemini', model: 'pro', price: GEMINI_PRO },
   { provider: 'gemini', model: 'flash', price: GEMINI_FLASH },
   // DeepSeek / Xiaomi.
-  { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_TIERS.pro },
-  { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_TIERS.flash },
+  // DeepSeek keeps the pre-schedule values as seed markers. resolvePrice()
+  // recognises these exact values as managed defaults and applies the current
+  // scheduled rate; any administrator-edited value still wins.
+  { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
+  { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_PRE_SCHEDULE_TIERS.pro },
+  { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
+  { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
   { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
@@ -421,14 +463,14 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
   {
     provider: 'deepseek',
     model: 'deepseek-v4-pro',
-    from: { input: 0.42, output: 0.84, cacheWrite: 0, cacheRead: 0.0035 },
-    to: DEEPSEEK_TIERS.pro,
+    from: DEEPSEEK_STALE_PRO_PRICE,
+    to: DEEPSEEK_PRE_SCHEDULE_TIERS.pro,
   },
   {
     provider: 'deepseek',
     model: 'deepseek-reasoner',
-    from: { input: 0.42, output: 0.84, cacheWrite: 0, cacheRead: 0.0035 },
-    to: DEEPSEEK_TIERS.flash,
+    from: DEEPSEEK_STALE_PRO_PRICE,
+    to: DEEPSEEK_PRE_SCHEDULE_TIERS.flash,
   },
 ]
 
@@ -437,6 +479,28 @@ const priceCache = new Map<string, TierPrice>()
 let loaded = false
 
 const cacheKey = (provider: string, model: string) => `${provider}:${model}`
+
+function sameTokenPrice(a: TierPrice, b: TierPrice): boolean {
+  return (
+    Math.abs(a.input - b.input) < 1e-9 &&
+    Math.abs(a.output - b.output) < 1e-9 &&
+    Math.abs(a.cacheWrite - b.cacheWrite) < 1e-9 &&
+    Math.abs(a.cacheRead - b.cacheRead) < 1e-9
+  )
+}
+
+/**
+ * DeepSeek rows seeded by older releases contain the price that was current at
+ * the time. Treat those exact tuples as managed defaults so they do not mask
+ * the official schedule. Any other DB value remains an administrator override.
+ */
+function isManagedDeepseekDefault(provider: string, model: string, price: TierPrice): boolean {
+  if (provider !== 'deepseek') return false
+  const tier = deepseekTier(model)
+  if (sameTokenPrice(price, DEEPSEEK_PRE_SCHEDULE_TIERS[tier])) return true
+  return (tier === 'pro' || model.toLowerCase().includes('reasoner')) &&
+    sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
+}
 
 /**
  * Loads model_pricing rows into the in-memory cache. Idempotent — call
@@ -545,12 +609,12 @@ export async function initPricing(): Promise<void> {
  * "claude-opus-4-1" beats the generic "opus" for that model), and falls
  * back to the built-in tiers.
  */
-export function resolvePrice(provider: string, model: string): TierPrice | null {
-  if (!loaded) return builtinPrice(provider, model)
+export function resolvePrice(provider: string, model: string, atMs = Date.now()): TierPrice | null {
+  if (!loaded) return builtinPrice(provider, model, atMs)
 
   // 1) exact match
   const exact = priceCache.get(cacheKey(provider, model))
-  if (exact) return exact
+  if (exact && !isManagedDeepseekDefault(provider, model, exact)) return exact
 
   // 2) substring match — DB might hold "deepseek-v4-flash" while the incoming
   //    model is "deepseek-v4-flash-thinking", or hold "opus" while incoming is
@@ -562,6 +626,7 @@ export function resolvePrice(provider: string, model: string): TierPrice | null 
   for (const [key, price] of priceCache) {
     const [p, dbModel] = key.split(':', 2)
     if (p !== provider) continue
+    if (isManagedDeepseekDefault(provider, dbModel, price)) continue
     const dm = dbModel.toLowerCase()
     if ((m.includes(dm) || dm.includes(m)) && dm.length > bestLen) {
       best = price
@@ -571,14 +636,14 @@ export function resolvePrice(provider: string, model: string): TierPrice | null 
   if (best) return best
 
   // 3) built-in fallback
-  return builtinPrice(provider, model)
+  return builtinPrice(provider, model, atMs)
 }
 
 /** Estimates the USD cost of one request from its token usage. */
-export function estimateCost(provider: string, model: string, usage: UsageData): number {
-  const p = resolvePrice(provider, model)
+export function estimateCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
+  const p = resolvePrice(provider, model, atMs)
   if (!p) return 0
-  const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel) : p
+  const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p
   const cost =
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +

@@ -41,8 +41,45 @@ export interface PlazaModel {
   /** USD list price per 1M tokens. */
   inputPrice: number
   outputPrice: number
+  cacheReadPrice?: number
+  priceSchedule?: ModelPriceSchedule
   /** Optional highlight badge. */
   badge?: 'new' | 'recommended'
+}
+
+export interface ModelTokenPrice {
+  inputPrice: number
+  outputPrice: number
+  cacheReadPrice?: number
+}
+
+export interface ModelPriceSchedule {
+  effectiveAt: number
+  peakUtcHours: ReadonlyArray<readonly [number, number]>
+  offPeak: ModelTokenPrice
+  peak: ModelTokenPrice
+}
+
+export interface ResolvedModelPrice extends ModelTokenPrice {
+  period: 'off-peak' | 'peak' | null
+}
+
+export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): ResolvedModelPrice {
+  const schedule = model.priceSchedule
+  if (!schedule || atMs < schedule.effectiveAt) {
+    return {
+      inputPrice: model.inputPrice,
+      outputPrice: model.outputPrice,
+      cacheReadPrice: model.cacheReadPrice,
+      period: null,
+    }
+  }
+
+  const hour = new Date(atMs).getUTCHours()
+  const period = schedule.peakUtcHours.some(([start, end]) => hour >= start && hour < end)
+    ? 'peak'
+    : 'off-peak'
+  return { ...schedule[period === 'peak' ? 'peak' : 'offPeak'], period }
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
@@ -104,6 +141,24 @@ export const CATEGORIES: CategoryMeta[] = [
   { key: 'multimodal', label: '多模态' },
   { key: 'lightweight', label: '轻量高速' },
 ]
+
+const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-16T16:00:00Z')
+const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
+  [1, 4],
+  [6, 10],
+]
+
+function deepseekPriceSchedule(
+  offPeak: ModelTokenPrice,
+  peak: ModelTokenPrice,
+): ModelPriceSchedule {
+  return {
+    effectiveAt: DEEPSEEK_SCHEDULE_EFFECTIVE_AT,
+    peakUtcHours: DEEPSEEK_PEAK_WINDOWS_UTC,
+    offPeak,
+    peak,
+  }
+}
 
 export const MODEL_CATALOG: PlazaModel[] = [
   // --- Anthropic / Claude --------------------------------------------------
@@ -305,6 +360,11 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.435,
     outputPrice: 0.87,
+    cacheReadPrice: 0.003625,
+    priceSchedule: deepseekPriceSchedule(
+      { inputPrice: 0.66, outputPrice: 1.98, cacheReadPrice: 0.022 },
+      { inputPrice: 1.32, outputPrice: 3.96, cacheReadPrice: 0.044 },
+    ),
     badge: 'recommended',
   },
   {
@@ -317,6 +377,11 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.14,
     outputPrice: 0.28,
+    cacheReadPrice: 0.0028,
+    priceSchedule: deepseekPriceSchedule(
+      { inputPrice: 0.22, outputPrice: 0.66, cacheReadPrice: 0.007 },
+      { inputPrice: 0.44, outputPrice: 1.32, cacheReadPrice: 0.014 },
+    ),
   },
   {
     id: 'deepseek-reasoner',
@@ -328,6 +393,11 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.14,
     outputPrice: 0.28,
+    cacheReadPrice: 0.0028,
+    priceSchedule: deepseekPriceSchedule(
+      { inputPrice: 0.22, outputPrice: 0.66, cacheReadPrice: 0.007 },
+      { inputPrice: 0.44, outputPrice: 1.32, cacheReadPrice: 0.014 },
+    ),
   },
 
   // --- 小米 MiMo -----------------------------------------------------------

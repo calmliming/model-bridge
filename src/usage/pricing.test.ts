@@ -91,25 +91,75 @@ describe('grok (xAI) pricing', () => {
 })
 
 describe('DeepSeek V4 pricing', () => {
-  it('uses the current official Flash price', () => {
-    expect(resolvePrice('deepseek', 'deepseek-v4-flash')).toMatchObject({
+  const beforeSchedule = Date.parse('2026-08-16T15:59:59.999Z')
+  const scheduleStarts = Date.parse('2026-08-16T16:00:00Z')
+  const peakStarts = Date.parse('2026-08-17T01:00:00Z')
+
+  it('keeps the previous official rates until the schedule takes effect', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', beforeSchedule)).toMatchObject({
       input: 0.14,
       output: 0.28,
       cacheRead: 0.0028,
     })
-  })
-
-  it('uses the current official Pro price without CNY rounding drift', () => {
-    expect(resolvePrice('deepseek', 'deepseek-v4-pro')).toMatchObject({
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', beforeSchedule)).toMatchObject({
       input: 0.435,
       output: 0.87,
       cacheRead: 0.003625,
     })
   })
 
-  it('prices legacy aliases as Flash-compatible models', () => {
-    expect(resolvePrice('deepseek', 'deepseek-chat')).toMatchObject({ input: 0.14, output: 0.28 })
-    expect(resolvePrice('deepseek', 'deepseek-reasoner')).toMatchObject({ input: 0.14, output: 0.28 })
+  it('switches to off-peak rates at the announced effective instant', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', scheduleStarts)).toMatchObject({
+      input: 0.22,
+      output: 0.66,
+      cacheRead: 0.007,
+    })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', scheduleStarts)).toMatchObject({
+      input: 0.66,
+      output: 1.98,
+      cacheRead: 0.022,
+    })
+  })
+
+  it('uses peak rates during both official UTC windows', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', peakStarts)).toMatchObject({
+      input: 0.44,
+      output: 1.32,
+      cacheRead: 0.014,
+    })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-17T06:00:00Z'))).toMatchObject({
+      input: 1.32,
+      output: 3.96,
+      cacheRead: 0.044,
+    })
+  })
+
+  it('treats the end of each peak window as off-peak', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', Date.parse('2026-08-17T04:00:00Z'))).toMatchObject({
+      input: 0.22,
+      output: 0.66,
+    })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-17T10:00:00Z'))).toMatchObject({
+      input: 0.66,
+      output: 1.98,
+    })
+  })
+
+  it('prices legacy aliases and Sub2API DeepSeek models on the same schedule', () => {
+    expect(resolvePrice('deepseek', 'deepseek-chat', peakStarts)).toMatchObject({ input: 0.44, output: 1.32 })
+    expect(resolvePrice('deepseek', 'deepseek-reasoner', peakStarts)).toMatchObject({ input: 0.44, output: 1.32 })
+    expect(resolvePrice('sub2api', 'deepseek-v4-pro', peakStarts)).toMatchObject({ input: 1.32, output: 3.96 })
+  })
+
+  it('estimates request cost with the rate active at the supplied timestamp', () => {
+    const usage = {
+      ...emptyUsage(),
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+    }
+    expect(estimateCost('deepseek', 'deepseek-v4-flash', usage, scheduleStarts)).toBe(0.887)
+    expect(estimateCost('deepseek', 'deepseek-v4-flash', usage, peakStarts)).toBe(1.774)
   })
 })
 

@@ -244,7 +244,8 @@ function roundUsd(n: number): number {
 function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog {
   const provider = row.provider as string
   const model = (row.model as string | null) ?? null
-  const price = resolvePrice(provider, model ?? '')
+  const ts = toNum(row.ts)
+  const price = resolvePrice(provider, model ?? '', ts)
   const inputTokens = toNum(row.inputtokens)
   const outputTokens = toNum(row.outputtokens)
   const reasoningTokens = toNum(row.reasoningtokens)
@@ -253,14 +254,14 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const imageInputTokens = toNum(row.imageinputtokens)
   const imageOutputTokens = toNum(row.imageoutputtokens)
   const imageModel = (row.imagemodel as string | null) ?? null
-  const imagePrice = imageModel ? resolvePrice(provider, imageModel) : price
+  const imagePrice = imageModel ? resolvePrice(provider, imageModel, ts) : price
   const cost = toNum(row.cost)
   const rawBaseCost = toNum(row.basecost)
   const baseCost = rawBaseCost > 0 ? rawBaseCost : cost
 
   return {
     id: row.id as string,
-    ts: toNum(row.ts),
+    ts,
     provider,
     model,
     status: row.status as string,
