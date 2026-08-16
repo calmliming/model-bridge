@@ -19,8 +19,16 @@ const props = withDefaults(
     clearable?: boolean
     disabled?: boolean
     size?: 'small' | 'medium'
+    maxTagCount?: number | 'responsive'
+    consistentMenuWidth?: boolean
+    ariaLabel?: string
   }>(),
-  { placeholder: '请选择', options: () => [] },
+  {
+    placeholder: '请选择',
+    options: () => [],
+    size: 'medium',
+    consistentMenuWidth: false,
+  },
 )
 
 const emit = defineEmits<{
@@ -157,6 +165,7 @@ const dropdownStyle = computed(() => {
     left: `${rect.value.left}px`,
     top: `${rect.value.bottom + 4}px`,
     minWidth: `${rect.value.width}px`,
+    width: props.consistentMenuWidth ? `${rect.value.width}px` : undefined,
     zIndex: 100000,
   }
 })
@@ -164,28 +173,69 @@ const dropdownStyle = computed(() => {
 const hasValue = computed(() =>
   props.multiple ? selectedArray.value.length > 0 : raw.value != null && raw.value !== '',
 )
+
+const visibleSelected = computed(() => {
+  if (props.maxTagCount == null) return selectedArray.value
+  const limit = props.maxTagCount === 'responsive'
+    ? 1
+    : Math.max(0, Math.trunc(props.maxTagCount))
+  return selectedArray.value.slice(0, limit)
+})
+
+const hiddenSelected = computed(() => selectedArray.value.slice(visibleSelected.value.length))
+const hiddenSelectedTitle = computed(() => hiddenSelected.value.map(labelOf).join('、'))
+const showClearButton = computed(() =>
+  Boolean(props.clearable && hasValue.value && (!props.multiple || selectedArray.value.length > 1)),
+)
 </script>
 
 <template>
   <div ref="triggerRef" class="relative">
     <div
-      class="input flex min-h-[38px] cursor-pointer items-center gap-1.5 pr-9"
-      :class="[disabled && 'cursor-not-allowed opacity-60', open && 'border-primary-500 ring-2 ring-primary-500/30']"
+      class="input select-trigger flex cursor-pointer items-center gap-1.5"
+      :class="[
+        size === 'small' && 'is-small',
+        multiple && 'flex-wrap',
+        showClearButton && 'has-clear',
+        disabled && 'cursor-not-allowed opacity-60',
+        open && 'border-primary-500 ring-2 ring-primary-500/30',
+      ]"
+      :tabindex="disabled ? -1 : 0"
+      role="combobox"
+      aria-haspopup="listbox"
+      :aria-expanded="open"
+      :aria-label="ariaLabel"
       @click="toggle"
+      @keydown.enter.self.prevent="toggle"
+      @keydown.space.self.prevent="toggle"
+      @keydown.esc.stop="close"
     >
       <!-- multiple selected tags -->
       <template v-if="multiple && selectedArray.length">
         <span
-          v-for="val in selectedArray"
+          v-for="val in visibleSelected"
           :key="val"
-          class="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200"
+          class="select-tag inline-flex min-w-0 max-w-full items-center gap-1 rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700 dark:bg-dark-700 dark:text-gray-200"
         >
           <span class="truncate">{{ labelOf(val) }}</span>
-          <button class="flex-shrink-0 text-gray-400 hover:text-gray-700 dark:hover:text-gray-100" @click.stop="removeTag(val)">
+          <button
+            type="button"
+            class="flex-shrink-0 rounded text-gray-400 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:hover:text-gray-100"
+            :title="`移除 ${labelOf(val)}`"
+            :aria-label="`移除 ${labelOf(val)}`"
+            @click.stop="removeTag(val)"
+          >
             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
+        </span>
+        <span
+          v-if="hiddenSelected.length"
+          class="select-tag-count inline-flex flex-shrink-0 items-center rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500 dark:bg-dark-700 dark:text-gray-300"
+          :title="hiddenSelectedTitle"
+        >
+          +{{ hiddenSelected.length }}
         </span>
       </template>
       <!-- single value -->
@@ -196,8 +246,11 @@ const hasValue = computed(() =>
       <!-- clear + chevron -->
       <span class="pointer-events-none absolute inset-y-0 right-2.5 flex items-center gap-1">
         <button
-          v-if="clearable && hasValue"
-          class="pointer-events-auto rounded text-gray-400 hover:text-gray-600"
+          v-if="showClearButton"
+          type="button"
+          class="pointer-events-auto rounded text-gray-400 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+          :title="multiple ? '清空全部选项' : '清除选择'"
+          :aria-label="multiple ? '清空全部选项' : '清除选择'"
           @click="clearAll"
         >
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -207,6 +260,7 @@ const hasValue = computed(() =>
         <svg
           class="h-4 w-4 text-gray-400 transition-transform"
           :class="open && 'rotate-180'"
+          aria-hidden="true"
           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
         >
           <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
@@ -227,6 +281,8 @@ const hasValue = computed(() =>
           v-if="open"
           ref="dropdownRef"
           :style="dropdownStyle"
+          role="listbox"
+          :aria-multiselectable="multiple || undefined"
           class="max-h-72 overflow-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-700 dark:bg-dark-800"
         >
           <div v-if="filterable" class="px-2 pb-1.5 pt-0.5">
@@ -240,6 +296,8 @@ const hasValue = computed(() =>
           <div
             v-for="opt in filteredOptions"
             :key="opt.value"
+            role="option"
+            :aria-selected="isSelected(opt.value)"
             class="flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
             :class="[
               isSelected(opt.value) && 'text-primary-600 dark:text-primary-400',
@@ -277,3 +335,32 @@ const hasValue = computed(() =>
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.select-trigger {
+  min-height: 38px;
+  padding-right: 36px;
+}
+
+.select-trigger.has-clear {
+  padding-right: 52px;
+}
+
+.select-trigger:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+  outline-offset: 1px;
+}
+
+.select-trigger.is-small {
+  min-height: 30px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-left: 8px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.select-tag {
+  max-width: calc(100% - 8px);
+}
+</style>

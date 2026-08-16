@@ -68,7 +68,32 @@ function isFixedRight(col: TableColumn<T>): boolean {
   return col.fixed === 'right'
 }
 
-function cellStyle(col: TableColumn<T>, section: 'head' | 'body') {
+function numericColumnWidth(col: TableColumn<T>): number {
+  const raw = col.width ?? col.minWidth
+  if (typeof raw === 'number') return raw
+  if (typeof raw === 'string' && /^\d+(?:\.\d+)?px$/.test(raw)) return Number.parseFloat(raw)
+  return 0
+}
+
+function fixedLeftOffset(index: number): number {
+  let offset = props.selectable ? 42 : 0
+  for (let i = 0; i < index; i += 1) {
+    const previous = props.columns[i]
+    if (previous && isFixedLeft(previous)) offset += numericColumnWidth(previous)
+  }
+  return offset
+}
+
+function fixedRightOffset(index: number): number {
+  let offset = 0
+  for (let i = index + 1; i < props.columns.length; i += 1) {
+    const next = props.columns[i]
+    if (next && isFixedRight(next)) offset += numericColumnWidth(next)
+  }
+  return offset
+}
+
+function cellStyle(col: TableColumn<T>, index: number, section: 'head' | 'body') {
   const style: Record<string, string> = {}
   if (col.width != null) style.width = typeof col.width === 'number' ? `${col.width}px` : col.width
   if (col.minWidth != null)
@@ -76,12 +101,12 @@ function cellStyle(col: TableColumn<T>, section: 'head' | 'body') {
   if (col.align) style.textAlign = col.align
   if (isFixedLeft(col)) {
     style.position = 'sticky'
-    style.left = '0'
+    style.left = `${fixedLeftOffset(index)}px`
     style.zIndex = section === 'head' ? '4' : '3'
   }
   if (isFixedRight(col)) {
     style.position = 'sticky'
-    style.right = '0'
+    style.right = `${fixedRightOffset(index)}px`
     style.zIndex = section === 'head' ? '4' : '3'
   }
   return style
@@ -114,10 +139,10 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
             />
           </th>
           <th
-            v-for="col in columns"
+            v-for="(col, colIndex) in columns"
             :key="col.key"
             :class="cellClass(col)"
-            :style="cellStyle(col, 'head')"
+            :style="cellStyle(col, colIndex, 'head')"
           >
             {{ col.title }}
           </th>
@@ -136,10 +161,10 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
             />
           </td>
           <td
-            v-for="col in columns"
+            v-for="(col, colIndex) in columns"
             :key="col.key"
             :class="cellClass(col)"
-            :style="cellStyle(col, 'body')"
+            :style="cellStyle(col, colIndex, 'body')"
           >
             <component :is="() => col.render!(row, index)" v-if="col.render" />
             <template v-else>{{ row[col.key] ?? '—' }}</template>
@@ -166,6 +191,38 @@ const tableStyle = computed(() => (props.scrollX ? { minWidth: `${props.scrollX}
   width: 42px;
   min-width: 42px;
   text-align: center;
+}
+
+thead .selection-cell {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: #f9fafb;
+  box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.45);
+}
+
+tbody .selection-cell {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  background: #fff;
+  box-shadow: 8px 0 12px -12px rgba(15, 23, 42, 0.35);
+}
+
+tbody tr:hover .selection-cell {
+  background: #f9fafb;
+}
+
+:global(.dark) thead .selection-cell {
+  background: #1e293b;
+}
+
+:global(.dark) tbody .selection-cell {
+  background: #0f172a;
+}
+
+:global(.dark) tbody tr:hover .selection-cell {
+  background: #1e293b;
 }
 
 .selection-checkbox {
