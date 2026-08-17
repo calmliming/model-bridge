@@ -485,7 +485,7 @@ function healthTagType(score: number): TagType {
 function renderHealth(row: Account) {
   const health = row.health
   if (!health || health.score == null) {
-    return h('span', { class: 'muted-cell', title: '近 6 小时无请求，暂无健康数据' }, '—')
+    return h('span', { class: 'muted-cell', title: '近 6 小时无请求，暂无健康数据' }, '暂无')
   }
   const score = health.score
   const parts: string[] = []
@@ -498,7 +498,7 @@ function renderHealth(row: Account) {
     { placement: 'top', trigger: 'hover' },
     {
       trigger: () =>
-        h(UiTag, { size: 'small', type: healthTagType(score), bordered: false }, { default: () => String(score) }),
+        h(UiTag, { size: 'small', type: healthTagType(score), bordered: false }, { default: () => `${score}/100` }),
       default: () => tip,
     },
   )
@@ -1511,7 +1511,7 @@ function accountRowKey(row: Account) {
 }
 
 const columns = computed<TableColumn<Account>[]>(() => [
-  { title: '账户', key: 'name', minWidth: 160, render: renderAccount },
+  { title: '账户', key: 'name', minWidth: 200, fixed: 'left', render: renderAccount },
   { title: '分组', key: 'group', width: 240, render: renderGroupCell },
   {
     title: '状态',
@@ -1519,7 +1519,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
     width: 110,
     render: renderStatus,
   },
-  { title: '健康', key: 'health', width: 84, render: renderHealth },
+  { title: '健康分', key: 'health', width: 92, render: renderHealth },
   { title: '访问令牌刷新', key: 'tokenExpiresAt', minWidth: 150, render: (row) => formatTime(row.tokenExpiresAt) },
   { title: '余额 / 配额', key: 'quota', minWidth: 330, render: renderQuota },
   { title: '停调阈值', key: 'autopause', width: 116, render: renderAutopause },
@@ -1542,6 +1542,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
     title: '操作',
     key: 'actions',
     width: 180,
+    fixed: 'right',
     render: (row) =>
       h(
         UiSpace,
@@ -1611,6 +1612,23 @@ const columns = computed<TableColumn<Account>[]>(() => [
       ),
   },
 ])
+
+const OAUTH_TOKEN_PROVIDERS = new Set<Provider>(['claude', 'openai', 'gemini'])
+
+function columnsForProvider(provider: string): TableColumn<Account>[] {
+  return columns.value
+    .filter((column) => column.key !== 'tokenExpiresAt' || OAUTH_TOKEN_PROVIDERS.has(provider as Provider))
+    .map((column) =>
+      provider === 'sub2api' && column.key === 'quota'
+        ? { ...column, minWidth: 190 }
+        : column,
+    )
+}
+
+function tableScrollWidth(provider: string): number {
+  if (provider === 'sub2api') return 1780
+  return OAUTH_TOKEN_PROVIDERS.has(provider as Provider) ? 2070 : 1920
+}
 
 const accountGroups = computed<AccountGroup[]>(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -1752,6 +1770,7 @@ onBeforeUnmount(() => {
         :key="group.provider"
         class="table-card account-group-card"
         :bordered="false"
+        :padding="false"
       >
         <div class="account-group-head">
           <div class="account-group-title">
@@ -1767,20 +1786,22 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <UiDataTable
-          :columns="columns"
+          class="account-table"
+          :columns="columnsForProvider(group.provider)"
           :data="group.accounts"
           :loading="loading"
           selectable
           v-model:checked-row-keys="selectedAccountIds"
           :row-key="accountRowKey"
           :bordered="false"
-          :scroll-x="1880"
+          :scroll-x="tableScrollWidth(group.provider)"
         />
       </UiCard>
     </div>
 
-    <UiCard v-else class="table-card" :bordered="false">
+    <UiCard v-else class="table-card account-table-shell" :bordered="false" :padding="false">
       <UiDataTable
+        class="account-table"
         :columns="columns"
         :data="accounts"
         :loading="loading"
@@ -1788,7 +1809,7 @@ onBeforeUnmount(() => {
         v-model:checked-row-keys="selectedAccountIds"
         :row-key="accountRowKey"
         :bordered="false"
-        :scroll-x="2020"
+        :scroll-x="2070"
       />
     </UiCard>
 
@@ -2277,6 +2298,7 @@ onBeforeUnmount(() => {
 
 .account-group-card {
   overflow: hidden;
+  border-radius: 8px;
 }
 
 .account-group-head {
@@ -2284,7 +2306,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 2px 4px 12px;
+  padding: 12px 14px 10px;
 }
 
 .account-group-title {
@@ -2613,6 +2635,29 @@ onBeforeUnmount(() => {
 
 :deep(.group-select) {
   min-width: 210px;
+}
+
+:deep(.account-table) {
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+:deep(.account-table .data-table th) {
+  padding: 8px 12px;
+}
+
+:deep(.account-table .data-table td) {
+  padding: 7px 12px;
+}
+
+.account-table-shell {
+  border-radius: 8px;
+}
+
+.account-table-shell :deep(.account-table) {
+  border-top: 0;
 }
 
 .groups-manager {

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   acquireSlot,
   checkRateLimit,
+  checkWindowLimit,
   currentConcurrency,
   releaseSlot,
   resetLimits,
@@ -34,6 +35,30 @@ describe('checkRateLimit', () => {
     expect(await checkRateLimit('a', 1, 0)).toBe(true)
     expect(await checkRateLimit('b', 1, 0)).toBe(true)
     expect(await checkRateLimit('a', 1, 1)).toBe(false)
+  })
+})
+
+describe('checkWindowLimit', () => {
+  it('supports independent windows and returns an exact retry delay', async () => {
+    expect(await checkWindowLimit('k', 1, 10_000, 1_000)).toEqual({
+      allowed: true,
+      retryAfterMs: 0,
+    })
+    expect(await checkWindowLimit('k', 1, 10_000, 4_000)).toEqual({
+      allowed: false,
+      retryAfterMs: 7_000,
+    })
+    expect(await checkWindowLimit('k', 1, 20_000, 4_000)).toEqual({
+      allowed: true,
+      retryAfterMs: 0,
+    })
+  })
+
+  it('does not count blocked attempts and releases on the sliding boundary', async () => {
+    await checkWindowLimit('k', 1, 1_000, 0)
+    expect((await checkWindowLimit('k', 1, 1_000, 500)).allowed).toBe(false)
+    expect((await checkWindowLimit('k', 1, 1_000, 900)).allowed).toBe(false)
+    expect((await checkWindowLimit('k', 1, 1_000, 1_001)).allowed).toBe(true)
   })
 })
 

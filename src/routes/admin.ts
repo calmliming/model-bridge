@@ -18,6 +18,7 @@ import {
   setAccountConcurrencyLimit,
   setAccountGroups,
   setAccountNotes,
+  setAccountProxyUrl,
   setAccountStatus,
   setAccountWeight,
   updateAccounts,
@@ -34,9 +35,11 @@ import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
 import {
   getOpenAiSchedulingStrategy,
+  getPanelRateLimitSettings,
   getQuotaAutopausePercent,
   isRegistrationEnabled,
   setOpenAiSchedulingStrategy,
+  setPanelRateLimitSettings,
   setQuotaAutopausePercent,
   setRegistrationEnabled,
 } from '../db/settings'
@@ -79,6 +82,8 @@ import {
   UpdaterError,
 } from '../system/updater'
 import { getSystemVersionInfo } from '../system/version'
+import { assertSafeUpstreamUrl } from '../http/urlGuard'
+import { resetPanelRateLimitSettingsCache } from '../middleware/panelRateLimit'
 
 const loginSchema = z.object({
   username: z.string().min(1),
@@ -88,11 +93,21 @@ const loginSchema = z.object({
 
 const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'grok', 'sub2api'])
 
+function safeBaseUrl(value: string): boolean {
+  try {
+    assertSafeUpstreamUrl(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const optionalBaseUrlSchema = z
   .string()
   .trim()
   .url()
   .refine((value) => value.startsWith('https://') || value.startsWith('http://'), 'baseUrl must be http(s)')
+  .refine(safeBaseUrl, 'baseUrl is blocked by upstream URL guard')
   .optional()
 
 const changePasswordSchema = z.object({
@@ -180,6 +195,7 @@ const accountUpdateSchema = z
     notes: z.string().trim().max(1000).nullable().optional(),
     // 0 = disable early auto-pause; 1-100 = own threshold; null = inherit global
     autopausePercent: z.number().int().min(0).max(100).nullable().optional(),
+    proxyUrl: optionalBaseUrlSchema.nullable(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -238,6 +254,9 @@ const updateSettingsSchema = z
     registrationEnabled: z.boolean().optional(),
     quotaAutopausePercent: z.number().int().min(1).max(100).optional(),
     openaiSchedulingStrategy: z.enum(['weighted_lru', 'prefer_soonest_reset']).optional(),
+    panelAuthenticatedRateLimit: z.number().int().positive().max(100_000).optional(),
+    panelPublicRateLimit: z.number().int().positive().max(100_000).optional(),
+    panelWriteRateLimit: z.number().int().positive().max(100_000).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -343,6 +362,11 @@ const recentLogsQuerySchema = paginationQuerySchema.extend({
   ),
   model: optionalTrimmedQuery(160),
   key: optionalTrimmedQuery(120),
+  status: z.enum(['success', 'error']).optional(),
+  modelMismatch: z.preprocess(
+    (value) => value === 'true' ? true : value === 'false' ? false : value,
+    z.boolean().optional(),
+  ),
 })
 
 const paymentOrdersQuerySchema = paginationQuerySchema.extend({
@@ -501,6 +525,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   // ── Platform settings ───────────────────────────────────
   app.get('/api/admin/settings', { preHandler: requireAdmin }, async () => {
+    const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
       turnstileEnabled: turnstileEnabled(),
@@ -508,6 +533,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
       quotaAutopausePercent: await getQuotaAutopausePercent(),
       openaiSchedulingStrategy: await getOpenAiSchedulingStrategy(),
+      panelAuthenticatedRateLimit: panelLimits.authenticated,
+      panelPublicRateLimit: panelLimits.public,
+      panelWriteRateLimit: panelLimits.write,
     }
   })
 
@@ -525,6 +553,13 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (body.data.openaiSchedulingStrategy !== undefined) {
       await setOpenAiSchedulingStrategy(body.data.openaiSchedulingStrategy)
     }
+    await setPanelRateLimitSettings({
+      authenticated: body.data.panelAuthenticatedRateLimit,
+      public: body.data.panelPublicRateLimit,
+      write: body.data.panelWriteRateLimit,
+    })
+    resetPanelRateLimitSettingsCache()
+    const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
       turnstileEnabled: turnstileEnabled(),
@@ -532,6 +567,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
       quotaAutopausePercent: await getQuotaAutopausePercent(),
       openaiSchedulingStrategy: await getOpenAiSchedulingStrategy(),
+      panelAuthenticatedRateLimit: panelLimits.authenticated,
+      panelPublicRateLimit: panelLimits.public,
+      panelWriteRateLimit: panelLimits.write,
     }
   })
 
@@ -1337,6 +1375,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (body.data.autopausePercent !== undefined) {
         await setAccountAutopause(request.params.id, body.data.autopausePercent)
       }
+      if (body.data.proxyUrl !== undefined) {
+        await setAccountProxyUrl(request.params.id, body.data.proxyUrl ?? null)
+      }
       return { ok: true }
     },
   )
@@ -1437,7 +1478,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   })
 
   // Dashboard recent calls
-  app.get<{ Querystring: { page?: string; pageSize?: string; provider?: string; model?: string; key?: string } }>(
+  app.get<{ Querystring: { page?: string; pageSize?: string; provider?: string; model?: string; key?: string; status?: string; modelMismatch?: string } }>(
     '/api/admin/overview/recent-logs',
     { preHandler: requireAdmin },
     async (request, reply) => {
@@ -1449,6 +1490,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         provider: query.data.provider,
         model: query.data.model,
         key: query.data.key,
+        status: query.data.status,
+        modelMismatch: query.data.modelMismatch,
       })
     },
   )

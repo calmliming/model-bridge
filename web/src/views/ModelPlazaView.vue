@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMessage } from '../composables/useMessage'
 import {
   CATEGORIES,
   MODEL_CATALOG,
   PROVIDERS,
+  resolveModelPrice,
   type PlazaModel,
+  type ResolvedModelPrice,
   type ProviderId,
 } from '../catalog/modelCatalog'
 
@@ -15,6 +17,18 @@ const search = ref('')
 const activeCategory = ref<string>('all')
 const activeProvider = ref<'all' | ProviderId>('all')
 const selected = ref<PlazaModel | null>(null)
+const priceClock = ref(Date.now())
+let priceClockTimer: ReturnType<typeof setInterval> | null = null
+
+onMounted(() => {
+  priceClockTimer = setInterval(() => {
+    priceClock.value = Date.now()
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (priceClockTimer) clearInterval(priceClockTimer)
+})
 
 const providerList = Object.values(PROVIDERS)
 
@@ -39,7 +53,18 @@ function providerCount(id: ProviderId): number {
 }
 
 function formatPrice(value: number): string {
-  return value < 1 ? `$${value.toFixed(2)}` : `$${value % 1 === 0 ? value : value.toFixed(2)}`
+  const digits = value < 0.01 ? 6 : value < 1 ? 3 : 2
+  return `$${value.toFixed(digits).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1')}`
+}
+
+function currentPrice(model: PlazaModel): ResolvedModelPrice {
+  return resolveModelPrice(model, priceClock.value)
+}
+
+function pricePeriodLabel(period: ResolvedModelPrice['period']): string {
+  if (period === 'peak') return '高峰'
+  if (period === 'off-peak') return '低峰'
+  return ''
 }
 
 function badgeLabel(badge: PlazaModel['badge']): string {
@@ -224,10 +249,13 @@ function openDetail(model: PlazaModel) {
           </span>
           <span class="text-[11px] text-gray-400 dark:text-dark-400">
             输入
-            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(model.inputPrice) }}</strong>
+            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(currentPrice(model).inputPrice) }}</strong>
             / 输出
-            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(model.outputPrice) }}</strong>
+            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(currentPrice(model).outputPrice) }}</strong>
             <span class="text-gray-400">/1M</span>
+            <span v-if="currentPrice(model).period" class="ml-1 text-primary-500">
+              {{ pricePeriodLabel(currentPrice(model).period) }}
+            </span>
           </span>
         </div>
       </button>
@@ -287,18 +315,28 @@ function openDetail(model: PlazaModel) {
           </UiTag>
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
+        <div
+          class="grid grid-cols-2 gap-3"
+          :class="currentPrice(selected).cacheReadPrice == null ? 'sm:grid-cols-3' : 'sm:grid-cols-4'"
+        >
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
             <div class="text-[11px] text-gray-400 dark:text-dark-400">上下文窗口</div>
             <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ selected.context }}</div>
           </div>
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
-            <div class="text-[11px] text-gray-400 dark:text-dark-400">输入价格 /1M</div>
-            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(selected.inputPrice) }}</div>
+            <div class="text-[11px] text-gray-400 dark:text-dark-400">
+              输入价格 /1M
+              <span v-if="currentPrice(selected).period">· {{ pricePeriodLabel(currentPrice(selected).period) }}</span>
+            </div>
+            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).inputPrice) }}</div>
+          </div>
+          <div v-if="currentPrice(selected).cacheReadPrice != null" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+            <div class="text-[11px] text-gray-400 dark:text-dark-400">缓存命中 /1M</div>
+            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).cacheReadPrice ?? 0) }}</div>
           </div>
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
             <div class="text-[11px] text-gray-400 dark:text-dark-400">输出价格 /1M</div>
-            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(selected.outputPrice) }}</div>
+            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).outputPrice) }}</div>
           </div>
         </div>
 

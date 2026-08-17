@@ -202,11 +202,18 @@ export async function initDb(): Promise<void> {
       image_model TEXT,
       cost DOUBLE PRECISION NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'success',
+      error_code TEXT,
+      error_message TEXT,
+      upstream_status BIGINT,
+      attempt_count BIGINT NOT NULL DEFAULT 1,
+      upstream_model TEXT,
+      model_mismatch BOOLEAN NOT NULL DEFAULT FALSE,
       latency_ms BIGINT,
       first_token_ms BIGINT
     );
     CREATE INDEX IF NOT EXISTS idx_usage_logs_ts ON usage_logs (ts);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_api_key ON usage_logs (api_key_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_status_ts ON usage_logs (status, ts DESC);
 
     CREATE TABLE IF NOT EXISTS model_pricing (
       id TEXT PRIMARY KEY,
@@ -262,9 +269,16 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_count BIGINT NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_size TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS image_model TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_code TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS error_message TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS upstream_status BIGINT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS attempt_count BIGINT NOT NULL DEFAULT 1;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS upstream_model TEXT;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS model_mismatch BOOLEAN NOT NULL DEFAULT FALSE;`)
   await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_input_price DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_output_price DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key_hash ON usage_logs (session_key_hash);`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_status_ts ON usage_logs (status, ts DESC);`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (
     id TEXT PRIMARY KEY,

@@ -1,6 +1,10 @@
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
+// Sub2API is a relay-to-relay gateway that may route requests through its own
+// backend pool. Stream responses can take longer than the default 10s connect
+// timeout, especially when upstream models are processing large contexts.
+const SUB2API_TIMEOUT_MS = 60_000
 
 export function normalizeSub2ApiBaseUrl(raw: string | null | undefined): string {
   const base = raw?.trim().replace(/\/+$/, '')
@@ -42,7 +46,7 @@ export function relaySub2ApiMessages(
       'anthropic-version': DEFAULT_ANTHROPIC_VERSION,
     },
     body: JSON.stringify(body),
-  })
+  }, SUB2API_TIMEOUT_MS)
 }
 
 export function relaySub2ApiChatCompletions(
@@ -66,7 +70,7 @@ export function relaySub2ApiChatCompletions(
       upstreamBody.stream === true ? 'text/event-stream' : 'application/json',
     ),
     body: JSON.stringify(upstreamBody),
-  })
+  }, SUB2API_TIMEOUT_MS)
 }
 
 export function relaySub2ApiResponses(
@@ -79,5 +83,5 @@ export function relaySub2ApiResponses(
     method: 'POST',
     headers: jsonHeaders(apiKey, 'text/event-stream'),
     body: JSON.stringify(upstreamBody),
-  })
+  }, SUB2API_TIMEOUT_MS)
 }

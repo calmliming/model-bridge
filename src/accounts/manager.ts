@@ -18,6 +18,7 @@ import {
   refreshFailureStatus,
   type AccountReauthState,
 } from './refreshErrors'
+import { assertSafeUpstreamEgress, assertSafeUpstreamUrl } from '../http/urlGuard'
 
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
@@ -46,6 +47,7 @@ export interface AccountUpdatePatch {
   groupIds?: string[]
   notes?: string | null
   autopausePercent?: number | null
+  proxyUrl?: string | null
 }
 
 export interface AccountBatchResult {
@@ -95,6 +97,9 @@ function decryptAccountSecret(value: string): string {
 /** Stores a new upstream account with its OAuth tokens encrypted at rest. */
 export async function createAccount(input: CreateAccountInput): Promise<{ id: string }> {
   const id = randomBytes(12).toString('hex')
+  const proxyUrl = input.proxyUrl?.trim()
+    ? assertSafeUpstreamUrl(input.proxyUrl).toString().replace(/\/+$/, '')
+    : null
   // Merge provider metadata fetched separately (e.g. Gemini project) with any
   // non-secret identity the token exchange derived (e.g. OpenAI id_token claims).
   const metadata = mergeMetadata(input.metadata, input.tokens.metadata)
@@ -107,7 +112,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
       tokenExpiresAt: input.tokens.expiresAt,
       status: 'active',
-      proxyUrl: input.proxyUrl?.trim().replace(/\/+$/, '') || null,
+      proxyUrl,
       concurrencyLimit: normalizeConcurrencyLimit(input.concurrencyLimit),
       notes: input.notes?.trim() || null,
       metadata,
@@ -173,6 +178,27 @@ export async function listAccounts() {
   })))
 }
 
+/**
+ * Audits legacy custom URLs at startup. Invalid rows are not rewritten; the
+ * account id is logged so operators can explicitly allow or repair it.
+ */
+export async function warnUnsafeStoredUpstreamUrls(): Promise<void> {
+  const rows = await db
+    .select({ id: accounts.id, proxyUrl: accounts.proxyUrl })
+    .from(accounts)
+    .where(sql`${accounts.proxyUrl} IS NOT NULL`)
+  await Promise.all(rows.map(async ({ id, proxyUrl }) => {
+    if (!proxyUrl) return
+    try {
+      await assertSafeUpstreamEgress(proxyUrl)
+    } catch (error) {
+      console.warn(
+        `[url-guard] account ${id} has a blocked proxy_url: ${error instanceof Error ? error.message : 'unsafe URL'}`,
+      )
+    }
+  }))
+}
+
 /** Replaces the set of groups an account belongs to (null/empty = default pool). */
 export async function setAccountGroups(id: string, groupIds: string[]): Promise<void> {
   await setAccountGroupMembers(id, groupIds)
@@ -197,6 +223,7 @@ async function applyAccountPatch(id: string, patch: AccountUpdatePatch): Promise
   if (patch.groupIds !== undefined) await setAccountGroups(id, patch.groupIds)
   if (patch.notes !== undefined) await setAccountNotes(id, patch.notes)
   if (patch.autopausePercent !== undefined) await setAccountAutopause(id, patch.autopausePercent)
+  if (patch.proxyUrl !== undefined) await setAccountProxyUrl(id, patch.proxyUrl)
 }
 
 function uniqueIds(ids: string[]): string[] {
@@ -309,6 +336,14 @@ export async function setAccountNotes(id: string, notes: string | null): Promise
   await db.update(accounts)
     .set({ notes: notes?.trim() || null })
     .where(eq(accounts.id, id))
+}
+
+/** Updates the optional custom upstream base URL after applying the same guard as account creation. */
+export async function setAccountProxyUrl(id: string, proxyUrl: string | null): Promise<void> {
+  const normalized = proxyUrl?.trim()
+    ? assertSafeUpstreamUrl(proxyUrl).toString().replace(/\/+$/, '')
+    : null
+  await db.update(accounts).set({ proxyUrl: normalized }).where(eq(accounts.id, id))
 }
 
 /** Updates the scheduler priority. Higher weight accounts are tried first. */

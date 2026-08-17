@@ -12,6 +12,8 @@ interface UsageLog {
   provider: string
   model: string | null
   status: string
+  errorCategory: string | null
+  modelMismatch: boolean
   latencyMs: number | null
   inputTokens: number
   outputTokens: number
@@ -43,6 +45,7 @@ const walletRows = ref<WalletTransaction[]>([])
 // converted to epoch-ms range when calling the API.
 const dateFrom = ref<string>('')
 const dateEnd = ref<string>('')
+const failureOnly = ref(false)
 
 const datePresets = [
   { label: '全部', value: null as null | [string, string] },
@@ -85,7 +88,7 @@ function applyPreset(preset: (typeof datePresets)[number]) {
 }
 
 // Reload when date range changes
-watch([dateFrom, dateEnd], () => {
+watch([dateFrom, dateEnd, failureOnly], () => {
   loadUsage()
 })
 
@@ -128,6 +131,7 @@ async function loadUsage() {
     const params: Record<string, unknown> = { pageSize: 100 }
     if (dateFrom.value) params.startDate = toStartOfDayMs(dateFrom.value)
     if (dateEnd.value) params.endDate = toEndOfDayMs(dateEnd.value)
+    if (failureOnly.value) params.status = 'error'
     const usageRes = await api.get('/users/usage', { params })
     usageRows.value = usageRes.data.logs
   } catch (e) {
@@ -161,7 +165,16 @@ const usageColumns: TableColumn<UsageLog>[] = [
   { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
   { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
   { title: '延迟', key: 'latencyMs', width: 90, render: (row) => row.latencyMs == null ? '—' : `${row.latencyMs}ms` },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
+  {
+    title: '状态',
+    key: 'status',
+    minWidth: 130,
+    render: (row) => h('div', { class: 'status-cell' }, [
+      h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }),
+      row.errorCategory ? h('span', null, row.errorCategory) : null,
+      row.modelMismatch ? h(UiTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '模型异常' }) : null,
+    ]),
+  },
 ]
 
 const walletColumns: TableColumn<WalletTransaction>[] = [
@@ -192,6 +205,7 @@ onMounted(load)
           </button>
         </div>
         <div class="filter-dates">
+          <button type="button" class="preset-btn" :class="{ active: failureOnly }" @click="failureOnly = !failureOnly">仅看失败</button>
           <input type="date" v-model="dateFrom" class="date-input" title="开始日期" />
           <span class="date-sep">—</span>
           <input type="date" v-model="dateEnd" class="date-input" title="结束日期" />
@@ -309,5 +323,13 @@ onMounted(load)
 :deep(.danger) {
   color: #dc2626;
   font-weight: 700;
+}
+
+:deep(.status-cell) {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+  color: #dc2626;
+  font-size: 12px;
 }
 </style>

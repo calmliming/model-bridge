@@ -9,7 +9,7 @@ import { incrementSubscriptionUsage } from '../subscriptions/manager'
 export interface UsageRecord {
   apiKeyId: string
   userId?: string | null
-  accountId: string
+  accountId: string | null
   provider: string
   model: string
   requestInput?: string | null
@@ -19,6 +19,13 @@ export interface UsageRecord {
   status: string
   latencyMs: number
   firstTokenMs?: number | null
+  errorCode?: string | null
+  /** Must already be redacted by the caller; recorder also bounds its length. */
+  errorMessage?: string | null
+  upstreamStatus?: number | null
+  attemptCount?: number
+  upstreamModel?: string | null
+  modelMismatch?: boolean
   /** Group billing markup applied to the base list-price cost. Defaults to 1. */
   multiplier?: number
   /** Which budget this request bills to (decided at auth time). Defaults to balance. */
@@ -46,6 +53,13 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const billTo: 'subscription' | 'balance' =
       record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
     const id = randomBytes(12).toString('hex')
+    const errorCode = record.errorCode?.trim().slice(0, 200) || null
+    const errorMessage = record.errorMessage?.trim().slice(0, 2_000) || null
+    const upstreamStatus = Number.isInteger(record.upstreamStatus) ? record.upstreamStatus! : null
+    const attemptCount = Number.isFinite(record.attemptCount)
+      ? Math.max(1, Math.trunc(record.attemptCount!))
+      : 1
+    const upstreamModel = record.upstreamModel?.trim().slice(0, 300) || null
     client = await pool.connect()
     await client.query('BEGIN')
     await client.query(
@@ -54,9 +68,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
           session_key_hash, session_source,
            input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
            image_input_tokens, image_output_tokens, image_count, image_size, image_model,
-           cost, base_cost, bill_to, status, latency_ms, first_token_ms)
+           cost, base_cost, bill_to, status, error_code, error_message, upstream_status,
+           attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-               $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+               $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+               $27, $28, $29, $30, $31)`,
       [
         id,
         record.apiKeyId,
@@ -81,6 +97,12 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         baseCost,
         billTo,
         record.status,
+        errorCode,
+        errorMessage,
+        upstreamStatus,
+        attemptCount,
+        upstreamModel,
+        record.modelMismatch === true,
         record.latencyMs,
         record.firstTokenMs ?? null,
       ],

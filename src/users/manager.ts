@@ -48,6 +48,8 @@ export interface UserUsageLog {
   provider: string
   model: string | null
   status: string
+  errorCategory: string | null
+  modelMismatch: boolean
   latencyMs: number | null
   inputTokens: number
   outputTokens: number
@@ -117,6 +119,8 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     provider: row.provider as string,
     model: (row.model as string | null) ?? null,
     status: row.status as string,
+    errorCategory: normalizeUserErrorCategory(row.error_code, row.upstream_status),
+    modelMismatch: row.model_mismatch === true,
     latencyMs: row.latency_ms == null ? null : Number(row.latency_ms),
     inputTokens: Number(row.input_tokens),
     outputTokens: Number(row.output_tokens),
@@ -132,6 +136,17 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     apiKeyName: (row.api_key_name as string | null) ?? null,
     requestInput: (row.request_input as string | null) ?? null,
   }
+}
+
+function normalizeUserErrorCategory(codeValue: unknown, statusValue: unknown): string | null {
+  const code = typeof codeValue === 'string' ? codeValue.toLowerCase() : ''
+  const status = Number(statusValue)
+  if (status === 429 || code.includes('rate') || code.includes('quota')) return '上游限流'
+  if (status === 401) return '上游认证失败'
+  if (status === 403 || code.includes('policy')) return '请求被拒绝'
+  if (status === 404 || code.includes('model')) return '模型不支持'
+  if (status >= 500) return '上游服务异常'
+  return code || status ? '请求失败' : null
 }
 
 export async function getUserById(id: string): Promise<UserView | null> {
@@ -378,7 +393,7 @@ export async function listUserUsage(
   userId: string,
   page = 1,
   pageSize = 20,
-  opts?: { startDate?: number; endDate?: number },
+  opts?: { startDate?: number; endDate?: number; status?: 'success' | 'error' },
 ): Promise<{ page: number; pageSize: number; total: number; logs: UserUsageLog[] }> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
   const safePageSize = Math.max(1, Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 20)))
@@ -391,11 +406,15 @@ export async function listUserUsage(
   const dateValues: unknown[] = []
   if (startDate != null) {
     dateValues.push(startDate)
-    dateConditions.push(`l.ts >= $${dateValues.length}`)
+    dateConditions.push(`l.ts >= $${dateValues.length + 1}`)
   }
   if (endDate != null) {
     dateValues.push(endDate)
-    dateConditions.push(`l.ts < $${dateValues.length}`)
+    dateConditions.push(`l.ts < $${dateValues.length + 1}`)
+  }
+  if (opts?.status) {
+    dateValues.push(opts.status)
+    dateConditions.push(`l.status = $${dateValues.length + 1}`)
   }
   const dateClause = dateConditions.length > 0 ? `AND ${dateConditions.join(' AND ')}` : ''
 
@@ -409,7 +428,8 @@ export async function listUserUsage(
       countValues,
     ),
     pool.query<Record<string, unknown>>(
-      `SELECT l.id, l.ts, l.provider, l.model, l.status, l.latency_ms,
+      `SELECT l.id, l.ts, l.provider, l.model, l.status, l.error_code,
+              l.upstream_status, l.attempt_count, l.upstream_model, l.model_mismatch, l.latency_ms,
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
               l.image_count, l.image_size, l.image_model, l.cost, l.request_input,

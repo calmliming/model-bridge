@@ -87,6 +87,21 @@ Optional login hardening:
   Do not expose the origin directly to untrusted private-network clients, which
   could otherwise spoof their source IP.
 
+Outbound and dashboard API protection:
+
+- `UPSTREAM_URL_GUARD_ENABLED=true` blocks custom upstream URLs that use a
+  non-HTTP protocol, contain credentials/path traversal, or resolve to loopback,
+  private, link-local, or metadata addresses. This check runs both when an
+  account is saved and immediately before egress.
+- Existing intranet Sub2API gateways must be explicitly listed in
+  `UPSTREAM_HOST_ALLOWLIST` (exact hosts or `*.example.com`). If they use a
+  non-standard port, add it to `UPSTREAM_PORT_ALLOWLIST` as well. Disabling the
+  guard restores legacy behavior but is not recommended.
+- Dashboard APIs use per-IP/public and per-user/admin sliding-window limits.
+  Environment defaults are `PANEL_PUBLIC_RATE_LIMIT=60`,
+  `PANEL_AUTHENTICATED_RATE_LIMIT=300`, and `PANEL_WRITE_RATE_LIMIT=10` per
+  minute; persisted admin settings can override them at runtime.
+
 Stop and view logs:
 
 ```bash

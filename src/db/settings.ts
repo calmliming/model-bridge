@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from './index'
 import { settings } from './schema'
+import { config } from '../config'
 
 /** Reads a value from the key/value settings table. */
 export async function getSetting(key: string): Promise<string | undefined> {
@@ -79,4 +80,47 @@ export async function getOpenAiSchedulingStrategy(): Promise<OpenAiSchedulingStr
 export async function setOpenAiSchedulingStrategy(strategy: OpenAiSchedulingStrategy): Promise<void> {
   const value = isOpenAiSchedulingStrategy(strategy) ? strategy : DEFAULT_OPENAI_SCHEDULING_STRATEGY
   await setSetting(OPENAI_SCHEDULING_STRATEGY_KEY, value)
+}
+
+const PANEL_AUTHENTICATED_RATE_LIMIT_KEY = 'panel_authenticated_rate_limit'
+const PANEL_PUBLIC_RATE_LIMIT_KEY = 'panel_public_rate_limit'
+const PANEL_WRITE_RATE_LIMIT_KEY = 'panel_write_rate_limit'
+
+export interface PanelRateLimitSettings {
+  authenticated: number
+  public: number
+  write: number
+}
+
+function positiveInteger(raw: string | undefined, fallback: number): number {
+  const value = raw == null ? NaN : Number(raw)
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 100_000) : fallback
+}
+
+/** Per-minute panel API thresholds; settings override environment defaults. */
+export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
+  const [authenticated, publicLimit, write] = await Promise.all([
+    getSetting(PANEL_AUTHENTICATED_RATE_LIMIT_KEY),
+    getSetting(PANEL_PUBLIC_RATE_LIMIT_KEY),
+    getSetting(PANEL_WRITE_RATE_LIMIT_KEY),
+  ])
+  return {
+    authenticated: positiveInteger(authenticated, config.PANEL_AUTHENTICATED_RATE_LIMIT),
+    public: positiveInteger(publicLimit, config.PANEL_PUBLIC_RATE_LIMIT),
+    write: positiveInteger(write, config.PANEL_WRITE_RATE_LIMIT),
+  }
+}
+
+export async function setPanelRateLimitSettings(values: Partial<PanelRateLimitSettings>): Promise<void> {
+  const writes: Promise<void>[] = []
+  if (values.authenticated !== undefined) {
+    writes.push(setSetting(PANEL_AUTHENTICATED_RATE_LIMIT_KEY, String(positiveInteger(String(values.authenticated), config.PANEL_AUTHENTICATED_RATE_LIMIT))))
+  }
+  if (values.public !== undefined) {
+    writes.push(setSetting(PANEL_PUBLIC_RATE_LIMIT_KEY, String(positiveInteger(String(values.public), config.PANEL_PUBLIC_RATE_LIMIT))))
+  }
+  if (values.write !== undefined) {
+    writes.push(setSetting(PANEL_WRITE_RATE_LIMIT_KEY, String(positiveInteger(String(values.write), config.PANEL_WRITE_RATE_LIMIT))))
+  }
+  await Promise.all(writes)
 }

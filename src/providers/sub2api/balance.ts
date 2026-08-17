@@ -1,4 +1,6 @@
 import { normalizeSub2ApiBaseUrl } from './relay'
+import { fetchWithConnectTimeout } from '../../http/upstream'
+import { UnsafeUpstreamUrlError } from '../../http/urlGuard'
 
 const BALANCE_TIMEOUT_MS = 15_000
 
@@ -264,42 +266,57 @@ function balanceHeaders(apiKey: string): Record<string, string> {
   }
 }
 
+function queryFailureMessage(error: unknown, endpoint: string): string {
+  if (error instanceof UnsafeUpstreamUrlError) {
+    return `${endpoint} 被上游地址安全策略拦截：${error.message}`
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return `${endpoint} 请求超时（${BALANCE_TIMEOUT_MS / 1000}s）`
+  }
+  const cause = error instanceof Error
+    ? (error as Error & { cause?: { code?: unknown; message?: unknown } }).cause
+    : undefined
+  if (cause?.message === 'unexpected redirect') {
+    return `${endpoint} 返回重定向，请将 Base URL 改为最终 HTTPS 地址`
+  }
+  if (typeof cause?.code === 'string' && /^[A-Z0-9_]+$/.test(cause.code)) {
+    return `${endpoint} 网络请求失败（${cause.code}）`
+  }
+  return `${endpoint} 网络请求失败`
+}
+
 /** Queries the upstream account balance without exposing the API key or raw body. */
 export async function fetchSub2ApiBalance(
   apiKey: string,
   baseUrl: string | null,
-): Promise<Sub2ApiBalanceInfo | null> {
+): Promise<Sub2ApiBalanceInfo> {
   const normalizedBase = normalizeSub2ApiBaseUrl(baseUrl)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), BALANCE_TIMEOUT_MS)
-  try {
-    for (const path of SUB2API_BALANCE_ENDPOINTS) {
-      try {
-        const response = await fetch(`${normalizedBase}${path}`, {
-          method: 'GET',
-          headers: balanceHeaders(apiKey),
-          signal: controller.signal,
-          // Never forward either credential header to a redirect target. A
-          // canonical Base URL is required for this administrative query.
-          redirect: 'error',
-        })
-        if (!response.ok) {
-          if (response.body) await response.body.cancel().catch(() => undefined)
-          continue
-        }
-        const payload: unknown = await response.json()
-        const parsed = parseSub2ApiBalanceResponse(payload, path)
-        if (parsed) return parsed
-      } catch {
-        if (controller.signal.aborted) return null
-        // A deployment may not expose every compatibility endpoint. Continue
-        // without logging response bodies or credentials.
+  let primaryFailure: string | null = null
+  for (const path of SUB2API_BALANCE_ENDPOINTS) {
+    try {
+      const response = await fetchWithConnectTimeout(`${normalizedBase}${path}`, {
+        method: 'GET',
+        headers: balanceHeaders(apiKey),
+        // Never forward either credential header to a redirect target. A
+        // canonical Base URL is required for this administrative query.
+        redirect: 'error',
+      }, BALANCE_TIMEOUT_MS)
+      if (!response.ok) {
+        if (path === '/v1/usage') primaryFailure = `${path} 返回 HTTP ${response.status}`
+        if (response.body) await response.body.cancel().catch(() => undefined)
+        continue
       }
+      const payload: unknown = await response.json()
+      const parsed = parseSub2ApiBalanceResponse(payload, path)
+      if (parsed) return parsed
+      if (path === '/v1/usage') primaryFailure = `${path} 返回了无法识别的余额响应`
+    } catch (error) {
+      if (path === '/v1/usage') primaryFailure = queryFailureMessage(error, path)
+      // A deployment may not expose every compatibility endpoint. Continue
+      // without logging response bodies or credentials.
     }
-    return null
-  } finally {
-    clearTimeout(timer)
   }
+  throw new Error(`Sub2API 余额查询失败：${primaryFailure ?? '上游没有可用的余额接口'}`)
 }
 
 /** Validates the sanitized balance snapshot persisted under account metadata. */

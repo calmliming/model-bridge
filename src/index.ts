@@ -23,6 +23,9 @@ import { initPaymentProviders } from './payments/providers/index'
 import { closeRedis } from './store/redis'
 import { waitForPendingUsage } from './usage/recorder'
 import { TRUSTED_LOCAL_PROXIES } from './http/trustProxy'
+import { warnUnsafeStoredUpstreamUrls } from './accounts/manager'
+import { panelRateLimit } from './middleware/panelRateLimit'
+import { closeUpstreamDispatcher } from './http/upstream'
 
 const SHUTDOWN_TIMEOUT_MS = 30_000
 
@@ -30,6 +33,7 @@ async function main(): Promise<void> {
   await initDb()
   await initPricing()
   await ensureAdmin()
+  await warnUnsafeStoredUpstreamUrls()
 
   // 初始化支付提供商
   initPaymentProviders({
@@ -72,12 +76,14 @@ async function main(): Promise<void> {
     await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob()])
     await closeOauthCallbackServer(oauthCallbackServer)
     await waitForPendingUsage()
+    await closeUpstreamDispatcher()
     await closeRedis()
     await pool.end()
   })
 
   await app.register(fastifyJwt, { secret: config.JWT_SECRET })
   registerSecurityHeaders(app)
+  app.addHook('onRequest', panelRateLimit)
 
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 

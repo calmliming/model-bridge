@@ -51,6 +51,13 @@ interface DashboardRecentLog {
   provider: string
   model: string | null
   status: string
+  errorCode: string | null
+  errorMessage: string | null
+  upstreamStatus: number | null
+  attemptCount: number
+  upstreamModel: string | null
+  modelMismatch: boolean
+  accountId: string | null
   latencyMs: number | null
   firstTokenMs: number | null
   inputTokens: number
@@ -125,6 +132,8 @@ const selectedLog = ref<DashboardRecentLog | null>(null)
 const recentProviderFilter = ref<string | null>(null)
 const recentModelFilter = ref('')
 const recentKeyFilter = ref('')
+const recentFailureOnly = ref(false)
+const recentMismatchOnly = ref(false)
 const RECENT_PAGE_SIZE = 10
 
 const emptyTotals: DashboardOverview['totals'] = {
@@ -251,7 +260,8 @@ const recentProviderOptions = computed(() => {
 })
 
 const hasRecentFilters = computed(
-  () => !!recentProviderFilter.value || !!recentModelFilter.value.trim() || !!recentKeyFilter.value.trim(),
+  () => !!recentProviderFilter.value || !!recentModelFilter.value.trim() || !!recentKeyFilter.value.trim()
+    || recentFailureOnly.value || recentMismatchOnly.value,
 )
 
 const recentEmptyText = computed(() => {
@@ -433,6 +443,8 @@ async function loadRecentLogs() {
     if (recentProviderFilter.value) params.provider = recentProviderFilter.value
     if (recentModelFilter.value.trim()) params.model = recentModelFilter.value.trim()
     if (recentKeyFilter.value.trim()) params.key = recentKeyFilter.value.trim()
+    if (recentFailureOnly.value) params.status = 'error'
+    if (recentMismatchOnly.value) params.modelMismatch = 'true'
     const { data } = await api.get<DashboardRecentLogsPage>('/admin/overview/recent-logs', {
       params,
     })
@@ -457,6 +469,8 @@ function resetRecentFilters() {
   recentProviderFilter.value = null
   recentModelFilter.value = ''
   recentKeyFilter.value = ''
+  recentFailureOnly.value = false
+  recentMismatchOnly.value = false
   applyRecentFilters()
 }
 
@@ -690,6 +704,10 @@ function openRequestInput(row: DashboardRecentLog) {
           <UiButton size="small" type="primary" :loading="recentLoading" @click="applyRecentFilters">查询</UiButton>
           <UiButton size="small" quaternary :disabled="!hasRecentFilters" @click="resetRecentFilters">重置</UiButton>
         </div>
+        <div class="flex flex-wrap items-center gap-2 md:col-span-full">
+          <button type="button" class="px-3 py-1.5 rounded-lg border text-xs font-bold" :class="recentFailureOnly ? 'border-red-500 bg-red-50 text-red-600' : 'border-accent-900/10 bg-white text-accent-900/55'" @click="recentFailureOnly = !recentFailureOnly; applyRecentFilters()">仅看失败</button>
+          <button type="button" class="px-3 py-1.5 rounded-lg border text-xs font-bold" :class="recentMismatchOnly ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-accent-900/10 bg-white text-accent-900/55'" @click="recentMismatchOnly = !recentMismatchOnly; applyRecentFilters()">模型不一致</button>
+        </div>
       </div>
 
       <div v-if="recentLogs.length" class="grid gap-2.5 min-w-0">
@@ -702,6 +720,7 @@ function openRequestInput(row: DashboardRecentLog) {
             <UiTag size="small" :type="logStatusType(row.status)" :bordered="false">
               {{ logStatusLabel(row.status) }}
             </UiTag>
+            <UiTag v-if="row.modelMismatch" size="small" type="warning" :bordered="false">模型异常</UiTag>
           </div>
 
           <div class="grid gap-1 min-w-0 max-xl:col-span-full">
@@ -868,6 +887,18 @@ function openRequestInput(row: DashboardRecentLog) {
       width="min(760px, calc(100vw - 32px))"
       @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
     >
+      <div v-if="selectedLog?.status !== 'success' || selectedLog?.modelMismatch" class="grid grid-cols-2 gap-2 mb-3 text-xs">
+        <div class="grid gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+          <span class="text-red-700/70 font-[650]">失败原因</span>
+          <strong class="font-[780] text-red-800">{{ selectedLog?.errorCode || '未知错误' }} · HTTP {{ selectedLog?.upstreamStatus || '—' }}</strong>
+          <span class="text-red-700">{{ selectedLog?.errorMessage || '未记录错误消息' }}</span>
+        </div>
+        <div class="grid gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <span class="text-amber-700/70 font-[650]">上游审计</span>
+          <strong class="font-[780] text-amber-900">尝试 {{ selectedLog?.attemptCount }} 次 · 账号 {{ selectedLog?.accountId || '—' }}</strong>
+          <span class="text-amber-800">声明模型：{{ selectedLog?.upstreamModel || '未声明' }}</span>
+        </div>
+      </div>
       <div v-if="selectedLog?.sessionKeyHash" class="grid grid-cols-2 gap-2 mb-3 text-xs">
         <div class="grid gap-1 rounded-lg border border-accent-900/10 bg-accent-50 px-3 py-2">
           <span class="text-accent-900/50 font-[650]">会话 Hash</span>

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchSub2ApiBalance,
   parseSub2ApiBalanceResponse,
@@ -12,7 +12,17 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-afterEach(() => vi.unstubAllGlobals())
+const originalHostAllowlist = process.env.UPSTREAM_HOST_ALLOWLIST
+
+beforeEach(() => {
+  process.env.UPSTREAM_HOST_ALLOWLIST = 'upstream.example'
+})
+
+afterEach(() => {
+  if (originalHostAllowlist === undefined) delete process.env.UPSTREAM_HOST_ALLOWLIST
+  else process.env.UPSTREAM_HOST_ALLOWLIST = originalHostAllowlist
+  vi.unstubAllGlobals()
+})
 
 describe('parseSub2ApiBalanceResponse', () => {
   it('parses the official unrestricted wallet response', () => {
@@ -154,6 +164,25 @@ describe('fetchSub2ApiBalance', () => {
       'https://upstream.example/v1/usage',
       'https://upstream.example/api/usage',
     ])
+  })
+
+  it('reports the official endpoint status after all compatibility endpoints fail', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'not authorized' }, 401)))
+
+    await expect(fetchSub2ApiBalance('secret-key', 'https://upstream.example')).rejects.toThrow(
+      'Sub2API 余额查询失败：/v1/usage 返回 HTTP 401',
+    )
+  })
+
+  it('reports a safe network error code without exposing the upstream error body', async () => {
+    const networkError = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('socket failed'), { code: 'ECONNREFUSED' }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => { throw networkError }))
+
+    await expect(fetchSub2ApiBalance('secret-key', 'https://upstream.example')).rejects.toThrow(
+      'Sub2API 余额查询失败：/v1/usage 网络请求失败（ECONNREFUSED）',
+    )
   })
 })
 

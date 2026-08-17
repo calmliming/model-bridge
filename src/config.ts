@@ -69,6 +69,18 @@ const schema = z.object({
   TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),
   TURNSTILE_SECRET_KEY: z.preprocess(blankToUndefined, z.string().optional()),
   SECURITY_HEADERS_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
+  PANEL_AUTHENTICATED_RATE_LIMIT: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().positive().default(300),
+  ),
+  PANEL_PUBLIC_RATE_LIMIT: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().positive().default(60),
+  ),
+  PANEL_WRITE_RATE_LIMIT: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().positive().default(10),
+  ),
   // IANA timezone used to compute "today" boundaries for dashboard stats.
   // Defaults to Asia/Shanghai so daily figures match Beijing time regardless of
   // where the server runs. Unlike some gateways we don't crash on a bad value —

@@ -77,6 +77,19 @@ Docker 部署会同时启动内部 `model-bridge-updater` 服务。登录后台�
   `X-Forwarded-For`；公网直连请求携带的转发头会被忽略。源站不要直接开放给不可信的
   内网客户端，否则对方可能伪造来源 IP。
 
+出站与面板 API 防护：
+
+- `UPSTREAM_URL_GUARD_ENABLED=true` 默认开启。自定义上游 URL 若使用非 HTTP(S)
+  协议、携带凭据或路径穿越片段，或者解析到回环、私网、链路本地、云元数据地址，
+  会在账号保存时和实际出站前分别被拦截。
+- 升级前已配置的内网 Sub2API 网关必须加入 `UPSTREAM_HOST_ALLOWLIST`（支持精确主机
+  或 `*.example.com`）。若使用 80/443 以外端口，还需加入
+  `UPSTREAM_PORT_ALLOWLIST`。关闭 URL Guard 可恢复旧行为，但不建议长期使用。
+- 面板 API 默认按公网 IP 或登录身份应用滑动窗口限流：公开接口每分钟 60 次、
+  已认证接口 300 次、注册/接受邀请/兑换等敏感写操作 10 次。可通过
+  `PANEL_PUBLIC_RATE_LIMIT`、`PANEL_AUTHENTICATED_RATE_LIMIT`、
+  `PANEL_WRITE_RATE_LIMIT` 调整环境默认值，后台设置值可运行时覆盖。
+
 停止 / 查看日志：
 
 ```bash
