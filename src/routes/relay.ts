@@ -1530,6 +1530,27 @@ async function runRelayLoop(
 // silent, short enough to stay under typical reverse-proxy idle timeouts (~60s).
 const STREAM_HEARTBEAT_MS = 15_000
 
+/**
+ * Starts an SSE response without allowing intermediary proxies to coalesce
+ * events. Claude Code derives live OTPS (tokens/s) from event arrival times,
+ * so buffered chunks make the metric unavailable even when final usage is
+ * otherwise complete.
+ */
+export function startStreamingResponse(
+  raw: ServerResponse,
+  status: number,
+  contentType = 'text/event-stream',
+): void {
+  raw.socket?.setNoDelay(true)
+  raw.writeHead(status, {
+    'content-type': contentType,
+    'cache-control': 'no-cache, no-transform',
+    connection: 'keep-alive',
+    'x-accel-buffering': 'no',
+  })
+  raw.flushHeaders()
+}
+
 /** True when a content-type is present and is not an SSE stream. */
 function isNonStreamContentType(contentType: string | null): boolean {
   return !!contentType && !contentType.includes('text/event-stream')
@@ -1580,11 +1601,7 @@ async function sendStreaming(
       )
       message = redactUrls(message)
     }
-    raw.writeHead(200, {
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-    })
+    startStreamingResponse(raw, 200)
     for (const event of buildResponsesErrorEvents(message, code)) writeSseData(raw, event)
     raw.end()
     await recordUsage({
@@ -1617,11 +1634,7 @@ async function sendStreaming(
     isNonStreamContentType(upstream.headers.get('content-type'))
   ) {
     const bodyText = await upstream.text().catch(() => '')
-    raw.writeHead(200, {
-      'content-type': 'text/event-stream',
-      'cache-control': 'no-cache',
-      connection: 'keep-alive',
-    })
+    startStreamingResponse(raw, 200)
     const jsonParser = provider.createStreamParser()
     const jsonState = newResponsesStreamState()
     const responseObject = parseResponseObject(bodyText)
@@ -1659,14 +1672,13 @@ async function sendStreaming(
   }
 
   const useStreamTransform = provider.createStreamTransform && upstream.ok
-  raw.writeHead(upstream.status, {
-    'content-type':
-      responsesProtocol || useStreamTransform
-        ? 'text/event-stream'
-        : (upstream.headers.get('content-type') ?? 'text/event-stream'),
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
-  })
+  startStreamingResponse(
+    raw,
+    upstream.status,
+    responsesProtocol || useStreamTransform
+      ? 'text/event-stream'
+      : (upstream.headers.get('content-type') ?? 'text/event-stream'),
+  )
   // SSE output means we can safely inject keepalive comment frames while the
   // upstream is silent (e.g. Codex processing a remote-compact) so idle-timeout
   // proxies don't drop the connection. Raw non-SSE passthrough can't take them.

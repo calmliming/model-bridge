@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import type { ServerResponse } from 'node:http'
+import { describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 import {
   classifyUpstreamFailure,
@@ -8,7 +9,48 @@ import {
   redactUrls,
   registerRelayRoutes,
   responsesStreamStatus,
+  startStreamingResponse,
 } from './relay'
+
+describe('startStreamingResponse', () => {
+  it('disables intermediary buffering and flushes SSE headers immediately', () => {
+    const setNoDelay = vi.fn()
+    const writeHead = vi.fn()
+    const flushHeaders = vi.fn()
+    const raw = {
+      socket: { setNoDelay },
+      writeHead,
+      flushHeaders,
+    } as unknown as ServerResponse
+
+    startStreamingResponse(raw, 200)
+
+    expect(setNoDelay).toHaveBeenCalledWith(true)
+    expect(writeHead).toHaveBeenCalledWith(200, {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    })
+    expect(flushHeaders).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a provider-specific streaming content type', () => {
+    const writeHead = vi.fn()
+    const raw = {
+      socket: null,
+      writeHead,
+      flushHeaders: vi.fn(),
+    } as unknown as ServerResponse
+
+    startStreamingResponse(raw, 206, 'text/event-stream; charset=utf-8')
+
+    expect(writeHead).toHaveBeenCalledWith(
+      206,
+      expect.objectContaining({ 'content-type': 'text/event-stream; charset=utf-8' }),
+    )
+  })
+})
 
 describe('OpenAI Images route registration', () => {
   it('registers both clean and provider-prefixed endpoints plus multipart parsing', async () => {
