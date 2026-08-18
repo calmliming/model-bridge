@@ -1643,15 +1643,23 @@ export function startStreamingResponse(
   raw: ServerResponse,
   status: number,
   contentType = 'text/event-stream',
-): void {
-  raw.socket?.setNoDelay(true)
-  raw.writeHead(status, {
-    'content-type': contentType,
-    'cache-control': 'no-cache, no-transform',
-    connection: 'keep-alive',
-    'x-accel-buffering': 'no',
-  })
-  raw.flushHeaders()
+): boolean {
+  if (raw.destroyed || raw.writableEnded) return false
+  try {
+    raw.socket?.setNoDelay(true)
+    raw.writeHead(status, {
+      'content-type': contentType,
+      'cache-control': 'no-cache, no-transform',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    })
+    raw.flushHeaders()
+    return true
+  } catch {
+    // A client can close between the state check and header write. Callers
+    // that still need upstream usage can continue draining the body.
+    return false
+  }
 }
 
 /** True when a content-type is present and is not an SSE stream. */
@@ -1787,7 +1795,7 @@ async function sendStreaming(
   }
 
   const useStreamTransform = provider.createStreamTransform && upstream.ok
-  startStreamingResponse(
+  let downstreamClosed = !startStreamingResponse(
     raw,
     upstream.status,
     responsesProtocol || useStreamTransform
@@ -1824,12 +1832,13 @@ async function sendStreaming(
     let lastActivity = Date.now()
     const heartbeat = sseOutput
       ? setInterval(() => {
-          if (Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
+          if (!downstreamClosed && Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
             try {
               raw.write(': keepalive\n\n')
               lastActivity = Date.now()
             } catch {
-              // downstream gone; the read loop will settle it
+              // Downstream gone; continue draining the upstream below.
+              downstreamClosed = true
             }
           }
         }, STREAM_HEARTBEAT_MS)
@@ -1849,8 +1858,8 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            emitFromStreamTransform(
-              raw,
+            const wrote = emitFromStreamTransform(
+              downstreamClosed ? null : raw,
               buffer.slice(0, sep),
               streamTransform,
               parser,
@@ -1859,19 +1868,36 @@ async function sendStreaming(
               streamState,
               modelAudit,
             )
+            if (!wrote) downstreamClosed = true
             buffer = buffer.slice(sep + 2)
           }
         } else if (transform) {
           // Event-buffered: only emit complete events, rewriting payloads.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
-            rewriteAndEmit(raw, buffer.slice(0, sep), transform, parser, markFirstToken, modelAudit)
+            const wrote = rewriteAndEmit(
+              downstreamClosed ? null : raw,
+              buffer.slice(0, sep),
+              transform,
+              parser,
+              markFirstToken,
+              modelAudit,
+            )
+            if (!wrote) downstreamClosed = true
             buffer = buffer.slice(sep + 2)
           }
         } else {
           // Raw passthrough; side-channel parse for usage.
           if (value.byteLength > 0) markFirstToken()
-          raw.write(Buffer.from(value))
+          if (!downstreamClosed) {
+            try {
+              raw.write(Buffer.from(value))
+            } catch {
+              // Do not stop reading: the upstream may still send the usage
+              // event after the client has disconnected.
+              downstreamClosed = true
+            }
+          }
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
             feedSseBlock(buffer.slice(0, sep), parser, streamState, modelAudit)
@@ -1891,7 +1917,7 @@ async function sendStreaming(
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
       noteResponsesTerminal(event, streamState)
       markFirstToken()
-      writeSseData(raw, event)
+      if (!downstreamClosed && !writeSseData(raw, event)) downstreamClosed = true
     }
   }
   // Stream ended without a terminal event (upstream dropped mid-response) —
@@ -1902,10 +1928,17 @@ async function sendStreaming(
       'Upstream stream closed before completion.',
       'upstream_stream_closed',
     )) {
-      writeSseData(raw, event)
+      if (!downstreamClosed && !writeSseData(raw, event)) downstreamClosed = true
     }
   }
-  raw.end()
+  if (!downstreamClosed && !raw.writableEnded) {
+    try {
+      raw.end()
+    } catch {
+      // The response may close while the upstream is being drained.
+      downstreamClosed = true
+    }
+  }
 
   const streamStatus = streamReadFailed
     ? 'error'
@@ -2265,7 +2298,7 @@ function feedSseBlock(
  * has its own completion signal). Terminal events are recorded into `state`.
  */
 function emitFromStreamTransform(
-  raw: ServerResponse,
+  raw: ServerResponse | null,
   block: string,
   xform: StreamTransform,
   parser: { feed(event: unknown): void },
@@ -2273,7 +2306,7 @@ function emitFromStreamTransform(
   onEmit: (() => void) | undefined,
   state: ResponsesStreamState,
   modelAudit?: ModelAuditState,
-): void {
+): boolean {
   const dataLines: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -2281,27 +2314,34 @@ function emitFromStreamTransform(
     dataLines.push(trimmed.slice(5).trimStart())
   }
   const payload = dataLines.join('\n').trim()
-  if (!payload || payload === '[DONE]') return
+  if (!payload || payload === '[DONE]') return true
   let parsed: unknown
   try {
     parsed = JSON.parse(payload)
   } catch {
-    return
+    return true
   }
   noteDeclaredModel(parsed, modelAudit)
   if (parseUpstream) parser.feed(parsed)
+  let wrote = true
   for (const event of xform.transform(parsed)) {
     if (!parseUpstream && event !== '[DONE]') parser.feed(event)
     noteResponsesTerminal(event, state)
     onEmit?.()
-    writeSseData(raw, event)
+    if (!writeSseData(raw, event)) wrote = false
   }
+  return wrote
 }
 
-function writeSseData(raw: ServerResponse, event: unknown): void {
+function writeSseData(raw: ServerResponse | null, event: unknown): boolean {
+  if (!raw) return true
   if (event === '[DONE]') {
-    raw.write('data: [DONE]\n\n')
-    return
+    try {
+      raw.write('data: [DONE]\n\n')
+      return true
+    } catch {
+      return false
+    }
   }
   if (
     event &&
@@ -2309,24 +2349,33 @@ function writeSseData(raw: ServerResponse, event: unknown): void {
     (event as { __modelBridgeSseEvent?: unknown }).__modelBridgeSseEvent === true
   ) {
     const named = event as { event?: unknown; data?: unknown }
-    if (typeof named.event === 'string' && named.event.trim()) {
-      raw.write(`event: ${named.event.trim()}\n`)
+    try {
+      if (typeof named.event === 'string' && named.event.trim()) {
+        raw.write(`event: ${named.event.trim()}\n`)
+      }
+      raw.write(`data: ${JSON.stringify(named.data)}\n\n`)
+      return true
+    } catch {
+      return false
     }
-    raw.write(`data: ${JSON.stringify(named.data)}\n\n`)
-    return
   }
-  raw.write(`data: ${JSON.stringify(event)}\n\n`)
+  try {
+    raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Transform mode: parses each event, applies transform, re-emits SSE. */
 function rewriteAndEmit(
-  raw: ServerResponse,
+  raw: ServerResponse | null,
   block: string,
   transform: (data: unknown) => unknown,
   parser: { feed(event: unknown): void },
   onEmit?: () => void,
   modelAudit?: ModelAuditState,
-): void {
+): boolean {
   const out: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -2350,5 +2399,11 @@ function rewriteAndEmit(
     }
   }
   if (out.length > 0) onEmit?.()
-  raw.write(out.join('\n') + '\n\n')
+  if (!raw) return true
+  try {
+    raw.write(out.join('\n') + '\n\n')
+    return true
+  } catch {
+    return false
+  }
 }

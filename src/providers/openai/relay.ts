@@ -52,8 +52,22 @@ function normalizeResponseTools(body: Record<string, unknown>): void {
     if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool
     const row = tool as Record<string, unknown>
     if (row.type !== 'function') return tool
-    if (row.parameters && typeof row.parameters === 'object') return tool
-    return { ...row, parameters: EMPTY_TOOL_PARAMETERS }
+    if (!row.parameters || typeof row.parameters !== 'object' || Array.isArray(row.parameters)) {
+      return { ...row, parameters: EMPTY_TOOL_PARAMETERS }
+    }
+
+    // Some clients serialise an omitted JSON-schema type as `null`. The
+    // Codex Responses endpoint rejects that shape with HTTP 400, so repair
+    // only the missing/null type while preserving all other explicit schema
+    // details and valid custom types.
+    const parameters = row.parameters as Record<string, unknown>
+    if (parameters.type == null) {
+      return {
+        ...row,
+        parameters: { ...parameters, type: 'object' },
+      }
+    }
+    return tool
   })
 }
 

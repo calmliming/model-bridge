@@ -72,4 +72,22 @@ describe('normalizeOpenaiResponsesBody', () => {
       { type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } },
     ])
   })
+
+  it('repairs a null JSON-schema type without dropping the rest of the schema', () => {
+    const body = normalizeOpenaiResponsesBody({
+      model: 'gpt-5.5',
+      input: 'hello',
+      tools: [{
+        type: 'function',
+        name: 'lookup',
+        parameters: { type: null, properties: { query: { type: 'string' } } },
+      }],
+    })
+
+    expect(body.tools).toEqual([{
+      type: 'function',
+      name: 'lookup',
+      parameters: { type: 'object', properties: { query: { type: 'string' } } },
+    }])
+  })
 })
