@@ -9,6 +9,7 @@ import {
   redactUrls,
   registerRelayRoutes,
   responsesStreamStatus,
+  shouldRetrySameRelayAccount,
   startStreamingResponse,
 } from './relay'
 
@@ -174,6 +175,36 @@ describe('classifyUpstreamFailure model scoping', () => {
     const failure = await classifyUpstreamFailure('openai', new Response('oops', { status: 502 }))
     expect(failure.penalty).toBe('error')
     expect(failure.modelScoped).not.toBe(true)
+  })
+})
+
+describe('Sub2API account-scoped failure rotation', () => {
+  it.each([400, 402, 403, 429])(
+    'rotates away from an account that reports INSUFFICIENT_BALANCE with HTTP %i',
+    async (status) => {
+      const response = new Response(JSON.stringify({
+        code: 'INSUFFICIENT_BALANCE',
+        message: 'Insufficient account balance',
+      }), { status })
+
+      const failure = await classifyUpstreamFailure('sub2api', response)
+
+      expect(failure).toMatchObject({
+        penalty: 'rate_limited',
+        retryable: true,
+        accountScoped: true,
+      })
+      expect(shouldRetrySameRelayAccount(failure)).toBe(false)
+    },
+  )
+
+  it('keeps retrying the same relay account for a transient 5xx', async () => {
+    const failure = await classifyUpstreamFailure(
+      'sub2api',
+      new Response('temporary backend failure', { status: 502 }),
+    )
+
+    expect(shouldRetrySameRelayAccount(failure)).toBe(true)
   })
 })
 

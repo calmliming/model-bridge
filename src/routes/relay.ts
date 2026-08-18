@@ -121,6 +121,11 @@ const RATE_LIMIT_MARKERS = [
   'usage limit',
   'billing_hard_limit',
 ]
+const ACCOUNT_BALANCE_MARKERS = [
+  'insufficient_balance',
+  'insufficient balance',
+  'insufficient account balance',
+]
 
 interface ParsedRoute {
   model: string
@@ -616,11 +621,18 @@ interface UpstreamFailure {
    * Codex quota-window evidence (e.g. a plan-gated model's limit).
    */
   modelScoped?: boolean
+  /** The local credential/account is exhausted or invalid, so retries must rotate it. */
+  accountScoped?: boolean
 }
 
 function textLooksRateLimited(text: string): boolean {
   const lower = text.toLowerCase()
   return RATE_LIMIT_MARKERS.some((marker) => lower.includes(marker))
+}
+
+function textLooksAccountBalanceExhausted(text: string): boolean {
+  const lower = text.toLowerCase()
+  return ACCOUNT_BALANCE_MARKERS.some((marker) => lower.includes(marker))
 }
 
 async function readErrorText(response: Response): Promise<string> {
@@ -821,6 +833,7 @@ export async function classifyUpstreamFailure(
       retryable: true,
       resetAt: parseRateLimitReset(provider, response, text),
       modelScoped: isOpenaiModelScopedLimit(provider, response),
+      accountScoped: textLooksAccountBalanceExhausted(text),
     }
   }
   if (response.status === 401) {
@@ -828,30 +841,41 @@ export async function classifyUpstreamFailure(
     if (isTokenRevoked(text)) {
       return { penalty: null, retryable: true, disable: true }
     }
-    return { penalty: 'error', retryable: true }
+    return { penalty: 'error', retryable: true, accountScoped: true }
   }
   if (response.status === 402) {
     const text = await readErrorText(response)
     if (isWorkspaceDeactivated(text)) {
       return { penalty: null, retryable: true, disable: true }
     }
-    return { penalty: 'error', retryable: true }
+    return {
+      penalty: textLooksAccountBalanceExhausted(text) ? 'rate_limited' : 'error',
+      retryable: true,
+      accountScoped: true,
+    }
   }
   if (response.status >= 500) {
     return { penalty: 'error', retryable: true }
   }
   if (response.status === 400 || response.status === 403) {
     const text = await readErrorText(response)
-    if (textLooksRateLimited(text)) {
+    const balanceExhausted = textLooksAccountBalanceExhausted(text)
+    if (balanceExhausted || textLooksRateLimited(text)) {
       return {
         penalty: 'rate_limited',
         retryable: true,
         resetAt: parseRateLimitReset(provider, response, text),
         modelScoped: isOpenaiModelScopedLimit(provider, response),
+        accountScoped: balanceExhausted,
       }
     }
   }
   return { penalty: null, retryable: false }
+}
+
+/** Relay gateways retry transient backend failures in place, but rotate exhausted credentials. */
+export function shouldRetrySameRelayAccount(failure: UpstreamFailure): boolean {
+  return failure.retryable && failure.accountScoped !== true
 }
 
 /**
@@ -1484,7 +1508,7 @@ async function runRelayLoop(
         if (failure.disable) {
           await disableAccount(account.id)
           if (sessionKey) await clearStickyAccount(sessionKey)
-        } else if (relayToRelay) {
+        } else if (relayToRelay && shouldRetrySameRelayAccount(failure)) {
           // Retry the same sub2api account: the gateway may route the retry to
           // a healthy backend. Don't cool it down or exclude it from the pool.
           tried.pop()
@@ -1494,6 +1518,7 @@ async function runRelayLoop(
           } else {
             await penalizeAccount(account.id, failure.penalty, failure.resetAt)
           }
+          if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
         }
         await upstream.body?.cancel().catch(() => {})
         continue
@@ -1509,9 +1534,12 @@ async function runRelayLoop(
         if (!relayToRelay && failure.modelScoped) {
           await penalizeAccountModel(account.id, parsed.model, failure.penalty, failure.resetAt)
         } else {
-          const cooldownUntil = relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : failure.resetAt
+          const cooldownUntil = relayToRelay && !failure.accountScoped
+            ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS
+            : failure.resetAt
           await penalizeAccount(account.id, failure.penalty, cooldownUntil)
         }
+        if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
       } else if (upstream.ok) {
         // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
         // the configured threshold, until the breaching window resets. Only costs
