@@ -1,0 +1,35 @@
+SUB2API Claude Code streaming throughput verification
+
+CHANGED_BRANCH: src/routes/relay.ts and src/routes/relay.test.ts
+CHANGED_FIELD: raw SSE response forwarding now writes one complete SSE event per response write; non-SSE passthrough remains byte-for-byte and an unterminated final SSE event is preserved.
+REFERENCE: sub2api gateway scans SSE event boundaries and flushes each completed event so Claude Code can derive live output tokens/sec from event arrival timing.
+
+ARTIFACTS:
+- E:\Projects\model-bridge\artifacts\MODIFIED_FILE.ts
+- E:\Projects\model-bridge\artifacts\DIFF_FILE.diff
+- E:\Projects\model-bridge\artifacts\VERIFICATION.txt
+- E:\Projects\model-bridge\artifacts\ROLLBACK.sh
+
+BASELINE_INPUT: git worktree at HEAD 519dabf; DATABASE_URL=postgres://user:pass@localhost:5432/model_bridge_test
+BASELINE_COMMAND: npm run typecheck; npm test -- --run src/providers/claude/chat.test.ts src/providers/claude/relay.test.ts
+BASELINE_RESULT: tsc --noEmit completed successfully; Vitest reported 2 passed files and 22 passed tests.
+BASELINE_EXIT_STATUS: 0
+
+MODIFIED_INPUT: working tree source with the SSE event-level forwarding change; DATABASE_URL=postgres://user:pass@localhost:5432/model_bridge_test
+MODIFIED_COMMAND: npm run typecheck; npm test -- --run src/routes/relay.test.ts src/providers/claude/chat.test.ts src/providers/claude/relay.test.ts
+MODIFIED_RESULT: tsc --noEmit completed successfully; Vitest reported 3 passed files and 48 passed tests.
+MODIFIED_EXIT_STATUS: 0
+
+ADDITIONAL_MODIFIED_COMMAND: npm test -- --run src/providers/sub2api/balance.test.ts src/http/upstream.test.ts
+ADDITIONAL_MODIFIED_RESULT: Vitest reported 2 passed files and 18 passed tests.
+ADDITIONAL_MODIFIED_EXIT_STATUS: 0
+
+BASELINE_SHA256: AB8620108A8AEC0ADBF3BD9CC56B7174B6956ADEC5E0D5C422D547E4A210FA2C (artifacts/BASELINE_RELAY.ts)
+MODIFIED_SHA256: FE4A042EDFE4AEFF9E6EBBC513D177DCEF4262D9E0034A1ABC0B56152CF86706 (artifacts/MODIFIED_FILE.ts)
+
+ROLLBACK_COMMAND: "D:\\Program Files\\Git\\bin\\bash.exe" artifacts/ROLLBACK.sh artifacts/ROLLBACK_TEST_COPY.ts artifacts/ROLLBACK_SOURCE.ts
+ROLLBACK_INPUT: target=artifacts/ROLLBACK_TEST_COPY.ts, source=artifacts/ROLLBACK_SOURCE.ts
+ROLLBACK_RESULT: ab8620108a8aec0adbf3bd9cc56b7174b6956adec5e0d5c422d547e4a210fa2c *artifacts/ROLLBACK_TEST_COPY.ts
+ROLLBACK_EXIT_STATUS: 0
+RESTORED_SHA256: AB8620108A8AEC0ADBF3BD9CC56B7174B6956ADEC5E0D5C422D547E4A210FA2C
+RESTORED_BEHAVIOR: ROLLBACK_TEST_COPY.ts is byte-for-byte restored from ROLLBACK_SOURCE.ts; MODIFIED_FILE.ts remains changed.

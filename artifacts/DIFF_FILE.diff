@@ -1,0 +1,125 @@
+diff --git a/src/routes/relay.test.ts b/src/routes/relay.test.ts
+index fd56d2e..3f3b853 100644
+--- a/src/routes/relay.test.ts
++++ b/src/routes/relay.test.ts
+@@ -11,6 +11,7 @@ import {
+   responsesStreamStatus,
+   shouldRetrySameRelayAccount,
+   startStreamingResponse,
++  writeSseEventBlock,
+ } from './relay'
+ 
+ describe('startStreamingResponse', () => {
+@@ -53,6 +54,26 @@ describe('startStreamingResponse', () => {
+   })
+ })
+ 
++describe('writeSseEventBlock', () => {
++  it('writes a complete SSE event in one separately flushable response write', () => {
++    const write = vi.fn(() => true)
++    const raw = { destroyed: false, writableEnded: false, write } as unknown as ServerResponse
++
++    expect(writeSseEventBlock(raw, 'event: content_block_delta\ndata: {"type":"content_block_delta"}')).toBe(true)
++    expect(write).toHaveBeenCalledWith(
++      'event: content_block_delta\ndata: {"type":"content_block_delta"}\n\n',
++    )
++  })
++
++  it('does not write after the downstream response has ended', () => {
++    const write = vi.fn(() => true)
++    const raw = { destroyed: false, writableEnded: true, write } as unknown as ServerResponse
++
++    expect(writeSseEventBlock(raw, 'data: {}')).toBe(false)
++    expect(write).not.toHaveBeenCalled()
++  })
++})
++
+ describe('OpenAI Images route registration', () => {
+   it('registers both clean and provider-prefixed endpoints plus multipart parsing', async () => {
+     const app = Fastify()
+diff --git a/src/routes/relay.ts b/src/routes/relay.ts
+index 0bba530..3f37ff2 100644
+--- a/src/routes/relay.ts
++++ b/src/routes/relay.ts
+@@ -1667,6 +1667,22 @@ function isNonStreamContentType(contentType: string | null): boolean {
+   return !!contentType && !contentType.includes('text/event-stream')
+ }
+ 
++/**
++ * Writes one complete SSE event as a separate response write. Keeping the
++ * event boundary here is important for Claude Code: it derives live output
++ * tokens/sec from the arrival time of each streamed event, not only from the
++ * final usage object.
++ */
++export function writeSseEventBlock(raw: ServerResponse, block: string): boolean {
++  if (raw.destroyed || raw.writableEnded) return false
++  try {
++    raw.write(`${block}\n\n`)
++    return true
++  } catch {
++    return false
++  }
++}
++
+ /**
+  * Parses a Responses-API JSON body into the response object for a synthesized
+  * `response.completed` event, or null if it doesn't look like one. Accepts a
+@@ -1887,21 +1903,33 @@ async function sendStreaming(
+             buffer = buffer.slice(sep + 2)
+           }
+         } else {
+-          // Raw passthrough; side-channel parse for usage.
+-          if (value.byteLength > 0) markFirstToken()
+-          if (!downstreamClosed) {
++          // Raw SSE passthrough; side-channel parse for usage. Write one
++          // complete event at a time instead of forwarding the fetch read
++          // buffer as-is. A single read commonly contains several SSE events,
++          // and coalescing them hides their arrival timing from Claude Code's
++          // live tokens/sec calculation.
++          if (sseOutput) {
++            let sep: number
++            while ((sep = buffer.indexOf('\n\n')) !== -1) {
++              const block = buffer.slice(0, sep)
++              feedSseBlock(block, parser, streamState, modelAudit)
++              if (!downstreamClosed && !writeSseEventBlock(raw, block)) {
++                // Do not stop reading: the upstream may still send the usage
++                // event after the client has disconnected.
++                downstreamClosed = true
++              }
++              markFirstToken()
++              buffer = buffer.slice(sep + 2)
++            }
++          } else if (value.byteLength > 0 && !downstreamClosed) {
++            // Non-SSE error/body passthrough still needs byte fidelity.
+             try {
+               raw.write(Buffer.from(value))
+             } catch {
+-              // Do not stop reading: the upstream may still send the usage
+-              // event after the client has disconnected.
+               downstreamClosed = true
+             }
+-          }
+-          let sep: number
+-          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+-            feedSseBlock(buffer.slice(0, sep), parser, streamState, modelAudit)
+-            buffer = buffer.slice(sep + 2)
++            // No SSE parsing is needed for a byte-for-byte non-stream body.
++            buffer = ''
+           }
+         }
+       }
+@@ -1912,6 +1940,14 @@ async function sendStreaming(
+       if (heartbeat) clearInterval(heartbeat)
+     }
+   }
++  // Some upstreams close immediately after the final SSE line without the
++  // customary blank separator. Preserve that final event instead of dropping
++  // it while still keeping the normal event-level write path.
++  if (!streamTransform && !transform && sseOutput && buffer.length > 0) {
++    feedSseBlock(buffer, parser, streamState, modelAudit)
++    if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
++    markFirstToken()
++  }
+   if (streamTransform) {
+     for (const event of streamTransform.flush()) {
+       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)

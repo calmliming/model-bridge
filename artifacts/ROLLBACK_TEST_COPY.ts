@@ -1668,22 +1668,6 @@ function isNonStreamContentType(contentType: string | null): boolean {
 }
 
 /**
- * Writes one complete SSE event as a separate response write. Keeping the
- * event boundary here is important for Claude Code: it derives live output
- * tokens/sec from the arrival time of each streamed event, not only from the
- * final usage object.
- */
-export function writeSseEventBlock(raw: ServerResponse, block: string): boolean {
-  if (raw.destroyed || raw.writableEnded) return false
-  try {
-    raw.write(`${block}\n\n`)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
  * Parses a Responses-API JSON body into the response object for a synthesized
  * `response.completed` event, or null if it doesn't look like one. Accepts a
  * bare response object or a `{ response: {...} }` envelope.
@@ -1903,33 +1887,21 @@ async function sendStreaming(
             buffer = buffer.slice(sep + 2)
           }
         } else {
-          // Raw SSE passthrough; side-channel parse for usage. Write one
-          // complete event at a time instead of forwarding the fetch read
-          // buffer as-is. A single read commonly contains several SSE events,
-          // and coalescing them hides their arrival timing from Claude Code's
-          // live tokens/sec calculation.
-          if (sseOutput) {
-            let sep: number
-            while ((sep = buffer.indexOf('\n\n')) !== -1) {
-              const block = buffer.slice(0, sep)
-              feedSseBlock(block, parser, streamState, modelAudit)
-              if (!downstreamClosed && !writeSseEventBlock(raw, block)) {
-                // Do not stop reading: the upstream may still send the usage
-                // event after the client has disconnected.
-                downstreamClosed = true
-              }
-              markFirstToken()
-              buffer = buffer.slice(sep + 2)
-            }
-          } else if (value.byteLength > 0 && !downstreamClosed) {
-            // Non-SSE error/body passthrough still needs byte fidelity.
+          // Raw passthrough; side-channel parse for usage.
+          if (value.byteLength > 0) markFirstToken()
+          if (!downstreamClosed) {
             try {
               raw.write(Buffer.from(value))
             } catch {
+              // Do not stop reading: the upstream may still send the usage
+              // event after the client has disconnected.
               downstreamClosed = true
             }
-            // No SSE parsing is needed for a byte-for-byte non-stream body.
-            buffer = ''
+          }
+          let sep: number
+          while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            feedSseBlock(buffer.slice(0, sep), parser, streamState, modelAudit)
+            buffer = buffer.slice(sep + 2)
           }
         }
       }
@@ -1939,14 +1911,6 @@ async function sendStreaming(
     } finally {
       if (heartbeat) clearInterval(heartbeat)
     }
-  }
-  // Some upstreams close immediately after the final SSE line without the
-  // customary blank separator. Preserve that final event instead of dropping
-  // it while still keeping the normal event-level write path.
-  if (!streamTransform && !transform && sseOutput && buffer.length > 0) {
-    feedSseBlock(buffer, parser, streamState, modelAudit)
-    if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
-    markFirstToken()
   }
   if (streamTransform) {
     for (const event of streamTransform.flush()) {
