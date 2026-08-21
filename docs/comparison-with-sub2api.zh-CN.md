@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.162**，2026-07-20）
-> 更新日期：2026-07-21
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.179**，2026-08-21）
+> 更新日期：2026-08-21
 
 ## 一句话定位
 
@@ -73,6 +73,7 @@
 | 27 | **Codex `image_generation` 工具策略** | ✅ (v0.1.144) | ✅ 网关开关开启时保留显式 tool / `tool_choice`，关闭时统一剥离 | ✅ 轻量完成 |
 | 28 | **Anthropic OAuth dateline 指纹归一化** | ✅ (v0.1.142) | ✅ 已实现（system 与 `<system-reminder>` 内日期句归一化，避免改用户正文） | ✅ 已完成 |
 | 29 | **OpenAI Images 网关**（generations / edits、JSON / multipart、JSON / SSE） | ✅ | ✅ 参考 sub2api OAuth Responses 图片桥实现 | ✅ 已完成 |
+| 30 | **Responses `input_tokens` 预检端点** | ✅ (v0.1.179) | ✅ 已实现本地结构化估算（最终用量仍以上游 usage 为准） | ✅ 兼容完成 |
 
 > 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；第 21–24 项为对照 **v0.1.137/v0.1.138** 补入；第 25–28 项为对照 **v0.1.142–v0.1.144** 补入。标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
 
@@ -104,6 +105,17 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api 至 v0.1.179（2026-08-21）
+
+对照 v0.1.173–v0.1.179 的发布内容，先落地与现有协议入口直接相关的 `POST /v1/responses/input_tokens` 预检端点。该端点支持 `/v1/responses/input_tokens`、`/responses/input_tokens` 和 `/api/openai/v1/responses/input_tokens`，返回标准 `response.input_tokens` envelope；由于本项目没有统一 tokenizer，结果是有上限的本地结构化估算，最终计费和真实用量仍以上游 usage 事件为准。
+
+本轮确认以下上游能力暂不直接照搬：
+
+- Kimi / 智谱 / DeepSeek 的 adaptive API protocol：本项目已经为三种协议分别提供路由和转换器，但账号级多 Base URL / 自适应协商需要扩展账号配置模型，暂不改变现有账号语义。
+- Fast/Flex 与上下文区间倍率、长上下文计费门控：属于渠道/分组级计价模型，当前 `model_pricing` 是全局模型价卡，直接引入会改变已有账单口径，单独立项处理。
+- Grok 4.6 的模型发现、别名和基础价卡已同步（输入 $2、输出 $6、缓存读取 $0.50 / MTok）；原生 `x_search`、长上下文倍率、Codex remote compaction v2、被动渠道监控和运营后台能力依赖上游专有端点或 SaaS 调度架构，暂不直接照搬。
+- v0.1.169 的 URL 路径校验与 v0.1.172 的建连超时、模型审计、计费量化：本项目已有 `src/http/urlGuard.ts`、`src/http/upstream.ts`、上游模型审计和微美元量化路径，后续只做针对性回归测试，不重复引入另一套机制。
 
 ### 跟踪 sub2api 至 v0.1.172（2026-08-07）
 

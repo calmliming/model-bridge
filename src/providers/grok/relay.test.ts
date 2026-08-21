@@ -13,6 +13,8 @@ describe('mapGrokModel', () => {
   })
 
   it('passes concrete model ids through untouched', () => {
+    expect(mapGrokModel('grok-4.6-latest')).toBe('grok-4.6')
+    expect(mapGrokModel('grok-4.6')).toBe('grok-4.6')
     expect(mapGrokModel('grok-4.3')).toBe('grok-4.3')
     expect(mapGrokModel('grok-build-0.1')).toBe('grok-build-0.1')
   })

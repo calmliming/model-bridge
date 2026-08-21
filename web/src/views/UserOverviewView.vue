@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
+import QRCode from 'qrcode'
 import { UiTag } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
@@ -90,6 +91,9 @@ const rechargeAmount = ref(10)
 const selectedProvider = ref<'manual' | 'alipay' | 'wechat'>('manual')
 const availableProviders = ref<Array<'manual' | 'alipay' | 'wechat'>>(['manual'])
 const currentPaymentOrder = ref<PaymentOrder | null>(null)
+const paymentQrDataUrl = ref('')
+const paymentQrLoading = ref(false)
+const paymentQrError = ref('')
 const user = ref<UserMe | null>(null)
 const transactions = ref<WalletTransaction[]>([])
 const usageLogs = ref<UsageLog[]>([])
@@ -235,6 +239,17 @@ async function load() {
     user.value = walletRes.data.user
     transactions.value = walletRes.data.transactions
     paymentOrders.value = ordersRes.data.orders
+    if (currentPaymentOrder.value) {
+      const refreshed = paymentOrders.value.find((order) => order.id === currentPaymentOrder.value?.id)
+      if (refreshed) {
+        const becamePaid = currentPaymentOrder.value.status !== 'paid' && refreshed.status === 'paid'
+        currentPaymentOrder.value = refreshed
+        if (becamePaid) {
+          showPaymentQr.value = false
+          message.success('支付已确认，充值金额已到账')
+        }
+      }
+    }
     availableProviders.value = providersRes.data.providers
     subscriptions.value = subsRes.data.subscriptions
     summary.value = summaryRes.data
@@ -269,6 +284,7 @@ async function createRechargeOrder() {
 
     if (selectedProvider.value === 'alipay' || selectedProvider.value === 'wechat') {
       showPaymentQr.value = true
+      await generatePaymentQr(data.order)
       message.success('订单创建成功，请扫码支付')
     } else {
       message.success('充值订单已创建，请联系管理员完成入账')
@@ -279,6 +295,28 @@ async function createRechargeOrder() {
     message.error(errMsg(e, '创建订单失败'))
   } finally {
     creatingOrder.value = false
+  }
+}
+
+async function generatePaymentQr(order: PaymentOrder) {
+  paymentQrDataUrl.value = ''
+  paymentQrError.value = ''
+  if (!order.paymentUrl) {
+    paymentQrError.value = '支付链接不可用，请重新创建订单'
+    return
+  }
+  paymentQrLoading.value = true
+  try {
+    paymentQrDataUrl.value = await QRCode.toDataURL(order.paymentUrl, {
+      width: 320,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#111827', light: '#ffffff' },
+    })
+  } catch {
+    paymentQrError.value = '二维码生成失败，请打开支付链接完成付款'
+  } finally {
+    paymentQrLoading.value = false
   }
 }
 
@@ -507,29 +545,70 @@ onMounted(load)
       </div>
     </UiModal>
 
-    <!-- 支付二维码弹窗 -->
-    <UiModal v-model:show="showPaymentQr" title="扫码支付" :width="480">
-      <div v-if="currentPaymentOrder" style="text-align: center">
-        <UiAlert type="info" style="margin-bottom: 16px">
-          请使用{{ providerLabels[currentPaymentOrder.provider] }}扫描下方二维码完成支付
-        </UiAlert>
-        <div style="display: flex; justify-content: center; margin: 24px 0">
-          <img
-            v-if="currentPaymentOrder.paymentUrl"
-            :src="`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(currentPaymentOrder.paymentUrl)}`"
-            alt="支付二维码"
-            style="width: 240px; height: 240px; border: 1px solid #e5e7eb; border-radius: 8px"
-          >
+    <UiModal v-model:show="showPaymentQr" title="账户充值" :width="520">
+      <div
+        v-if="currentPaymentOrder"
+        class="checkout"
+        :class="`checkout--${currentPaymentOrder.provider}`"
+      >
+        <div class="checkout-brand">
+          <span class="checkout-logo">MB</span>
+          <span>
+            <strong>Model Bridge</strong>
+            <small>平台账户充值</small>
+          </span>
+          <UiTag size="small" type="success" :bordered="false">安全收银台</UiTag>
         </div>
-        <UiText depth="3" style="font-size: 14px">
-          订单金额: {{ formatUsd(currentPaymentOrder.amount) }}
-        </UiText>
-        <UiDivider />
-        <UiSpace justify="center">
-          <UiButton @click="showPaymentQr = false">关闭</UiButton>
-          <UiButton type="primary" @click="load">刷新状态</UiButton>
-        </UiSpace>
+
+        <div class="checkout-summary">
+          <span>应付金额</span>
+          <strong>{{ formatUsd(currentPaymentOrder.amount) }}</strong>
+          <small>{{ providerLabels[currentPaymentOrder.provider] }}扫码支付</small>
+        </div>
+
+        <div class="checkout-qr-stage">
+          <div class="checkout-qr-frame" :aria-busy="paymentQrLoading">
+            <span v-if="paymentQrLoading" class="spinner h-7 w-7" />
+            <img
+              v-else-if="paymentQrDataUrl"
+              :src="paymentQrDataUrl"
+              :alt="`${providerLabels[currentPaymentOrder.provider]}支付二维码`"
+            >
+            <div v-else class="checkout-qr-error">
+              <strong>二维码暂不可用</strong>
+              <span>{{ paymentQrError }}</span>
+              <a
+                v-if="currentPaymentOrder.paymentUrl"
+                :href="currentPaymentOrder.paymentUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+              >打开支付页面</a>
+            </div>
+          </div>
+          <p>使用{{ providerLabels[currentPaymentOrder.provider] }}扫描二维码完成付款</p>
+        </div>
+
+        <dl class="checkout-details">
+          <div>
+            <dt>订单号</dt>
+            <dd>{{ currentPaymentOrder.id }}</dd>
+          </div>
+          <div>
+            <dt>有效期至</dt>
+            <dd>{{ formatTime(currentPaymentOrder.expiresAt) }}</dd>
+          </div>
+        </dl>
+
+        <div class="checkout-notice">
+          支付结果由订单系统核验，到账前请勿重复支付。
+        </div>
       </div>
+      <template #footer>
+        <UiSpace justify="end">
+          <UiButton @click="showPaymentQr = false">稍后支付</UiButton>
+          <UiButton type="primary" @click="load">我已支付，刷新状态</UiButton>
+        </UiSpace>
+      </template>
     </UiModal>
   </div>
 </template>
@@ -714,6 +793,192 @@ onMounted(load)
 :deep(.danger) {
   color: #dc2626;
   font-weight: 700;
+}
+
+.checkout {
+  --checkout-accent: #1677ff;
+  overflow: hidden;
+  border-top: 3px solid var(--checkout-accent);
+  background: #f8fafc;
+}
+
+.checkout--wechat {
+  --checkout-accent: #07c160;
+}
+
+.checkout-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+  text-align: left;
+}
+
+.checkout-brand > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.checkout-brand strong,
+.checkout-brand small {
+  display: block;
+  letter-spacing: 0;
+}
+
+.checkout-brand strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.checkout-brand small {
+  margin-top: 1px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.checkout-logo {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #111827;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.checkout-summary {
+  padding: 20px 18px 12px;
+  text-align: center;
+}
+
+.checkout-summary span,
+.checkout-summary small {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.checkout-summary strong {
+  display: block;
+  margin: 4px 0;
+  color: #111827;
+  font-size: 30px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.checkout-qr-stage {
+  padding: 8px 18px 16px;
+  text-align: center;
+}
+
+.checkout-qr-frame {
+  display: flex;
+  width: min(272px, 100%);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.checkout-qr-frame img {
+  display: block;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+}
+
+.checkout-qr-stage p {
+  margin: 10px 0 0;
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.checkout-qr-error {
+  display: flex;
+  max-width: 210px;
+  flex-direction: column;
+  gap: 8px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.checkout-qr-error strong {
+  color: #374151;
+  font-size: 14px;
+}
+
+.checkout-qr-error a {
+  color: var(--checkout-accent);
+  font-weight: 600;
+}
+
+.checkout-details {
+  margin: 0;
+  padding: 0 18px 14px;
+}
+
+.checkout-details div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.checkout-details dt {
+  color: #9ca3af;
+}
+
+.checkout-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #4b5563;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.checkout-notice {
+  padding: 11px 18px;
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  color: #6b7280;
+  font-size: 12px;
+  text-align: center;
+}
+
+:global(.dark) .checkout {
+  background: #0f172a;
+}
+
+:global(.dark) .checkout-brand,
+:global(.dark) .checkout-notice {
+  border-color: #334155;
+  background: #1e293b;
+}
+
+:global(.dark) .checkout-brand strong,
+:global(.dark) .checkout-summary strong {
+  color: #f8fafc;
+}
+
+:global(.dark) .checkout-brand small,
+:global(.dark) .checkout-summary span,
+:global(.dark) .checkout-summary small,
+:global(.dark) .checkout-qr-stage p,
+:global(.dark) .checkout-details dd,
+:global(.dark) .checkout-notice {
+  color: #94a3b8;
 }
 
 @media (max-width: 980px) {

@@ -92,6 +92,7 @@ import {
 } from '../providers/sub2api/relay'
 import { mapGrokModel, relayGrokChatCompletions, relayGrokResponses } from '../providers/grok/relay'
 import {
+  inferProviderForModel,
   isProviderAllowed,
   listGeminiModels,
   listOpenAIStyleModels,
@@ -99,6 +100,7 @@ import {
 import type { ProviderId } from '../providers/types'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
+import { estimateResponsesInputTokens } from './inputTokens'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
@@ -1010,6 +1012,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // base URL=https://your-host/api/claude/v1 and call a Claude subscription.
   app.post('/api/claude/v1/chat/completions', { preHandler: requireApiKey }, claudeChatHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
+  app.post('/api/openai/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
   app.post('/api/openai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
   app.post('/api/openai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
@@ -1149,6 +1152,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
   ], PROVIDERS['sub2api-chat']!)
   app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
+  app.post('/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
   app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
   app.post('/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
@@ -1157,6 +1161,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // `/chat/completions`. Register the un-prefixed forms too so the base URL can
   // be the bare domain (no trailing /v1).
   app.post('/responses', { preHandler: requireApiKey }, responsesHandler)
+  app.post('/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/chat/completions', { preHandler: requireApiKey }, chatHandler)
   app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
 }
@@ -1233,6 +1238,42 @@ function sendGeminiModel(request: FastifyRequest, reply: FastifyReply): void {
     return
   }
   void reply.send(model)
+}
+
+function sendResponsesInputTokens(request: FastifyRequest, reply: FastifyReply): void {
+  const apiKey = request.apiKey!
+  const body = (request.body ?? {}) as Record<string, unknown>
+  const requestedModel = typeof body.model === 'string' ? body.model.trim() : ''
+  if (!requestedModel) {
+    void reply.code(400).send({
+      error: {
+        type: 'invalid_request_error',
+        code: 'model_required',
+        message: 'model is required',
+      },
+    })
+    return
+  }
+
+  const mappedModel = mapRequestedModel(requestedModel, apiKey.modelMappings)
+  if (!isAnyAllowedModel([requestedModel, mappedModel], apiKey.allowedModels)) {
+    void reply.code(403).send({ error: `this API key may not use model ${mappedModel}` })
+    return
+  }
+
+  // The clean Responses endpoint defaults unknown model names to OpenAI, so
+  // the preflight route must enforce the same provider restriction.
+  const inferredProvider = inferProviderForModel(mappedModel) ?? 'openai'
+  const sub2apiOnly = apiKey.allowedProviders?.length === 1 && apiKey.allowedProviders[0] === 'sub2api'
+  if (inferredProvider && !sub2apiOnly && !isProviderAllowed(inferredProvider, apiKey)) {
+    void reply.code(403).send({ error: `this API key may not use ${inferredProvider}` })
+    return
+  }
+
+  void reply.send({
+    object: 'response.input_tokens',
+    input_tokens: estimateResponsesInputTokens(body),
+  })
 }
 
 /**

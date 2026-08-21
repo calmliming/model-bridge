@@ -87,6 +87,9 @@ describe('OpenAI Images route registration', () => {
     expect(app.hasRoute({ method: 'POST', url: '/v1/images/edits' })).toBe(true)
     expect(app.hasRoute({ method: 'POST', url: '/api/openai/v1/images/generations' })).toBe(true)
     expect(app.hasRoute({ method: 'POST', url: '/api/openai/v1/images/edits' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/api/openai/v1/responses/input_tokens' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/v1/responses/input_tokens' })).toBe(true)
+    expect(app.hasRoute({ method: 'POST', url: '/responses/input_tokens' })).toBe(true)
 
     const boundary = 'route-test-boundary'
     const payload = `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\ndraw\r\n--${boundary}--\r\n`

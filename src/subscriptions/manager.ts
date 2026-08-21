@@ -168,6 +168,72 @@ export async function hasWindowHeadroom(
 }
 
 /**
+ * Atomically consumes a request's cost from a subscription. The subscription
+ * row is locked while the rolling windows and all configured limits are
+ * checked, so concurrent requests cannot collectively spend past a quota.
+ * Returns false when the subscription is missing, expired, or lacks room in
+ * any defined window; callers can then fall back to the user's wallet.
+ */
+export async function consumeSubscriptionUsage(
+  client: Pick<PoolClient, 'query'>,
+  subscriptionId: string,
+  cost: number,
+  now = Date.now(),
+): Promise<boolean> {
+  if (!Number.isFinite(cost) || cost < 0) {
+    throw new Error('subscription cost must be a finite non-negative number')
+  }
+  if (cost === 0) return true
+
+  const { rows } = await client.query<SubRow & {
+    daily_limit_usd: number | string | null
+    weekly_limit_usd: number | string | null
+    monthly_limit_usd: number | string | null
+  }>(
+    `SELECT s.*, p.daily_limit_usd, p.weekly_limit_usd, p.monthly_limit_usd
+     FROM user_subscriptions s
+     JOIN subscription_plans p ON p.id = s.plan_id
+     WHERE s.id = $1
+     FOR UPDATE OF s`,
+    [subscriptionId],
+  )
+  const sub = rows[0]
+  if (!sub || sub.status !== 'active' || Number(sub.expires_at) <= now) return false
+
+  const windows = rolledWindows(sub, now)
+  const limits = {
+    daily: sub.daily_limit_usd == null ? null : Number(sub.daily_limit_usd),
+    weekly: sub.weekly_limit_usd == null ? null : Number(sub.weekly_limit_usd),
+    monthly: sub.monthly_limit_usd == null ? null : Number(sub.monthly_limit_usd),
+  }
+  // Costs are rounded to micro-USD before this function is called. Keep a
+  // tiny epsilon for PostgreSQL DOUBLE PRECISION representation noise.
+  const epsilon = 1e-9
+  if (
+    (limits.daily != null && windows.daily.usage + cost > limits.daily + epsilon) ||
+    (limits.weekly != null && windows.weekly.usage + cost > limits.weekly + epsilon) ||
+    (limits.monthly != null && windows.monthly.usage + cost > limits.monthly + epsilon)
+  ) {
+    return false
+  }
+
+  await client.query(
+    `UPDATE user_subscriptions
+       SET daily_window_start = $1, daily_usage_usd = $2,
+           weekly_window_start = $3, weekly_usage_usd = $4,
+           monthly_window_start = $5, monthly_usage_usd = $6
+     WHERE id = $7`,
+    [
+      windows.daily.start, windows.daily.usage + cost,
+      windows.weekly.start, windows.weekly.usage + cost,
+      windows.monthly.start, windows.monthly.usage + cost,
+      subscriptionId,
+    ],
+  )
+  return true
+}
+
+/**
  * Adds `cost` to all three usage windows (rolling each forward first) inside
  * the caller's transaction. Charges at sale price, matching the limit units.
  */
@@ -444,5 +510,4 @@ export async function listUserSubscriptions(userId: string, now = Date.now()): P
 export async function listSubscriptionsForUser(userId: string): Promise<SubscriptionView[]> {
   return listUserSubscriptions(userId)
 }
-
 

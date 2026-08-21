@@ -11,6 +11,7 @@ import { fetchWithConnectTimeout } from '../../http/upstream'
 const MODEL_ALIASES: Record<string, string> = {
   grok: GROK_DEFAULT_MODEL,
   'grok-latest': GROK_DEFAULT_MODEL,
+  'grok-4.6-latest': 'grok-4.6',
   'grok-4.5-latest': 'grok-4.5',
   'grok-build': 'grok-build-0.1',
   'grok-build-latest': 'grok-build-0.1',

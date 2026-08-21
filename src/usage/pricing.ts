@@ -276,9 +276,10 @@ function kimiTier(model: string): keyof typeof KIMI_TIERS {
   return model.toLowerCase().includes('k3') ? 'k3' : 'k2'
 }
 
-// xAI (Grok) list prices per 1M tokens (docs.x.ai, mid-2026). No separate
-// cache-write fee — cacheWrite is 0; cacheRead is the cached-input rate.
-const GROK_45: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 }
+// xAI (Grok) list prices per 1M tokens. No separate cache-write fee —
+// cacheWrite is 0; cacheRead is the cached-input rate.
+const GROK_46: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 }
+const GROK_45: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.3 }
 const GROK_43: TierPrice = { input: 1.25, output: 2.5, cacheWrite: 0, cacheRead: 0.2 }
 const GROK_BUILD: TierPrice = { input: 1, output: 2, cacheWrite: 0, cacheRead: 0.2 }
 
@@ -286,6 +287,7 @@ function grokPrice(model: string): TierPrice {
   const m = model.toLowerCase()
   if (m.includes('build') || m.includes('code')) return GROK_BUILD
   if (m.includes('4.3') || m.includes('4-3')) return GROK_43
+  if (m.includes('4.6') || m.includes('4-6')) return GROK_46
   // grok-4.5 flagship, and the default for a bare "grok".
   return GROK_45
 }
@@ -385,6 +387,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'kimi', model: 'kimi-k2.6', price: KIMI_TIERS.k2 },
   // Grok (xAI) — exact rows for the discoverable models; grokPrice() covers
   // other grok-* variants via substring tiers.
+  { provider: 'grok', model: 'grok-4.6', price: GROK_46 },
   { provider: 'grok', model: 'grok-4.5', price: GROK_45 },
   { provider: 'grok', model: 'grok-4.3', price: GROK_43 },
   { provider: 'grok', model: 'grok-build-0.1', price: GROK_BUILD },
@@ -394,7 +397,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v6` settings flag.
+ * gated by the `pricing_seed_v7` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -404,6 +407,14 @@ interface SeedCorrection {
 }
 
 const SEED_CORRECTIONS: SeedCorrection[] = [
+  // Sub2API v0.1.179 documents Grok 4.5 cached input at $0.30/MTok. Only
+  // correct the old built-in value; an administrator override remains intact.
+  {
+    provider: 'grok',
+    model: 'grok-4.5',
+    from: { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 },
+    to: GROK_45,
+  },
   // Opus 4.5 dropped list prices; the generic "opus" tier was seeded at 15/75.
   {
     provider: 'claude',
@@ -568,7 +579,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v6'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v7'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -595,7 +606,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v6', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v7', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }

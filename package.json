@@ -1,6 +1,6 @@
 {
   "name": "model-bridge",
-  "version": "0.1.162",
+  "version": "0.1.179",
   "private": true,
   "type": "module",
   "description": "Self-hosted AI API relay platform — Claude / OpenAI / Gemini subscriptions as standard APIs",

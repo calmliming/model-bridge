@@ -40,7 +40,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
   kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
-  grok: ['grok-4.5', 'grok-4.3', 'grok-build-0.1'],
+  grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1'],
 }
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
@@ -65,6 +65,11 @@ function inferProvider(model: string): ProviderId | null {
   if (lower.startsWith('kimi') || lower.startsWith('moonshot')) return 'kimi'
   if (lower.startsWith('grok')) return 'grok'
   return null
+}
+
+/** Exposes the same model-prefix inference used by model discovery routes. */
+export function inferProviderForModel(model: string): ProviderId | null {
+  return inferProvider(model)
 }
 
 function displayName(model: string): string {

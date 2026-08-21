@@ -4,7 +4,7 @@ import { pool } from '../db/index'
 import { estimateCost } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
-import { incrementSubscriptionUsage } from '../subscriptions/manager'
+import { consumeSubscriptionUsage } from '../subscriptions/manager'
 
 export interface UsageRecord {
   apiKeyId: string
@@ -49,8 +49,10 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const multiplier =
       Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
     const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
-    // Charge the subscription only when the gate selected it and a sub is present.
-    const billTo: 'subscription' | 'balance' =
+    // The auth gate makes an optimistic subscription choice. Re-check the
+    // exact request cost under the subscription row lock below, then fall back
+    // to the wallet when this request would cross any configured window.
+    const preferredBillTo: 'subscription' | 'balance' =
       record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
     const id = randomBytes(12).toString('hex')
     const errorCode = record.errorCode?.trim().slice(0, 200) || null
@@ -62,6 +64,12 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const upstreamModel = record.upstreamModel?.trim().slice(0, 300) || null
     client = await pool.connect()
     await client.query('BEGIN')
+    let billTo: 'subscription' | 'balance' = preferredBillTo
+    let subscriptionCharged = false
+    if (cost > 0 && preferredBillTo === 'subscription') {
+      subscriptionCharged = await consumeSubscriptionUsage(client, record.subscriptionId!, cost)
+      if (!subscriptionCharged) billTo = 'balance'
+    }
     await client.query(
       `INSERT INTO usage_logs
          (id, api_key_id, user_id, account_id, provider, model, request_input,
@@ -113,11 +121,8 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         [cost, Date.now(), record.apiKeyId],
       )
     }
-    if (cost > 0) {
-      if (billTo === 'subscription') {
-        // Subscription pays: accrue the rolling windows, leave the wallet alone.
-        await incrementSubscriptionUsage(client, record.subscriptionId!, cost)
-      } else if (record.userId) {
+    if (cost > 0 && !subscriptionCharged && record.userId) {
+      if (billTo === 'balance') {
         await debitWalletForUsage(client, record.userId, id, cost)
       }
     }

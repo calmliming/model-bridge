@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => {
     connect,
     estimateCost: vi.fn(),
     debitWalletForUsage: vi.fn(),
-    incrementSubscriptionUsage: vi.fn(),
+    consumeSubscriptionUsage: vi.fn(),
   }
 })
 
@@ -27,7 +27,7 @@ vi.mock('../wallet/manager', () => ({
 }))
 
 vi.mock('../subscriptions/manager', () => ({
-  incrementSubscriptionUsage: mocks.incrementSubscriptionUsage,
+  consumeSubscriptionUsage: mocks.consumeSubscriptionUsage,
 }))
 
 import { recordUsage, waitForPendingUsage } from './recorder'
@@ -62,6 +62,7 @@ function insertParams(): unknown[] {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
+  mocks.consumeSubscriptionUsage.mockResolvedValue(true)
 })
 
 describe('recordUsage', () => {
@@ -113,15 +114,23 @@ describe('recordUsage', () => {
     mocks.estimateCost.mockReturnValue(2)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_1', multiplier: 1.5 }))
     expect(insertParams()[21]).toBe('subscription')
-    expect(mocks.incrementSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_1', 3)
+    expect(mocks.consumeSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_1', 3)
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the wallet when the exact request cost exceeds subscription headroom', async () => {
+    mocks.estimateCost.mockReturnValue(2)
+    mocks.consumeSubscriptionUsage.mockResolvedValue(false)
+    await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_1' }))
+    expect(insertParams()[21]).toBe('balance')
+    expect(mocks.debitWalletForUsage).toHaveBeenCalledWith(expect.anything(), 'u_1', expect.any(String), 2)
   })
 
   it('falls back to wallet when a subscriptionId is missing', async () => {
     mocks.estimateCost.mockReturnValue(2)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: null }))
     expect(insertParams()[21]).toBe('balance')
-    expect(mocks.incrementSubscriptionUsage).not.toHaveBeenCalled()
+    expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
     expect(mocks.debitWalletForUsage).toHaveBeenCalled()
   })
 
@@ -130,7 +139,7 @@ describe('recordUsage', () => {
     await recordUsage(baseRecord())
     expect(insertParams()[21]).toBe('balance')
     expect(mocks.debitWalletForUsage).toHaveBeenCalled()
-    expect(mocks.incrementSubscriptionUsage).not.toHaveBeenCalled()
+    expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
   })
 
   it('stores non-sensitive sticky session diagnostics', async () => {

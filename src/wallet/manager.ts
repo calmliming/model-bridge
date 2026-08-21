@@ -70,6 +70,9 @@ export async function applyWalletTransactionWithClient(
     throw new Error('user not found')
   }
   const balanceAfterMicros = Number(current.balance_micros) + input.amountMicros
+  if (input.type === 'usage' && balanceAfterMicros < 0) {
+    throw new Error('insufficient balance')
+  }
   await client.query(
     'UPDATE users SET balance_micros = $1 WHERE id = $2',
     [balanceAfterMicros, input.userId],

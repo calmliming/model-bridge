@@ -5,6 +5,9 @@ import { microsToUsd, usdToMicros } from '../wallet/money'
 import { getPaymentProvider } from './providers/index'
 
 const ORDER_TTL_MS = 30 * 60_000
+// Alipay/WeChat settle in CNY cents, so converting back to USD can differ by
+// less than one tenth of a cent at the configured fixed exchange rate.
+const CALLBACK_AMOUNT_TOLERANCE_MICROS = 1_000
 
 export type PaymentOrderStatus = 'pending' | 'paid' | 'canceled' | 'expired'
 export type PaymentProviderType = 'manual' | 'alipay' | 'wechat'
@@ -319,55 +322,79 @@ export async function handlePaymentNotification(input: {
     return { success: false }
   }
 
-  // 查询订单
-  const selected = await pool.query<Record<string, unknown>>(
-    `SELECT id, user_id, provider, status, amount_micros, provider_order_id,
-            payment_url, wallet_transaction_id, note, expires_at, paid_at,
-            canceled_at, created_at, updated_at
-     FROM payment_orders
-     WHERE id = $1`,
-    [notification.orderId],
-  )
-
-  const order = selected.rows[0]
-  if (!order) {
-    throw new PaymentOrderError('payment order not found', 404)
-  }
-
-  // 如果订单已经处理过，直接返回成功
-  if (order.status === 'paid') {
-    return { success: true, orderId: notification.orderId }
-  }
-
-  // 如果订单不是 pending 状态，不处理
-  if (order.status !== 'pending') {
-    throw new PaymentOrderError('payment order is not pending', 409)
-  }
-
-  // 确认入账
   const client = await pool.connect()
   let committed = false
   try {
     await client.query('BEGIN')
 
+    // Lock before checking status. Duplicate callbacks can arrive in parallel;
+    // only the first transaction may credit the wallet.
+    const selected = await client.query<Record<string, unknown>>(
+      `SELECT id, user_id, provider, status, amount_micros, provider_order_id,
+              payment_url, wallet_transaction_id, note, expires_at, paid_at,
+              canceled_at, created_at, updated_at
+       FROM payment_orders
+       WHERE id = $1
+       FOR UPDATE`,
+      [notification.orderId],
+    )
+    const order = selected.rows[0]
+    if (!order) {
+      throw new PaymentOrderError('payment order not found', 404)
+    }
+    if (order.provider !== input.provider) {
+      throw new PaymentOrderError('payment provider does not match order', 409)
+    }
+
+    if (notification.paidAmount == null || !Number.isFinite(notification.paidAmount)) {
+      throw new PaymentOrderError('payment notification amount is missing', 400)
+    }
+    const paidAmountMicros = usdToMicros(notification.paidAmount)
+    const orderAmountMicros = Number(order.amount_micros)
+    if (Math.abs(paidAmountMicros - orderAmountMicros) > CALLBACK_AMOUNT_TOLERANCE_MICROS) {
+      throw new PaymentOrderError('payment amount does not match order', 409)
+    }
+
+    // A matching replay is successful but must not produce another wallet row.
+    if (order.status === 'paid') {
+      if (
+        order.provider_order_id &&
+        notification.providerOrderId &&
+        order.provider_order_id !== notification.providerOrderId
+      ) {
+        throw new PaymentOrderError('provider payment id does not match paid order', 409)
+      }
+      await client.query('COMMIT')
+      committed = true
+      return { success: true, orderId: notification.orderId }
+    }
+    if (order.status !== 'pending') {
+      throw new PaymentOrderError('payment order is not pending', 409)
+    }
+
     const transaction = await applyWalletTransactionWithClient(client, {
       userId: order.user_id as string,
       type: 'credit',
-      amountMicros: Number(order.amount_micros),
+      amountMicros: orderAmountMicros,
       note: `${input.provider} payment ${notification.providerOrderId}`,
       createdBy: input.provider,
     })
 
-    await client.query(
+    const paidAt = Number.isFinite(notification.paidAt) ? notification.paidAt! : Date.now()
+
+    const updated = await client.query(
       `UPDATE payment_orders
        SET status = 'paid',
            provider_order_id = $1,
            wallet_transaction_id = $2,
            paid_at = $3,
            updated_at = $3
-       WHERE id = $4`,
-      [notification.providerOrderId, transaction.id, notification.paidAt || Date.now(), notification.orderId],
+       WHERE id = $4 AND status = 'pending'`,
+      [notification.providerOrderId, transaction.id, paidAt, notification.orderId],
     )
+    if (updated.rowCount !== 1) {
+      throw new PaymentOrderError('payment order state changed', 409)
+    }
 
     await client.query('COMMIT')
     committed = true

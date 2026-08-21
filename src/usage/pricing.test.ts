@@ -69,8 +69,8 @@ describe('openai gpt-5.6 pricing', () => {
 })
 
 describe('grok (xAI) pricing', () => {
-  it('prices the grok-4.5 flagship at 2 / 6 with a 0.5× cached-read rate', () => {
-    expect(resolvePrice('grok', 'grok-4.5')).toMatchObject({ input: 2, output: 6, cacheRead: 0.5 })
+  it('prices the grok-4.5 flagship at 2 / 6 with a 0.3× cached-read rate', () => {
+    expect(resolvePrice('grok', 'grok-4.5')).toMatchObject({ input: 2, output: 6, cacheRead: 0.3 })
   })
 
   it('prices grok-4.3 at 1.25 / 2.5', () => {
@@ -87,6 +87,12 @@ describe('grok (xAI) pricing', () => {
 
   it('routes grok through the sub2api aggregator too', () => {
     expect(resolvePrice('sub2api', 'grok-4.3')).toMatchObject({ input: 1.25, output: 2.5 })
+  })
+
+  it('prices Grok 4.6 and its latest alias at the upstream cache-read rate', () => {
+    expect(resolvePrice('grok', 'grok-4.6')).toMatchObject({ input: 2, output: 6, cacheRead: 0.5 })
+    expect(resolvePrice('grok', 'grok-4.6-latest')).toMatchObject({ input: 2, output: 6, cacheRead: 0.5 })
+    expect(resolvePrice('grok', 'grok-4.5')).toMatchObject({ input: 2, output: 6, cacheRead: 0.3 })
   })
 })
 
