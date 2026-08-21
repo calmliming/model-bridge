@@ -99,6 +99,67 @@ function contentToText(content: unknown): string {
   return ''
 }
 
+/** Converts OpenAI Chat content blocks into Responses input content parts. */
+function contentToResponsesParts(
+  content: unknown,
+  contentType: 'input_text' | 'output_text',
+  includeImages: boolean,
+): Array<Record<string, unknown>> {
+  if (typeof content === 'string') return [{ type: contentType, text: content }]
+  if (!Array.isArray(content)) return []
+
+  const parts: Array<Record<string, unknown>> = []
+  for (const rawPart of content) {
+    if (!rawPart || typeof rawPart !== 'object') continue
+    const part = rawPart as Record<string, unknown>
+    const type = typeof part.type === 'string' ? part.type : ''
+
+    if (type === 'text' || type === contentType) {
+      if (typeof part.text === 'string') parts.push({ type: contentType, text: part.text })
+      continue
+    }
+
+    if (!includeImages) continue
+
+    if (type === 'image_url') {
+      const image = part.image_url
+      const imageUrl =
+        typeof image === 'string'
+          ? image
+          : image && typeof image === 'object' && typeof (image as Record<string, unknown>).url === 'string'
+            ? (image as Record<string, unknown>).url
+            : null
+      if (!imageUrl) continue
+      const detail = image && typeof image === 'object' ? (image as Record<string, unknown>).detail : undefined
+      parts.push({ type: 'input_image', image_url: imageUrl, ...(typeof detail === 'string' ? { detail } : {}) })
+      continue
+    }
+
+    if (type === 'input_image') {
+      const imageUrl = typeof part.image_url === 'string' ? part.image_url : undefined
+      const fileId = typeof part.file_id === 'string' ? part.file_id : undefined
+      if (imageUrl || fileId) {
+        parts.push({
+          type: 'input_image',
+          ...(imageUrl ? { image_url: imageUrl } : {}),
+          ...(fileId ? { file_id: fileId } : {}),
+          ...(typeof part.detail === 'string' ? { detail: part.detail } : {}),
+        })
+      }
+      continue
+    }
+
+    if (type === 'file') {
+      const fileId = typeof part.file_id === 'string' ? part.file_id : undefined
+      const fileData = typeof part.file_data === 'string' ? part.file_data : undefined
+      if (fileId || fileData) {
+        parts.push({ type: 'input_image', ...(fileId ? { file_id: fileId } : { image_url: fileData }) })
+      }
+    }
+  }
+  return parts
+}
+
 function convertChatToolCall(toolCall: ChatToolCall): Record<string, unknown> | null {
   if (toolCall.type !== 'function' || !toolCall.function?.name) return null
   return {
@@ -154,10 +215,11 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
 
     const responseRole = role === 'assistant' ? 'assistant' : 'user'
     const contentType = responseRole === 'assistant' ? 'output_text' : 'input_text'
-    if (text) {
+    const contentParts = contentToResponsesParts(message.content, contentType, responseRole === 'user')
+    if (contentParts.length) {
       input.push({
         role: responseRole,
-        content: [{ type: contentType, text }],
+        content: contentParts,
       })
     }
 

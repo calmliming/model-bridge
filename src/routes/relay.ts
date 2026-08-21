@@ -897,6 +897,9 @@ function isOpenaiModelScopedLimit(provider: string, response: Response): boolean
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
   const imageBodyLimit = 64 * 1024 * 1024
+  // DeepSeek vision accepts up to 48 MiB JSON requests (base64 images included).
+  // Keep headroom for JSON encoding while leaving the global limit unchanged.
+  const multimodalBodyLimit = 64 * 1024 * 1024
   app.addContentTypeParser(/^multipart\/form-data\b/i, { parseAs: 'buffer' }, (_request, body, done) => {
     done(null, body)
   })
@@ -1021,15 +1024,15 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
   // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
-  app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey }, deepseekHandler)
+  app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, deepseekHandler)
   // DeepSeek: OpenAI-compatible Chat Completions compatibility endpoint. The
   // gateway converts the request to native Responses upstream, then converts
   // the result back for older OpenAI clients.
   // OpenAI clients: base URL=https://your-host/api/deepseek/v1
-  app.post('/api/deepseek/v1/chat/completions', { preHandler: requireApiKey }, deepseekChatHandler)
+  app.post('/api/deepseek/v1/chat/completions', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, deepseekChatHandler)
   // DeepSeek: native OpenAI Responses-API surface for Codex CLI.
   // Codex: configure base_url=https://your-host/api/deepseek
-  app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey }, deepseekResponsesHandler)
+  app.post('/api/deepseek/v1/responses', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, deepseekResponsesHandler)
   // Xiaomi MiMo: Anthropic-compatible endpoint under /api/xiaomi prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/xiaomi
   app.post('/api/xiaomi/v1/messages', { preHandler: requireApiKey }, xiaomiHandler)
@@ -1151,18 +1154,18 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-chat']! },
     { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
   ], PROVIDERS['sub2api-chat']!)
-  app.post('/v1/messages', { preHandler: requireApiKey }, messagesHandler)
+  app.post('/v1/messages', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, messagesHandler)
   app.post('/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
-  app.post('/v1/responses', { preHandler: requireApiKey }, responsesHandler)
-  app.post('/v1/chat/completions', { preHandler: requireApiKey }, chatHandler)
+  app.post('/v1/responses', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, responsesHandler)
+  app.post('/v1/chat/completions', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, chatHandler)
   app.post('/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
   app.post('/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
   // Codex appends `/responses` to its base_url; OpenAI-compatible clients hit
   // `/chat/completions`. Register the un-prefixed forms too so the base URL can
   // be the bare domain (no trailing /v1).
-  app.post('/responses', { preHandler: requireApiKey }, responsesHandler)
+  app.post('/responses', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, responsesHandler)
   app.post('/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
-  app.post('/chat/completions', { preHandler: requireApiKey }, chatHandler)
+  app.post('/chat/completions', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, chatHandler)
   app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
 }
 

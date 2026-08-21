@@ -9,9 +9,14 @@ export function mapModel(input: unknown): string {
   return input.startsWith('deepseek-') ? input : 'deepseek-v4-pro'
 }
 
-/** DeepSeek's native Responses API supports both V4 Flash and V4 Pro. */
+/** DeepSeek's native Responses API supports V4 Flash, V4 Pro, and the V4 Flash vision experiment. */
 export function mapResponsesModel(input: unknown): string {
-  if (typeof input === 'string' && (input === 'deepseek-v4-flash' || input === 'deepseek-v4-pro')) {
+  if (
+    typeof input === 'string' &&
+    (input === 'deepseek-v4-flash' ||
+      input === 'deepseek-v4-pro' ||
+      input === 'deepseek-v4-flash-vision-exp')
+  ) {
     return input
   }
   return 'deepseek-v4-flash'

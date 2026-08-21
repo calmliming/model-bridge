@@ -366,6 +366,7 @@ const SEED_ROWS: SeedRow[] = [
   // recognises these exact values as managed defaults and applies the current
   // scheduled rate; any administrator-edited value still wins.
   { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
+  { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_PRE_SCHEDULE_TIERS.pro },
   { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },

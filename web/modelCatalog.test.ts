@@ -8,6 +8,13 @@ function model(id: string) {
 }
 
 describe('DeepSeek catalog pricing schedule', () => {
+  it('exposes the official DeepSeek vision model as multimodal', () => {
+    expect(model('deepseek-v4-flash-vision-exp')).toMatchObject({
+      provider: 'deepseek',
+      categories: expect.arrayContaining(['multimodal']),
+    })
+  })
+
   it('shows the previous price before the schedule takes effect', () => {
     expect(resolveModelPrice(
       model('deepseek-v4-flash'),

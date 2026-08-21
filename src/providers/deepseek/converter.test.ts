@@ -26,6 +26,7 @@ describe('mapResponsesModel', () => {
   it('preserves supported Responses models and defaults to V4 Flash', () => {
     expect(mapResponsesModel('deepseek-v4-flash')).toBe('deepseek-v4-flash')
     expect(mapResponsesModel('deepseek-v4-pro')).toBe('deepseek-v4-pro')
+    expect(mapResponsesModel('deepseek-v4-flash-vision-exp')).toBe('deepseek-v4-flash-vision-exp')
     expect(mapResponsesModel('gpt-5.5')).toBe('deepseek-v4-flash')
     expect(mapResponsesModel(undefined)).toBe('deepseek-v4-flash')
   })

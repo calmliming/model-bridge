@@ -384,6 +384,22 @@ export const MODEL_CATALOG: PlazaModel[] = [
     ),
   },
   {
+    id: 'deepseek-v4-flash-vision-exp',
+    name: 'DeepSeek V4 Flash Vision',
+    provider: 'deepseek',
+    categories: ['chat', 'lightweight', 'multimodal'],
+    tags: ['多模态', '图像理解', '高速'],
+    description: 'DeepSeek V4 Flash 视觉实验模型，支持图片理解、截图文字识别与图表分析。',
+    context: '1M',
+    inputPrice: 0.14,
+    outputPrice: 0.28,
+    cacheReadPrice: 0.0028,
+    priceSchedule: deepseekPriceSchedule(
+      { inputPrice: 0.22, outputPrice: 0.66, cacheReadPrice: 0.007 },
+      { inputPrice: 0.44, outputPrice: 1.32, cacheReadPrice: 0.014 },
+    ),
+  },
+  {
     id: 'deepseek-reasoner',
     name: 'DeepSeek Reasoner',
     provider: 'deepseek',

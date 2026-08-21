@@ -12,6 +12,9 @@ describe('normalizeDeepseekChatCompletionsBody', () => {
     expect(normalizeDeepseekChatCompletionsBody({ model: 'deepseek-v4-flash' })).toMatchObject({
       model: 'deepseek-v4-flash',
     })
+    expect(normalizeDeepseekChatCompletionsBody({ model: 'deepseek-v4-flash-vision-exp' })).toMatchObject({
+      model: 'deepseek-v4-flash-vision-exp',
+    })
   })
 
   it('maps legacy reasoner alias to V4 Flash thinking mode', () => {

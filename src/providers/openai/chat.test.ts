@@ -73,6 +73,33 @@ describe('chatCompletionsToResponses', () => {
     ])
   })
 
+  it('preserves image and file content when converting vision chat requests', () => {
+    const out = chatCompletionsToResponses({
+      model: 'deepseek-v4-flash-vision-exp',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read this image.' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,abc', detail: 'low' } },
+            { type: 'file', file_id: 'file-api-123' },
+          ],
+        },
+      ],
+    })
+
+    expect(out.input).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'Read this image.' },
+          { type: 'input_image', image_url: 'data:image/png;base64,abc', detail: 'low' },
+          { type: 'input_image', file_id: 'file-api-123' },
+        ],
+      },
+    ])
+  })
+
   it('carries chat user isolation into Responses user', () => {
     expect(chatCompletionsToResponses({
       model: 'deepseek-v4-flash',

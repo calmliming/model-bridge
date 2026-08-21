@@ -35,7 +35,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   claude: ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-image-2'],
   gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
