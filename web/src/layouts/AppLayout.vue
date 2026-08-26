@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import SystemVersionBadge from '../components/SystemVersionBadge.vue'
 import { api } from '../api/client'
@@ -106,6 +106,7 @@ const avatarInitials = computed(() => {
 })
 
 const balance = ref<number | null>(null)
+const consoleStatus = ref<'checking' | 'online' | 'offline'>('checking')
 
 function formatUsd(value: number): string {
   return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
@@ -114,25 +115,40 @@ function formatUsd(value: number): string {
 async function loadBalance() {
   try {
     const { data } = await api.get('/admin/me')
+    consoleStatus.value = 'online'
     if (typeof data.balance === 'number') {
       balance.value = data.balance
     }
   } catch {
-    // Non-critical: the header just falls back to '--'.
+    consoleStatus.value = 'offline'
   }
 }
-
-onMounted(loadBalance)
 
 const sidebarOpen = ref(false)
 const profileOpen = ref(false)
 const notificationsOpen = ref(false)
 const languageOpen = ref(false)
-watch(() => route.fullPath, () => {
+
+function closeOverlays() {
   sidebarOpen.value = false
   profileOpen.value = false
   notificationsOpen.value = false
   languageOpen.value = false
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeOverlays()
+}
+
+onMounted(() => {
+  void loadBalance()
+  document.addEventListener('keydown', onGlobalKeydown)
+})
+
+watch(() => route.fullPath, closeOverlays)
+
+onBeforeUnmount(() => {
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 
 function toggleNotifications() {
@@ -161,7 +177,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-dark-950">
+  <div class="flex h-screen h-dvh overflow-hidden bg-gray-50 dark:bg-dark-950">
     <!-- Mobile overlay -->
     <Transition name="modal-fade">
       <div
@@ -175,6 +191,7 @@ function logout() {
     <aside
       class="fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-white/95 backdrop-blur-xl transition-transform duration-300 ease-out dark:border-dark-800 dark:bg-dark-900/95 lg:static lg:z-40 lg:translate-x-0 lg:bg-white/90 lg:dark:bg-dark-900/90"
       :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      id="admin-sidebar"
     >
       <div class="flex items-center gap-3 px-5 py-5">
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow">
@@ -185,6 +202,7 @@ function logout() {
           <SystemVersionBadge class="mt-1" />
         </div>
         <button
+          type="button"
           class="ml-auto rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 lg:hidden"
           aria-label="关闭菜单"
           @click="sidebarOpen = false"
@@ -198,7 +216,7 @@ function logout() {
       <div class="px-5 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500">
         管理
       </div>
-      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label="管理菜单">
         <RouterLink
           v-for="item in menu"
           :key="item.key"
@@ -234,14 +252,24 @@ function logout() {
         </RouterLink>
       </nav>
 
-      <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-dark-700/50 dark:bg-dark-800/60">
+      <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-dark-700/50 dark:bg-dark-800/60" role="status" aria-live="polite">
         <div class="relative flex h-2.5 w-2.5 items-center justify-center">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary-400 opacity-75"></span>
-          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary-500"></span>
+          <span
+            class="absolute inline-flex h-full w-full rounded-full opacity-75"
+            :class="consoleStatus === 'online' ? 'animate-ping bg-emerald-400' : 'bg-amber-400'"
+          />
+          <span
+            class="relative inline-flex h-2.5 w-2.5 rounded-full"
+            :class="consoleStatus === 'online' ? 'bg-emerald-500' : 'bg-amber-500'"
+          />
         </div>
         <div class="leading-tight">
-          <strong class="block text-[13px] font-bold text-gray-900 dark:text-white">Relay Ready</strong>
-          <span class="text-[11px] font-medium text-gray-400 dark:text-dark-400">控制台在线</span>
+          <strong class="block text-[13px] font-bold text-gray-900 dark:text-white">
+            {{ consoleStatus === 'online' ? '控制台在线' : consoleStatus === 'offline' ? '连接异常' : '正在检查' }}
+          </strong>
+          <span class="text-[11px] font-medium text-gray-400 dark:text-dark-400">
+            {{ consoleStatus === 'online' ? '管理接口可用' : consoleStatus === 'offline' ? '暂时无法读取状态' : '正在读取控制台状态' }}
+          </span>
         </div>
       </div>
     </aside>
@@ -253,8 +281,11 @@ function logout() {
       >
         <div class="flex min-w-0 items-center gap-3">
           <button
+            type="button"
             class="-ml-1 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-800 lg:hidden"
             aria-label="打开菜单"
+            aria-controls="admin-sidebar"
+            :aria-expanded="sidebarOpen"
             @click="sidebarOpen = true"
           >
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -275,6 +306,8 @@ function logout() {
             <button
               class="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white"
               aria-label="通知"
+              aria-controls="admin-notifications"
+              :aria-expanded="notificationsOpen"
               type="button"
               @click="toggleNotifications"
             >
@@ -288,6 +321,8 @@ function logout() {
             </button>
             <div
               v-if="notificationsOpen"
+              id="admin-notifications"
+              role="status"
               class="absolute right-0 top-full z-40 mt-2 w-56 rounded-xl border border-gray-200 bg-white p-4 text-sm font-medium text-gray-500 shadow-xl dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300"
             >
               暂无通知
@@ -298,6 +333,8 @@ function logout() {
               class="flex items-center gap-2 rounded-xl px-2 py-1 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 dark:text-dark-300 dark:hover:bg-dark-800"
               type="button"
               aria-label="语言"
+              aria-controls="admin-language-menu"
+              :aria-expanded="languageOpen"
               @click="toggleLanguage"
             >
               <span class="relative inline-flex h-3.5 w-5 overflow-hidden rounded-sm bg-red-500">
@@ -310,11 +347,14 @@ function logout() {
             </button>
             <div
               v-if="languageOpen"
+              id="admin-language-menu"
+              role="menu"
               class="absolute right-0 top-full z-40 mt-2 w-40 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-dark-700 dark:bg-dark-800"
             >
               <button
                 class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 dark:text-dark-200"
                 type="button"
+                role="menuitem"
                 @click="languageOpen = false"
               >
                 <span>简体中文</span>
@@ -336,6 +376,9 @@ function logout() {
             <button
               class="flex items-center gap-2 rounded-xl px-1.5 py-1 transition hover:bg-gray-100 dark:hover:bg-dark-800 sm:px-2"
               type="button"
+              aria-label="管理员菜单"
+              aria-controls="admin-profile-menu"
+              :aria-expanded="profileOpen"
               @click="toggleProfile"
             >
               <span class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary-500 text-xs font-bold text-white shadow-sm">
@@ -353,11 +396,14 @@ function logout() {
             </button>
             <div
               v-if="profileOpen"
+              id="admin-profile-menu"
+              role="menu"
               class="absolute right-0 top-full z-40 mt-1.5 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-dark-700 dark:bg-dark-800"
             >
               <button
                 class="block w-full px-3 py-2 text-left text-xs font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-white"
                 type="button"
+                role="menuitem"
                 @click="logout"
               >
                 退出登录

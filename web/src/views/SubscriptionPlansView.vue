@@ -186,7 +186,7 @@ onMounted(load)
     </UiCard>
 
     <UiModal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="save">
         <UiFormItem label="套餐名称">
           <UiInput v-model:value="form.name" placeholder="如：Claude 月卡" />
         </UiFormItem>

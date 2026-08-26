@@ -203,7 +203,7 @@ onMounted(load)
     </UiCard>
 
     <UiModal v-model:show="showGenerate" title="生成兑换码" :width="460">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="submitGenerate">
         <UiFormItem label="生成数量（1–1000）">
           <UiInputNumber v-model:value="genForm.count" :min="1" :max="1000" style="width: 100%" />
         </UiFormItem>

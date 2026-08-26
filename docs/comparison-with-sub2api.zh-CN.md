@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已跟踪至 **v0.1.179**，2026-08-21）
-> 更新日期：2026-08-21
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已核查至 **v0.1.182**，2026-08-25）
+> 更新日期：2026-08-26
 
 ## 一句话定位
 
@@ -105,6 +105,15 @@
 ---
 
 ## 六、本次更新整理
+
+### 核查 sub2api v0.1.175–v0.1.182（2026-08-12～2026-08-25）
+
+本轮对照上游连续版本，补齐了与本项目原生协议路径同构、且不会引入新数据库迁移的兼容性修复：
+
+- **Gemini 工具 Schema 清理增强**：在递归清理基础上继续移除 `minLength`、`maxLength`、`minItems`、`maxItems`、`exclusiveMinimum`、`deprecated`；混合标量 `enum` 归一为字符串，含对象/数组等复合值的枚举安全丢弃，避免 Code Assist 400。
+- **Kimi Code K3 路由兼容**：`k3`、`k3-256k`、`kimi-code/k3` 纳入 Kimi 模型发现和裸路径按模型分发；原生 Moonshot 上游统一转换为 `kimi-k3`，Sub2API 专用 Key 仍保留原始模型名透传。
+
+以下上游能力暂未照搬：Responses Lite 专用 OAuth/WS 传输细节、Remote Compaction V2 全链路、服务层级（Fast/Flex）与渠道级逐模型定价、OpenAI 官方输入 token 预检转发。这些功能依赖 Sub2API 的 Go 调度/账号模型或独立上游接口，直接移植会改变本项目的轻量架构；后续应分别设计兼容层和配置开关。
 
 ### 跟踪 sub2api 至 v0.1.179（2026-08-21）
 

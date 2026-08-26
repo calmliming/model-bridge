@@ -118,6 +118,57 @@ describe('sanitizeGeminiBody', () => {
     expect(params.properties.value.anyOf).toEqual([{ type: 'string' }, { type: 'number' }])
   })
 
+  it('drops unsupported constraint fields and normalizes scalar enums', () => {
+    const body = {
+      tools: [{
+        functionDeclarations: [{
+          name: 'configure',
+          parameters: {
+            type: 'object',
+            properties: {
+              mode: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 12,
+                deprecated: true,
+                enum: ['safe', false, 1, null],
+              },
+              count: {
+                type: 'array',
+                minItems: 1,
+                maxItems: 3,
+                items: { type: 'number', exclusiveMinimum: 0 },
+              },
+            },
+          },
+        }],
+      }],
+    }
+
+    const params = (sanitizeGeminiBody(body).tools as any)[0].functionDeclarations[0].parameters
+    expect(params).toEqual({
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['safe', 'false', '1', 'null'] },
+        count: { type: 'array', items: { type: 'number' } },
+      },
+    })
+  })
+
+  it('drops an enum containing compound values instead of sending an invalid schema', () => {
+    const body = {
+      tools: [{
+        functionDeclarations: [{
+          name: 'invalid_enum',
+          parameters: { type: 'string', enum: ['ok', { nested: true }] },
+        }],
+      }],
+    }
+
+    const params = (sanitizeGeminiBody(body).tools as any)[0].functionDeclarations[0].parameters
+    expect(params).toEqual({ type: 'string' })
+  })
+
   it('returns the body unchanged when there are no tools', () => {
     const body = { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }
     expect(sanitizeGeminiBody(body)).toBe(body)

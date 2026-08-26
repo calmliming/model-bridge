@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useFieldContext } from './fieldContext'
 
 const props = defineProps<{
+  id?: string
   value?: boolean
   modelValue?: boolean
   size?: 'small' | 'medium'
   disabled?: boolean
 }>()
+
+const field = useFieldContext()
+const resolvedId = computed(() => props.id ?? field?.id)
 
 const emit = defineEmits<{
   (e: 'update:value', value: boolean): void
@@ -30,7 +35,9 @@ function toggle() {
   <button
     type="button"
     role="switch"
+    :id="resolvedId"
     :aria-checked="current"
+    :aria-labelledby="field?.labelId"
     :disabled="disabled"
     class="relative inline-flex flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:cursor-not-allowed disabled:opacity-50"
     :class="[

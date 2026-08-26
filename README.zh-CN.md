@@ -24,7 +24,7 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek �
 
 ## 快速开始（开发环境）
 
-需要 Node.js 20+。
+需要 Node.js 24.19.0 LTS（或更新的 LTS 版本）。
 
 ```bash
 # 同时启动前后端，并用 API / WEB 标签区分格式化日志。

@@ -3,9 +3,9 @@ import { computed, h, onMounted, ref, watch } from 'vue'
 import { UiTag } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
-import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
 import { formatTokens } from '../utils'
+import LazyEChart from '../components/LazyEChart.vue'
 
 interface DailyStat {
   day: string
@@ -387,7 +387,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
           <p>输入、输出、缓存写入和缓存读取的每日变化。</p>
         </div>
       </div>
-      <EChart :option="dailyOption" height="320px" />
+      <LazyEChart :option="dailyOption" height="320px" />
     </UiCard>
 
     <UiCard class="panel-card model-usage-card" :bordered="false">
@@ -454,8 +454,8 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
               <p>服务商 token 消耗占比。</p>
             </div>
           </div>
-          <EChart :option="providerOption" height="220px" />
-          <UiText v-if="!summary?.byProvider.length" depth="3" style="font-size: 13px">
+          <LazyEChart v-if="summary?.byProvider.length" :option="providerOption" height="220px" />
+          <UiText v-else depth="3" style="font-size: 13px">
             暂无数据
           </UiText>
         </UiCard>

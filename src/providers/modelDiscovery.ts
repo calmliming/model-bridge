@@ -39,7 +39,10 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.2', 'glm-5.1'],
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
-  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
+  // Kimi Code exposes the K3 model under short aliases as well as the
+  // provider-qualified name. Keep them discoverable so a Composite-style key
+  // can route the same identifiers that Sub2API v0.1.182 accepts.
+  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1'],
 }
 
@@ -62,7 +65,13 @@ function inferProvider(model: string): ProviderId | null {
   if (lower.startsWith('mimo-')) return 'xiaomi'
   if (lower.startsWith('glm-')) return 'zhipu'
   if (lower.startsWith('qwen')) return 'qwen'
-  if (lower.startsWith('kimi') || lower.startsWith('moonshot')) return 'kimi'
+  if (
+    lower.startsWith('kimi') ||
+    lower.startsWith('moonshot') ||
+    lower === 'k3' ||
+    lower === 'k3-256k' ||
+    lower === 'kimi-code/k3'
+  ) return 'kimi'
   if (lower.startsWith('grok')) return 'grok'
   return null
 }

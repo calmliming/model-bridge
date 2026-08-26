@@ -301,7 +301,16 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
   if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
   if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
   if (m.startsWith('qwen')) return QWEN_TIERS[qwenTier(model)]
-  if (m.startsWith('kimi') || m.startsWith('moonshot')) return KIMI_TIERS[kimiTier(model)]
+  // Sub2API v0.1.182 accepts Kimi Code's bare Composite aliases. They are
+  // still K3-tier requests and must not fall through to the Claude default
+  // price when the relay preserves the original model name for auditing.
+  if (
+    m.startsWith('kimi') ||
+    m.startsWith('moonshot') ||
+    m === 'k3' ||
+    m === 'k3-256k' ||
+    m === 'kimi-code/k3'
+  ) return KIMI_TIERS.k3
   if (m.startsWith('grok')) return grokPrice(model)
   return CLAUDE_SONNET
 }

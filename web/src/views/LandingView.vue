@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../api/client'
@@ -9,6 +9,9 @@ type SnippetKey = 'curl' | 'python' | 'js'
 const auth = useAuthStore()
 const scrolled = ref(false)
 const activeTab = ref<SnippetKey>('curl')
+const mobileMenuOpen = ref(false)
+
+const chartBars = [42, 68, 34, 48, 56, 78, 51, 72, 61, 38]
 
 const systemSummary = ref<{
   registrationEnabled: boolean
@@ -17,10 +20,28 @@ const systemSummary = ref<{
   providers: string[]
 } | null>(null)
 
+function handleScroll() {
+  scrolled.value = window.scrollY > 20
+}
+
+function formatRequestCount(requests: number): string {
+  if (!Number.isFinite(requests) || requests < 10_000) {
+    return Math.max(0, Math.round(requests)).toLocaleString('zh-CN')
+  }
+  const wan = requests / 10_000
+  return `${wan >= 100 ? wan.toFixed(0) : wan.toFixed(1)} 万`
+}
+
+const summaryAccounts = computed(() =>
+  systemSummary.value ? systemSummary.value.accounts.toLocaleString('zh-CN') : '多个',
+)
+const summaryRequests = computed(() =>
+  systemSummary.value ? formatRequestCount(systemSummary.value.requests) : '',
+)
+
 onMounted(async () => {
-  window.addEventListener('scroll', () => {
-    scrolled.value = window.scrollY > 20
-  })
+  handleScroll()
+  window.addEventListener('scroll', handleScroll, { passive: true })
 
   try {
     const { data } = await api.get('/auth/system-summary')
@@ -28,6 +49,10 @@ onMounted(async () => {
   } catch {
     // Ignore error
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleScroll)
 })
 
 const features = [
@@ -86,7 +111,7 @@ const openai = new OpenAI({
     <!-- Simple Navbar -->
     <nav
       class="fixed inset-x-0 top-0 z-50 border-b transition-all duration-300"
-      :class="scrolled ? 'bg-white/90 backdrop-blur-md border-slate-200 dark:bg-dark-900/90 dark:border-dark-800' : 'bg-transparent border-transparent'"
+      :class="(scrolled || mobileMenuOpen) ? 'bg-white/90 backdrop-blur-md border-slate-200 dark:bg-dark-900/90 dark:border-dark-800' : 'bg-transparent border-transparent'"
     >
       <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <div class="flex items-center gap-3">
@@ -98,9 +123,31 @@ const openai = new OpenAI({
           <span class="text-xl font-bold tracking-tight">Model Bridge</span>
         </div>
         
-        <div class="hidden md:flex items-center gap-10">
-          <a href="#features" class="text-sm font-medium text-slate-600 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors">核心功能</a>
-          <RouterLink :to="{ name: 'docs' }" class="text-sm font-medium text-slate-600 hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400 transition-colors">文档</RouterLink>
+        <div class="hidden items-center gap-10 md:flex">
+          <a href="#features" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">核心功能</a>
+          <RouterLink :to="{ name: 'docs' }" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">文档</RouterLink>
+        </div>
+
+        <button
+          type="button"
+          class="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:hidden dark:text-slate-300 dark:hover:bg-dark-800 dark:hover:text-white"
+          :aria-expanded="mobileMenuOpen"
+          aria-controls="mobile-navigation"
+          :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
+          @click="mobileMenuOpen = !mobileMenuOpen"
+        >
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="mobileMenuOpen ? 'M6 18 18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'" />
+          </svg>
+        </button>
+
+        <div
+          v-if="mobileMenuOpen"
+          id="mobile-navigation"
+          class="absolute inset-x-4 top-[calc(100%+0.5rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl md:hidden dark:border-dark-700 dark:bg-dark-900"
+        >
+          <a href="#features" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">核心功能</a>
+          <RouterLink :to="{ name: 'docs' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">文档</RouterLink>
         </div>
 
         <div class="flex items-center gap-4">
@@ -126,14 +173,16 @@ const openai = new OpenAI({
       <div class="mx-auto max-w-7xl px-6 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
         <div class="animate-in fade-in slide-in-from-left-4 duration-1000">
           <div class="inline-flex items-center rounded-full bg-primary-50 px-4 py-1 text-sm font-bold text-primary-700 dark:bg-primary-950/30 dark:text-primary-400 mb-6">
-            {{ systemSummary?.providers.length ?? '10+' }} 个顶级 AI 服务商已接入
+            {{ systemSummary?.providers.length ?? '多个' }} 个 AI 服务商已接入
           </div>
           <h1 class="text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-7xl leading-tight">
             更稳定、更智能、<br />
             <span class="text-primary-600">更懂开发者的中转。</span>
           </h1>
           <p class="mt-8 text-xl text-slate-600 dark:text-slate-400 leading-relaxed max-w-xl mx-auto lg:mx-0">
-            Model Bridge 将 {{ systemSummary?.accounts ?? '数十' }} 个上游账户聚合为单一入口。累计已稳定处理 {{ systemSummary ? (systemSummary.requests / 10000).toFixed(1) : '数万' }} 万次 API 调用。
+            Model Bridge 将 {{ summaryAccounts }} 个上游账户聚合为单一入口。
+            <template v-if="systemSummary">累计已稳定处理 {{ summaryRequests }} 次 API 调用。</template>
+            <template v-else>统一接入多个主流 AI 服务商。</template>
           </p>
           <div class="mt-12 flex flex-wrap justify-center lg:justify-start gap-5">
             <RouterLink
@@ -142,7 +191,7 @@ const openai = new OpenAI({
             >
               {{ auth.isAuthenticated ? '进入管理后台' : '立即开始构建' }}
             </RouterLink>
-            <a href="https://github.com/calmliming/model-bridge" target="_blank" class="rounded-xl bg-white border border-slate-200 px-8 py-4 text-lg font-bold text-slate-900 shadow-sm hover:bg-slate-50 transition-all dark:bg-dark-800 dark:border-dark-700 dark:text-white">
+            <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="rounded-xl bg-white border border-slate-200 px-8 py-4 text-lg font-bold text-slate-900 shadow-sm hover:bg-slate-50 transition-all dark:bg-dark-800 dark:border-dark-700 dark:text-white">
               GitHub 源码
             </a>
           </div>
@@ -170,7 +219,7 @@ const openai = new OpenAI({
                   </div>
                 </div>
                 <div class="h-40 rounded-xl bg-white dark:bg-dark-900 border border-slate-100 dark:border-dark-800 p-4 flex items-end justify-between gap-2">
-                  <div v-for="i in 10" :key="i" class="w-full bg-primary-500/20 dark:bg-primary-500/40 rounded-t-lg" :style="`height: ${Math.random() * 80 + 20}%` "></div>
+                  <div v-for="(height, index) in chartBars" :key="index" class="w-full rounded-t-lg bg-primary-500/20 dark:bg-primary-500/40" :style="{ height: `${height}%` }"></div>
                 </div>
               </div>
             </div>
@@ -208,12 +257,23 @@ const openai = new OpenAI({
         <div class="relative">
           <div class="absolute -inset-2 rounded-3xl bg-primary-600/5 blur-2xl"></div>
           <div class="relative overflow-hidden rounded-2xl bg-slate-950 shadow-2xl border border-white/10">
-            <div class="flex items-center gap-2 border-b border-white/5 bg-white/5 px-6 py-4">
-              <button v-for="t in snippetTabs" :key="t" @click="activeTab = t" :class="activeTab === t ? 'text-white' : 'text-white/40 hover:text-white/60'" class="text-xs font-bold uppercase tracking-widest px-3 transition-colors">
+            <div class="flex items-center gap-2 border-b border-white/5 bg-white/5 px-6 py-4" role="tablist" aria-label="代码示例">
+              <button
+                v-for="t in snippetTabs"
+                :key="t"
+                type="button"
+                role="tab"
+                :id="`tab-${t}`"
+                aria-controls="code-example"
+                :aria-selected="activeTab === t"
+                :class="activeTab === t ? 'text-white' : 'text-white/40 hover:text-white/60'"
+                class="px-3 text-xs font-bold uppercase tracking-widest transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+                @click="activeTab = t"
+              >
                 {{ t }}
               </button>
             </div>
-            <pre class="p-8 text-sm leading-relaxed text-blue-300 font-mono overflow-x-auto"><code>{{ codeSnippets[activeTab] }}</code></pre>
+            <pre id="code-example" role="tabpanel" :aria-labelledby="`tab-${activeTab}`" class="p-8 text-sm leading-relaxed text-blue-300 font-mono overflow-x-auto"><code>{{ codeSnippets[activeTab] }}</code></pre>
           </div>
         </div>
         <div class="text-left">
@@ -244,8 +304,8 @@ const openai = new OpenAI({
         </div>
         <p class="text-sm font-medium text-slate-400 dark:text-dark-500">© 2026 Model Bridge Protocol. Open source infrastructure.</p>
         <div class="flex gap-8">
-          <a href="https://github.com/calmliming/model-bridge" target="_blank" class="text-sm font-bold text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">GitHub</a>
-          <a href="#" class="text-sm font-bold text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">Twitter</a>
+          <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="text-sm font-bold text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-white">GitHub</a>
+          <RouterLink :to="{ name: 'docs' }" class="text-sm font-bold text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-white">文档</RouterLink>
         </div>
       </div>
     </footer>

@@ -392,7 +392,7 @@ onMounted(load)
     </UiCard>
 
     <UiModal v-model:show="showInvite" title="邀请用户" :width="460">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="invite">
         <UiFormItem label="邮箱">
           <UiInput v-model:value="inviteForm.email" placeholder="user@example.com" />
         </UiFormItem>
@@ -420,7 +420,7 @@ onMounted(load)
     </UiModal>
 
     <UiModal v-model:show="showAdjust" :title="`调整余额：${selectedUser?.name ?? ''}`" :width="460">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="adjustWallet">
         <UiFormItem label="金额（USD，可为负数）">
           <UiInputNumber v-model:value="adjustForm.amount" :step="1" style="width: 100%" />
         </UiFormItem>
@@ -437,7 +437,7 @@ onMounted(load)
     </UiModal>
 
     <UiModal v-model:show="showConcurrency" :title="`并发上限：${selectedUser?.name ?? ''}`" :width="460">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="saveConcurrency">
         <UiFormItem label="最大并发请求数（跨该用户所有 Key）">
           <UiInputNumber v-model:value="concurrencyForm.value" :min="1" :step="1" placeholder="留空 = 不限" style="width: 100%" />
         </UiFormItem>

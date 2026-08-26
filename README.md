@@ -27,7 +27,7 @@ daily / provider / model / key breakdowns, and a one-command Docker deploy.
 
 ## Quick start (development)
 
-Requires Node.js 20+.
+Requires Node.js 24.19.0 LTS (or a newer LTS release).
 
 ```bash
 # Start backend and frontend together with formatted API / WEB log prefixes.

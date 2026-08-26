@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { provide, ref, watch, type Ref } from 'vue'
+import { computed, provide, ref, watch, type Ref } from 'vue'
+import { useFieldContext } from './fieldContext'
 
 const props = defineProps<{
+  id?: string
   value?: string | number
   modelValue?: string | number
   size?: 'small' | 'medium' | 'large'
@@ -29,10 +31,13 @@ provide<{ current: Ref<string | number | undefined>; select: (v: string | number
   'uiRadioGroup',
   { current, select },
 )
+
+const field = useFieldContext()
+const resolvedId = computed(() => props.id ?? field?.id)
 </script>
 
 <template>
-  <div class="inline-flex flex-wrap items-center gap-2" role="radiogroup">
+  <div class="inline-flex flex-wrap items-center gap-2" role="radiogroup" :id="resolvedId" :aria-labelledby="field?.labelId">
     <slot />
   </div>
 </template>

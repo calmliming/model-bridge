@@ -384,7 +384,7 @@ onMounted(() => {
 
     <!-- create / edit -->
     <UiModal v-model:show="showForm" :title="formTitle" :width="480">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="submitForm">
         <UiFormItem label="分组名称">
           <UiInput v-model:value="form.name" placeholder="例如：高优先级池" />
         </UiFormItem>

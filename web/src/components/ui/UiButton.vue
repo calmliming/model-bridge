@@ -33,6 +33,7 @@ const variantClass = computed(() => {
   }
   if (props.secondary || props.ghost) {
     if (props.type === 'error') return 'btn-danger-ghost'
+    if (props.type === 'warning') return 'btn-warning-ghost'
     return 'btn-secondary'
   }
   switch (props.type) {
@@ -43,7 +44,7 @@ const variantClass = computed(() => {
     case 'error':
       return 'btn-danger'
     case 'warning':
-      return 'btn-success'
+      return 'btn-warning'
     default:
       return 'btn-secondary'
   }
@@ -74,9 +75,10 @@ function onClick(ev: MouseEvent) {
     class="btn"
     :class="[variantClass, sizeClass, block && 'btn-block']"
     :disabled="disabled || loading"
+    :aria-busy="loading || undefined"
     @click="onClick"
   >
-    <span v-if="loading" class="spinner h-4 w-4" />
+    <span v-if="loading" class="spinner h-4 w-4" aria-hidden="true" />
     <slot />
   </button>
 </template>

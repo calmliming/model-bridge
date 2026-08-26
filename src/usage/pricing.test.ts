@@ -96,6 +96,14 @@ describe('grok (xAI) pricing', () => {
   })
 })
 
+describe('Kimi Code pricing', () => {
+  it('prices Kimi Code K3 aliases as the Kimi K3 tier', () => {
+    for (const model of ['k3', 'k3-256k', 'kimi-code/k3']) {
+      expect(resolvePrice('sub2api', model)).toMatchObject({ input: 2.8, output: 14 })
+    }
+  })
+})
+
 describe('DeepSeek V4 pricing', () => {
   const beforeSchedule = Date.parse('2026-08-16T15:59:59.999Z')
   const scheduleStarts = Date.parse('2026-08-16T16:00:00Z')

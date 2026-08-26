@@ -438,7 +438,7 @@ function confirmSystemUpdate() {
     </UiCard>
 
     <UiCard class="max-w-xl" title="管理员账户">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="changePassword">
         <UiFormItem label="当前用户">
           <UiInput :value="auth.username ?? ''" readonly />
         </UiFormItem>
@@ -452,10 +452,9 @@ function confirmSystemUpdate() {
           <UiInput
             v-model:value="confirmPassword"
             type="password"
-            @keyup.enter="changePassword"
           />
         </UiFormItem>
-        <UiButton type="primary" :loading="saving" @click="changePassword">更新密码</UiButton>
+        <UiButton type="primary" native-type="submit" :loading="saving">更新密码</UiButton>
       </UiForm>
     </UiCard>
 

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useFieldContext } from './fieldContext'
 
 const props = withDefaults(
   defineProps<{
+    id?: string
+    name?: string
     value?: string | null
     modelValue?: string | null
     type?: 'text' | 'textarea' | 'password'
     placeholder?: string
+    autocomplete?: string
+    ariaLabel?: string
+    ariaDescribedby?: string
+    required?: boolean
     disabled?: boolean
     readonly?: boolean
     error?: boolean
@@ -18,6 +25,9 @@ const props = withDefaults(
     rows: 3,
   },
 )
+
+const field = useFieldContext()
+const resolvedId = computed(() => props.id ?? field?.id)
 
 const emit = defineEmits<{
   (e: 'update:value', value: string): void
@@ -44,8 +54,14 @@ const minRows = computed(() =>
     v-if="type === 'textarea'"
     class="input resize-y"
     :class="error && 'input-error'"
+    :id="resolvedId"
+    :name="name"
     :value="current"
     :placeholder="placeholder"
+    :autocomplete="autocomplete"
+    :aria-label="ariaLabel"
+    :aria-describedby="ariaDescribedby"
+    :required="required"
     :disabled="disabled"
     :readonly="readonly"
     :rows="minRows"
@@ -55,9 +71,15 @@ const minRows = computed(() =>
     v-else
     class="input"
     :class="error && 'input-error'"
+    :id="resolvedId"
+    :name="name"
     :type="type"
     :value="current"
     :placeholder="placeholder"
+    :autocomplete="autocomplete"
+    :aria-label="ariaLabel"
+    :aria-describedby="ariaDescribedby"
+    :required="required"
     :disabled="disabled"
     :readonly="readonly"
     @input="onInput"

@@ -65,6 +65,18 @@ describe('model discovery', () => {
     ])
   })
 
+  it('discovers Kimi Code K3 aliases for Kimi-scoped keys', () => {
+    const key = { allowedProviders: ['kimi'] as const, allowedModels: null }
+    expect(listModelIdsForKey(key)).toEqual([
+      'kimi-k3',
+      'kimi-k2.7-code',
+      'kimi-k2.6',
+      'k3',
+      'k3-256k',
+      'kimi-code/k3',
+    ])
+  })
+
   it('returns Gemini API model objects', () => {
     const key = { allowedProviders: ['gemini'] as const, allowedModels: ['gemini-*'] }
     expect(listGeminiModels(key)).toEqual([

@@ -14,16 +14,54 @@ const UNSUPPORTED_SCHEMA_KEYS = new Set([
   'additionalProperties',
   'unevaluatedProperties',
   'patternProperties',
+  // The Code Assist schema dialect accepts only a small JSON-Schema subset.
+  // Length/cardinality constraints are valid JSON Schema but are rejected by
+  // the Gemini compatibility endpoint (the same fields are stripped by the
+  // upstream Sub2API compatibility layer).
+  'minLength',
+  'maxLength',
+  'minItems',
+  'maxItems',
+  'exclusiveMinimum',
   'title',
   'default',
   'examples',
   'nullable',
+  'deprecated',
 ])
 
 // Nested schema containers to recurse into. `properties` and `$defs`-like maps
 // hold named sub-schemas; the rest hold a schema or an array of schemas.
 const SCHEMA_MAP_KEYS = new Set(['properties'])
 const SCHEMA_LIST_OR_NODE_KEYS = new Set(['items', 'anyOf', 'allOf', 'oneOf', 'prefixItems', 'not'])
+
+/**
+ * Gemini enums are string-valued even when the incoming JSON Schema contains
+ * scalar numbers/booleans. Keep scalar values losslessly as strings and drop
+ * the enum when it contains a compound value that cannot be represented by
+ * the Gemini dialect. This avoids an upstream 400 while preserving the
+ * useful part of mixed scalar enums.
+ */
+function normalizeGeminiEnum(value: unknown): unknown[] | null {
+  if (!Array.isArray(value)) return null
+  const normalized: unknown[] = []
+  for (const item of value) {
+    if (typeof item === 'string') {
+      normalized.push(item)
+      continue
+    }
+    if (item === null || typeof item === 'boolean') {
+      normalized.push(String(item))
+      continue
+    }
+    if (typeof item === 'number' && Number.isFinite(item)) {
+      normalized.push(String(item))
+      continue
+    }
+    return null
+  }
+  return normalized
+}
 
 /** Recursively strips Gemini-incompatible JSON Schema fields from a tool schema. */
 function sanitizeSchema(value: unknown): unknown {
@@ -45,6 +83,11 @@ function sanitizeSchema(value: unknown): unknown {
       // Scalars (type, description, enum, required, format, …) pass through.
       out[key] = val
     }
+  }
+  if (Object.prototype.hasOwnProperty.call(out, 'enum')) {
+    const normalized = normalizeGeminiEnum(out.enum)
+    if (normalized) out.enum = normalized
+    else delete out.enum
   }
   return out
 }

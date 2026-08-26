@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useFieldContext } from './fieldContext'
 
 interface Option {
   label: string
@@ -22,6 +23,7 @@ const props = withDefaults(
     maxTagCount?: number | 'responsive'
     consistentMenuWidth?: boolean
     ariaLabel?: string
+    id?: string
   }>(),
   {
     placeholder: '请选择',
@@ -36,6 +38,9 @@ const emit = defineEmits<{
   (e: 'update:modelValue', v: string | number | null | (string | number)[]): void
   (e: 'updateValue', v: string | number | null | (string | number)[]): void
 }>()
+
+const field = useFieldContext()
+const resolvedId = computed(() => props.id ?? field?.id)
 
 const open = ref(false)
 const search = ref('')
@@ -193,6 +198,7 @@ const showClearButton = computed(() =>
   <div ref="triggerRef" class="relative">
     <div
       class="input select-trigger flex cursor-pointer items-center gap-1.5"
+      :id="resolvedId"
       :class="[
         size === 'small' && 'is-small',
         multiple && 'flex-wrap',
@@ -205,6 +211,7 @@ const showClearButton = computed(() =>
       aria-haspopup="listbox"
       :aria-expanded="open"
       :aria-label="ariaLabel"
+      :aria-labelledby="field?.labelId"
       @click="toggle"
       @keydown.enter.self.prevent="toggle"
       @keydown.space.self.prevent="toggle"

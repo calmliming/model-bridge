@@ -1165,6 +1165,15 @@ function confirmBulkDelete() {
   })
 }
 
+async function submitAddForm() {
+  if (step.value !== 'name') return
+  if (isApiKeyProvider(form.value.provider)) {
+    await finishApiKeyImport()
+  } else {
+    await startOAuth()
+  }
+}
+
 async function finishApiKeyImport() {
   const provider = form.value.provider
   const label = providerLabel[provider]
@@ -1661,6 +1670,25 @@ function providerRank(provider: string): number {
   return index === -1 ? providerOrder.length : index
 }
 
+function stopRefreshTimer() {
+  if (refreshTimer != null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+function scheduleRefreshTimer() {
+  stopRefreshTimer()
+  if (document.visibilityState === 'visible') {
+    refreshTimer = window.setInterval(() => void load(), 30_000)
+  }
+}
+
+function handleVisibilityChange() {
+  scheduleRefreshTimer()
+  if (document.visibilityState === 'visible') void load()
+}
+
 async function loadGlobalAutopause() {
   try {
     const { data } = await api.get('/admin/settings')
@@ -1676,7 +1704,8 @@ onMounted(() => {
   void load()
   void loadGroups()
   void loadGlobalAutopause()
-  refreshTimer = window.setInterval(() => void load(), 30_000)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  scheduleRefreshTimer()
 })
 
 watch(showGroups, (open) => {
@@ -1685,7 +1714,8 @@ watch(showGroups, (open) => {
 
 onBeforeUnmount(() => {
   viewUnmounted = true
-  if (refreshTimer != null) window.clearInterval(refreshTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  stopRefreshTimer()
 })
 </script>
 
@@ -1815,7 +1845,7 @@ onBeforeUnmount(() => {
 
     <UiModal v-model:show="showAdd" title="添加上游账户" :width="520">
       <div v-if="step === 'name'">
-        <UiForm label-placement="top">
+          <UiForm label-placement="top" @submit="submitAddForm">
           <UiFormItem label="服务商">
             <UiRadioGroup v-model:value="form.provider">
               <UiRadioButton value="claude">Claude</UiRadioButton>
@@ -2050,18 +2080,20 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-else class="group-form">
+      <form v-else class="group-form" @submit.prevent="submitGroupForm">
         <div class="group-form-field">
-          <label class="field-label">分组名称</label>
+          <label class="field-label" for="accounts-group-name">分组名称</label>
           <UiInput
+            id="accounts-group-name"
             v-model:value="groupForm.name"
             placeholder="例如：Claude 优先池"
             @keyup.enter="submitGroupForm"
           />
         </div>
         <div class="group-form-field">
-          <label class="field-label">备注</label>
+          <label class="field-label" for="accounts-group-description">备注</label>
           <UiInput
+            id="accounts-group-description"
             v-model:value="groupForm.description"
             type="textarea"
             :autosize="{ minRows: 3, maxRows: 5 }"
@@ -2069,8 +2101,9 @@ onBeforeUnmount(() => {
           />
         </div>
         <div class="group-form-field">
-          <label class="field-label">计费倍率</label>
+          <label class="field-label" for="accounts-group-rate">计费倍率</label>
           <UiInputNumber
+            id="accounts-group-rate"
             v-model:value="groupForm.rateMultiplier"
             :min="0.0001"
             :step="0.005"
@@ -2088,7 +2121,7 @@ onBeforeUnmount(() => {
             {{ formatRateMultiplier(groupForm.rateMultiplier) }}
           </UiTag>
         </div>
-      </div>
+      </form>
 
       <template #footer>
         <UiSpace justify="end">

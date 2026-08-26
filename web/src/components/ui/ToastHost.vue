@@ -26,7 +26,7 @@ const iconPath: Record<string, string> = {
 
 <template>
   <Teleport to="body">
-    <div class="pointer-events-none fixed right-4 top-4 z-[9999] flex flex-col gap-3">
+    <div class="pointer-events-none fixed right-4 top-4 z-[9999] flex flex-col gap-3" aria-live="polite" aria-atomic="false">
       <TransitionGroup
         enter-active-class="transition ease-out duration-300"
         enter-from-class="opacity-0 translate-x-8"
@@ -48,6 +48,7 @@ const iconPath: Record<string, string> = {
             viewBox="0 0 24 24"
             stroke="currentColor"
             stroke-width="1.6"
+            aria-hidden="true"
           >
             <path stroke-linecap="round" stroke-linejoin="round" :d="iconPath[toast.type]" />
           </svg>
@@ -55,7 +56,9 @@ const iconPath: Record<string, string> = {
             {{ toast.content }}
           </p>
           <button
+            type="button"
             class="-m-1 flex-shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700"
+            aria-label="关闭通知"
             @click="remove(toast.id)"
           >
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

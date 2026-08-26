@@ -161,7 +161,7 @@ async function register() {
         </div>
       </section>
 
-      <div class="login-card" role="main">
+      <main class="login-card">
         <div class="login-card-inner">
         <div class="form-head">
           <div>
@@ -171,18 +171,29 @@ async function register() {
           <span class="secure-badge">Secure</span>
         </div>
 
-        <UiForm v-if="mode === 'login'" label-placement="top" class="login-form">
-          <UiFormItem label="账号">
-            <UiInput v-model:value="account" size="large" placeholder="请输入账号" />
-          </UiFormItem>
-          <UiFormItem label="密码">
+        <UiForm v-if="mode === 'login'" label-placement="top" novalidate class="login-form" @submit="login">
+          <UiFormItem label="账号" for-id="login-account">
             <UiInput
+              id="login-account"
+              name="account"
+              v-model:value="account"
+              size="large"
+              placeholder="请输入账号"
+              autocomplete="username"
+              required
+            />
+          </UiFormItem>
+          <UiFormItem label="密码" for-id="login-password">
+            <UiInput
+              id="login-password"
+              name="password"
               v-model:value="password"
               size="large"
               type="password"
               show-password-on="click"
               placeholder="请输入密码"
-              @keyup.enter="login"
+              autocomplete="current-password"
+              required
             />
           </UiFormItem>
           <TurnstileWidget
@@ -191,38 +202,60 @@ async function register() {
             :site-key="turnstileSiteKey"
             @update:token="turnstileToken = $event"
           />
-          <UiButton type="primary" size="large" block :loading="loading" :disabled="captchaMissing" @click="login">
+          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing">
             登录
           </UiButton>
           <p v-if="registrationEnabled" class="form-switch">
-            还没有账号？<a @click="setMode('register')">注册账号</a>
+            还没有账号？<button type="button" class="form-switch-link" @click="setMode('register')">注册账号</button>
           </p>
         </UiForm>
 
-        <UiForm v-else label-placement="top" class="login-form">
-          <UiFormItem label="邮箱">
-            <UiInput v-model:value="regEmail" size="large" placeholder="请输入邮箱" />
-          </UiFormItem>
-          <UiFormItem label="昵称（可选）">
-            <UiInput v-model:value="regName" size="large" placeholder="如何称呼你" />
-          </UiFormItem>
-          <UiFormItem label="密码">
+        <UiForm v-else label-placement="top" novalidate class="login-form" @submit="register">
+          <UiFormItem label="邮箱" for-id="register-email">
             <UiInput
+              id="register-email"
+              name="email"
+              v-model:value="regEmail"
+              size="large"
+              placeholder="请输入邮箱"
+              autocomplete="email"
+              required
+            />
+          </UiFormItem>
+          <UiFormItem label="昵称（可选）" for-id="register-name">
+            <UiInput
+              id="register-name"
+              name="name"
+              v-model:value="regName"
+              size="large"
+              placeholder="如何称呼你"
+              autocomplete="name"
+            />
+          </UiFormItem>
+          <UiFormItem label="密码" for-id="register-password">
+            <UiInput
+              id="register-password"
+              name="password"
               v-model:value="regPassword"
               size="large"
               type="password"
               show-password-on="click"
               placeholder="至少 6 位"
+              autocomplete="new-password"
+              required
             />
           </UiFormItem>
-          <UiFormItem label="确认密码">
+          <UiFormItem label="确认密码" for-id="register-confirm">
             <UiInput
+              id="register-confirm"
+              name="passwordConfirmation"
               v-model:value="regConfirm"
               size="large"
               type="password"
               show-password-on="click"
               placeholder="再次输入密码"
-              @keyup.enter="register"
+              autocomplete="new-password"
+              required
             />
           </UiFormItem>
           <TurnstileWidget
@@ -231,15 +264,15 @@ async function register() {
             :site-key="turnstileSiteKey"
             @update:token="turnstileToken = $event"
           />
-          <UiButton type="primary" size="large" block :loading="loading" :disabled="captchaMissing" @click="register">
+          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing">
             注册
           </UiButton>
           <p class="form-switch">
-            已有账号？<a @click="setMode('login')">返回登录</a>
+            已有账号？<button type="button" class="form-switch-link" @click="setMode('login')">返回登录</button>
           </p>
         </UiForm>
         </div>
-      </div>
+      </main>
     </div>
   </div>
 </template>
@@ -530,14 +563,24 @@ async function register() {
   font-size: 14px;
 }
 
-.form-switch a {
+.form-switch-link {
+  border: 0;
+  padding: 0;
   color: #0d9488;
+  background: transparent;
+  font: inherit;
   font-weight: 600;
   cursor: pointer;
 }
 
-.form-switch a:hover {
+.form-switch-link:hover {
   text-decoration: underline;
+}
+
+.form-switch-link:focus-visible {
+  outline: 2px solid rgba(13, 148, 136, 0.45);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .login-form :deep(.field-label) {

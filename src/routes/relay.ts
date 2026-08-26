@@ -1136,6 +1136,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^glm/i, handler: PROVIDERS.zhipu! },
     { test: /^qwen/i, handler: PROVIDERS.qwen! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS.kimi! },
+    { test: /^(k3|k3-256k)$/i, handler: PROVIDERS.kimi! },
   ], PROVIDERS.sub2api!)
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
@@ -1143,6 +1144,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-responses']! },
+    { test: /^(k3|k3-256k)$/i, handler: PROVIDERS['kimi-responses']! },
     { test: /^grok/i, handler: PROVIDERS.grok! },
   ], PROVIDERS['sub2api-responses']!)
   const chatHandler = dispatchByModel(PROVIDERS['openai-chat']!, [
@@ -1152,6 +1154,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-chat']! },
+    { test: /^(k3|k3-256k)$/i, handler: PROVIDERS['kimi-chat']! },
     { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
   ], PROVIDERS['sub2api-chat']!)
   app.post('/v1/messages', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, messagesHandler)

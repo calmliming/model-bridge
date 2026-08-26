@@ -9,6 +9,12 @@ describe('kimi mapModel', () => {
     expect(mapModel('moonshot-v1-128k')).toBe('moonshot-v1-128k')
   })
 
+  it('maps Kimi Code K3 aliases to the native K3 identifier', () => {
+    expect(mapModel('k3')).toBe('kimi-k3')
+    expect(mapModel('k3-256k')).toBe('kimi-k3')
+    expect(mapModel('kimi-code/k3')).toBe('kimi-k3')
+  })
+
   it('rewrites unknown / Codex model names to the flagship', () => {
     expect(mapModel('gpt-5.5')).toBe('kimi-k3')
     expect(mapModel('')).toBe('kimi-k3')

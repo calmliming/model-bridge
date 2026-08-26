@@ -4,7 +4,7 @@
 #
 
 # ── Stage 1: build the Vue admin dashboard ───────────────────────
-FROM node:20-bookworm-slim AS web-builder
+FROM node:24.19.0-bookworm-slim AS web-builder
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 2: install backend production dependencies ────────────
-FROM node:20-bookworm-slim AS deps
+FROM node:24.19.0-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # tsx lives in `dependencies` so --omit=dev still leaves it available
@@ -32,7 +32,7 @@ ENTRYPOINT []
 CMD ["node", "scripts/updater.mjs"]
 
 # ── Stage 4: slim runtime image ─────────────────────────────────
-FROM node:20-bookworm-slim AS runtime
+FROM node:24.19.0-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \

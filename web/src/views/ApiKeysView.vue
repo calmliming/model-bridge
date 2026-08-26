@@ -964,7 +964,7 @@ onMounted(() => {
       title="新建 API Key"
       :width="520"
     >
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="create">
         <UiFormItem label="归属用户">
           <UiSelect
             v-model:value="form.userId"
@@ -1163,7 +1163,7 @@ onMounted(() => {
 
     <!-- edit limits -->
     <UiModal v-model:show="showEdit" title="编辑 API Key" :width="520">
-      <UiForm label-placement="top">
+      <UiForm label-placement="top" @submit="saveEdit">
         <UiFormItem label="归属用户">
           <UiSelect
             v-model:value="editForm.userId"

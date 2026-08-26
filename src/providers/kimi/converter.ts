@@ -53,7 +53,14 @@ export interface ChatCompletionsRequest {
  */
 export function mapModel(input: unknown): string {
   if (typeof input !== 'string' || !input) return 'kimi-k3'
-  return input.startsWith('kimi') || input.startsWith('moonshot') ? input : 'kimi-k3'
+  const normalized = input.trim().toLowerCase()
+  // Kimi Code's Composite aliases are routed to the K3 backend by Sub2API.
+  // The native Moonshot endpoint expects the canonical `kimi-k3` identifier,
+  // so translate the short/provider-qualified aliases before sending them.
+  if (normalized === 'k3' || normalized === 'k3-256k' || normalized === 'kimi-code/k3') {
+    return 'kimi-k3'
+  }
+  return normalized.startsWith('kimi') || normalized.startsWith('moonshot') ? input : 'kimi-k3'
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

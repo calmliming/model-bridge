@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMessage } from '../composables/useMessage'
-import EChart from '../components/EChart.vue'
 import { api, errMsg } from '../api/client'
 import { formatTime, formatTokens } from '../utils'
+import LazyEChart from '../components/LazyEChart.vue'
 
 interface DailyStat {
   day: string
@@ -633,7 +633,7 @@ function openRequestInput(row: DashboardRecentLog) {
             </div>
             <UiButton size="small" quaternary @click="load">刷新</UiButton>
           </div>
-          <EChart :option="dailyOption" height="282px" />
+          <LazyEChart :option="dailyOption" height="282px" />
         </UiCard>
       </UiGi>
 
@@ -645,7 +645,7 @@ function openRequestInput(row: DashboardRecentLog) {
               <span class="block mt-1 text-accent-900/45 text-xs">按近 30 天 Tokens 统计</span>
             </div>
           </div>
-          <EChart v-if="providerRows.length" :option="providerOption" height="218px" />
+          <LazyEChart v-if="providerRows.length" :option="providerOption" height="218px" />
           <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">暂无用量数据</div>
           <div class="grid gap-2.5 mt-1">
             <div

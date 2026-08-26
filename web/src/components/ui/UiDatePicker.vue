@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useFieldContext } from './fieldContext'
 
 const props = defineProps<{
+  id?: string
+  name?: string
   value?: number | null
   modelValue?: number | null
   type?: string
   clearable?: boolean
   disabled?: boolean
+  ariaLabel?: string
+  ariaDescribedby?: string
 }>()
+
+const field = useFieldContext()
+const resolvedId = computed(() => props.id ?? field?.id)
 
 const emit = defineEmits<{
   (e: 'update:value', v: number | null): void
@@ -42,6 +50,11 @@ function clear() {
     <input
       class="input pr-9"
       type="datetime-local"
+      :id="resolvedId"
+      :name="name"
+      :aria-label="ariaLabel"
+      :aria-labelledby="field?.labelId"
+      :aria-describedby="ariaDescribedby"
       :value="localValue"
       :disabled="disabled"
       @input="onInput"
