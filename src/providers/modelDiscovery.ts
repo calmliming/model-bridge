@@ -41,7 +41,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
   // Kimi Code exposes the K3 model under short aliases as well as the
   // provider-qualified name. Keep them discoverable so a Composite-style key
-  // can route the same identifiers that Sub2API v0.1.182 accepts.
+  // can route the same identifiers that Sub2API v0.1.183 accepts.
   kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1'],
 }

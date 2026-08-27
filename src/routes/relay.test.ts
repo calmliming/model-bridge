@@ -189,6 +189,61 @@ describe('classifyUpstreamFailure model scoping', () => {
     expect(failure.modelScoped).toBe(true)
   })
 
+  it('treats an OpenAI usage_limit_reached body as account-scoped', async () => {
+    const before = Date.now()
+    const failure = await classifyUpstreamFailure(
+      'openai',
+      new Response(JSON.stringify({
+        error: {
+          type: 'usage_limit_reached',
+          message: 'The usage limit has been reached',
+          resets_in_seconds: 3600,
+        },
+      }), { status: 429 }),
+    )
+
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: false,
+      accountScoped: true,
+    })
+    expect(failure.resetAt).toBeGreaterThanOrEqual(before + 3_599_000)
+    expect(failure.resetAt).toBeLessThanOrEqual(Date.now() + 3_601_000)
+  })
+
+  it('uses a human-readable OpenCode usage reset duration', async () => {
+    const before = Date.now()
+    const failure = await classifyUpstreamFailure(
+      'openai',
+      new Response(JSON.stringify({
+        error: {
+          type: 'GoUsageLimitError',
+          message: '5-hour usage limit reached. Resets in 4hr 59min.',
+        },
+      }), { status: 429 }),
+    )
+
+    expect(failure.modelScoped).toBe(false)
+    expect(failure.accountScoped).toBe(true)
+    expect(failure.resetAt).toBeGreaterThanOrEqual(before + (4 * 60 + 59) * 60_000 - 1_000)
+    expect(failure.resetAt).toBeLessThanOrEqual(Date.now() + (4 * 60 + 59) * 60_000 + 1_000)
+  })
+
+  it('does not use a healthy Codex snapshot to classify a 429 as account exhaustion', async () => {
+    const failure = await classifyUpstreamFailure(
+      'openai',
+      rateLimited({
+        'x-codex-primary-used-percent': '37',
+        'x-codex-primary-reset-after-seconds': '604800',
+        'x-codex-primary-window-minutes': '10080',
+      }),
+    )
+
+    expect(failure.modelScoped).toBe(true)
+    expect(failure.resetAt).toBeNull()
+  })
+
   it('never marks non-OpenAI providers as model-scoped', async () => {
     const failure = await classifyUpstreamFailure('claude', rateLimited())
     expect(failure.penalty).toBe('rate_limited')
@@ -229,6 +284,38 @@ describe('Sub2API account-scoped failure rotation', () => {
     )
 
     expect(shouldRetrySameRelayAccount(failure)).toBe(true)
+  })
+})
+
+describe('Kimi 403 concurrency classification', () => {
+  it('treats the provider concurrency response as a temporary account failure', async () => {
+    const failure = await classifyUpstreamFailure(
+      'kimi',
+      new Response(JSON.stringify({
+        error: {
+          message: "You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again.",
+        },
+      }), { status: 403 }),
+    )
+
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      accountScoped: true,
+    })
+    expect(failure.modelScoped).not.toBe(true)
+  })
+
+  it('keeps a near-match Kimi permission response non-retryable', async () => {
+    const failure = await classifyUpstreamFailure(
+      'kimi',
+      new Response(JSON.stringify({
+        error: { message: "You've reached your concurrent request limit. Please contact support." },
+      }), { status: 403 }),
+    )
+
+    expect(failure.retryable).toBe(false)
+    expect(failure.penalty).toBeNull()
   })
 })
 

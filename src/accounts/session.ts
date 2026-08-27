@@ -98,7 +98,10 @@ export async function resetStickyBindings(): Promise<void> {
 // ── Session fingerprinting ─────────────────────────────────────────────────
 
 /** Request headers a client may use to pin a conversation explicitly. */
-const SESSION_HEADERS = ['session_id', 'conversation_id', 'x-session-id', 'x-conversation-id']
+// Codex has emitted both hyphenated and underscored spellings over time. Keep
+// the hyphenated form first so the current official client signal wins when a
+// proxy happens to forward both variants.
+const SESSION_HEADERS = ['session-id', 'session_id', 'conversation_id', 'x-session-id', 'x-conversation-id']
 
 type Headers = Record<string, string | string[] | undefined>
 

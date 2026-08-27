@@ -90,4 +90,28 @@ describe('normalizeOpenaiResponsesBody', () => {
       parameters: { type: 'object', properties: { query: { type: 'string' } } },
     }])
   })
+
+  it('retypes known custom/tool-search item IDs before replaying history', () => {
+    const original = {
+      model: 'gpt-5.5',
+      input: [
+        { type: 'custom_tool_call', id: 'fc_custom-1', input: '{}' },
+        { type: 'custom_tool_call_output', id: 'fc_output-1', call_id: 'call-1', output: '{}' },
+        { type: 'tool_search_call', id: 'ctc_search-1', arguments: '{}' },
+        { type: 'tool_search_output', id: 'fc_search-output-1', call_id: 'call-2', output: '{}' },
+        { type: 'message', id: 'message-1' },
+      ],
+    }
+
+    const body = normalizeOpenaiResponsesBody(original)
+
+    expect(body.input).toEqual([
+      { type: 'custom_tool_call', id: 'ctc_custom-1', input: '{}' },
+      { type: 'custom_tool_call_output', id: 'ctco_output-1', call_id: 'call-1', output: '{}' },
+      { type: 'tool_search_call', id: 'tsc_search-1', arguments: '{}' },
+      { type: 'tool_search_output', id: 'tso_search-output-1', call_id: 'call-2', output: '{}' },
+      { type: 'message', id: 'message-1' },
+    ])
+    expect(original.input?.[0]).toEqual({ type: 'custom_tool_call', id: 'fc_custom-1', input: '{}' })
+  })
 })

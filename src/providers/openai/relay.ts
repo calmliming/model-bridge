@@ -13,6 +13,15 @@ const DEFAULT_INSTRUCTIONS = 'You are Codex, a helpful AI coding assistant.'
 const FORBIDDEN_FIELDS = ['max_output_tokens', 'parallel_tool_calls'] as const
 const IMAGE_GENERATION_TOOL_TYPE = 'image_generation'
 const EMPTY_TOOL_PARAMETERS = { type: 'object', properties: {} }
+const RESPONSES_ITEM_ID_PREFIXES = ['fc_', 'ctc_', 'ctco_', 'tsc_', 'tso_'] as const
+
+const RESPONSES_ITEM_PREFIX_BY_TYPE: Record<string, string> = {
+  function_call: 'fc_',
+  custom_tool_call: 'ctc_',
+  custom_tool_call_output: 'ctco_',
+  tool_search_call: 'tsc_',
+  tool_search_output: 'tso_',
+}
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -71,6 +80,27 @@ function normalizeResponseTools(body: Record<string, unknown>): void {
   })
 }
 
+/**
+ * Reconciles Responses item IDs after a client has round-tripped custom/tool
+ * search calls through a function-compatible adapter. The Codex endpoint
+ * validates the prefix against the item type (`fc_`, `ctc_`, `tsc_`, ...), so
+ * retaining a known foreign prefix causes the next replay to fail with 400.
+ * Unknown prefixes are left untouched rather than guessed at.
+ */
+function normalizeResponseInputItemIds(body: Record<string, unknown>): void {
+  if (!Array.isArray(body.input)) return
+  body.input = body.input.map((rawItem) => {
+    if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) return rawItem
+    const item = rawItem as Record<string, unknown>
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const expected = RESPONSES_ITEM_PREFIX_BY_TYPE[String(item.type ?? '')]
+    if (!id || !expected || id.startsWith(expected)) return rawItem
+    const known = RESPONSES_ITEM_ID_PREFIXES.find((prefix) => id.startsWith(prefix))
+    if (!known) return rawItem
+    return { ...item, id: `${expected}${id.slice(known.length)}` }
+  })
+}
+
 /** Normalises an incoming Responses-API body to what the Codex backend accepts. */
 export function normalizeOpenaiResponsesBody(
   body: Record<string, unknown>,
@@ -79,6 +109,7 @@ export function normalizeOpenaiResponsesBody(
   const out: Record<string, unknown> = { ...body }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
   normalizeResponseTools(out)
+  normalizeResponseInputItemIds(out)
   if (!options.allowImageGeneration) stripImageGenerationTools(out)
   if (typeof out.input === 'string') {
     out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]

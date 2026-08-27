@@ -55,6 +55,22 @@ describe('computeSessionKey', () => {
     expect(info?.hash).toMatch(/^[0-9a-f]{16}$/)
   })
 
+  it('accepts the hyphenated Codex session-id header', () => {
+    const info = computeSessionInfo('openai', 'k1', { 'session-id': 'codex-session-7' }, {})
+    expect(info).toMatchObject({
+      key: 'openai:k1:h:codex-session-7',
+      source: 'header',
+    })
+  })
+
+  it('prefers session-id over the legacy session_id spelling', () => {
+    const key = computeSessionKey('openai', 'k1', {
+      'session-id': 'current-session',
+      session_id: 'legacy-session',
+    }, {})
+    expect(key).toBe('openai:k1:h:current-session')
+  })
+
   it('uses prompt_cache_key when no explicit header is present', () => {
     const key = computeSessionKey('openai', 'k1', {}, {
       prompt_cache_key: 'cache-session-1',

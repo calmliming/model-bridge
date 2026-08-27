@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已核查至 **v0.1.182**，2026-08-25）
-> 更新日期：2026-08-26
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已核查至 **v0.1.183**，2026-08-25）
+> 更新日期：2026-08-27
 
 ## 一句话定位
 
@@ -106,12 +106,18 @@
 
 ## 六、本次更新整理
 
-### 核查 sub2api v0.1.175–v0.1.182（2026-08-12～2026-08-25）
+### 核查 sub2api v0.1.175–v0.1.183（2026-08-12～2026-08-26）
 
 本轮对照上游连续版本，补齐了与本项目原生协议路径同构、且不会引入新数据库迁移的兼容性修复：
 
 - **Gemini 工具 Schema 清理增强**：在递归清理基础上继续移除 `minLength`、`maxLength`、`minItems`、`maxItems`、`exclusiveMinimum`、`deprecated`；混合标量 `enum` 归一为字符串，含对象/数组等复合值的枚举安全丢弃，避免 Code Assist 400。
 - **Kimi Code K3 路由兼容**：`k3`、`k3-256k`、`kimi-code/k3` 纳入 Kimi 模型发现和裸路径按模型分发；原生 Moonshot 上游统一转换为 `kimi-k3`，Sub2API 专用 Key 仍保留原始模型名透传。
+- **Kimi 403 并发限制兼容**：精确识别 Kimi 返回的 `You've reached your concurrent request limit...`，按临时限流处理并继续故障转移，避免把可恢复的并发拒绝当成永久权限错误。
+- **OpenAI/Codex 配额 429 识别**：识别 `usage_limit_reached`、`GoUsageLimitError` 及 `resets_at` / `resets_in_seconds` 响应体，按账号窗口暂停到重置时间；非耗尽快照不再把账号错误冷却到 5 小时/7 天窗口。
+- **Codex 会话与容量溢出**：支持 `session-id` 会话信号；粘性账号并发已满时允许一次溢出，但不把持久会话绑定迁移到临时账号。
+- **Responses 工具历史 ID 归一**：对已知 `fc_` / `ctc_` / `tsc_` / `tso_` 前缀按输入项类型归一，避免 custom tool / tool search 历史重放触发上游 ID 校验 400。
+
+以上四项已在本项目落地。Sub2API v0.1.183 的 Antigravity token 上限、邮箱别名事务保护和 Composite 频道监控修复依赖本项目未采用的账号/监控模型，暂不照搬；New API `v1.0.0-rc.26` 的 32 位额度迁移和 vLLM 专属字段也不与本项目后端同构，未引入对应数据库迁移。
 
 以下上游能力暂未照搬：Responses Lite 专用 OAuth/WS 传输细节、Remote Compaction V2 全链路、服务层级（Fast/Flex）与渠道级逐模型定价、OpenAI 官方输入 token 预检转发。这些功能依赖 Sub2API 的 Go 调度/账号模型或独立上游接口，直接移植会改变本项目的轻量架构；后续应分别设计兼容层和配置开关。
 

@@ -128,6 +128,12 @@ const ACCOUNT_BALANCE_MARKERS = [
   'insufficient balance',
   'insufficient account balance',
 ]
+// Kimi exposes its per-account concurrency gate as a structured 403 rather
+// than a conventional 429. The exact wording is intentional: broad
+// "concurrent request" matching would turn unrelated permission errors into
+// temporary account cooldowns.
+const KIMI_CONCURRENCY_LIMIT_MESSAGE =
+  "You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again."
 
 interface ParsedRoute {
   model: string
@@ -637,6 +643,74 @@ function textLooksAccountBalanceExhausted(text: string): boolean {
   return ACCOUNT_BALANCE_MARKERS.some((marker) => lower.includes(marker))
 }
 
+function normalizedMessage(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLowerCase() : ''
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+/** Returns the nested error object used by OpenAI-compatible error envelopes. */
+function parsedErrorObject(text: string): Record<string, unknown> | null {
+  try {
+    const root = jsonRecord(JSON.parse(text))
+    if (!root) return null
+    const direct = jsonRecord(root.error)
+    if (direct) return direct
+    const response = jsonRecord(root.response)
+    return response ? jsonRecord(response.error) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Kimi's coding endpoint reports this transient account-capacity condition as
+ * HTTP 403. Match the provider's exact message (with harmless whitespace
+ * normalization) so ordinary permission 403s retain their existing handling.
+ */
+function isKimiConcurrencyLimit403(provider: string, text: string): boolean {
+  if (provider !== 'kimi') return false
+  const expected = normalizedMessage(KIMI_CONCURRENCY_LIMIT_MESSAGE)
+  const error = parsedErrorObject(text)
+  if (error && normalizedMessage(error.message) === expected) return true
+  return normalizedMessage(text) === expected
+}
+
+/**
+ * Distinguishes an OpenAI account/window quota exhaustion response from a
+ * model-scoped or ordinary transient 429. Newer Codex responses may provide
+ * the reset only in the JSON body (`usage_limit_reached` / `GoUsageLimitError`)
+ * instead of the x-codex-* headers.
+ */
+function isOpenaiQuotaExhaustedBody(text: string): boolean {
+  const error = parsedErrorObject(text)
+  if (!error) return false
+
+  const type = normalizedMessage(error.type)
+  const code = normalizedMessage(error.code)
+  if (type === 'usage_limit_reached' || type === 'gousagelimiterror') return true
+  if (code === 'usage_limit_reached' || code === 'gousagelimiterror') return true
+
+  const hasReset = error.resets_at != null || error.resets_in_seconds != null
+  if (hasReset) return true
+
+  const message = normalizedMessage(error.message)
+  if (!message) return false
+  // Window-specific wording is account-level by definition. Keep the generic
+  // "usage limit ... for this model" shape model-scoped.
+  if (
+    /(?:5[- ]?hour|7[- ]?day|weekly|daily)\s+(?:usage|quota)\s+(?:limit|quota)/i.test(message) ||
+    /(?:usage|quota)\s+(?:limit|quota)\s+(?:has been\s+)?(?:reached|exhausted)/i.test(message)
+  ) {
+    return !/\b(?:for|on)\s+(?:this\s+)?model\b/i.test(message)
+  }
+  return false
+}
+
 async function readErrorText(response: Response): Promise<string> {
   try {
     return (await response.clone().text()).slice(0, 4_000)
@@ -729,6 +803,11 @@ function parseCodexReset(headers: Headers): number | null {
 
   const exceeded = quota.windows.filter((window) => window.exceeded)
   if (exceeded.length) return pickLater(exceeded.map((window) => window.resetAt))
+  // A successful/non-exhausted quota snapshot can be attached to a later 429
+  // (especially on streaming responses). Do not inherit its 5h/7d reset and
+  // park an otherwise healthy account for days. If no utilization was sent at
+  // all, a reset-only snapshot remains useful account-level evidence.
+  if (quota.windows.some((window) => window.usedPercent != null)) return null
   return pickLater(quota.windows.map((window) => window.resetAt))
 }
 
@@ -745,6 +824,39 @@ function parseDurationMs(raw: string): number | null {
   return null
 }
 
+/** Parses human-readable reset phrases such as "4hr 59min" or "2 days". */
+function parseHumanDurationMs(raw: string): number | null {
+  const parts = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*(milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w)\b/gi)]
+  if (!parts.length) return null
+  let total = 0
+  for (const part of parts) {
+    const value = Number(part[1])
+    const unit = part[2]?.toLowerCase()
+    if (!Number.isFinite(value)) return null
+    const multiplier =
+      unit === 'ms' || unit === 'millisecond' || unit === 'milliseconds'
+        ? 1
+        : unit === 's' || unit === 'sec' || unit === 'secs' || unit === 'second' || unit === 'seconds'
+          ? 1_000
+          : unit === 'm' || unit === 'min' || unit === 'mins' || unit === 'minute' || unit === 'minutes'
+            ? 60_000
+            : unit === 'h' || unit === 'hr' || unit === 'hrs' || unit === 'hour' || unit === 'hours'
+              ? 3_600_000
+              : unit === 'd' || unit === 'day' || unit === 'days'
+                ? 86_400_000
+                : 604_800_000
+    total += value * multiplier
+  }
+  return Number.isFinite(total) && total > 0 ? total : null
+}
+
+function resetFromHumanMessage(message: string): number | null {
+  const match = message.match(/\b(?:resets?|retry)\s+in\s+(.+?)(?:[.!]|$)/i)
+  if (!match?.[1]) return null
+  const duration = parseHumanDurationMs(match[1])
+  return duration == null ? null : Date.now() + Math.ceil(duration)
+}
+
 function nextLocalMidnightMs(): number {
   const next = new Date()
   next.setDate(next.getDate() + 1)
@@ -754,41 +866,36 @@ function nextLocalMidnightMs(): number {
 
 function parseBodyReset(text: string, provider: string): number | null {
   if (!text) return null
+  const error = parsedErrorObject(text)
   try {
-    const body = JSON.parse(text) as {
-      error?: {
-        message?: string
-        resets_at?: number | string
-        resets_in_seconds?: number | string
-        details?: Array<{ metadata?: { quotaResetDelay?: string } }>
-      }
-    }
-    const error = body.error
     const resetsAt = error?.resets_at
     if (typeof resetsAt === 'number') return parseEpochMs(String(resetsAt))
-    if (typeof resetsAt === 'string') return parseEpochMs(resetsAt)
+    if (typeof resetsAt === 'string') return parseResetHeader(resetsAt) ?? parseEpochMs(resetsAt)
 
     const resetsInSeconds = Number(error?.resets_in_seconds)
     if (Number.isFinite(resetsInSeconds) && resetsInSeconds > 0) {
       return Date.now() + resetsInSeconds * 1000
     }
 
-    for (const detail of error?.details ?? []) {
-      const delay = detail.metadata?.quotaResetDelay
+    const details = Array.isArray(error?.details) ? error.details : []
+    for (const rawDetail of details) {
+      const detail = jsonRecord(rawDetail)
+      const metadata = detail ? jsonRecord(detail.metadata) : null
+      const delay = typeof metadata?.quotaResetDelay === 'string' ? metadata.quotaResetDelay : null
       if (!delay) continue
       const duration = parseDurationMs(delay)
       if (duration != null) return Date.now() + Math.ceil(duration)
     }
 
-    const message = error?.message?.toLowerCase() ?? ''
-    if (provider === 'gemini' && message.includes('per day')) return nextLocalMidnightMs()
+    const message = typeof error?.message === 'string' ? error.message : ''
+    const humanReset = resetFromHumanMessage(message)
+    if (humanReset != null) return humanReset
+    if (provider === 'gemini' && message.toLowerCase().includes('per day')) return nextLocalMidnightMs()
   } catch {
     // Fall back to regex parsing below.
   }
 
-  const retryIn = text.match(/retry in (\d+(?:\.\d+)?)s/i)
-  if (retryIn?.[1]) return Date.now() + Number(retryIn[1]) * 1000
-  return null
+  return resetFromHumanMessage(text)
 }
 
 function parseRateLimitReset(provider: string, response: Response, text: string): number | null {
@@ -830,12 +937,15 @@ export async function classifyUpstreamFailure(
     if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers)) {
       return { penalty: null, retryable: true }
     }
+    const openaiAccountQuota =
+      provider === 'openai' &&
+      (parseCodexReset(response.headers) != null || isOpenaiQuotaExhaustedBody(text))
     return {
       penalty: 'rate_limited',
       retryable: true,
       resetAt: parseRateLimitReset(provider, response, text),
-      modelScoped: isOpenaiModelScopedLimit(provider, response),
-      accountScoped: textLooksAccountBalanceExhausted(text),
+      modelScoped: openaiAccountQuota ? false : isOpenaiModelScopedLimit(provider, response, text),
+      accountScoped: textLooksAccountBalanceExhausted(text) || openaiAccountQuota,
     }
   }
   if (response.status === 401) {
@@ -862,13 +972,14 @@ export async function classifyUpstreamFailure(
   if (response.status === 400 || response.status === 403) {
     const text = await readErrorText(response)
     const balanceExhausted = textLooksAccountBalanceExhausted(text)
-    if (balanceExhausted || textLooksRateLimited(text)) {
+    const kimiConcurrency = response.status === 403 && isKimiConcurrencyLimit403(provider, text)
+    if (balanceExhausted || kimiConcurrency || textLooksRateLimited(text)) {
       return {
         penalty: 'rate_limited',
         retryable: true,
         resetAt: parseRateLimitReset(provider, response, text),
-        modelScoped: isOpenaiModelScopedLimit(provider, response),
-        accountScoped: balanceExhausted,
+        modelScoped: isOpenaiModelScopedLimit(provider, response, text),
+        accountScoped: balanceExhausted || kimiConcurrency,
       }
     }
   }
@@ -890,8 +1001,15 @@ export function shouldRetrySameRelayAccount(failure: UpstreamFailure): boolean {
  * models against the same account, while the reverse (account-wide cooldown
  * for a model-only limit) takes the account out of rotation entirely.
  */
-function isOpenaiModelScopedLimit(provider: string, response: Response): boolean {
-  return provider === 'openai' && parseCodexReset(response.headers) == null
+function isOpenaiModelScopedLimit(provider: string, response: Response, text = ''): boolean {
+  if (provider !== 'openai') return false
+  if (
+    response.status === 429 &&
+    (parseCodexReset(response.headers) != null || isOpenaiQuotaExhaustedBody(text))
+  ) {
+    return false
+  }
+  return parseCodexReset(response.headers) == null
 }
 
 /** Registers the provider relay endpoints. */
@@ -1401,6 +1519,11 @@ async function runRelayLoop(
   const sessionKey = session?.key ?? null
   const tried: string[] = []
   let terminalFailureRecorded = false
+  // When a sticky account is temporarily full, a one-request spillover may be
+  // selected. Keep the durable session binding on the original account so a
+  // short capacity burst does not migrate the whole conversation to a
+  // cache-cold account.
+  let stickyCapacitySpillover = false
   // sub2api & friends: a transient upstream error means "retry the same account"
   // (the gateway rotates its own backends), not "blackball this credential".
   const relayToRelay = provider.relayToRelay === true
@@ -1468,6 +1591,7 @@ async function runRelayLoop(
         ? await acquireSlotWithStickyWait(accountSlotKey, accountLimit, config.STICKY_SESSION_WAIT_MS)
         : await acquireSlot(accountSlotKey, accountLimit))
     if (!acquired) {
+      if (isStickySelection) stickyCapacitySpillover = true
       tried.push(account.id)
       continue
     }
@@ -1601,7 +1725,7 @@ async function runRelayLoop(
         } else {
           await markAccountUsed(account.id)
           // Pin this conversation to the account so its prompt cache stays warm.
-          if (sessionKey) await bindStickyAccount(sessionKey, account.id)
+          if (sessionKey && !stickyCapacitySpillover) await bindStickyAccount(sessionKey, account.id)
         }
       }
 
