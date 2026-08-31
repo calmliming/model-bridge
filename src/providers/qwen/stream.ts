@@ -320,7 +320,7 @@ function closeToolCall(s: StreamState, b: ToolCallBucket, out: unknown[]): void 
 export function createQwenResponsesStreamTransform(): StreamTransform {
   const state: StreamState = {
     responseId: shortId('resp'),
-    model: 'qwen3-coder-plus',
+    model: 'qwen3.8-max',
     createdAt: Math.floor(Date.now() / 1000),
     sequenceNumber: 0,
     startedEmitted: false,

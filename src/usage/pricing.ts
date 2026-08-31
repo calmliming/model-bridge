@@ -147,14 +147,27 @@ function openaiPrice(model: string): TierPrice {
 }
 
 // ---------------------------------------------------------------------------
-// Gemini list prices, per 1M tokens. Same billing path as OpenAI above.
-// gemini-2.5-flash is 0.30 / 2.50 — not the old 1.5/2.0-flash rate.
+// Gemini list prices, per 1M tokens (verified against the live Google pricing
+// page on 2026-08-31). The retained Gemini 2.5 tiers cover callers that
+// explicitly keep using those stable model IDs.
 // ---------------------------------------------------------------------------
-const GEMINI_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.31 }
-const GEMINI_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.075 }
+const GEMINI_31_PRO: TierPrice = { input: 2, output: 12, cacheWrite: 0, cacheRead: 0.2 }
+const GEMINI_36_FLASH: TierPrice = { input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.15 }
+const GEMINI_35_FLASH: TierPrice = { input: 1.5, output: 9, cacheWrite: 0, cacheRead: 0.15 }
+const GEMINI_35_FLASH_LITE: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.03 }
+const GEMINI_25_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
+const GEMINI_25_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.03 }
+const GEMINI_STALE_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.31 }
+const GEMINI_STALE_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.075 }
 
 function geminiPrice(model: string): TierPrice {
-  return model.toLowerCase().includes('flash') ? GEMINI_FLASH : GEMINI_PRO
+  const m = model.toLowerCase()
+  if (m.includes('2.5-pro')) return GEMINI_25_PRO
+  if (m.includes('2.5-flash')) return GEMINI_25_FLASH
+  if (m.includes('3.5-flash-lite')) return GEMINI_35_FLASH_LITE
+  if (m.includes('3.5-flash')) return GEMINI_35_FLASH
+  if (m.includes('flash')) return GEMINI_36_FLASH
+  return GEMINI_31_PRO
 }
 
 // DeepSeek list prices per 1M tokens. The current official schedule is
@@ -224,11 +237,15 @@ function deepseekPrice(model: string, atMs: number): TierPrice {
     : DEEPSEEK_SCHEDULED_TIERS[period][tier]
 }
 
-// Xiaomi MiMo V2.5 list prices (per 1M tokens). MiMo-V2.5-Pro uses the official
-// CNY rate (3 / 6 CNY, cache-hit input 0.025 CNY) converted to USD; the standard
-// MiMo-V2.5 uses the international USD rate ($1 / $3, cached $0.2). MiMo has no
-// separate cache-write fee — cacheWrite is 0; cacheRead is the cached-input price.
+// Xiaomi MiMo V2.5 overseas list prices (per 1M tokens, 2026-08-06). MiMo has
+// no separate cache-write fee — cacheWrite is 0; cacheRead is the published
+// cached-input price.
 const XIAOMI_TIERS: Record<'standard' | 'pro', TierPrice> = {
+  standard: { input: 0.14, output: 0.28, cacheWrite: 0, cacheRead: 0.0028 },
+  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.0036 },
+}
+
+const XIAOMI_STALE_TIERS: Record<'standard' | 'pro', TierPrice> = {
   standard: { input: 1, output: 3, cacheWrite: 0, cacheRead: 0.2 },
   pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) },
 }
@@ -240,36 +257,51 @@ function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
 
 // Zhipu GLM list prices (per 1M tokens), quoted in CNY on the BigModel pricing
 // page and converted to USD. GLM has no separate cache-write fee — cacheWrite
-// is 0; cacheRead is the cache-hit input price. Flagship is glm-5.2 (8 / 28,
-// cache-hit 2 CNY); the cheaper base tier is glm-5.1 (6 / 24, cache-hit ~1.5 CNY).
-const ZHIPU_TIERS: Record<'base' | 'flagship', TierPrice> = {
-  base: { input: cny(6), output: cny(24), cacheWrite: 0, cacheRead: cny(1.5) },
+// is 0; cacheRead is the cache-hit input price. GLM-5.3 is the current 1M
+// flagship; GLM-5.3-Flash is the low-cost native-multimodal tier. Older tiers
+// remain available for callers that explicitly request their model IDs.
+const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flagship', TierPrice> = {
+  balanced: { input: cny(2), output: cny(8), cacheWrite: 0, cacheRead: cny(0.4) },
+  legacy: { input: cny(6), output: cny(24), cacheWrite: 0, cacheRead: cny(1.5) },
+  turbo: { input: cny(5), output: cny(22), cacheWrite: 0, cacheRead: cny(1.2) },
+  flash53: { input: cny(0.8), output: cny(2.8), cacheWrite: 0, cacheRead: cny(0.23) },
   flagship: { input: cny(8), output: cny(28), cacheWrite: 0, cacheRead: cny(2) },
 }
 
 function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
-  // glm-5.2 → flagship; glm-5.1 / glm-5 / other glm-* → base.
-  return model.toLowerCase().includes('5.2') ? 'flagship' : 'base'
+  const m = model.toLowerCase()
+  if (m.includes('5.3-flash')) return 'flash53'
+  if (m.includes('5.3') || m.includes('5.2')) return 'flagship'
+  if (m.includes('5-turbo') || m.includes('5v-turbo')) return 'turbo'
+  if (m.includes('4.7')) return 'balanced'
+  return 'legacy'
 }
 
 // Qwen (通义千问 / 阿里百炼) list prices (per 1M tokens), quoted in CNY on the
 // Bailian pricing page and converted to USD. No separate cache-write fee —
-// cacheWrite 0; cacheRead is an estimated cache-hit input rate (~0.2x input).
-// qwen3-coder-plus is the repo-level coding flagship; qwen-max / qwen-plus are
-// the stable general / value aliases.
-const QWEN_TIERS: Record<'coder' | 'max' | 'plus', TierPrice> = {
-  coder: { input: cny(7.34), output: cny(36.7), cacheWrite: 0, cacheRead: cny(1.47) },
-  max: { input: cny(2.4), output: cny(9.6), cacheWrite: 0, cacheRead: cny(0.48) },
-  plus: { input: cny(0.8), output: cny(2), cacheWrite: 0, cacheRead: cny(0.16) },
+// cacheWrite 0; cacheRead is the published cache-hit input rate. Qwen 3.8 Max
+// is the current flagship, Qwen 3.7 Plus the balanced Agent tier, and Qwen 3.7
+// Flash the low-cost tier. Legacy rows stay available for explicit old IDs.
+const QWEN_TIERS: Record<
+  'max38' | 'plus37' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus',
+  TierPrice
+> = {
+  max38: { input: cny(12), output: cny(36), cacheWrite: 0, cacheRead: cny(1.5) },
+  plus37: { input: cny(2), output: cny(8), cacheWrite: 0, cacheRead: cny(0.4) },
+  flash37: { input: cny(0.2), output: cny(0.8), cacheWrite: 0, cacheRead: cny(0.04) },
+  legacyCoder: { input: cny(7.34), output: cny(36.7), cacheWrite: 0, cacheRead: cny(1.47) },
+  legacyMax: { input: cny(2.4), output: cny(9.6), cacheWrite: 0, cacheRead: cny(0.48) },
+  legacyPlus: { input: cny(0.8), output: cny(2), cacheWrite: 0, cacheRead: cny(0.16) },
 }
 
 function qwenTier(model: string): keyof typeof QWEN_TIERS {
   const m = model.toLowerCase()
-  if (m.includes('coder')) return 'coder'
-  // qwen-plus / qwen-turbo / qwen-flash / qwen-long → cheap balanced tier.
-  if (m.includes('plus') || m.includes('turbo') || m.includes('flash') || m.includes('long')) return 'plus'
-  // qwen-max / qwen3-max / other → flagship general tier.
-  return 'max'
+  if (m.includes('coder')) return 'legacyCoder'
+  if (m === 'qwen-max' || m.startsWith('qwen-max-')) return 'legacyMax'
+  if (m === 'qwen-plus' || m.startsWith('qwen-plus-')) return 'legacyPlus'
+  if (m.includes('flash')) return 'flash37'
+  if (m.includes('plus')) return 'plus37'
+  return 'max38'
 }
 
 // Kimi (月之暗面 / Moonshot) list prices (per 1M tokens), quoted in CNY on the
@@ -380,10 +412,14 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
-  { provider: 'gemini', model: 'gemini-2.5-pro', price: GEMINI_PRO },
-  { provider: 'gemini', model: 'gemini-2.5-flash', price: GEMINI_FLASH },
-  { provider: 'gemini', model: 'pro', price: GEMINI_PRO },
-  { provider: 'gemini', model: 'flash', price: GEMINI_FLASH },
+  { provider: 'gemini', model: 'gemini-3.6-flash', price: GEMINI_36_FLASH },
+  { provider: 'gemini', model: 'gemini-3.1-pro-preview', price: GEMINI_31_PRO },
+  { provider: 'gemini', model: 'gemini-3.5-flash', price: GEMINI_35_FLASH },
+  { provider: 'gemini', model: 'gemini-3.5-flash-lite', price: GEMINI_35_FLASH_LITE },
+  { provider: 'gemini', model: 'gemini-2.5-pro', price: GEMINI_25_PRO },
+  { provider: 'gemini', model: 'gemini-2.5-flash', price: GEMINI_25_FLASH },
+  { provider: 'gemini', model: 'pro', price: GEMINI_31_PRO },
+  { provider: 'gemini', model: 'flash', price: GEMINI_36_FLASH },
   // DeepSeek / Xiaomi.
   // DeepSeek keeps the pre-schedule values as seed markers. resolvePrice()
   // recognises these exact values as managed defaults and applies the current
@@ -395,15 +431,23 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
+  { provider: 'zhipu', model: 'glm-5.3', price: ZHIPU_TIERS.flagship },
+  { provider: 'zhipu', model: 'glm-5.3-flash', price: ZHIPU_TIERS.flash53 },
   { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
-  { provider: 'zhipu', model: 'glm-5.1', price: ZHIPU_TIERS.base },
-  { provider: 'zhipu', model: 'glm', price: ZHIPU_TIERS.base },
+  { provider: 'zhipu', model: 'glm-5v-turbo', price: ZHIPU_TIERS.turbo },
+  { provider: 'zhipu', model: 'glm-5-turbo', price: ZHIPU_TIERS.turbo },
+  { provider: 'zhipu', model: 'glm-4.7', price: ZHIPU_TIERS.balanced },
+  { provider: 'zhipu', model: 'glm-5.1', price: ZHIPU_TIERS.legacy },
+  { provider: 'zhipu', model: 'glm', price: ZHIPU_TIERS.legacy },
   // Exact rows only — no generic 'qwen' row, because the granular qwenTier()
   // builtin fallback prices other qwen-* variants (turbo/flash/long/3-max) more
   // accurately than a broad substring row would.
-  { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.coder },
-  { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.max },
-  { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.plus },
+  { provider: 'qwen', model: 'qwen3.8-max', price: QWEN_TIERS.max38 },
+  { provider: 'qwen', model: 'qwen3.7-plus', price: QWEN_TIERS.plus37 },
+  { provider: 'qwen', model: 'qwen3.7-flash', price: QWEN_TIERS.flash37 },
+  { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.legacyCoder },
+  { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.legacyMax },
+  { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.legacyPlus },
   // Kimi — exact rows for the discoverable models; kimiTier() covers other
   // kimi-* / moonshot-* variants via substring tiers.
   { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
@@ -421,7 +465,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v7` settings flag.
+ * gated by the `pricing_seed_v8` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -459,12 +503,38 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     from: { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.075 },
     to: OPENAI_MINI,
   },
-  // Gemini 2.5 Flash is 0.30/2.50; the old seed used the 1.5/2.0-flash rate.
+  // Move generic Gemini tiers to the current 3.x defaults and correct the
+  // retained 2.5 rows' old cache-read rates. Older databases may still carry
+  // the pre-2.5 Flash tuple, so keep a direct correction for it as well.
   {
     provider: 'gemini',
     model: 'flash',
     from: { input: 0.075, output: 0.3, cacheWrite: 0, cacheRead: 0.019 },
-    to: GEMINI_FLASH,
+    to: GEMINI_36_FLASH,
+  },
+  {
+    provider: 'gemini',
+    model: 'flash',
+    from: GEMINI_STALE_FLASH,
+    to: GEMINI_36_FLASH,
+  },
+  {
+    provider: 'gemini',
+    model: 'pro',
+    from: GEMINI_STALE_PRO,
+    to: GEMINI_31_PRO,
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-2.5-flash',
+    from: GEMINI_STALE_FLASH,
+    to: GEMINI_25_FLASH,
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-2.5-pro',
+    from: GEMINI_STALE_PRO,
+    to: GEMINI_25_PRO,
   },
   // Fable 5 now has a published list price (10/50); it was seeded at the Opus
   // reduced rate (5/25) while unpriced.
@@ -506,6 +576,20 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'deepseek-reasoner',
     from: DEEPSEEK_STALE_PRO_PRICE,
     to: DEEPSEEK_PRE_SCHEDULE_TIERS.flash,
+  },
+  // MiMo V2.5 prices were seeded from stale pre-reduction / mixed-region
+  // values. Correct only rows that still contain those exact built-in values.
+  {
+    provider: 'xiaomi',
+    model: 'mimo-v2.5-pro',
+    from: XIAOMI_STALE_TIERS.pro,
+    to: XIAOMI_TIERS.pro,
+  },
+  {
+    provider: 'xiaomi',
+    model: 'mimo-v2.5',
+    from: XIAOMI_STALE_TIERS.standard,
+    to: XIAOMI_TIERS.standard,
   },
 ]
 
@@ -603,7 +687,7 @@ export async function initPricing(): Promise<void> {
 
   // Correct stale defaults exactly once (preserves admin customisations).
   const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v7'`,
+    `SELECT value FROM settings WHERE key = 'pricing_seed_v8'`,
   )
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
@@ -630,7 +714,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v7', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v8', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`,
     )
   }

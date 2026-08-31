@@ -320,7 +320,7 @@ function closeToolCall(s: StreamState, b: ToolCallBucket, out: unknown[]): void 
 export function createZhipuResponsesStreamTransform(): StreamTransform {
   const state: StreamState = {
     responseId: shortId('resp'),
-    model: 'glm-5.2',
+    model: 'glm-5.3',
     createdAt: Math.floor(Date.now() / 1000),
     sequenceNumber: 0,
     startedEmitted: false,

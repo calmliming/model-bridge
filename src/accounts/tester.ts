@@ -251,7 +251,7 @@ async function testZhipu(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      model: 'glm-5.2',
+      model: 'glm-5.3',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),
@@ -270,7 +270,7 @@ async function testQwen(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      model: 'qwen3-coder-plus',
+      model: 'qwen3.8-max',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),

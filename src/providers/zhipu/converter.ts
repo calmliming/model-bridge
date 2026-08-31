@@ -43,14 +43,14 @@ export interface ChatCompletionsRequest {
 
 /**
  * Codex defaults to model names like `gpt-5.5` which GLM does not recognise.
- * Rewrite anything that doesn't already look like a GLM model to `glm-5.2`
+ * Rewrite anything that doesn't already look like a GLM model to `glm-5.3`
  * (the coding/agentic flagship). Anything starting with `glm-` is passed
- * through, so users can set `model="glm-5.1"` for the cheaper base model in
- * their Codex config.
+ * through, so users can set `model="glm-5.3-flash"` for the lower-cost native
+ * multimodal tier or keep `model="glm-5.2"` for compatibility.
  */
 export function mapModel(input: unknown): string {
-  if (typeof input !== 'string' || !input) return 'glm-5.2'
-  return input.startsWith('glm-') ? input : 'glm-5.2'
+  if (typeof input !== 'string' || !input) return 'glm-5.3'
+  return input.startsWith('glm-') ? input : 'glm-5.3'
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

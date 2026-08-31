@@ -121,6 +121,63 @@ describe('Kimi Code pricing', () => {
   })
 })
 
+describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
+  it('prices the current Gemini tiers', () => {
+    expect(resolvePrice('gemini', 'gemini-3.6-flash')).toMatchObject({
+      input: 1.5,
+      output: 7.5,
+      cacheRead: 0.15,
+    })
+    expect(resolvePrice('gemini', 'gemini-3.1-pro-preview')).toMatchObject({
+      input: 2,
+      output: 12,
+      cacheRead: 0.2,
+    })
+    expect(resolvePrice('gemini', 'gemini-3.5-flash-lite')).toMatchObject({
+      input: 0.3,
+      output: 2.5,
+      cacheRead: 0.03,
+    })
+    expect(resolvePrice('gemini', 'gemini-3.5-flash')).toMatchObject({
+      input: 1.5,
+      output: 9,
+      cacheRead: 0.15,
+    })
+  })
+
+  it('uses Xiaomi MiMo V2.5 overseas list prices', () => {
+    expect(resolvePrice('xiaomi', 'mimo-v2.5-pro')).toMatchObject({
+      input: 0.435,
+      output: 0.87,
+      cacheRead: 0.0036,
+    })
+    expect(resolvePrice('xiaomi', 'mimo-v2.5')).toMatchObject({
+      input: 0.14,
+      output: 0.28,
+      cacheRead: 0.0028,
+    })
+  })
+
+  it('prices the current GLM text and multimodal tiers', () => {
+    expect(resolvePrice('zhipu', 'glm-5.3')).toMatchObject({ input: 1.12, output: 3.92, cacheRead: 0.28 })
+    expect(resolvePrice('zhipu', 'glm-5.3-flash')).toMatchObject({ input: 0.112, output: 0.392, cacheRead: 0.0322 })
+    expect(resolvePrice('zhipu', 'glm-5.2')).toMatchObject({ input: 1.12, output: 3.92, cacheRead: 0.28 })
+  })
+
+  it('prices the current Qwen 3.8/3.7 tiers', () => {
+    expect(resolvePrice('qwen', 'qwen3.8-max')).toMatchObject({ input: 1.68, output: 5.04, cacheRead: 0.21 })
+    expect(resolvePrice('qwen', 'qwen3.7-plus')).toMatchObject({ input: 0.28, output: 1.12, cacheRead: 0.056 })
+    expect(resolvePrice('qwen', 'qwen3.7-flash')).toMatchObject({ input: 0.028, output: 0.112, cacheRead: 0.0056 })
+  })
+
+  it('routes the same current models through Sub2API pricing', () => {
+    expect(resolvePrice('sub2api', 'gemini-3.6-flash')).toMatchObject({ input: 1.5, output: 7.5 })
+    expect(resolvePrice('sub2api', 'mimo-v2.5')).toMatchObject({ input: 0.14, output: 0.28 })
+    expect(resolvePrice('sub2api', 'glm-5.3')).toMatchObject({ input: 1.12, output: 3.92 })
+    expect(resolvePrice('sub2api', 'qwen3.8-max')).toMatchObject({ input: 1.68, output: 5.04 })
+  })
+})
+
 describe('DeepSeek V4 pricing', () => {
   const beforeSchedule = Date.parse('2026-08-22T15:59:59.999Z')
   const scheduleStarts = Date.parse('2026-08-22T16:00:00Z')

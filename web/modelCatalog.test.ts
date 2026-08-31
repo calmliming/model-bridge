@@ -71,3 +71,32 @@ describe('Codex Spark catalog', () => {
     })
   })
 })
+
+describe('current provider model catalog', () => {
+  it('shows the current Google and Qwen model families', () => {
+    expect(model('gemini-3.6-flash')).toMatchObject({ context: '1M', badge: 'recommended' })
+    expect(model('gemini-3.1-pro-preview')).toMatchObject({ context: '1M' })
+    expect(model('qwen3.8-max')).toMatchObject({ context: '1M', badge: 'recommended' })
+    expect(model('qwen3.7-flash')).toMatchObject({ context: '1M' })
+  })
+
+  it('shows current Xiaomi and GLM capabilities and context lengths', () => {
+    expect(model('mimo-v2.5-pro')).toMatchObject({ context: '1M', inputPrice: 0.435, outputPrice: 0.87 })
+    expect(model('mimo-v2.5')).toMatchObject({
+      context: '1M',
+      categories: expect.arrayContaining(['multimodal']),
+    })
+    expect(model('glm-5.3')).toMatchObject({ context: '1M', badge: 'recommended' })
+    expect(model('glm-5.3-flash')).toMatchObject({
+      context: '1M',
+      categories: expect.arrayContaining(['multimodal']),
+    })
+  })
+
+  it('does not advertise retired aliases or shut-down Gemini previews', () => {
+    expect(MODEL_CATALOG.some((item) => item.id === 'deepseek-reasoner')).toBe(false)
+    expect(MODEL_CATALOG.some((item) => item.id === 'gemini-3-pro-preview')).toBe(false)
+    expect(MODEL_CATALOG.some((item) => item.id === 'gemini-3.7-flash')).toBe(false)
+    expect(MODEL_CATALOG.some((item) => item.id === 'qwen3.8-flash')).toBe(false)
+  })
+})

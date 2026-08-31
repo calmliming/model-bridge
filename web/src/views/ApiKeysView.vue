@@ -180,18 +180,25 @@ const commonModelOptions = [
   'claude-*',
   'gpt-*',
   'gemini-*',
+  'gemini-3.6-flash',
+  'gemini-3.1-pro-preview',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
   'deepseek-*',
   'deepseek-v4-pro',
   'deepseek-v4-flash',
+  'deepseek-v4-flash-vision-exp',
   'mimo-*',
   'mimo-v2.5-pro',
   'mimo-v2.5',
   'glm-*',
+  'glm-5.3',
+  'glm-5.3-flash',
   'glm-5.2',
-  'glm-5.1',
   'qwen*',
-  'qwen3-coder-plus',
-  'qwen-plus',
+  'qwen3.8-max',
+  'qwen3.7-plus',
+  'qwen3.7-flash',
   'kimi-*',
   'kimi-k3',
   'kimi-k2.7-code',
@@ -203,8 +210,10 @@ const commonMappingOptions = [
   'gpt-fast=gpt-5.4-mini',
   'deepseek-pro=deepseek-v4-pro',
   'deepseek-fast=deepseek-v4-flash',
-  'glm-pro=glm-5.2',
-  'qwen-coder=qwen3-coder-plus',
+  'glm-pro=glm-5.3',
+  'glm-fast=glm-5.3-flash',
+  'qwen-pro=qwen3.8-max',
+  'qwen-fast=qwen3.7-flash',
   'kimi-pro=kimi-k3',
 ].map((value) => ({ label: value, value }))
 
@@ -587,13 +596,13 @@ POST ${baseOrigin.value}/api/deepseek/v1/chat/completions
 GET ${baseOrigin.value}/api/deepseek/v1/models`,
     zhipu: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/zhipu
 export ANTHROPIC_AUTH_TOKEN=${key}
-export ANTHROPIC_MODEL=glm-5.2
-export ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.2
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.1
+export ANTHROPIC_MODEL=glm-5.3
+export ANTHROPIC_DEFAULT_SONNET_MODEL=glm-5.3
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=glm-5.3-flash
 claude`,
     codexZhipu: `[profiles.model-bridge-zhipu]
 model_provider = "model-bridge-zhipu"
-model = "glm-5.2"
+model = "glm-5.3"
 
 [model_providers.model-bridge-zhipu]
 name = "model-bridge-zhipu"
@@ -614,13 +623,13 @@ POST ${baseOrigin.value}/api/zhipu/v1/chat/completions
 GET ${baseOrigin.value}/api/zhipu/v1/models`,
     qwen: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/qwen
 export ANTHROPIC_AUTH_TOKEN=${key}
-export ANTHROPIC_MODEL=qwen3-coder-plus
-export ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3-coder-plus
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen-plus
+export ANTHROPIC_MODEL=qwen3.8-max
+export ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3.7-plus
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen3.7-flash
 claude`,
     codexQwen: `[profiles.model-bridge-qwen]
 model_provider = "model-bridge-qwen"
-model = "qwen3-coder-plus"
+model = "qwen3.8-max"
 
 [model_providers.model-bridge-qwen]
 name = "model-bridge-qwen"

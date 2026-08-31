@@ -37,4 +37,17 @@ describe('CC Switch import links', () => {
     expect(params.get('app')).toBe('claude')
     expect(params.has('model')).toBe(false)
   })
+
+  it('uses current GLM and Qwen model presets', () => {
+    const glm = CC_SWITCH_TARGETS.find((t) => t.id === 'claude-zhipu')
+    const qwen = CC_SWITCH_TARGETS.find((t) => t.id === 'claude-qwen')
+
+    expect(glm?.models).toMatchObject({ model: 'glm-5.3', haikuModel: 'glm-5.3-flash' })
+    expect(qwen?.models).toEqual({
+      model: 'qwen3.8-max',
+      sonnetModel: 'qwen3.7-plus',
+      haikuModel: 'qwen3.7-flash',
+      opusModel: 'qwen3.8-max',
+    })
+  })
 })

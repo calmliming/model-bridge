@@ -5,9 +5,23 @@ describe('model discovery', () => {
   it('returns all default models for unrestricted keys', () => {
     const models = listModelIdsForKey({ allowedProviders: null, allowedModels: null })
     expect(models).toEqual(
-      expect.arrayContaining(['gpt-5.5', 'claude-sonnet-5', 'gemini-2.5-flash', 'deepseek-v4-pro']),
+      expect.arrayContaining([
+        'gpt-5.5',
+        'claude-sonnet-5',
+        'gemini-3.6-flash',
+        'mimo-v2.5-pro',
+        'glm-5.3',
+        'qwen3.8-max',
+        'deepseek-v4-pro',
+      ]),
     )
-    expect(models).not.toEqual(expect.arrayContaining(['deepseek-chat', 'deepseek-reasoner']))
+    expect(models).not.toEqual(expect.arrayContaining([
+      'gemini-3-pro-preview',
+      'glm-5.1',
+      'qwen3-coder-plus',
+      'deepseek-chat',
+      'deepseek-reasoner',
+    ]))
   })
 
   it('honors provider restrictions', () => {
@@ -84,15 +98,27 @@ describe('model discovery', () => {
     const key = { allowedProviders: ['gemini'] as const, allowedModels: ['gemini-*'] }
     expect(listGeminiModels(key)).toEqual([
       {
-        name: 'models/gemini-3-pro-preview',
+        name: 'models/gemini-3.6-flash',
         version: '001',
-        displayName: 'Gemini 3 Pro Preview',
+        displayName: 'Gemini 3.6 Flash',
         supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
       },
       {
-        name: 'models/gemini-3-flash-preview',
+        name: 'models/gemini-3.1-pro-preview',
         version: '001',
-        displayName: 'Gemini 3 Flash Preview',
+        displayName: 'Gemini 3.1 Pro Preview',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+      },
+      {
+        name: 'models/gemini-3.5-flash',
+        version: '001',
+        displayName: 'Gemini 3.5 Flash',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+      },
+      {
+        name: 'models/gemini-3.5-flash-lite',
+        version: '001',
+        displayName: 'Gemini 3.5 Flash Lite',
         supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
       },
       {

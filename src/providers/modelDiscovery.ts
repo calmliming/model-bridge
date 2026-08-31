@@ -34,11 +34,18 @@ const CREATED_AT = 1_704_067_200
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   claude: ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2'],
-  gemini: ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'],
+  gemini: [
+    'gemini-3.6-flash',
+    'gemini-3.1-pro-preview',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+  ],
+  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
-  zhipu: ['glm-5.2', 'glm-5.1'],
-  qwen: ['qwen3-coder-plus', 'qwen-max', 'qwen-plus'],
+  zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
+  qwen: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash'],
   // Kimi Code exposes the K3 model under short aliases as well as the
   // provider-qualified name. Keep them discoverable so a Composite-style key
   // can route the same identifiers that Sub2API v0.1.183 accepts.

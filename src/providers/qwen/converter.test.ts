@@ -3,27 +3,27 @@ import { mapModel, responsesToChatCompletions } from './converter'
 
 describe('qwen mapModel', () => {
   it('passes through qwen* model names', () => {
-    expect(mapModel('qwen3-coder-plus')).toBe('qwen3-coder-plus')
-    expect(mapModel('qwen-max')).toBe('qwen-max')
-    expect(mapModel('qwen-plus')).toBe('qwen-plus')
+    expect(mapModel('qwen3.8-max')).toBe('qwen3.8-max')
+    expect(mapModel('qwen3.7-plus')).toBe('qwen3.7-plus')
+    expect(mapModel('qwen3.7-flash')).toBe('qwen3.7-flash')
   })
 
-  it('rewrites unknown / Codex model names to the coding flagship', () => {
-    expect(mapModel('gpt-5.5')).toBe('qwen3-coder-plus')
-    expect(mapModel('')).toBe('qwen3-coder-plus')
-    expect(mapModel(undefined)).toBe('qwen3-coder-plus')
+  it('rewrites unknown / Codex model names to the current flagship', () => {
+    expect(mapModel('gpt-5.5')).toBe('qwen3.8-max')
+    expect(mapModel('')).toBe('qwen3.8-max')
+    expect(mapModel(undefined)).toBe('qwen3.8-max')
   })
 })
 
 describe('qwen responsesToChatCompletions', () => {
   it('maps instructions + string input into system/user messages', () => {
     const out = responsesToChatCompletions({
-      model: 'qwen-plus',
+      model: 'qwen3.7-plus',
       instructions: 'be terse',
       input: 'hello',
       stream: true,
     })
-    expect(out.model).toBe('qwen-plus')
+    expect(out.model).toBe('qwen3.7-plus')
     expect(out.stream).toBe(true)
     expect(out.messages).toEqual([
       { role: 'system', content: 'be terse' },
@@ -33,7 +33,7 @@ describe('qwen responsesToChatCompletions', () => {
 
   it('enforces uniform reasoning_content across assistant messages', () => {
     const out = responsesToChatCompletions({
-      model: 'qwen3-coder-plus',
+      model: 'qwen3.8-max',
       input: [
         { type: 'reasoning', summary: [{ type: 'summary_text', text: 'think' }] },
         { type: 'message', role: 'assistant', content: 'with reasoning' },
