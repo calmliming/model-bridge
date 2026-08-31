@@ -10,9 +10,9 @@ vi.mock('../db/index', () => ({
 
 import { loadPricing, resolvePrice } from './pricing'
 
-function priceRow(model: string, input: number, output: number, cacheRead: number) {
+function priceRow(model: string, input: number, output: number, cacheRead: number, provider = 'deepseek') {
   return {
-    provider: 'deepseek',
+    provider,
     model,
     input_price: input,
     output_price: output,
@@ -24,7 +24,7 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('DeepSeek database price overrides', () => {
-  const peakTime = Date.parse('2026-08-17T01:00:00Z')
+  const peakTime = Date.parse('2026-08-24T01:00:00Z')
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -64,6 +64,19 @@ describe('DeepSeek database price overrides', () => {
       input: 2,
       output: 4,
       cacheRead: 0.2,
+    })
+  })
+
+  it('does not let a broad Codex row mask the dedicated Spark price', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [priceRow('gpt-5.3-codex', 1.5, 12, 0.15, 'openai')],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('openai', 'gpt-5.3-codex-spark')).toMatchObject({
+      input: 1.75,
+      output: 14,
+      cacheRead: 0.175,
     })
   })
 })

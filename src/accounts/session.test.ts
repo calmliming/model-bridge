@@ -86,6 +86,20 @@ describe('computeSessionKey', () => {
     expect(key).toBe('openai:k1:h:header-session')
   })
 
+  it('prefers Grok prompt_cache_key over its transient conversation header', () => {
+    const key = computeSessionKey('grok', 'k1', { 'x-grok-conv-id': 'turn-summary' }, {
+      prompt_cache_key: 'parent-session',
+    })
+    expect(key).toBe('grok:k1:p:parent-session')
+  })
+
+  it('uses a structured Grok metadata session when no prompt key is present', () => {
+    const info = computeSessionInfo('grok', 'k1', { 'x-grok-conv-id': 'side-call' }, {
+      metadata: { user_id: JSON.stringify({ session_id: 'parent-session' }) },
+    })
+    expect(info).toMatchObject({ key: 'grok:k1:m:parent-session', source: 'metadata' })
+  })
+
   it('is stable across turns of the same Anthropic conversation', () => {
     const turn1 = {
       system: 'You are a helpful assistant.',

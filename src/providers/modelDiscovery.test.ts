@@ -22,6 +22,7 @@ describe('model discovery', () => {
       'gpt-5.4',
       'gpt-5.4-mini',
       'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
       'gpt-image-2',
     ])
   })
@@ -36,6 +37,7 @@ describe('model discovery', () => {
       'gpt-5.4',
       'gpt-5.4-mini',
       'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
       'gpt-image-2',
       'deepseek-v4-pro',
     ])
@@ -60,6 +62,7 @@ describe('model discovery', () => {
       'gpt-5.4',
       'gpt-5.4-mini',
       'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
       'gpt-image-2',
       'gpt-public',
     ])

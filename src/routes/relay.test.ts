@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 import {
   classifyUpstreamFailure,
+  classifyBufferedResponsesFailure,
+  isAnthropicFableModel,
   isAnthropicFableOnlyWindowExceeded,
+  isOpenaiSparkModel,
   newResponsesStreamState,
   noteResponsesTerminal,
   redactUrls,
@@ -177,6 +180,26 @@ describe('classifyUpstreamFailure model scoping', () => {
     )
     expect(failure.penalty).toBe('rate_limited')
     expect(failure.modelScoped).not.toBe(true)
+  })
+
+  it('keeps Spark quota exhaustion model-scoped even with account quota headers', async () => {
+    const failure = await classifyUpstreamFailure(
+      'openai',
+      rateLimited({
+        'x-codex-primary-used-percent': '100',
+        'x-codex-primary-window-minutes': '10080',
+        'x-codex-primary-reset-after-seconds': '604800',
+      }),
+      'gpt-5.3-codex-spark',
+    )
+    expect(isOpenaiSparkModel('gpt-5.3-codex-spark-high')).toBe(true)
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: true,
+      accountScoped: false,
+    })
+    expect(failure.resetAt).toBeGreaterThan(Date.now() + 6 * 24 * 60 * 60_000)
   })
 
   it('marks an OpenAI rate-limit-shaped 400 as model-scoped', async () => {
@@ -357,5 +380,131 @@ describe('isAnthropicFableOnlyWindowExceeded', () => {
         }),
       ),
     ).toBe(false)
+  })
+
+  it('requires a Fable model when a model is supplied', () => {
+    const headers = new Headers({
+      'anthropic-ratelimit-unified-7d_oi-utilization': '1',
+      'anthropic-ratelimit-unified-7d_oi-reset': String(Date.now() + 60_000),
+    })
+    expect(isAnthropicFableModel('claude-fable-5')).toBe(true)
+    expect(isAnthropicFableModel('claude-mythos-5')).toBe(true)
+    expect(isAnthropicFableModel('claude-sonnet-5')).toBe(false)
+    expect(isAnthropicFableOnlyWindowExceeded(headers, 'claude-fable-5')).toBe(true)
+    expect(isAnthropicFableOnlyWindowExceeded(headers, 'claude-sonnet-5')).toBe(false)
+  })
+
+  it('classifies a Fable-only 429 as a model-scoped cooldown', async () => {
+    const resetAt = Date.now() + 60_000
+    const failure = await classifyUpstreamFailure(
+      'claude',
+      new Response(JSON.stringify({ error: { message: 'Fable quota reached' } }), {
+        status: 429,
+        headers: {
+          'anthropic-ratelimit-unified-7d_oi-utilization': '1',
+          'anthropic-ratelimit-unified-7d_oi-reset': String(resetAt),
+        },
+      }),
+      'claude-fable-5',
+    )
+
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: true,
+      accountScoped: false,
+    })
+    expect(failure.resetAt).toBeGreaterThanOrEqual(resetAt - 1_000)
+  })
+})
+
+describe('classifyBufferedResponsesFailure', () => {
+  const failedSse = (error: Record<string, unknown>) => [
+    `data: ${JSON.stringify({ type: 'response.created', response: { id: 'r1' } })}`,
+    '',
+    `data: ${JSON.stringify({ type: 'response.failed', response: { error } })}`,
+    '',
+  ].join('\n')
+
+  it('treats a pre-output capacity terminal as retryable', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({ code: 'server_error', message: 'capacity unavailable' }),
+    )
+    expect(failure).toMatchObject({ penalty: 'rate_limited', retryable: true })
+  })
+
+  it('keeps a buffered Spark rate-limit terminal model-scoped', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({ code: 'rate_limit_exceeded', message: 'Spark quota reached' }),
+      'gpt-5.3-codex-spark',
+    )
+    expect(failure).toMatchObject({ modelScoped: true, accountScoped: false })
+  })
+
+  it('recognizes a reset-bearing terminal as account quota exhaustion', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({
+        type: 'GoUsageLimitError',
+        message: 'usage limit reached',
+        resets_in_seconds: 3600,
+      }),
+      'gpt-5.5',
+    )
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: false,
+      accountScoped: true,
+    })
+  })
+
+  it('keeps transient buffered failures retryable on relay-to-relay accounts', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'sub2api',
+      failedSse({ code: 'server_error', message: 'temporary backend failure' }),
+    )
+    expect(failure).toMatchObject({ penalty: 'error', retryable: true })
+    expect(failure?.accountScoped).not.toBe(true)
+    expect(shouldRetrySameRelayAccount(failure!)).toBe(true)
+  })
+
+  it('does not retry cyber policy terminals', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({ code: 'cyber_policy', message: 'blocked by policy' }),
+    )
+    expect(failure).toMatchObject({ penalty: null, retryable: false })
+  })
+
+  it('does not retry policy text that happens to mention quota exhaustion', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({ code: 'cyber_policy', message: 'policy quota exceeded' }),
+    )
+    expect(failure).toMatchObject({ penalty: null, retryable: false })
+  })
+
+  it('does not fail over a non-policy invalid-request terminal', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      failedSse({ code: 'invalid_request_error', message: 'unsupported field quota exceeded' }),
+    )
+    expect(failure).toMatchObject({ penalty: null, retryable: false })
+  })
+
+  it('does not propose failover after visible output', async () => {
+    const failure = await classifyBufferedResponsesFailure(
+      'openai',
+      [
+        'data: {"type":"response.output_text.delta","delta":"partial"}',
+        '',
+        'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}',
+        '',
+      ].join('\n'),
+    )
+    expect(failure).toBeNull()
   })
 })

@@ -46,6 +46,23 @@ describe('openai gpt-5.6 pricing', () => {
     expect(resolvePrice('openai', 'gpt-5.9')).toMatchObject({ input: 1.25, output: 10 })
   })
 
+  it('uses the dedicated Codex Spark price card', () => {
+    expect(resolvePrice('openai', 'gpt-5.3-codex-spark')).toMatchObject({
+      input: 1.75,
+      output: 14,
+      cacheRead: 0.175,
+    })
+    expect(resolvePrice('openai', 'gpt-5.3-codex-spark-high')).toMatchObject({
+      input: 1.75,
+      output: 14,
+    })
+    expect(resolvePrice('sub2api', 'gpt-5.3-codex-spark')).toMatchObject({
+      input: 1.75,
+      output: 14,
+      cacheRead: 0.175,
+    })
+  })
+
   it('routes gpt-5.6 through the sub2api provider too', () => {
     expect(resolvePrice('sub2api', 'gpt-5.6-luna')).toMatchObject({ input: 1, output: 6 })
   })
@@ -105,9 +122,9 @@ describe('Kimi Code pricing', () => {
 })
 
 describe('DeepSeek V4 pricing', () => {
-  const beforeSchedule = Date.parse('2026-08-16T15:59:59.999Z')
-  const scheduleStarts = Date.parse('2026-08-16T16:00:00Z')
-  const peakStarts = Date.parse('2026-08-17T01:00:00Z')
+  const beforeSchedule = Date.parse('2026-08-22T15:59:59.999Z')
+  const scheduleStarts = Date.parse('2026-08-22T16:00:00Z')
+  const peakStarts = Date.parse('2026-08-24T01:00:00Z')
 
   it('keeps the previous official rates until the schedule takes effect', () => {
     expect(resolvePrice('deepseek', 'deepseek-v4-flash', beforeSchedule)).toMatchObject({
@@ -141,19 +158,32 @@ describe('DeepSeek V4 pricing', () => {
       output: 1.32,
       cacheRead: 0.014,
     })
-    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-17T06:00:00Z'))).toMatchObject({
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-24T06:00:00Z'))).toMatchObject({
       input: 1.32,
       output: 3.96,
       cacheRead: 0.044,
     })
   })
 
+  it('keeps the full Beijing weekend at off-peak rates', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', Date.parse('2026-08-29T02:00:00Z'))).toMatchObject({
+      input: 0.22,
+      output: 0.66,
+      cacheRead: 0.007,
+    })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-30T07:00:00Z'))).toMatchObject({
+      input: 0.66,
+      output: 1.98,
+      cacheRead: 0.022,
+    })
+  })
+
   it('treats the end of each peak window as off-peak', () => {
-    expect(resolvePrice('deepseek', 'deepseek-v4-flash', Date.parse('2026-08-17T04:00:00Z'))).toMatchObject({
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', Date.parse('2026-08-24T04:00:00Z'))).toMatchObject({
       input: 0.22,
       output: 0.66,
     })
-    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-17T10:00:00Z'))).toMatchObject({
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-08-24T10:00:00Z'))).toMatchObject({
       input: 0.66,
       output: 1.98,
     })

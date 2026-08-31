@@ -44,6 +44,7 @@ import {
   buildResponsesErrorEvents,
   createChatCompletionStreamParser,
   createOpenaiChatCompletionsStreamTransform,
+  inspectResponsesSseTerminalFailure,
   parseChatCompletionUsage,
   responsesSseToChatCompletion,
   chatCompletionsToResponses,
@@ -208,6 +209,8 @@ interface ProviderHandler {
     text: string,
     meta: RelayMeta,
   ) => { body: unknown; usage: UsageData; status?: 'error'; httpStatus?: number }
+  /** The buffered response is an OpenAI Responses SSE transcript. */
+  bufferedResponsesProtocol?: boolean
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
   transformEventData?: (data: unknown) => unknown
   /**
@@ -277,6 +280,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
     parseStreamEventsFrom: 'upstream',
+    bufferedResponsesProtocol: true,
     bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
     createStreamTransform: createOpenaiChatCompletionsStreamTransform,
   },
@@ -360,6 +364,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: deepseekResponsesUsage.createStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
     parseStreamEventsFrom: 'upstream',
+    bufferedResponsesProtocol: true,
     bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
     createStreamTransform: createOpenaiChatCompletionsStreamTransform,
   },
@@ -616,7 +621,7 @@ interface RelayMeta {
   attemptCount: number
 }
 
-interface UpstreamFailure {
+export interface UpstreamFailure {
   penalty: 'rate_limited' | 'error' | null
   retryable: boolean
   resetAt?: number | null
@@ -761,7 +766,19 @@ function isAnthropicWindowExceeded(headers: Headers, window: '5h' | '7d' | '7d_o
   return utilization != null && utilization >= 1
 }
 
-export function isAnthropicFableOnlyWindowExceeded(headers: Headers): boolean {
+export function isAnthropicFableModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase()
+  return normalized.includes('fable') || normalized.includes('mythos')
+}
+
+/** Spark quota responses are scoped to the Codex Spark model family. */
+export function isOpenaiSparkModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase()
+  return normalized.includes('codex-spark') || /(?:^|[-_])spark(?:[-_]|$)/.test(normalized)
+}
+
+export function isAnthropicFableOnlyWindowExceeded(headers: Headers, model = ''): boolean {
+  if (model && !isAnthropicFableModel(model)) return false
   return (
     isAnthropicWindowExceeded(headers, '7d_oi') &&
     !isAnthropicWindowExceeded(headers, '5h') &&
@@ -784,15 +801,19 @@ function pickLater(values: Array<number | null>): number | null {
 function parseAnthropicReset(headers: Headers): number | null {
   const reset5h = parseEpochMs(headers.get('anthropic-ratelimit-unified-5h-reset'))
   const reset7d = parseEpochMs(headers.get('anthropic-ratelimit-unified-7d-reset'))
+  const reset7dFable = parseEpochMs(headers.get('anthropic-ratelimit-unified-7d_oi-reset'))
   const fiveHourExceeded = isAnthropicWindowExceeded(headers, '5h')
   const sevenDayExceeded = isAnthropicWindowExceeded(headers, '7d')
+  const fableOnlyExceeded = isAnthropicFableOnlyWindowExceeded(headers)
 
   if (fiveHourExceeded && sevenDayExceeded) return pickLater([reset5h, reset7d])
   if (fiveHourExceeded) return reset5h
   if (sevenDayExceeded) return reset7d
+  if (fableOnlyExceeded) return reset7dFable
   return pickSooner([
     reset5h,
     reset7d,
+    reset7dFable,
     parseEpochMs(headers.get('anthropic-ratelimit-unified-reset')),
   ])
 }
@@ -931,21 +952,40 @@ function isWorkspaceDeactivated(text: string): boolean {
 export async function classifyUpstreamFailure(
   provider: string,
   response: Response,
+  model = '',
 ): Promise<UpstreamFailure> {
   if (response.status === 429) {
     const text = await readErrorText(response)
-    if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers)) {
-      return { penalty: null, retryable: true }
+    if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers, model)) {
+      // Keep the exported two-argument helper backward compatible for callers
+      // that cannot identify the requested model. The relay loop always passes
+      // the model and takes the model-scoped path below.
+      if (!model) return { penalty: null, retryable: true }
+      return {
+        penalty: 'rate_limited',
+        retryable: true,
+        resetAt: parseRateLimitReset(provider, response, text),
+        modelScoped: true,
+        accountScoped: false,
+      }
     }
     const openaiAccountQuota =
       provider === 'openai' &&
       (parseCodexReset(response.headers) != null || isOpenaiQuotaExhaustedBody(text))
+    const openaiBalanceExhausted = textLooksAccountBalanceExhausted(text)
+    const openaiSpark = provider === 'openai' && isOpenaiSparkModel(model)
     return {
       penalty: 'rate_limited',
       retryable: true,
       resetAt: parseRateLimitReset(provider, response, text),
-      modelScoped: openaiAccountQuota ? false : isOpenaiModelScopedLimit(provider, response, text),
-      accountScoped: textLooksAccountBalanceExhausted(text) || openaiAccountQuota,
+      // Spark's quota headers describe the Spark model dimension, not the
+      // account. Keep the reset timestamp but write a model cooldown.
+      modelScoped: openaiSpark
+        ? !openaiBalanceExhausted
+        : openaiAccountQuota
+          ? false
+          : isOpenaiModelScopedLimit(provider, response, text, model),
+      accountScoped: openaiBalanceExhausted || (!openaiSpark && openaiAccountQuota),
     }
   }
   if (response.status === 401) {
@@ -978,7 +1018,7 @@ export async function classifyUpstreamFailure(
         penalty: 'rate_limited',
         retryable: true,
         resetAt: parseRateLimitReset(provider, response, text),
-        modelScoped: isOpenaiModelScopedLimit(provider, response, text),
+        modelScoped: isOpenaiModelScopedLimit(provider, response, text, model),
         accountScoped: balanceExhausted || kimiConcurrency,
       }
     }
@@ -991,6 +1031,121 @@ export function shouldRetrySameRelayAccount(failure: UpstreamFailure): boolean {
   return failure.retryable && failure.accountScoped !== true
 }
 
+type FailureRetryMode = 'same-account' | 'next-account'
+
+/** Applies account/model state for one failed attempt and returns retry routing. */
+async function applyFailureSideEffects(
+  failure: UpstreamFailure,
+  accountId: string,
+  model: string,
+  sessionKey: string | null,
+  relayToRelay: boolean,
+  allowSameAccountRetry: boolean,
+): Promise<FailureRetryMode> {
+  if (failure.disable) {
+    await disableAccount(accountId)
+    if (sessionKey) await clearStickyAccount(sessionKey)
+    return 'next-account'
+  }
+
+  if (allowSameAccountRetry && relayToRelay && shouldRetrySameRelayAccount(failure)) {
+    return 'same-account'
+  }
+
+  if (failure.penalty) {
+    if (failure.modelScoped && !relayToRelay) {
+      await penalizeAccountModel(accountId, model, failure.penalty, failure.resetAt)
+    } else {
+      const cooldownUntil = relayToRelay && !failure.accountScoped
+        ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS
+        : failure.resetAt
+      await penalizeAccount(accountId, failure.penalty, cooldownUntil)
+    }
+    if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
+  }
+  return 'next-account'
+}
+
+function responsesTerminalFailureStatus(code: string, message: string): number {
+  const text = `${code} ${message}`.toLowerCase()
+  if (isHardResponsesFailure(text)) return 400
+  if (text.includes('unauthorized') || text.includes('invalid_api_key') || text.includes('authentication')) return 401
+  if (text.includes('insufficient_balance') || text.includes('insufficient balance')) return 402
+  if (
+    text.includes('rate_limit') ||
+    text.includes('usage_limit') ||
+    text.includes('gousagelimit') ||
+    text.includes('quota') ||
+    text.includes('capacity') ||
+    text.includes('overloaded') ||
+    text.includes('too many requests') ||
+    text.includes('temporarily unavailable')
+  ) return 429
+  return 502
+}
+
+function isHardResponsesFailure(text: string): boolean {
+  return (
+    text.includes('cyber_policy') ||
+    text.includes('policy_violation') ||
+    text.includes('cyber-security') ||
+    text.includes('invalid_request') ||
+    text.includes('invalid_argument') ||
+    text.includes('content_filter') ||
+    text.includes('moderation') ||
+    text.includes('permission') ||
+    text.includes('forbidden')
+  )
+}
+
+/**
+ * Classifies a semantic Responses terminal carried inside an HTTP 200 SSE
+ * response. This is used by buffered Chat-Completions adapters before they
+ * commit a response to the client.
+ */
+export async function classifyBufferedResponsesFailure(
+  provider: string,
+  text: string,
+  model = '',
+): Promise<UpstreamFailure | null> {
+  const terminal = inspectResponsesSseTerminalFailure(text)
+  if (!terminal || terminal.hasOutput) return null
+
+  // Policy blocks are terminal request decisions, even when their message
+  // happens to contain words such as "quota" or "exceeded". Do not let the
+  // generic HTTP-400 marker heuristic turn them into a retry/failover.
+  const terminalText = `${terminal.code} ${terminal.message}`.toLowerCase()
+  if (isHardResponsesFailure(terminalText)) {
+    return { penalty: null, retryable: false }
+  }
+
+  const serialized = JSON.stringify({ error: terminal.error })
+  const hasExplicitReset = terminal.error.resets_at != null || terminal.error.resets_in_seconds != null
+  const syntheticStatus = hasExplicitReset
+    ? 429
+    : responsesTerminalFailureStatus(terminal.code, terminal.message)
+  const synthetic = new Response(serialized, { status: syntheticStatus })
+  return classifyUpstreamFailure(provider, synthetic, model)
+}
+
+async function inspectBufferedResponsesFailure(
+  upstream: Response,
+  provider: ProviderHandler,
+  model: string,
+): Promise<UpstreamFailure | null> {
+  if (
+    !provider.bufferedResponsesProtocol ||
+    !upstream.ok ||
+    !(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
+  ) return null
+  try {
+    const text = await upstream.clone().text()
+    return await classifyBufferedResponsesFailure(provider.id, text, model)
+  } catch {
+    return null
+  }
+}
+
 /**
  * OpenAI rate-limit scope heuristic: the Codex backend reports account-wide
  * 5h/weekly quota windows via response headers. A rate-limit response WITHOUT
@@ -1001,8 +1156,9 @@ export function shouldRetrySameRelayAccount(failure: UpstreamFailure): boolean {
  * models against the same account, while the reverse (account-wide cooldown
  * for a model-only limit) takes the account out of rotation entirely.
  */
-function isOpenaiModelScopedLimit(provider: string, response: Response, text = ''): boolean {
+function isOpenaiModelScopedLimit(provider: string, response: Response, text = '', model = ''): boolean {
   if (provider !== 'openai') return false
+  if (isOpenaiSparkModel(model)) return !textLooksAccountBalanceExhausted(text)
   if (
     response.status === 429 &&
     (parseCodexReset(response.headers) != null || isOpenaiQuotaExhaustedBody(text))
@@ -1672,45 +1828,62 @@ async function runRelayLoop(
       const quota = extractAccountQuota(provider.id, upstream.headers)
       if (quota) await updateAccountQuota(account.id, quota)
 
-      const failure = await classifyUpstreamFailure(provider.id, upstream)
+      const failure = await classifyUpstreamFailure(provider.id, upstream, parsed.model)
       const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
       if (failure.retryable && !lastAttempt) {
-        if (failure.disable) {
-          await disableAccount(account.id)
-          if (sessionKey) await clearStickyAccount(sessionKey)
-        } else if (relayToRelay && shouldRetrySameRelayAccount(failure)) {
-          // Retry the same sub2api account: the gateway may route the retry to
-          // a healthy backend. Don't cool it down or exclude it from the pool.
-          tried.pop()
-        } else if (failure.penalty) {
-          if (failure.modelScoped) {
-            await penalizeAccountModel(account.id, parsed.model, failure.penalty, failure.resetAt)
-          } else {
-            await penalizeAccount(account.id, failure.penalty, failure.resetAt)
-          }
-          if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
-        }
+        const retryMode = await applyFailureSideEffects(
+          failure,
+          account.id,
+          parsed.model,
+          sessionKey,
+          relayToRelay,
+          true,
+        )
+        if (retryMode === 'same-account') tried.pop()
         await upstream.body?.cancel().catch(() => {})
         continue
       }
 
-      if (failure.disable) {
-        await disableAccount(account.id)
-        if (sessionKey) await clearStickyAccount(sessionKey)
-      } else if (failure.penalty) {
-        // Relay-to-relay retries are exhausted here: apply only a short back-off
-        // so subsequent turns recover quickly instead of hitting a multi-minute
-        // "no sub2api account" window on a single-account group.
-        if (!relayToRelay && failure.modelScoped) {
-          await penalizeAccountModel(account.id, parsed.model, failure.penalty, failure.resetAt)
-        } else {
-          const cooldownUntil = relayToRelay && !failure.accountScoped
-            ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS
-            : failure.resetAt
-          await penalizeAccount(account.id, failure.penalty, cooldownUntil)
+      // Some Responses-compatible upstreams return HTTP 200 with a semantic
+      // response.failed/error event. Inspect a clone before sendBuffered() reads
+      // the original body, so a transient terminal can still rotate accounts.
+      const bufferedFailure = !wantStream
+        ? await inspectBufferedResponsesFailure(upstream, provider, parsed.model)
+        : null
+      if (bufferedFailure) {
+        if (bufferedFailure.retryable && !lastAttempt) {
+          const retryMode = await applyFailureSideEffects(
+            bufferedFailure,
+            account.id,
+            parsed.model,
+            sessionKey,
+            relayToRelay,
+            true,
+          )
+          if (retryMode === 'same-account') tried.pop()
+          await upstream.body?.cancel().catch(() => {})
+          continue
         }
-        if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
+        if (bufferedFailure.disable || bufferedFailure.penalty) {
+          await applyFailureSideEffects(
+            bufferedFailure,
+            account.id,
+            parsed.model,
+            sessionKey,
+            relayToRelay,
+            false,
+          )
+        }
+      } else if (failure.disable || failure.penalty) {
+        await applyFailureSideEffects(
+          failure,
+          account.id,
+          parsed.model,
+          sessionKey,
+          relayToRelay,
+          false,
+        )
       } else if (upstream.ok) {
         // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
         // the configured threshold, until the breaching window resets. Only costs
@@ -2339,6 +2512,18 @@ async function sendBuffered(
       responseContentType = 'application/json'
       convertedStatus = converted.status
       convertedHttpStatus = converted.httpStatus
+      if (convertedStatus) {
+        const body = jsonRecord(converted.body)
+        const error = body ? jsonRecord(body.error) : null
+        const message = error?.message
+        if (typeof message === 'string' && message.trim()) {
+          const code = error?.code ?? error?.type
+          errorDetails = {
+            code: typeof code === 'string' && code.trim() ? code : 'upstream_response_failed',
+            message,
+          }
+        }
+      }
     } else {
       errorDetails = extractUpstreamError(sseText, upstream.status)
     }

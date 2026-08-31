@@ -195,14 +195,34 @@ export async function penalizeAccount(
 /**
  * The unexpired model-scoped cooldown for `model` from an account's metadata
  * (`metadata.modelCooldowns[model]`, epoch ms), or null when none is stored.
- * Exported for unit testing the pickAccount filter.
+ * Fable and Codex Spark variants also consult their family key. Exported for
+ * unit testing the pickAccount filter.
  */
 export function modelCooldownUntil(metadata: unknown, model: string): number | null {
   if (!model || !metadata || typeof metadata !== 'object') return null
   const map = (metadata as { modelCooldowns?: Record<string, unknown> }).modelCooldowns
   if (!map || typeof map !== 'object') return null
-  const value = map[model]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  const exact = map[model]
+  if (typeof exact === 'number' && Number.isFinite(exact)) return exact
+  const canonical = canonicalModelCooldownKey(model)
+  if (canonical === model) return null
+  const family = map[canonical]
+  return typeof family === 'number' && Number.isFinite(family) ? family : null
+}
+
+/** Shares one cooldown across dated/aliased Fable and Codex Spark names. */
+export function canonicalModelCooldownKey(model: string): string {
+  const normalized = model.trim().toLowerCase()
+  if (normalized.startsWith('claude-') && (normalized.includes('fable') || normalized.includes('mythos'))) {
+    return 'claude-fable-5'
+  }
+  if (
+    (normalized.startsWith('gpt-') || /^o\d/.test(normalized)) &&
+    (normalized.includes('codex-spark') || /(?:^|[-_])spark(?:[-_]|$)/.test(normalized))
+  ) {
+    return 'gpt-5.3-codex-spark'
+  }
+  return model
 }
 
 /**
@@ -242,7 +262,7 @@ export async function penalizeAccountModel(
       if (typeof value === 'number' && value > now) pruned[key] = value
     }
   }
-  pruned[model] = until
+  pruned[canonicalModelCooldownKey(model)] = until
   metadata.modelCooldowns = pruned
   await db.update(accounts).set({ metadata }).where(eq(accounts.id, id))
 }

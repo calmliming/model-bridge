@@ -105,7 +105,7 @@ const SESSION_HEADERS = ['session-id', 'session_id', 'conversation_id', 'x-sessi
 
 type Headers = Record<string, string | string[] | undefined>
 
-export type SessionSource = 'header' | 'prompt_cache_key' | 'content_fingerprint'
+export type SessionSource = 'header' | 'prompt_cache_key' | 'metadata' | 'grok_header' | 'content_fingerprint'
 
 export interface SessionInfo {
   key: string
@@ -139,6 +139,36 @@ function headerSessionId(headers: Headers): string | null {
 function bodyPromptCacheKey(body: Record<string, unknown>): string | null {
   const raw = body.prompt_cache_key
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
+/** Extracts a Grok/Codex session id nested in metadata.user_id when present. */
+function bodyMetadataSessionKey(body: Record<string, unknown>): string | null {
+  const metadata = body.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const row = metadata as Record<string, unknown>
+  const direct = [row.session_id, row.sessionId, row.conversation_id, row.conversationId]
+  for (const candidate of direct) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+  }
+  const nested = row.user_id
+  if (typeof nested !== 'string' || !nested.trim()) return null
+  try {
+    const parsed = JSON.parse(nested) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const object = parsed as Record<string, unknown>
+    for (const key of ['session_id', 'sessionId', 'conversation_id', 'conversationId']) {
+      const candidate = object[key]
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+  } catch {
+    // metadata.user_id is commonly an opaque user identifier; do not use it
+    // as a conversation key unless it contains a structured session field.
+  }
+  return null
+}
+
+function grokConversationHeader(headers: Headers): string | null {
+  return headerValue(headers, 'x-grok-conv-id') ?? headerValue(headers, 'grok-conv-id')
 }
 
 /**
@@ -267,10 +297,9 @@ export function hashSessionKey(sessionKey: string): string {
 
 /**
  * Computes sticky-session information for a request, scoped to provider + API
- * key. Priority mirrors sub2api for OpenAI-compatible clients:
- *   1. explicit session/conversation header
- *   2. body prompt_cache_key
- *   3. stable content fingerprint
+ * key. Explicit session headers win; OpenAI-compatible body cache keys follow.
+ * Grok additionally accepts the structured metadata session and its transient
+ * conversation header before falling back to a stable content fingerprint.
  *
  * Returns null when no useful session signal can be derived, in which case the
  * caller should fall back to plain LRU scheduling (no stickiness).
@@ -291,6 +320,22 @@ export function computeSessionInfo(
   if (promptCacheKey) {
     const key = `${provider}:${apiKeyId}:p:${promptCacheKey}`
     return { key, source: 'prompt_cache_key', hash: hashSessionKey(key) }
+  }
+
+  // Grok side calls may carry the stable parent session in metadata.user_id
+  // while assigning a fresh X-Grok-Conv-Id to each call. Metadata must win over
+  // that transient header, and it is safe to strip before the upstream request.
+  if (provider === 'grok') {
+    const metadataSession = bodyMetadataSessionKey(body)
+    if (metadataSession) {
+      const key = `${provider}:${apiKeyId}:m:${metadataSession}`
+      return { key, source: 'metadata', hash: hashSessionKey(key) }
+    }
+    const grokHeader = grokConversationHeader(headers)
+    if (grokHeader) {
+      const key = `${provider}:${apiKeyId}:gh:${grokHeader}`
+      return { key, source: 'grok_header', hash: hashSessionKey(key) }
+    }
   }
 
   const seed = contentSeed(body)

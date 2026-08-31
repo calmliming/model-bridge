@@ -56,6 +56,8 @@ export interface ModelTokenPrice {
 export interface ModelPriceSchedule {
   effectiveAt: number
   peakUtcHours: ReadonlyArray<readonly [number, number]>
+  /** When true, Saturday/Sunday in Beijing are always off-peak. */
+  weekendBeijingOffPeak?: boolean
   offPeak: ModelTokenPrice
   peak: ModelTokenPrice
 }
@@ -75,6 +77,12 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
     }
   }
 
+  if (schedule.weekendBeijingOffPeak) {
+    const beijingDay = new Date(atMs + 8 * 60 * 60_000).getUTCDay()
+    if (beijingDay === 0 || beijingDay === 6) {
+      return { ...schedule.offPeak, period: 'off-peak' }
+    }
+  }
   const hour = new Date(atMs).getUTCHours()
   const period = schedule.peakUtcHours.some(([start, end]) => hour >= start && hour < end)
     ? 'peak'
@@ -142,7 +150,7 @@ export const CATEGORIES: CategoryMeta[] = [
   { key: 'lightweight', label: '轻量高速' },
 ]
 
-const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-16T16:00:00Z')
+const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
   [6, 10],
@@ -155,6 +163,7 @@ function deepseekPriceSchedule(
   return {
     effectiveAt: DEEPSEEK_SCHEDULE_EFFECTIVE_AT,
     peakUtcHours: DEEPSEEK_PEAK_WINDOWS_UTC,
+    weekendBeijingOffPeak: true,
     offPeak,
     peak,
   }
@@ -300,6 +309,18 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '256K',
     inputPrice: 1.5,
     outputPrice: 12,
+  },
+  {
+    id: 'gpt-5.3-codex-spark',
+    name: 'GPT-5.3 Codex Spark',
+    provider: 'openai',
+    categories: ['code', 'reasoning', 'lightweight'],
+    tags: ['代码', '低延迟', 'Codex CLI'],
+    description: 'Codex Spark 的高吞吐模型，适合交互式编码和高并发 Agent 请求。',
+    context: '272K',
+    inputPrice: 1.75,
+    outputPrice: 14,
+    cacheReadPrice: 0.175,
   },
 
   // --- Google / Gemini -----------------------------------------------------

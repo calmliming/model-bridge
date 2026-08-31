@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   mapGrokModel,
+  grokFunctionParametersHaveInvalidUnionRoot,
   normalizeGrokChatCompletionsBody,
   normalizeGrokResponsesBody,
+  sanitizeGrokResponsesTools,
 } from './relay'
 
 describe('mapGrokModel', () => {
@@ -38,6 +40,52 @@ describe('normalizeGrokResponsesBody', () => {
     expect(out.prompt_cache_retention).toBeUndefined()
     expect(out.safety_identifier).toBeUndefined()
     expect(out.reasoning).toEqual({ effort: 'high' })
+  })
+
+  it('strips metadata after promoting a structured session to prompt_cache_key', () => {
+    const out = normalizeGrokResponsesBody({
+      model: 'grok-4.6',
+      metadata: { user_id: JSON.stringify({ session_id: 'parent-session' }) },
+    })
+    expect(out.metadata).toBeUndefined()
+    expect(out.prompt_cache_key).toBe('parent-session')
+  })
+
+  it('repairs mixed root unions and disables strict mode', () => {
+    const out = normalizeGrokResponsesBody({
+      model: 'grok-4.6',
+      tools: [{
+        type: 'function',
+        name: 'update',
+        strict: true,
+        parameters: {
+          type: 'object',
+          oneOf: [{ type: 'object', properties: {} }, { type: 'null' }],
+        },
+      }],
+    })
+    expect(grokFunctionParametersHaveInvalidUnionRoot({
+      type: 'object',
+      oneOf: [{ type: 'object' }, { type: 'null' }],
+    })).toBe(true)
+    expect(out.tools).toEqual([{
+      type: 'function',
+      name: 'update',
+      strict: false,
+      parameters: { type: 'object', properties: {}, additionalProperties: true },
+    }])
+  })
+
+  it('preserves an object-only union and does not mutate the input', () => {
+    const parameters = {
+      type: 'object',
+      anyOf: [{ type: 'object', properties: { a: { type: 'string' } } }, { type: 'object' }],
+    }
+    const tools = [{ type: 'function', name: 'ok', parameters }]
+    const out = sanitizeGrokResponsesTools(tools)
+    expect(grokFunctionParametersHaveInvalidUnionRoot(parameters)).toBe(false)
+    expect(out).toEqual(tools)
+    expect(out).not.toBe(tools)
   })
 })
 

@@ -77,6 +77,9 @@ function claudePrice(model: string): TierPrice {
 const OPENAI_GPT55: TierPrice = { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 }
 const OPENAI_GPT54: TierPrice = { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 }
 const OPENAI_CODEX: TierPrice = { input: 1.5, output: 12, cacheWrite: 0, cacheRead: 0.15 }
+// Codex Spark has its own official card (1.75 / 14 / 0.175), distinct from
+// the regular Codex card; keep the check before the generic codex fallback.
+const OPENAI_CODEX_SPARK: TierPrice = { input: 1.75, output: 14, cacheWrite: 0, cacheRead: 0.175 }
 const OPENAI_MINI: TierPrice = { input: 0.25, output: 2, cacheWrite: 0, cacheRead: 0.025 }
 // gpt-5 / gpt-5.1 base tier; also the fallback for unrecognised gpt-* / o* models.
 const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
@@ -128,6 +131,7 @@ function openaiPrice(model: string): TierPrice {
   if (m.startsWith('gpt-image-1.5')) return OPENAI_IMAGE_15
   if (m.startsWith('gpt-image-1-mini')) return OPENAI_IMAGE_MINI
   if (m.startsWith('gpt-image-1')) return OPENAI_IMAGE_1
+  if (m.includes('codex-spark')) return OPENAI_CODEX_SPARK
   if (m.includes('codex')) return OPENAI_CODEX
   if (m.includes('mini') || m.includes('nano')) return OPENAI_MINI
   // gpt-5.6 family: luna (budget) / terra (workhorse) / sol (flagship, and the
@@ -153,13 +157,18 @@ function geminiPrice(model: string): TierPrice {
   return model.toLowerCase().includes('flash') ? GEMINI_FLASH : GEMINI_PRO
 }
 
-// DeepSeek list prices per 1M tokens. Peak/off-peak billing takes effect at
-// 2026-08-16 16:00 UTC. Peak windows are 01:00-04:00 and 06:00-10:00 UTC;
-// every other hour is off-peak. There is no separate cache-write fee.
+// DeepSeek list prices per 1M tokens. The current official schedule is
+// effective from 2026-08-23 (Beijing time). Peak windows are 01:00-04:00 and
+// 06:00-10:00 UTC on weekdays only; Beijing Saturday/Sunday is always
+// off-peak. There is no separate cache-write fee.
 type DeepseekTier = 'flash' | 'pro'
 type DeepseekPricePeriod = 'pre-schedule' | 'off-peak' | 'peak'
 
-const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-16T16:00:00Z')
+// The upstream pricing note dates the change to 2026-08-23 in Beijing. Keep
+// the instant explicit so historical usage rows continue to use the rate that
+// was active when they were recorded.
+const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
+const BEIJING_OFFSET_MS = 8 * 60 * 60_000
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
   [6, 10],
@@ -197,6 +206,10 @@ function deepseekTier(model: string): DeepseekTier {
 
 function deepseekPricePeriod(atMs: number): DeepseekPricePeriod {
   if (atMs < DEEPSEEK_SCHEDULE_EFFECTIVE_AT) return 'pre-schedule'
+  // DeepSeek defines weekends by Beijing calendar day, not UTC day. A fixed
+  // offset is correct here because China has no daylight-saving transitions.
+  const beijingDay = new Date(atMs + BEIJING_OFFSET_MS).getUTCDay()
+  if (beijingDay === 0 || beijingDay === 6) return 'off-peak'
   const hour = new Date(atMs).getUTCHours()
   return DEEPSEEK_PEAK_WINDOWS_UTC.some(([start, end]) => hour >= start && hour < end)
     ? 'peak'
@@ -363,6 +376,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.4', price: OPENAI_GPT54 },
   { provider: 'openai', model: 'gpt-5.4-mini', price: OPENAI_MINI },
   { provider: 'openai', model: 'gpt-5.3-codex', price: OPENAI_CODEX },
+  { provider: 'openai', model: 'gpt-5.3-codex-spark', price: OPENAI_CODEX_SPARK },
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
@@ -636,6 +650,19 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // 1) exact match
   const exact = priceCache.get(cacheKey(provider, model))
   if (exact && !isManagedDeepseekDefault(provider, model, exact)) return exact
+
+  // A dedicated model family must win over a broader DB substring row. This
+  // matters on upgraded installations where `gpt-5.3-codex` exists but the
+  // newly introduced Spark seed row has not been inserted yet. An exact row
+  // above remains an administrator override; only the fallback lookup is
+  // short-circuited here.
+  const normalizedModel = model.toLowerCase()
+  if (
+    normalizedModel.includes('codex-spark') &&
+    (provider === 'openai' || provider === 'sub2api')
+  ) {
+    return builtinPrice(provider, model, atMs)
+  }
 
   // 2) substring match — DB might hold "deepseek-v4-flash" while the incoming
   //    model is "deepseek-v4-flash-thinking", or hold "opus" while incoming is

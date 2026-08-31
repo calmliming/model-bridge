@@ -3,6 +3,7 @@ import {
   buildResponsesErrorEvents,
   chatCompletionsToResponses,
   createOpenaiChatCompletionsStreamTransform,
+  inspectResponsesSseTerminalFailure,
   responsesSseToChatCompletion,
 } from './chat'
 
@@ -226,9 +227,54 @@ describe('responsesSseToChatCompletion', () => {
     const result = responsesSseToChatCompletion(sse, 'fallback')
 
     expect(result.status).toBe('error')
+    expect(result.httpStatus).toBe(502)
     expect(result.body).toEqual({
       error: { message: 'boom', type: 'server_error', code: 'server_error' },
     })
+  })
+
+  it('maps a rate-limit terminal to HTTP 429 for buffered clients', () => {
+    const result = responsesSseToChatCompletion([
+      'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"capacity unavailable"}}}',
+      '',
+    ].join('\n'), 'fallback')
+    expect(result.httpStatus).toBe(429)
+  })
+})
+
+describe('inspectResponsesSseTerminalFailure', () => {
+  it('finds a retryable response.failed before any visible output', () => {
+    const failure = inspectResponsesSseTerminalFailure([
+      'data: {"type":"response.created","response":{"id":"r1"}}',
+      '',
+      'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"capacity unavailable"}}}',
+      '',
+    ].join('\n'))
+
+    expect(failure).toMatchObject({
+      terminalType: 'response.failed',
+      code: 'server_error',
+      message: 'capacity unavailable',
+      hasOutput: false,
+    })
+  })
+
+  it('marks a failure after output as unsafe for failover', () => {
+    const failure = inspectResponsesSseTerminalFailure([
+      'data: {"type":"response.output_text.delta","delta":"partial"}',
+      '',
+      'data: {"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}',
+      '',
+    ].join('\n'))
+
+    expect(failure?.hasOutput).toBe(true)
+  })
+
+  it('does not treat response.incomplete as a retry failure', () => {
+    expect(inspectResponsesSseTerminalFailure([
+      'data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}',
+      '',
+    ].join('\n'))).toBeNull()
   })
 })
 

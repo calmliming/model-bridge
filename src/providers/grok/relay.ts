@@ -28,6 +28,67 @@ export function mapGrokModel(model: string): string {
 // Fields the xAI Responses endpoint rejects (present on OpenAI Responses bodies
 // but unsupported upstream). Reasoning effort is intentionally preserved.
 const RESPONSES_FORBIDDEN_FIELDS = ['prompt_cache_retention', 'safety_identifier'] as const
+const GROK_SAFE_FUNCTION_PARAMETERS = { type: 'object', properties: {}, additionalProperties: true }
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function metadataSessionId(value: unknown): string | null {
+  const metadata = recordOf(value)
+  if (!metadata) return null
+  for (const key of ['session_id', 'sessionId', 'conversation_id', 'conversationId']) {
+    const direct = metadata[key]
+    if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  }
+  const nested = metadata.user_id
+  if (typeof nested !== 'string' || !nested.trim()) return null
+  try {
+    const parsed = recordOf(JSON.parse(nested))
+    if (!parsed) return null
+    for (const key of ['session_id', 'sessionId', 'conversation_id', 'conversationId']) {
+      const candidate = parsed[key]
+      if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
+    }
+  } catch {
+    // Opaque user ids are not cache/session identifiers.
+  }
+  return null
+}
+
+/** Returns true when a function schema has a non-object union at its root. */
+export function grokFunctionParametersHaveInvalidUnionRoot(value: unknown): boolean {
+  const parameters = recordOf(value)
+  if (!parameters) return false
+  for (const keyword of ['anyOf', 'oneOf']) {
+    const branches = parameters[keyword]
+    if (!Array.isArray(branches) || branches.length === 0) continue
+    if (branches.some((branch) => {
+      const row = recordOf(branch)
+      return !row || typeof row.type !== 'string' || row.type.toLowerCase() !== 'object'
+    })) return true
+  }
+  return false
+}
+
+function sanitizeGrokTool(value: unknown): unknown {
+  const tool = recordOf(value)
+  if (!tool) return value
+  const out: Record<string, unknown> = { ...tool }
+  if (Array.isArray(out.tools)) out.tools = out.tools.map(sanitizeGrokTool)
+  if (out.type === 'function' && grokFunctionParametersHaveInvalidUnionRoot(out.parameters)) {
+    out.parameters = { ...GROK_SAFE_FUNCTION_PARAMETERS }
+    if (out.strict === true) out.strict = false
+  }
+  return out
+}
+
+/** Sanitizes only invalid root unions, preserving valid nested tool schemas. */
+export function sanitizeGrokResponsesTools(tools: unknown[]): unknown[] {
+  return tools.map(sanitizeGrokTool)
+}
 
 /** Normalises an incoming Responses-API body to what the xAI backend accepts. */
 export function normalizeGrokResponsesBody(
@@ -35,6 +96,12 @@ export function normalizeGrokResponsesBody(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   for (const field of RESPONSES_FORBIDDEN_FIELDS) delete out[field]
+  const metadataKey = metadataSessionId(out.metadata)
+  if (metadataKey && (typeof out.prompt_cache_key !== 'string' || !out.prompt_cache_key.trim())) {
+    out.prompt_cache_key = metadataKey
+  }
+  delete out.metadata
+  if (Array.isArray(out.tools)) out.tools = sanitizeGrokResponsesTools(out.tools)
   out.stream = true
   out.store = false
   return out

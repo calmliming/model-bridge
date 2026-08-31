@@ -56,6 +56,16 @@ interface ResponsesStreamEvent {
   }
 }
 
+export interface ResponsesSseTerminalFailure {
+  terminalType: 'response.failed' | 'error'
+  code: string
+  message: string
+  /** The original error object, retained for reset/status classification. */
+  error: Record<string, unknown>
+  /** True when semantic output was already emitted before the failure. */
+  hasOutput: boolean
+}
+
 interface ResponsesOutputItem {
   id?: string
   type?: string
@@ -364,6 +374,55 @@ export function parseResponsesSseEvents(text: string): unknown[] {
   return events
 }
 
+/**
+ * Finds a retry-relevant terminal failure in a Responses SSE transcript.
+ * `response.incomplete` is intentionally excluded: it represents a usable
+ * truncation in the Chat conversion path and should not trigger failover.
+ * Once visible output has started, failover would splice two responses, so the
+ * caller must treat that failure as non-retryable.
+ */
+export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTerminalFailure | null {
+  let hasOutput = false
+  for (const raw of parseResponsesSseEvents(text)) {
+    const event = raw as ResponsesStreamEvent & { error?: Record<string, unknown> }
+    const type = event.type
+    if (
+      type === 'response.output_text.delta' ||
+      type === 'response.output_item.added' ||
+      type === 'response.function_call_arguments.delta' ||
+      type === 'response.reasoning_summary_text.delta' ||
+      type === 'response.content_part.added'
+    ) {
+      hasOutput = true
+    }
+    if (type === 'response.failed') {
+      const rawError = event.response?.error ?? event.error
+      const error = rawError && typeof rawError === 'object'
+        ? { ...rawError } as Record<string, unknown>
+        : {}
+      if (Array.isArray(event.response?.output) && event.response.output.length > 0) hasOutput = true
+      const rawCode = error.code ?? error.type
+      const code = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : 'response.failed'
+      const rawMessage = error.message
+      const message = typeof rawMessage === 'string' && rawMessage.trim()
+        ? rawMessage
+        : 'Upstream response failed.'
+      return { terminalType: 'response.failed', code, message, error, hasOutput }
+    }
+    if (type === 'error') {
+      const error = event.error && typeof event.error === 'object' ? { ...event.error } : {}
+      const rawCode = error.code ?? error.type
+      const code = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : 'error'
+      const rawMessage = error.message
+      const message = typeof rawMessage === 'string' && rawMessage.trim()
+        ? rawMessage
+        : 'Upstream response failed.'
+      return { terminalType: 'error', code, message, error, hasOutput }
+    }
+  }
+  return null
+}
+
 function textFromOutputItems(output: ResponsesOutputItem[] | undefined): string {
   const chunks: string[] = []
   for (const item of output ?? []) {
@@ -404,10 +463,26 @@ function finishReasonFromIncomplete(reason: unknown): 'length' | 'content_filter
   return null
 }
 
+function responseFailureHttpStatus(code: string, message = ''): number {
+  const normalized = `${code} ${message}`.toLowerCase()
+  if (
+    normalized.includes('rate_limit') ||
+    normalized.includes('usage_limit') ||
+    normalized.includes('gousagelimit') ||
+    normalized.includes('quota') ||
+    normalized.includes('overload') ||
+    normalized.includes('capacity') ||
+    normalized.includes('too many requests')
+  ) return 429
+  if (normalized.includes('cyber_policy') || normalized.includes('policy') || normalized.includes('invalid_request')) return 400
+  if (normalized.includes('unauthorized') || normalized.includes('authentication')) return 401
+  return 502
+}
+
 export function responsesSseToChatCompletion(
   text: string,
   fallbackModel: string,
-): { body: Record<string, unknown>; usage: UsageData; status?: 'error' } {
+): { body: Record<string, unknown>; usage: UsageData; status?: 'error'; httpStatus?: number } {
   const id = `chatcmpl-${randomUUID()}`
   let upstreamId = id
   let model = fallbackModel
@@ -465,6 +540,7 @@ export function responsesSseToChatCompletion(
       body: { error: { message: failure.message, type: failure.code, code: failure.code } },
       usage: usageDataFromResponses(rawUsage),
       status: 'error',
+      httpStatus: responseFailureHttpStatus(failure.code, failure.message),
     }
   }
 

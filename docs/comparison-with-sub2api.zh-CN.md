@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（已核查至 **v0.1.183**，2026-08-25）
-> 更新日期：2026-08-27
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（正式版 **v0.1.183**，并核查主线至 **b5827cfd**，2026-08-29）
+> 更新日期：2026-08-31
 
 ## 一句话定位
 
@@ -105,6 +105,18 @@
 ---
 
 ## 六、本次更新整理
+
+### 跟踪 sub2api v0.1.183 之后主线（b5827cfd，尚未发布）
+
+对照上游 2026-08-26～2026-08-29 的主线修复，本项目已落地与现有 TypeScript 中转路径同构的部分：
+
+- **DeepSeek 官方峰谷计价**：高峰窗口仅工作日生效，北京时间周末全天低谷；模型广场与后端计费保持同一口径。
+- **OpenAI/Codex Spark 模型级限流**：即使 429 携带全局 `x-codex-*` 配额头，也只冷却 Spark 模型族，并补齐专用价卡。
+- **非流式 Responses 终止失败处理**：HTTP 200 内的 `response.failed` / `error` 在产生可见输出前按临时故障换号，策略错误不重试，最终响应返回正确 HTTP 状态。
+- **Fable 模型级冷却**：`7d_oi` 窗口只作用于 Fable/Mythos 模型，不暂停整个 Claude 账号。
+- **Grok Responses 兼容**：清理不支持的 `metadata`，保留稳定会话键，修复混合联合工具 Schema。
+
+WebSocket 专用调度、Fast/Flex 服务档位、Zhipu 团队 Coding Plan 查询和动态 Codex 模型目录仍未引入；这些功能依赖上游 Go 调度/账号模型，需单独设计。
 
 ### 核查 sub2api v0.1.175–v0.1.183（2026-08-12～2026-08-26）
 

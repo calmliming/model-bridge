@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { modelCooldownUntil, soonestReset } from './scheduler'
+import { canonicalModelCooldownKey, modelCooldownUntil, soonestReset } from './scheduler'
 
 const NOW = 1_700_000_000_000
 
@@ -60,6 +60,20 @@ describe('modelCooldownUntil (model-scoped cooldowns)', () => {
     expect(modelCooldownUntil({ modelCooldowns: 'bad' }, 'gpt-5.6-luna')).toBeNull()
     expect(modelCooldownUntil({ modelCooldowns: { 'gpt-5.6-luna': 'soon' } }, 'gpt-5.6-luna')).toBeNull()
     expect(modelCooldownUntil({ modelCooldowns: { 'gpt-5.6-luna': NOW } }, '')).toBeNull()
+  })
+
+  it('shares a cooldown across Fable model aliases', () => {
+    const metadata = { modelCooldowns: { 'claude-fable-5': NOW + 60_000 } }
+    expect(canonicalModelCooldownKey('claude-fable-5-20260801')).toBe('claude-fable-5')
+    expect(canonicalModelCooldownKey('claude-mythos-5')).toBe('claude-fable-5')
+    expect(modelCooldownUntil(metadata, 'claude-fable-5-20260801')).toBe(NOW + 60_000)
+    expect(modelCooldownUntil(metadata, 'claude-sonnet-5')).toBeNull()
+  })
+
+  it('shares a cooldown across Codex Spark model suffixes', () => {
+    const metadata = { modelCooldowns: { 'gpt-5.3-codex-spark': NOW + 60_000 } }
+    expect(canonicalModelCooldownKey('gpt-5.3-codex-spark')).toBe('gpt-5.3-codex-spark')
+    expect(modelCooldownUntil(metadata, 'gpt-5.3-codex-spark-high')).toBe(NOW + 60_000)
   })
 
   it('filters accounts the way pickAccount does', () => {
