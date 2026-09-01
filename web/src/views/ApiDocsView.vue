@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useMessage } from '../composables/useMessage'
+
+type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'streaming' | 'errors'
 
 interface ParameterRow {
   name: string
@@ -10,14 +12,75 @@ interface ParameterRow {
   description: string
 }
 
+interface NavigationItem {
+  id: DocSection
+  label: string
+  description: string
+  method?: 'POST'
+}
+
+interface NavigationGroup {
+  label: string
+  items: NavigationItem[]
+}
+
 const message = useMessage()
+const activeSection = ref<DocSection>('overview')
+const docsSearch = ref('')
+const generationLanguage = ref<'curl' | 'javascript'>('curl')
+const editLanguage = ref<'curl' | 'javascript'>('curl')
 
 const baseOrigin = computed(() => {
   if (typeof window === 'undefined') return 'http://localhost:3000'
   return window.location.origin
 })
-
 const apiBaseUrl = computed(() => `${baseOrigin.value}/v1`)
+
+const navigationGroups: NavigationGroup[] = [
+  {
+    label: '开始使用',
+    items: [
+      { id: 'overview', label: '概览', description: '能力、入口与快速开始' },
+      { id: 'authentication', label: '认证', description: 'API Key 与安全建议' },
+    ],
+  },
+  {
+    label: '图片 API',
+    items: [
+      { id: 'image-generation', label: '生成图片', description: '/images/generations', method: 'POST' },
+      { id: 'image-edit', label: '编辑图片', description: '/images/edits', method: 'POST' },
+      { id: 'streaming', label: '流式响应', description: 'SSE 事件与前端读取' },
+    ],
+  },
+  {
+    label: '通用说明',
+    items: [{ id: 'errors', label: '错误处理', description: '状态码与错误结构' }],
+  },
+]
+
+const navigationItems = navigationGroups.flatMap((group) => group.items)
+const activeNavigationItem = computed(() =>
+  navigationItems.find((item) => item.id === activeSection.value) ?? navigationItems[0]!,
+)
+const activeGroupLabel = computed(() =>
+  navigationGroups.find((group) => group.items.some((item) => item.id === activeSection.value))?.label ?? 'API 文档',
+)
+const activeIndex = computed(() => navigationItems.findIndex((item) => item.id === activeSection.value))
+const previousItem = computed(() => navigationItems[activeIndex.value - 1] ?? null)
+const nextItem = computed(() => navigationItems[activeIndex.value + 1] ?? null)
+
+const filteredNavigationGroups = computed(() => {
+  const query = docsSearch.value.trim().toLowerCase()
+  if (!query) return navigationGroups
+  return navigationGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) =>
+        `${group.label} ${item.label} ${item.description}`.toLowerCase().includes(query),
+      ),
+    }))
+    .filter((group) => group.items.length > 0)
+})
 
 const generationParameters: ParameterRow[] = [
   { name: 'prompt', type: 'string', required: true, defaultValue: '—', description: '用于描述目标图片的提示词。' },
@@ -76,19 +139,12 @@ const generationJavaScript = computed(() => [
 
 const generationResponse = `{
   "created": 1788246000,
-  "data": [
-    {
-      "url": "data:image/png;base64,iVBORw0KGgoAAA..."
-    }
-  ],
+  "data": [{ "url": "data:image/png;base64,iVBORw0KGgoAAA..." }],
   "output_format": "png",
   "quality": "high",
   "size": "1024x1024",
   "model": "gpt-image-2",
-  "usage": {
-    "input_tokens": 123,
-    "output_tokens": 456
-  }
+  "usage": { "input_tokens": 123, "output_tokens": 456 }
 }`
 
 const editCurl = computed(() => [
@@ -136,6 +192,27 @@ data: {"type":"image_generation.partial_image","partial_image_index":0,"b64_json
 event: image_generation.completed
 data: {"type":"image_generation.completed","b64_json":"...","size":"1024x1024","model":"gpt-image-2"}`
 
+function isDocSection(value: string): value is DocSection {
+  return navigationItems.some((item) => item.id === value)
+}
+
+function syncSectionFromHash(): void {
+  const section = window.location.hash.slice(1)
+  if (isDocSection(section)) activeSection.value = section
+}
+
+function selectSection(section: DocSection): void {
+  activeSection.value = section
+  docsSearch.value = ''
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${section}`)
+  document.querySelector('.docs-article')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function handleMobileSection(event: Event): void {
+  const value = (event.target as HTMLSelectElement).value
+  if (isDocSection(value)) selectSection(value)
+}
+
 async function copy(text: string): Promise<void> {
   try {
     if (!navigator.clipboard || !window.isSecureContext) throw new Error('clipboard unavailable')
@@ -154,363 +231,387 @@ async function copy(text: string): Promise<void> {
     else message.error('复制失败，请手动选择文本')
   }
 }
+
+onMounted(() => {
+  syncSectionFromHash()
+  window.addEventListener('hashchange', syncSectionFromHash)
+})
+onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHash))
 </script>
 
 <template>
-  <div class="grid gap-5">
-    <section class="overflow-hidden rounded-2xl border border-primary-100 bg-gradient-to-br from-white via-primary-50/60 to-violet-50 p-5 shadow-sm dark:border-primary-900/40 dark:from-dark-900 dark:via-primary-950/30 dark:to-dark-900 sm:p-7">
-      <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-        <div class="max-w-2xl">
-          <div class="mb-3 flex flex-wrap items-center gap-2">
-            <UiTag type="success">接口已内置</UiTag>
-            <UiTag type="primary">OpenAI Images 兼容</UiTag>
-            <UiTag>JSON · multipart · SSE</UiTag>
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="API 文档目录">
+      <div class="docs-sidebar-inner">
+        <div class="docs-product">
+          <span class="docs-mark">MB</span>
+          <div>
+            <strong>API Reference</strong>
+            <span>Model Bridge · v1</span>
           </div>
-          <h2 class="text-2xl font-black tracking-tight text-gray-950 dark:text-white sm:text-3xl">图片生成 API</h2>
-          <p class="mt-2 max-w-xl text-sm leading-6 text-gray-600 dark:text-dark-300">
-            使用一个统一入口完成文生图、图片编辑和流式中间图输出。请求通过平台 API Key 鉴权，并自动纳入现有额度与用量统计。
-          </p>
         </div>
-        <div class="min-w-0 lg:w-[430px]">
-          <span class="mb-1.5 block text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-dark-400">Base URL</span>
-          <div class="flex min-w-0 items-center gap-2 rounded-xl border border-white/80 bg-white/90 p-2 pl-3 shadow-sm dark:border-dark-700 dark:bg-dark-800/90">
-            <code class="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-dark-100">{{ apiBaseUrl }}</code>
-            <UiButton size="small" secondary @click="copy(apiBaseUrl)">复制</UiButton>
+
+        <label class="docs-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" />
+          </svg>
+          <input v-model="docsSearch" type="search" placeholder="搜索文档" />
+        </label>
+
+        <nav class="docs-nav">
+          <div v-for="group in filteredNavigationGroups" :key="group.label" class="docs-nav-group">
+            <p>{{ group.label }}</p>
+            <button
+              v-for="item in group.items"
+              :key="item.id"
+              type="button"
+              :class="['docs-nav-item', activeSection === item.id && 'docs-nav-item-active']"
+              :aria-current="activeSection === item.id ? 'page' : undefined"
+              @click="selectSection(item.id)"
+            >
+              <span class="docs-nav-label">
+                <span v-if="item.method" class="nav-method">{{ item.method }}</span>
+                {{ item.label }}
+              </span>
+              <small>{{ item.description }}</small>
+            </button>
           </div>
+          <p v-if="filteredNavigationGroups.length === 0" class="docs-empty">没有匹配的文档</p>
+        </nav>
+
+        <div class="docs-base-url">
+          <span>Base URL</span>
+          <button type="button" title="复制 Base URL" @click="copy(apiBaseUrl)">
+            <code>{{ apiBaseUrl }}</code>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v1.125c0 .621-.504 1.125-1.125 1.125h-9.75A1.125 1.125 0 0 1 3.75 18.375v-9.75c0-.621.504-1.125 1.125-1.125H6m9.75 9.75h3.375c.621 0 1.125-.504 1.125-1.125v-9.75c0-.621-.504-1.125-1.125-1.125h-9.75c-.621 0-1.125.504-1.125 1.125V7.5m7.5 9.75h-7.5V7.5" />
+            </svg>
+          </button>
         </div>
       </div>
-    </section>
+    </aside>
 
-    <UiAlert type="warning" title="安全提示">
-      公网网站不要把固定 API Key 写入前端源码。面向匿名访客时，请由业务后端保管 Key 并代理调用；跨域前端还需要在反向代理中按来源配置 CORS。
-    </UiAlert>
+    <main class="docs-main">
+      <label class="docs-mobile-nav">
+        <span>文档目录</span>
+        <select :value="activeSection" @change="handleMobileSection">
+          <optgroup v-for="group in navigationGroups" :key="group.label" :label="group.label">
+            <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </optgroup>
+        </select>
+      </label>
 
-    <UiGrid :cols="3" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <UiGi span="3 m:1">
-        <div class="h-full rounded-2xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-900">
-          <div class="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/25 dark:text-primary-300">
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.03 5.91c-.56-.1-1.16.03-1.56.43l-2.66 2.66H8.25v2.25H6v2.25H2.25v-2.82c0-.6.24-1.17.66-1.59l6.5-6.5A6 6 0 1121.75 8.25z" />
-            </svg>
+      <article class="docs-article">
+        <header class="article-header">
+          <p class="article-kicker">{{ activeGroupLabel }} <span>/</span> {{ activeNavigationItem.label }}</p>
+          <div class="article-title-row">
+            <div>
+              <h1>{{ activeNavigationItem.label }}</h1>
+              <p>{{ activeNavigationItem.description }}</p>
+            </div>
+            <UiTag v-if="activeNavigationItem.method" type="success">{{ activeNavigationItem.method }}</UiTag>
           </div>
-          <strong class="text-sm text-gray-950 dark:text-white">Bearer 鉴权</strong>
-          <p class="mt-1.5 text-[13px] leading-5 text-gray-500 dark:text-dark-400">请求头使用 <code class="code-inline">Authorization: Bearer mb-...</code></p>
-        </div>
-      </UiGi>
-      <UiGi span="3 m:1">
-        <div class="h-full rounded-2xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-900">
-          <div class="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-900/25 dark:text-violet-300">
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.16-5.16a2.25 2.25 0 013.18 0l5.16 5.16m-1.5-1.5 1.41-1.41a2.25 2.25 0 013.18 0l2.91 2.91M3.75 19.5h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.01v.01h-.01v-.01z" />
-            </svg>
+        </header>
+
+        <section v-if="activeSection === 'overview'" class="article-body">
+          <div class="lead-copy">
+            <h2>使用统一接口调用图片能力</h2>
+            <p>Model Bridge 提供兼容 OpenAI Images 的 HTTP API，覆盖文生图、图片编辑和 SSE 流式结果。所有请求复用平台现有的账号调度、API Key 权限、额度和用量统计。</p>
           </div>
-          <strong class="text-sm text-gray-950 dark:text-white">默认模型</strong>
-          <p class="mt-1.5 text-[13px] leading-5 text-gray-500 dark:text-dark-400">未传模型时使用 <code class="code-inline">gpt-image-2</code></p>
-        </div>
-      </UiGi>
-      <UiGi span="3 m:1">
-        <div class="h-full rounded-2xl border border-gray-200 bg-white p-5 dark:border-dark-700 dark:bg-dark-900">
-          <div class="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-900/25 dark:text-emerald-300">
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 4.5h16.5m-16.5 15h16.5M6.75 8.25l3.75 3.75-3.75 3.75M12.75 15.75h4.5" />
-            </svg>
+
+          <div class="status-line">
+            <span class="status-dot" />
+            <strong>接口已内置</strong>
+            <span>JSON · multipart · SSE</span>
+            <code>gpt-image-2</code>
           </div>
-          <strong class="text-sm text-gray-950 dark:text-white">返回格式</strong>
-          <p class="mt-1.5 text-[13px] leading-5 text-gray-500 dark:text-dark-400"><code class="code-inline">b64_json</code> 或可直接赋给 img 的 Data URL</p>
-        </div>
-      </UiGi>
-    </UiGrid>
 
-    <UiCard title="接口参考">
-      <UiTabs>
-        <UiTabPane name="generation" tab="图片生成">
-          <div class="grid gap-5">
-            <div class="endpoint-bar">
-              <span class="method-post">POST</span>
-              <code>{{ apiBaseUrl }}/images/generations</code>
-              <UiButton class="ml-auto" size="tiny" secondary @click="copy(`${apiBaseUrl}/images/generations`)">复制地址</UiButton>
+          <section class="article-section">
+            <h2>快速开始</h2>
+            <ol class="start-list">
+              <li><span>01</span><div><strong>创建平台 API Key</strong><p>在控制台的 API Keys 页面创建一个以 <code>mb-</code> 开头的密钥，并允许访问 OpenAI 图片模型。</p></div></li>
+              <li><span>02</span><div><strong>设置请求地址与鉴权</strong><p>将 Base URL 设为 <code>{{ apiBaseUrl }}</code>，通过 Bearer Token 传递 API Key。</p></div></li>
+              <li><span>03</span><div><strong>发送第一条生图请求</strong><p>调用 <code>POST /images/generations</code>，至少传入非空的 <code>prompt</code>。</p></div></li>
+            </ol>
+          </section>
+
+          <section class="article-section">
+            <h2>可用接口</h2>
+            <div class="endpoint-list">
+              <button type="button" @click="selectSection('image-generation')">
+                <span class="method-post">POST</span><code>/v1/images/generations</code><span>根据提示词生成图片</span><b>→</b>
+              </button>
+              <button type="button" @click="selectSection('image-edit')">
+                <span class="method-post">POST</span><code>/v1/images/edits</code><span>上传并编辑图片</span><b>→</b>
+              </button>
             </div>
+          </section>
 
-            <p class="doc-copy">根据文本提示词生成一张或多张图片。请求体使用 <code class="code-inline">application/json</code>。</p>
+          <UiAlert type="info" title="返回格式">
+            <code>response_format=b64_json</code> 返回纯 Base64；<code>response_format=url</code> 返回可直接赋给 <code>&lt;img src&gt;</code> 的 Data URL，不是长期公网地址。
+          </UiAlert>
+        </section>
 
-            <div>
-              <h3 class="section-title">请求参数</h3>
-              <div class="table-wrap">
-                <table class="doc-table">
-                  <thead>
-                    <tr><th>参数</th><th>类型</th><th>必填</th><th>默认值</th><th>说明</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="parameter in generationParameters" :key="parameter.name">
-                      <td><code>{{ parameter.name }}</code></td>
-                      <td>{{ parameter.type }}</td>
-                      <td><span :class="parameter.required ? 'required' : 'optional'">{{ parameter.required ? '是' : '否' }}</span></td>
-                      <td>{{ parameter.defaultValue }}</td>
-                      <td>{{ parameter.description }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div>
-              <h3 class="section-title">调用示例</h3>
-              <UiTabs>
-                <UiTabPane name="generation-curl" tab="cURL">
-                  <div class="code-shell">
-                    <button type="button" class="copy-code" @click="copy(generationCurl)">复制代码</button>
-                    <pre><code>{{ generationCurl }}</code></pre>
-                  </div>
-                </UiTabPane>
-                <UiTabPane name="generation-js" tab="JavaScript">
-                  <div class="code-shell">
-                    <button type="button" class="copy-code" @click="copy(generationJavaScript)">复制代码</button>
-                    <pre><code>{{ generationJavaScript }}</code></pre>
-                  </div>
-                </UiTabPane>
-              </UiTabs>
-            </div>
-
-            <div>
-              <h3 class="section-title">响应示例</h3>
-              <div class="code-shell">
-                <button type="button" class="copy-code" @click="copy(generationResponse)">复制 JSON</button>
-                <pre><code>{{ generationResponse }}</code></pre>
-              </div>
-              <p class="doc-note"><code>response_format=url</code> 返回的是 Data URL，并非可长期访问的公网链接。需要持久化时，请将图片上传到自己的对象存储。</p>
-            </div>
+        <section v-else-if="activeSection === 'authentication'" class="article-body">
+          <div class="lead-copy">
+            <h2>使用 Bearer Token 认证</h2>
+            <p>所有图片 API 请求都必须携带有效的平台 API Key。密钥状态、用户余额、服务商范围、模型白名单、速率和并发限制会在请求转发前统一校验。</p>
           </div>
-        </UiTabPane>
 
-        <UiTabPane name="edit" tab="图片编辑">
-          <div class="grid gap-5">
-            <div class="endpoint-bar">
-              <span class="method-post">POST</span>
-              <code>{{ apiBaseUrl }}/images/edits</code>
-              <UiButton class="ml-auto" size="tiny" secondary @click="copy(`${apiBaseUrl}/images/edits`)">复制地址</UiButton>
+          <section class="article-section">
+            <h2>请求头</h2>
+            <div class="code-shell">
+              <button type="button" class="copy-code" @click="copy('Authorization: Bearer mb-xxxxxxxx')">复制</button>
+              <pre><code>Authorization: Bearer mb-xxxxxxxx</code></pre>
             </div>
+          </section>
 
-            <p class="doc-copy">上传原图并通过提示词进行编辑。浏览器上传本地文件时推荐使用 <code class="code-inline">multipart/form-data</code>。</p>
-
-            <UiAlert type="info">
-              每个 multipart 文件最大 20 MB，整个请求体最大 64 MB。使用 FormData 时不要手动设置 Content-Type，浏览器会自动补全 boundary。
-            </UiAlert>
-
-            <div>
-              <h3 class="section-title">请求参数</h3>
-              <div class="table-wrap">
-                <table class="doc-table">
-                  <thead>
-                    <tr><th>参数</th><th>类型</th><th>必填</th><th>默认值</th><th>说明</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="parameter in editParameters" :key="parameter.name">
-                      <td><code>{{ parameter.name }}</code></td>
-                      <td>{{ parameter.type }}</td>
-                      <td><span :class="parameter.required ? 'required' : 'optional'">{{ parameter.required ? '是' : '否' }}</span></td>
-                      <td>{{ parameter.defaultValue }}</td>
-                      <td>{{ parameter.description }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+          <section class="article-section">
+            <h2>密钥安全</h2>
+            <div class="security-list">
+              <div><strong>服务端调用</strong><p>把 Key 放入环境变量或密钥管理系统，不要提交到 Git。</p></div>
+              <div><strong>登录用户前端</strong><p>允许用户输入自己的 Key，避免共享一个固定平台密钥。</p></div>
+              <div><strong>匿名公网前端</strong><p>由业务后端保管 Key 并代理请求，同时增加用户鉴权、限流和提示词长度限制。</p></div>
             </div>
+          </section>
 
-            <div>
-              <h3 class="section-title">调用示例</h3>
-              <UiTabs>
-                <UiTabPane name="edit-curl" tab="cURL">
-                  <div class="code-shell">
-                    <button type="button" class="copy-code" @click="copy(editCurl)">复制代码</button>
-                    <pre><code>{{ editCurl }}</code></pre>
-                  </div>
-                </UiTabPane>
-                <UiTabPane name="edit-js" tab="JavaScript">
-                  <div class="code-shell">
-                    <button type="button" class="copy-code" @click="copy(editJavaScript)">复制代码</button>
-                    <pre><code>{{ editJavaScript }}</code></pre>
-                  </div>
-                </UiTabPane>
-              </UiTabs>
-            </div>
+          <UiAlert type="warning" title="不要暴露固定密钥">
+            浏览器代码、Source Map 和网络请求都可能暴露写死在前端的 API Key。跨域页面还需要在反向代理中按可信来源配置 CORS，避免使用无条件的通配来源。
+          </UiAlert>
+        </section>
+
+        <section v-else-if="activeSection === 'image-generation'" class="article-body">
+          <div class="endpoint-bar">
+            <span class="method-post">POST</span><code>{{ apiBaseUrl }}/images/generations</code>
+            <UiButton size="tiny" secondary @click="copy(`${apiBaseUrl}/images/generations`)">复制地址</UiButton>
           </div>
-        </UiTabPane>
+          <p class="doc-copy">根据文本提示词生成一张或多张图片。请求体使用 <code>application/json</code>。</p>
 
-        <UiTabPane name="stream" tab="流式响应">
-          <div class="grid gap-5">
-            <div>
-              <h3 class="section-title">SSE 事件</h3>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="event-card">
-                  <UiTag type="primary">生成</UiTag>
-                  <code>image_generation.partial_image</code>
-                  <code>image_generation.completed</code>
-                </div>
-                <div class="event-card">
-                  <UiTag type="success">编辑</UiTag>
-                  <code>image_edit.partial_image</code>
-                  <code>image_edit.completed</code>
-                </div>
-              </div>
-            </div>
+          <section class="article-section">
+            <h2>请求参数</h2>
+            <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>类型</th><th>必填</th><th>默认值</th><th>说明</th></tr></thead><tbody>
+              <tr v-for="parameter in generationParameters" :key="parameter.name"><td><code>{{ parameter.name }}</code></td><td>{{ parameter.type }}</td><td><span :class="parameter.required ? 'required' : 'optional'">{{ parameter.required ? '是' : '否' }}</span></td><td>{{ parameter.defaultValue }}</td><td>{{ parameter.description }}</td></tr>
+            </tbody></table></div>
+          </section>
 
-            <UiAlert type="warning">
-              原生 EventSource 不支持 POST 和自定义 Authorization 请求头。Web 端请使用 fetch 读取 ReadableStream，或由业务后端代理流式响应。
-            </UiAlert>
+          <section class="article-section">
+            <div class="section-heading"><h2>调用示例</h2><div class="language-switch"><button :class="generationLanguage === 'curl' && 'active'" @click="generationLanguage = 'curl'">cURL</button><button :class="generationLanguage === 'javascript' && 'active'" @click="generationLanguage = 'javascript'">JavaScript</button></div></div>
+            <div class="code-shell"><button type="button" class="copy-code" @click="copy(generationLanguage === 'curl' ? generationCurl : generationJavaScript)">复制代码</button><pre><code>{{ generationLanguage === 'curl' ? generationCurl : generationJavaScript }}</code></pre></div>
+          </section>
 
-            <div>
-              <h3 class="section-title">流式请求</h3>
-              <div class="code-shell">
-                <button type="button" class="copy-code" @click="copy(streamCurl)">复制代码</button>
-                <pre><code>{{ streamCurl }}</code></pre>
-              </div>
-            </div>
+          <section class="article-section">
+            <h2>响应示例</h2>
+            <div class="code-shell"><button type="button" class="copy-code" @click="copy(generationResponse)">复制 JSON</button><pre><code>{{ generationResponse }}</code></pre></div>
+            <p class="doc-note"><code>response_format=url</code> 返回 Data URL。需要长期访问时，请将图片上传到自己的对象存储或 CDN。</p>
+          </section>
+        </section>
 
-            <div>
-              <h3 class="section-title">事件示例</h3>
-              <div class="code-shell">
-                <button type="button" class="copy-code" @click="copy(streamResponse)">复制示例</button>
-                <pre><code>{{ streamResponse }}</code></pre>
-              </div>
-            </div>
+        <section v-else-if="activeSection === 'image-edit'" class="article-body">
+          <div class="endpoint-bar">
+            <span class="method-post">POST</span><code>{{ apiBaseUrl }}/images/edits</code>
+            <UiButton size="tiny" secondary @click="copy(`${apiBaseUrl}/images/edits`)">复制地址</UiButton>
           </div>
-        </UiTabPane>
+          <p class="doc-copy">上传原图并通过提示词进行编辑。浏览器上传本地文件时推荐使用 <code>multipart/form-data</code>。</p>
 
-        <UiTabPane name="errors" tab="错误处理">
-          <div class="grid gap-5">
-            <div class="table-wrap">
-              <table class="doc-table">
-                <thead><tr><th>状态码</th><th>含义</th><th>处理建议</th></tr></thead>
-                <tbody>
-                  <tr><td><code>400</code></td><td>参数错误、缺少图片或内容策略拒绝</td><td>检查 error.message 后修改请求，不要自动重试。</td></tr>
-                  <tr><td><code>401</code></td><td>API Key 缺失、无效、禁用或过期</td><td>检查 Authorization 请求头和 Key 状态。</td></tr>
-                  <tr><td><code>402</code></td><td>账户余额不足</td><td>充值后重试。</td></tr>
-                  <tr><td><code>403</code></td><td>生图功能关闭，或 Key 无权使用模型</td><td>联系管理员检查功能开关和访问范围。</td></tr>
-                  <tr><td><code>413</code></td><td>请求体超过大小限制</td><td>压缩输入图片或减少上传文件。</td></tr>
-                  <tr><td><code>429</code></td><td>速率、并发或额度限制</td><td>降低并发并按退避策略重试。</td></tr>
-                  <tr><td><code>502 / 503</code></td><td>上游无图片输出或暂无可用账号</td><td>短暂退避后进行有限次数重试。</td></tr>
-                </tbody>
-              </table>
+          <UiAlert type="info">每个 multipart 文件最大 20 MB，整个请求体最大 64 MB。使用 FormData 时不要手动设置 Content-Type，浏览器会自动补全 boundary。</UiAlert>
+
+          <section class="article-section">
+            <h2>请求参数</h2>
+            <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>类型</th><th>必填</th><th>默认值</th><th>说明</th></tr></thead><tbody>
+              <tr v-for="parameter in editParameters" :key="parameter.name"><td><code>{{ parameter.name }}</code></td><td>{{ parameter.type }}</td><td><span :class="parameter.required ? 'required' : 'optional'">{{ parameter.required ? '是' : '否' }}</span></td><td>{{ parameter.defaultValue }}</td><td>{{ parameter.description }}</td></tr>
+            </tbody></table></div>
+          </section>
+
+          <section class="article-section">
+            <div class="section-heading"><h2>调用示例</h2><div class="language-switch"><button :class="editLanguage === 'curl' && 'active'" @click="editLanguage = 'curl'">cURL</button><button :class="editLanguage === 'javascript' && 'active'" @click="editLanguage = 'javascript'">JavaScript</button></div></div>
+            <div class="code-shell"><button type="button" class="copy-code" @click="copy(editLanguage === 'curl' ? editCurl : editJavaScript)">复制代码</button><pre><code>{{ editLanguage === 'curl' ? editCurl : editJavaScript }}</code></pre></div>
+          </section>
+        </section>
+
+        <section v-else-if="activeSection === 'streaming'" class="article-body">
+          <div class="lead-copy"><h2>通过 SSE 接收中间图和最终结果</h2><p>请求中设置 <code>stream=true</code> 后，接口返回 <code>text/event-stream</code>。设置 <code>partial_images</code> 可以请求最多 3 张中间图。</p></div>
+
+          <section class="article-section">
+            <h2>事件类型</h2>
+            <div class="event-list">
+              <div><span>生成</span><code>image_generation.partial_image</code><code>image_generation.completed</code></div>
+              <div><span>编辑</span><code>image_edit.partial_image</code><code>image_edit.completed</code></div>
+              <div><span>失败</span><code>error</code><small>错误事件可能在任一阶段出现</small></div>
             </div>
+          </section>
 
-            <div>
-              <h3 class="section-title">错误结构</h3>
-              <div class="code-shell">
-                <pre><code>{
+          <UiAlert type="warning">原生 EventSource 不支持 POST 和自定义 Authorization 请求头。Web 端请使用 fetch 读取 ReadableStream，或由业务后端代理流式响应。</UiAlert>
+
+          <section class="article-section"><h2>流式请求</h2><div class="code-shell"><button type="button" class="copy-code" @click="copy(streamCurl)">复制代码</button><pre><code>{{ streamCurl }}</code></pre></div></section>
+          <section class="article-section"><h2>事件示例</h2><div class="code-shell"><button type="button" class="copy-code" @click="copy(streamResponse)">复制示例</button><pre><code>{{ streamResponse }}</code></pre></div></section>
+        </section>
+
+        <section v-else class="article-body">
+          <div class="lead-copy"><h2>统一判断 HTTP 状态与错误体</h2><p>调用方应先判断 HTTP 状态，再读取 <code>error.message</code> 和 <code>error.code</code>。只有网络错误、502 和 503 适合进行有限次数的退避重试。</p></div>
+
+          <section class="article-section">
+            <h2>HTTP 状态码</h2>
+            <div class="table-wrap"><table class="doc-table error-table"><thead><tr><th>状态码</th><th>含义</th><th>处理建议</th></tr></thead><tbody>
+              <tr><td><code>400</code></td><td>参数错误、缺少图片或内容策略拒绝</td><td>检查 error.message 后修改请求，不自动重试。</td></tr>
+              <tr><td><code>401</code></td><td>API Key 缺失、无效、禁用或过期</td><td>检查 Authorization 请求头和 Key 状态。</td></tr>
+              <tr><td><code>402</code></td><td>账户余额不足</td><td>充值后重试。</td></tr>
+              <tr><td><code>403</code></td><td>生图功能关闭，或 Key 无权使用模型</td><td>检查功能开关和 Key 访问范围。</td></tr>
+              <tr><td><code>413</code></td><td>请求体超过大小限制</td><td>压缩输入图片或减少上传文件。</td></tr>
+              <tr><td><code>429</code></td><td>速率、并发或额度限制</td><td>降低并发并按退避策略重试。</td></tr>
+              <tr><td><code>502 / 503</code></td><td>上游无图片输出或暂无可用账号</td><td>短暂退避后进行有限次数重试。</td></tr>
+            </tbody></table></div>
+          </section>
+
+          <section class="article-section"><h2>错误结构</h2><div class="code-shell"><pre><code>{
   "error": {
     "type": "invalid_request_error",
     "code": "invalid_image_request",
     "message": "prompt is required"
   }
-}</code></pre>
-              </div>
-            </div>
-          </div>
-        </UiTabPane>
-      </UiTabs>
-    </UiCard>
+}</code></pre></div></section>
+        </section>
 
-    <UiCard title="接入前检查">
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="check-item"><span>1</span><p>准备有效的 <code>mb-...</code> API Key</p></div>
-        <div class="check-item"><span>2</span><p>确认 Key 允许访问 OpenAI 和图片模型</p></div>
-        <div class="check-item"><span>3</span><p>确认上游 OAuth 账号拥有生图权限</p></div>
-        <div class="check-item"><span>4</span><p>生产环境配置 HTTPS、超时与限流</p></div>
-      </div>
-    </UiCard>
+        <footer class="article-pagination">
+          <button v-if="previousItem" type="button" @click="selectSection(previousItem.id)"><small>上一节</small><span>← {{ previousItem.label }}</span></button><span v-else />
+          <button v-if="nextItem" type="button" class="next" @click="selectSection(nextItem.id)"><small>下一节</small><span>{{ nextItem.label }} →</span></button>
+        </footer>
+      </article>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.endpoint-bar {
-  @apply flex min-w-0 items-center gap-3 overflow-x-auto rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-dark-700 dark:bg-dark-800/70;
+.docs-layout {
+  @apply mx-auto grid max-w-[1440px] gap-6 xl:grid-cols-[15rem_minmax(0,1fr)];
 }
 
-.endpoint-bar > code {
-  @apply whitespace-nowrap font-semibold text-gray-800 dark:text-dark-100;
+.docs-sidebar {
+  @apply hidden xl:block;
 }
 
-.method-post {
-  @apply rounded-lg bg-emerald-100 px-2.5 py-1 text-xs font-black tracking-wide text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300;
+.docs-sidebar-inner {
+  @apply sticky top-0 flex max-h-[calc(100vh-7.75rem)] flex-col overflow-hidden border-r border-gray-200 pr-5 dark:border-dark-700;
 }
 
-.section-title {
-  @apply mb-3 text-sm font-bold text-gray-950 dark:text-white;
+.docs-product {
+  @apply mb-5 flex items-center gap-3 px-1;
 }
 
-.doc-copy {
-  @apply text-sm leading-6 text-gray-600 dark:text-dark-300;
+.docs-mark {
+  @apply flex h-9 w-9 items-center justify-center rounded-lg bg-gray-950 text-[11px] font-black tracking-wider text-white dark:bg-white dark:text-dark-950;
 }
 
-.doc-note {
-  @apply mt-2 text-xs leading-5 text-gray-500 dark:text-dark-400;
-}
+.docs-product strong { @apply block text-sm font-extrabold tracking-tight text-gray-950 dark:text-white; }
+.docs-product div > span { @apply mt-0.5 block text-[11px] font-medium text-gray-400 dark:text-dark-400; }
 
-.table-wrap {
-  @apply overflow-x-auto rounded-xl border border-gray-200 dark:border-dark-700;
+.docs-search {
+  @apply mb-5 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/10 dark:border-dark-700 dark:bg-dark-900;
 }
+.docs-search svg { @apply h-4 w-4 flex-shrink-0 text-gray-400; }
+.docs-search input { @apply min-w-0 flex-1 bg-transparent text-xs text-gray-800 outline-none placeholder:text-gray-400 dark:text-dark-100; }
 
-.doc-table {
-  @apply min-w-[760px] w-full border-collapse text-left text-[13px];
-}
+.docs-nav { @apply min-h-0 flex-1 space-y-6 overflow-y-auto pb-5; }
+.docs-nav-group > p { @apply mb-2 px-2 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400 dark:text-dark-500; }
+.docs-nav-item { @apply mb-1 block w-full rounded-lg border-l-2 border-transparent px-2.5 py-2 text-left transition duration-200 hover:bg-gray-100/80 active:translate-y-px dark:hover:bg-dark-800; }
+.docs-nav-item:focus-visible { @apply outline-none ring-2 ring-primary-500/30; }
+.docs-nav-item-active { @apply border-primary-500 bg-primary-50/80 dark:bg-primary-900/15; }
+.docs-nav-label { @apply flex items-center gap-1.5 text-[13px] font-semibold text-gray-700 dark:text-dark-200; }
+.docs-nav-item-active .docs-nav-label { @apply text-primary-700 dark:text-primary-300; }
+.docs-nav-item small { @apply mt-0.5 block truncate text-[10px] text-gray-400 dark:text-dark-500; }
+.nav-method { @apply font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
+.docs-empty { @apply px-2 py-8 text-center text-xs text-gray-400; }
 
-.doc-table th {
-  @apply whitespace-nowrap border-b border-gray-200 bg-gray-50 px-4 py-3 font-bold text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300;
-}
+.docs-base-url { @apply border-t border-gray-200 pt-4 dark:border-dark-700; }
+.docs-base-url > span { @apply mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-400; }
+.docs-base-url button { @apply flex w-full items-center gap-2 rounded-lg bg-gray-100 px-2.5 py-2 text-left transition hover:bg-gray-200 dark:bg-dark-800 dark:hover:bg-dark-700; }
+.docs-base-url code { @apply min-w-0 flex-1 truncate text-[10px] font-semibold text-gray-600 dark:text-dark-300; }
+.docs-base-url svg { @apply h-3.5 w-3.5 flex-shrink-0 text-gray-400; }
 
-.doc-table td {
-  @apply border-b border-gray-100 px-4 py-3 align-top leading-5 text-gray-600 last:border-b-0 dark:border-dark-800 dark:text-dark-300;
-}
+.docs-main { @apply min-w-0; }
+.docs-mobile-nav { @apply mb-4 block rounded-xl border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900 xl:hidden; }
+.docs-mobile-nav span { @apply mb-1.5 block text-xs font-semibold text-gray-500 dark:text-dark-400; }
+.docs-mobile-nav select { @apply w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-primary-400 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-100; }
 
-.doc-table tr:last-child td {
-  @apply border-b-0;
-}
+.docs-article { @apply min-w-0 rounded-2xl border border-gray-200 bg-white px-5 pb-6 pt-7 shadow-[0_12px_36px_rgba(15,23,42,0.04)] dark:border-dark-700 dark:bg-dark-900 sm:px-8 lg:px-10; scroll-margin-top: 1rem; }
+.article-header { @apply border-b border-gray-200 pb-6 dark:border-dark-700; }
+.article-kicker { @apply mb-3 text-[11px] font-bold tracking-wide text-primary-600 dark:text-primary-300; }
+.article-kicker span { @apply mx-1 text-gray-300 dark:text-dark-600; }
+.article-title-row { @apply flex items-start justify-between gap-5; }
+.article-title-row h1 { @apply text-3xl font-black leading-tight tracking-[-0.035em] text-gray-950 dark:text-white sm:text-4xl; text-wrap: balance; }
+.article-title-row p { @apply mt-2 text-sm leading-6 text-gray-500 dark:text-dark-400; }
 
-.doc-table td code {
-  @apply whitespace-nowrap font-semibold text-primary-600 dark:text-primary-300;
-}
+.article-body { @apply grid gap-7 py-7; }
+.lead-copy { @apply max-w-3xl; }
+.lead-copy h2 { @apply text-xl font-extrabold tracking-tight text-gray-950 dark:text-white; }
+.lead-copy p { @apply mt-2 max-w-[68ch] text-[15px] leading-7 text-gray-600 dark:text-dark-300; text-wrap: pretty; }
+.article-section { @apply grid gap-3 border-t border-gray-100 pt-6 dark:border-dark-800; }
+.article-section > h2, .section-heading h2 { @apply text-base font-extrabold tracking-tight text-gray-950 dark:text-white; }
+.section-heading { @apply flex flex-wrap items-center justify-between gap-3; }
 
-.required {
-  @apply font-semibold text-red-600 dark:text-red-400;
-}
+.status-line { @apply flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-gray-50 px-4 py-3 text-xs text-gray-500 dark:bg-dark-800/70 dark:text-dark-400; }
+.status-line strong { @apply text-gray-800 dark:text-dark-100; }
+.status-line code { @apply ml-auto font-semibold text-gray-600 dark:text-dark-300; }
+.status-dot { @apply h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]; }
 
-.optional {
-  @apply text-gray-400 dark:text-dark-500;
-}
+.start-list { @apply divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-800 dark:border-dark-800; }
+.start-list li { @apply grid grid-cols-[2.5rem_1fr] gap-4 py-5; }
+.start-list li > span { @apply font-mono text-xs font-bold text-primary-500; }
+.start-list strong { @apply text-sm font-bold text-gray-900 dark:text-white; }
+.start-list p { @apply mt-1 max-w-[68ch] text-[13px] leading-6 text-gray-500 dark:text-dark-400; }
+.start-list code { @apply font-semibold text-gray-700 dark:text-dark-200; }
 
-.code-shell {
-  @apply relative overflow-hidden rounded-xl border border-slate-700 bg-slate-950;
-}
+.endpoint-list { @apply overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700; }
+.endpoint-list button { @apply grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-gray-100 px-4 py-4 text-left transition hover:bg-gray-50 active:translate-y-px last:border-b-0 dark:border-dark-800 dark:hover:bg-dark-800/60 sm:grid-cols-[auto_minmax(12rem,1fr)_minmax(10rem,1fr)_auto]; }
+.endpoint-list code { @apply truncate text-xs font-semibold text-gray-800 dark:text-dark-100; }
+.endpoint-list button > span:nth-child(3) { @apply hidden text-xs text-gray-500 dark:text-dark-400 sm:block; }
+.endpoint-list b { @apply text-gray-300 transition-transform group-hover:translate-x-1 dark:text-dark-600; }
 
-.code-shell pre {
-  @apply overflow-x-auto p-4 pr-20 text-[13px] leading-6 text-slate-200;
-}
+.method-post { @apply rounded-md bg-emerald-100 px-2 py-1 font-mono text-[9px] font-black tracking-wide text-emerald-700 dark:bg-emerald-900/35 dark:text-emerald-300; }
+.endpoint-bar { @apply flex min-w-0 items-center gap-3 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm dark:border-dark-700 dark:bg-dark-800/70; }
+.endpoint-bar > code { @apply min-w-0 flex-1 whitespace-nowrap font-semibold text-gray-800 dark:text-dark-100; }
+.doc-copy { @apply max-w-[68ch] text-sm leading-6 text-gray-600 dark:text-dark-300; }
+.doc-copy code, .doc-note code { @apply font-semibold text-gray-800 dark:text-dark-100; }
+.doc-note { @apply text-xs leading-5 text-gray-500 dark:text-dark-400; }
 
-.code-shell code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
+.table-wrap { @apply overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-700; }
+.doc-table { @apply w-full min-w-[760px] border-collapse text-left text-[13px]; }
+.doc-table th { @apply whitespace-nowrap border-b border-gray-200 bg-gray-50 px-4 py-3 font-bold text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300; }
+.doc-table td { @apply border-b border-gray-100 px-4 py-3 align-top leading-5 text-gray-600 dark:border-dark-800 dark:text-dark-300; }
+.doc-table tr:last-child td { @apply border-b-0; }
+.doc-table td code { @apply whitespace-nowrap font-semibold text-primary-600 dark:text-primary-300; }
+.required { @apply font-semibold text-red-600 dark:text-red-400; }
+.optional { @apply text-gray-400 dark:text-dark-500; }
 
-.copy-code {
-  @apply absolute right-2 top-2 z-10 rounded-lg border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white;
-}
+.language-switch { @apply inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-800; }
+.language-switch button { @apply rounded-md px-3 py-1.5 text-xs font-semibold text-gray-500 transition hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-dark-400 dark:hover:text-white; }
+.language-switch button.active { @apply bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white; }
 
-.event-card {
-  @apply grid gap-2 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-dark-700 dark:bg-dark-800/70;
-}
+.code-shell { @apply relative overflow-hidden rounded-lg border border-slate-700 bg-slate-950; }
+.code-shell pre { @apply overflow-x-auto p-4 pr-20 text-[13px] leading-6 text-slate-200; }
+.code-shell code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.copy-code { @apply absolute right-2 top-2 z-10 rounded-md border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400; }
 
-.event-card code {
-  @apply break-all text-xs font-semibold text-gray-700 dark:text-dark-200;
-}
+.security-list { @apply divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-800 dark:border-dark-800; }
+.security-list div { @apply grid gap-1 py-4 sm:grid-cols-[9rem_1fr] sm:gap-5; }
+.security-list strong { @apply text-sm font-bold text-gray-800 dark:text-dark-100; }
+.security-list p { @apply text-[13px] leading-6 text-gray-500 dark:text-dark-400; }
 
-.check-item {
-  @apply flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/80 p-4 dark:border-dark-700 dark:bg-dark-800/60;
-}
+.event-list { @apply overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700; }
+.event-list > div { @apply grid gap-2 border-b border-gray-100 px-4 py-4 last:border-0 dark:border-dark-800 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)]; }
+.event-list span { @apply text-xs font-bold text-gray-500 dark:text-dark-400; }
+.event-list code { @apply break-all text-xs font-semibold text-gray-800 dark:text-dark-100; }
+.event-list small { @apply text-xs text-gray-400; }
 
-.check-item > span {
-  @apply flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-black text-primary-700 dark:bg-primary-900/40 dark:text-primary-300;
-}
+.article-pagination { @apply mt-2 grid grid-cols-2 gap-4 border-t border-gray-200 pt-6 dark:border-dark-700; }
+.article-pagination button { @apply rounded-lg border border-gray-200 px-4 py-3 text-left transition hover:border-primary-300 hover:bg-primary-50/50 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:hover:border-primary-700 dark:hover:bg-primary-900/10; }
+.article-pagination button.next { @apply text-right; }
+.article-pagination small { @apply block text-[10px] font-medium text-gray-400; }
+.article-pagination span { @apply mt-1 block text-xs font-bold text-gray-700 dark:text-dark-200; }
 
-.check-item p {
-  @apply text-[13px] leading-5 text-gray-600 dark:text-dark-300;
+@media (max-width: 639px) {
+  .docs-article { @apply rounded-xl px-4 pt-5; }
+  .article-title-row h1 { @apply text-2xl; }
+  .status-line code { @apply ml-0 w-full; }
+  .endpoint-bar :deep(.btn) { @apply hidden; }
 }
 </style>
