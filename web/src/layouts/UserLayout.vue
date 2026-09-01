@@ -19,6 +19,7 @@ const menu = [
   { to: '/app/models', key: 'user-models', label: '模型广场' },
   { to: '/app/keys', key: 'user-keys', label: 'API Keys' },
   { to: '/app/usage', key: 'user-usage', label: '用量流水' },
+  { to: '/app/docs', key: 'user-api-docs', label: 'API 文档' },
 ]
 
 const titleMap: Record<string, string> = {
@@ -26,6 +27,7 @@ const titleMap: Record<string, string> = {
   'user-models': '模型广场',
   'user-keys': 'API Keys',
   'user-usage': '用量流水',
+  'user-api-docs': 'API 文档',
 }
 
 const subtitleMap: Record<string, string> = {
@@ -33,6 +35,7 @@ const subtitleMap: Record<string, string> = {
   'user-models': '浏览可用模型、能力分类与计费价格。',
   'user-keys': '管理您的 API Key 和调用入口。',
   'user-usage': '查看请求消耗、账单扣费和钱包流水。',
+  'user-api-docs': '查看图片生成与编辑接口、参数和调用示例。',
 }
 
 const activeKey = computed(() => route.name as string)
