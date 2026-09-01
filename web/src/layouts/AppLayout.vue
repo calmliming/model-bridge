@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import SystemVersionBadge from '../components/SystemVersionBadge.vue'
 import { api } from '../api/client'
+import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -131,6 +132,7 @@ async function loadBalance() {
 }
 
 const sidebarOpen = ref(false)
+const { collapsed: sidebarCollapsed, toggle: toggleSidebarCollapsed } = useCollapsibleSidebar('mb_admin_sidebar_collapsed')
 const profileOpen = ref(false)
 const notificationsOpen = ref(false)
 const languageOpen = ref(false)
@@ -195,15 +197,29 @@ function logout() {
 
     <!-- Sidebar -->
     <aside
-      class="fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-white/95 backdrop-blur-xl transition-transform duration-300 ease-out dark:border-dark-800 dark:bg-dark-900/95 lg:static lg:z-40 lg:translate-x-0 lg:bg-white/90 lg:dark:bg-dark-900/90"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="fixed inset-y-0 left-0 z-50 flex w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-white/95 backdrop-blur-xl transition-[transform,width] duration-300 ease-out dark:border-dark-800 dark:bg-dark-900/95 lg:relative lg:z-40 lg:translate-x-0 lg:bg-white/90 lg:dark:bg-dark-900/90"
+      :class="[
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        sidebarCollapsed ? 'lg:w-20' : 'lg:w-64',
+      ]"
       id="admin-sidebar"
     >
+      <button
+        type="button"
+        class="absolute -right-3 top-6 z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition hover:border-primary-300 hover:text-primary-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400 dark:hover:border-primary-700 dark:hover:text-primary-300 lg:flex"
+        :aria-label="sidebarCollapsed ? '展开管理侧边栏' : '收起管理侧边栏'"
+        :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        @click="toggleSidebarCollapsed"
+      >
+        <svg class="h-3.5 w-3.5 transition-transform" :class="sidebarCollapsed && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
       <div class="flex items-center gap-3 px-5 py-5">
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow">
           <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
         </span>
-        <div class="min-w-0 leading-tight">
+        <div class="min-w-0 leading-tight" :class="sidebarCollapsed && 'lg:hidden'">
           <strong class="block text-base font-bold text-gray-900 dark:text-white">Model Bridge</strong>
           <SystemVersionBadge class="mt-1" />
         </div>
@@ -219,7 +235,7 @@ function logout() {
         </button>
       </div>
 
-      <div class="px-5 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500">
+      <div class="px-5 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500" :class="sidebarCollapsed && 'lg:hidden'">
         管理
       </div>
       <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label="管理菜单">
@@ -228,10 +244,14 @@ function logout() {
           :key="item.key"
           :to="item.to"
           class="group relative flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+          :title="sidebarCollapsed ? item.label : undefined"
           :class="
-            activeKey === item.key
-              ? 'bg-primary-50 text-primary-600 shadow-sm shadow-primary-500/10 dark:bg-primary-900/20 dark:text-primary-300'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white'
+            [
+              activeKey === item.key
+                ? 'bg-primary-50 text-primary-600 shadow-sm shadow-primary-500/10 dark:bg-primary-900/20 dark:text-primary-300'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
+              sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
+            ]
           "
         >
           <div
@@ -254,11 +274,17 @@ function logout() {
               :d="path"
             />
           </svg>
-          <span class="truncate">{{ item.label }}</span>
+          <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
         </RouterLink>
       </nav>
 
-      <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-dark-700/50 dark:bg-dark-800/60" role="status" aria-live="polite">
+      <div
+        class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-3.5 shadow-sm dark:border-dark-700/50 dark:bg-dark-800/60"
+        :class="sidebarCollapsed && 'lg:justify-center lg:px-2'"
+        role="status"
+        aria-live="polite"
+        :title="sidebarCollapsed ? (consoleStatus === 'online' ? '控制台在线' : consoleStatus === 'offline' ? '连接异常' : '正在检查') : undefined"
+      >
         <div class="relative flex h-2.5 w-2.5 items-center justify-center">
           <span
             class="absolute inline-flex h-full w-full rounded-full opacity-75"
@@ -269,7 +295,7 @@ function logout() {
             :class="consoleStatus === 'online' ? 'bg-emerald-500' : 'bg-amber-500'"
           />
         </div>
-        <div class="leading-tight">
+        <div class="leading-tight" :class="sidebarCollapsed && 'lg:hidden'">
           <strong class="block text-[13px] font-bold text-gray-900 dark:text-white">
             {{ consoleStatus === 'online' ? '控制台在线' : consoleStatus === 'offline' ? '连接异常' : '正在检查' }}
           </strong>

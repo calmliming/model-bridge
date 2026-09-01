@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
+import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
 
 interface HeaderUser {
@@ -14,12 +15,21 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const menu = [
-  { to: '/app', key: 'user-overview', label: '概览' },
-  { to: '/app/models', key: 'user-models', label: '模型广场' },
-  { to: '/app/keys', key: 'user-keys', label: 'API Keys' },
-  { to: '/app/usage', key: 'user-usage', label: '用量流水' },
-  { to: '/app/docs', key: 'user-api-docs', label: 'API 文档' },
+const menuIconPaths = {
+  overview: ['M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z'],
+  models: ['M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z'],
+  keys: ['M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.03 5.91c-.56-.1-1.16.03-1.56.43l-2.66 2.66H8.25v2.25H6v2.25H2.25v-2.82c0-.6.24-1.17.66-1.59l6.5-6.5A6 6 0 1121.75 8.25z'],
+  usage: ['M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z'],
+  docs: ['M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25'],
+} as const
+
+type MenuIcon = keyof typeof menuIconPaths
+const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = [
+  { to: '/app', key: 'user-overview', label: '概览', icon: 'overview' },
+  { to: '/app/models', key: 'user-models', label: '模型广场', icon: 'models' },
+  { to: '/app/keys', key: 'user-keys', label: 'API Keys', icon: 'keys' },
+  { to: '/app/usage', key: 'user-usage', label: '用量流水', icon: 'usage' },
+  { to: '/app/docs', key: 'user-api-docs', label: 'API 文档', icon: 'docs' },
 ]
 
 const titleMap: Record<string, string> = {
@@ -50,6 +60,7 @@ const avatarInitials = computed(() => {
 })
 
 const sidebarOpen = ref(false)
+const { collapsed: sidebarCollapsed, toggle: toggleSidebarCollapsed } = useCollapsibleSidebar('mb_user_sidebar_collapsed')
 const profileOpen = ref(false)
 const notificationsOpen = ref(false)
 const languageOpen = ref(false)
@@ -102,7 +113,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-gray-50 dark:bg-dark-950">
+  <div class="flex h-screen h-dvh overflow-hidden bg-gray-50 dark:bg-dark-950">
     <!-- Mobile overlay -->
     <Transition name="modal-fade">
       <div
@@ -113,15 +124,29 @@ function logout() {
     </Transition>
 
     <aside
-      class="fixed inset-y-0 left-0 z-50 flex flex-col flex-shrink-0 transition-transform duration-300 ease-out border-r border-gray-200 w-58 bg-white/95 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/95 lg:static lg:z-auto lg:translate-x-0 lg:bg-white/90 lg:dark:bg-dark-900/90"
-      style="width: 232px"
-      :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+      class="fixed inset-y-0 left-0 z-50 flex w-[232px] flex-shrink-0 flex-col border-r border-gray-200 bg-white/95 backdrop-blur-xl transition-[transform,width] duration-300 ease-out dark:border-dark-800 dark:bg-dark-900/95 lg:relative lg:z-auto lg:translate-x-0 lg:bg-white/90 lg:dark:bg-dark-900/90"
+      :class="[
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+        sidebarCollapsed ? 'lg:w-20' : 'lg:w-[232px]',
+      ]"
+      id="user-sidebar"
     >
+      <button
+        type="button"
+        class="absolute -right-3 top-6 z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition hover:border-primary-300 hover:text-primary-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400 dark:hover:border-primary-700 dark:hover:text-primary-300 lg:flex"
+        :aria-label="sidebarCollapsed ? '展开用户侧边栏' : '收起用户侧边栏'"
+        :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+        @click="toggleSidebarCollapsed"
+      >
+        <svg class="h-3.5 w-3.5 transition-transform" :class="sidebarCollapsed && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+        </svg>
+      </button>
       <div class="flex items-center gap-3 px-5 py-5">
         <span class="flex items-center justify-center h-9 w-9 rounded-xl bg-gradient-primary shadow-glow">
           <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
         </span>
-        <div class="leading-tight">
+        <div class="leading-tight" :class="sidebarCollapsed && 'lg:hidden'">
           <strong class="block text-[15px] font-bold text-gray-900 dark:text-white">Model Bridge</strong>
           <small class="text-xs text-gray-400 dark:text-dark-400">User Console</small>
         </div>
@@ -136,25 +161,35 @@ function logout() {
         </button>
       </div>
 
-      <nav class="flex-1 px-3 pt-2 pb-4 space-y-1 overflow-y-auto">
+      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-2" aria-label="用户菜单">
         <RouterLink
           v-for="item in menu"
           :key="item.key"
           :to="item.to"
-          class="flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+          class="group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+          :title="sidebarCollapsed ? item.label : undefined"
           :class="
-            activeKey === item.key
-              ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white'
+            [
+              activeKey === item.key
+                ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
+              sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
+            ]
           "
         >
-          {{ item.label }}
+          <svg class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path v-for="path in menuIconPaths[item.icon]" :key="path" stroke-linecap="round" stroke-linejoin="round" :d="path" />
+          </svg>
+          <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
         </RouterLink>
       </nav>
 
-      <div class="m-4 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 dark:border-dark-700 dark:bg-dark-800/60">
-        <strong class="block text-[13px] text-gray-900 dark:text-white">{{ auth.username }}</strong>
-        <span class="text-xs text-gray-400 dark:text-dark-400">钱包账户</span>
+      <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50/80 p-3 dark:border-dark-700 dark:bg-dark-800/60" :class="sidebarCollapsed && 'lg:justify-center lg:px-2'" :title="sidebarCollapsed ? (auth.username ?? '钱包账户') : undefined">
+        <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary-100 text-[10px] font-black text-primary-700 dark:bg-primary-900/35 dark:text-primary-300">{{ avatarInitials }}</span>
+        <div class="min-w-0" :class="sidebarCollapsed && 'lg:hidden'">
+          <strong class="block truncate text-[13px] text-gray-900 dark:text-white">{{ auth.username }}</strong>
+          <span class="text-xs text-gray-400 dark:text-dark-400">钱包账户</span>
+        </div>
       </div>
     </aside>
 
@@ -166,6 +201,8 @@ function logout() {
           <button
             class="p-2 -ml-1 text-gray-500 rounded-lg hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-dark-800 lg:hidden"
             aria-label="打开菜单"
+            aria-controls="user-sidebar"
+            :aria-expanded="sidebarOpen"
             @click="sidebarOpen = true"
           >
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

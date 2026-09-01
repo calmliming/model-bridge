@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
 
 type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'streaming' | 'errors'
@@ -15,6 +16,7 @@ interface ParameterRow {
 interface NavigationItem {
   id: DocSection
   label: string
+  shortLabel: string
   description: string
   method?: 'POST'
 }
@@ -29,6 +31,7 @@ const activeSection = ref<DocSection>('overview')
 const docsSearch = ref('')
 const generationLanguage = ref<'curl' | 'javascript'>('curl')
 const editLanguage = ref<'curl' | 'javascript'>('curl')
+const { collapsed: docsSidebarCollapsed, toggle: toggleDocsSidebarCollapsed } = useCollapsibleSidebar('mb_api_docs_sidebar_collapsed')
 
 const baseOrigin = computed(() => {
   if (typeof window === 'undefined') return 'http://localhost:3000'
@@ -40,21 +43,21 @@ const navigationGroups: NavigationGroup[] = [
   {
     label: '开始使用',
     items: [
-      { id: 'overview', label: '概览', description: '能力、入口与快速开始' },
-      { id: 'authentication', label: '认证', description: 'API Key 与安全建议' },
+      { id: 'overview', label: '概览', shortLabel: '概', description: '能力、入口与快速开始' },
+      { id: 'authentication', label: '认证', shortLabel: '认', description: 'API Key 与安全建议' },
     ],
   },
   {
     label: '图片 API',
     items: [
-      { id: 'image-generation', label: '生成图片', description: '/images/generations', method: 'POST' },
-      { id: 'image-edit', label: '编辑图片', description: '/images/edits', method: 'POST' },
-      { id: 'streaming', label: '流式响应', description: 'SSE 事件与前端读取' },
+      { id: 'image-generation', label: '生成图片', shortLabel: '生', description: '/images/generations', method: 'POST' },
+      { id: 'image-edit', label: '编辑图片', shortLabel: '编', description: '/images/edits', method: 'POST' },
+      { id: 'streaming', label: '流式响应', shortLabel: '流', description: 'SSE 事件与前端读取' },
     ],
   },
   {
     label: '通用说明',
-    items: [{ id: 'errors', label: '错误处理', description: '状态码与错误结构' }],
+    items: [{ id: 'errors', label: '错误处理', shortLabel: '错', description: '状态码与错误结构' }],
   },
 ]
 
@@ -240,12 +243,23 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 </script>
 
 <template>
-  <div class="docs-layout">
+  <div class="docs-layout" :class="docsSidebarCollapsed ? 'docs-layout-collapsed' : 'docs-layout-expanded'">
     <aside class="docs-sidebar" aria-label="API 文档目录">
       <div class="docs-sidebar-inner">
+        <button
+          type="button"
+          class="docs-collapse-button"
+          :aria-label="docsSidebarCollapsed ? '展开 API 文档目录' : '收起 API 文档目录'"
+          :title="docsSidebarCollapsed ? '展开文档目录' : '收起文档目录'"
+          @click="toggleDocsSidebarCollapsed"
+        >
+          <svg :class="docsSidebarCollapsed && 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
         <div class="docs-product">
           <span class="docs-mark">MB</span>
-          <div>
+          <div class="docs-product-copy">
             <strong>API Reference</strong>
             <span>Model Bridge · v1</span>
           </div>
@@ -267,13 +281,17 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
               type="button"
               :class="['docs-nav-item', activeSection === item.id && 'docs-nav-item-active']"
               :aria-current="activeSection === item.id ? 'page' : undefined"
+              :title="docsSidebarCollapsed ? item.label : undefined"
               @click="selectSection(item.id)"
             >
-              <span class="docs-nav-label">
+              <span class="docs-nav-symbol">{{ item.shortLabel }}</span>
+              <span class="docs-nav-copy">
+                <span class="docs-nav-label">
                 <span v-if="item.method" class="nav-method">{{ item.method }}</span>
                 {{ item.label }}
+                </span>
+                <small>{{ item.description }}</small>
               </span>
-              <small>{{ item.description }}</small>
             </button>
           </div>
           <p v-if="filteredNavigationGroups.length === 0" class="docs-empty">没有匹配的文档</p>
@@ -482,16 +500,25 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 
 <style scoped>
 .docs-layout {
-  @apply mx-auto grid max-w-[1440px] gap-6 xl:grid-cols-[15rem_minmax(0,1fr)];
+  @apply mx-auto grid max-w-[1440px] gap-6;
+  transition: grid-template-columns 240ms ease;
 }
 
+.docs-layout-expanded { @apply xl:grid-cols-[15rem_minmax(0,1fr)]; }
+.docs-layout-collapsed { @apply xl:grid-cols-[3.75rem_minmax(0,1fr)]; }
+
 .docs-sidebar {
-  @apply hidden xl:block;
+  @apply relative hidden xl:block;
 }
 
 .docs-sidebar-inner {
-  @apply sticky top-0 flex max-h-[calc(100vh-7.75rem)] flex-col overflow-hidden border-r border-gray-200 pr-5 dark:border-dark-700;
+  @apply sticky top-0 flex max-h-[calc(100vh-7.75rem)] flex-col border-r border-gray-200 pr-5 dark:border-dark-700;
 }
+
+.docs-collapse-button {
+  @apply absolute -right-3 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition hover:border-primary-300 hover:text-primary-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400 dark:hover:border-primary-700 dark:hover:text-primary-300;
+}
+.docs-collapse-button svg { @apply h-3.5 w-3.5 transition-transform; }
 
 .docs-product {
   @apply mb-5 flex items-center gap-3 px-1;
@@ -503,6 +530,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 
 .docs-product strong { @apply block text-sm font-extrabold tracking-tight text-gray-950 dark:text-white; }
 .docs-product div > span { @apply mt-0.5 block text-[11px] font-medium text-gray-400 dark:text-dark-400; }
+.docs-product-copy { @apply min-w-0; }
 
 .docs-search {
   @apply mb-5 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/10 dark:border-dark-700 dark:bg-dark-900;
@@ -518,6 +546,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 .docs-nav-label { @apply flex items-center gap-1.5 text-[13px] font-semibold text-gray-700 dark:text-dark-200; }
 .docs-nav-item-active .docs-nav-label { @apply text-primary-700 dark:text-primary-300; }
 .docs-nav-item small { @apply mt-0.5 block truncate text-[10px] text-gray-400 dark:text-dark-500; }
+.docs-nav-copy { @apply block min-w-0; }
+.docs-nav-symbol { @apply hidden h-8 w-8 items-center justify-center rounded-lg text-xs font-black text-gray-500 dark:text-dark-400; }
 .nav-method { @apply font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
 .docs-empty { @apply px-2 py-8 text-center text-xs text-gray-400; }
 
@@ -526,6 +556,22 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 .docs-base-url button { @apply flex w-full items-center gap-2 rounded-lg bg-gray-100 px-2.5 py-2 text-left transition hover:bg-gray-200 dark:bg-dark-800 dark:hover:bg-dark-700; }
 .docs-base-url code { @apply min-w-0 flex-1 truncate text-[10px] font-semibold text-gray-600 dark:text-dark-300; }
 .docs-base-url svg { @apply h-3.5 w-3.5 flex-shrink-0 text-gray-400; }
+
+.docs-layout-collapsed .docs-sidebar-inner { @apply pr-3; }
+.docs-layout-collapsed .docs-product { @apply justify-center px-0; }
+.docs-layout-collapsed .docs-product-copy,
+.docs-layout-collapsed .docs-search,
+.docs-layout-collapsed .docs-nav-group > p,
+.docs-layout-collapsed .docs-nav-copy,
+.docs-layout-collapsed .docs-base-url > span,
+.docs-layout-collapsed .docs-base-url code { @apply hidden; }
+.docs-layout-collapsed .docs-nav { @apply space-y-2 overflow-visible; }
+.docs-layout-collapsed .docs-nav-group { @apply space-y-1; }
+.docs-layout-collapsed .docs-nav-item { @apply flex items-center justify-center border-l-0 px-1 py-1.5; }
+.docs-layout-collapsed .docs-nav-symbol { @apply flex; }
+.docs-layout-collapsed .docs-nav-item-active { @apply bg-primary-50 ring-1 ring-inset ring-primary-200 dark:bg-primary-900/20 dark:ring-primary-800; }
+.docs-layout-collapsed .docs-nav-item-active .docs-nav-symbol { @apply text-primary-700 dark:text-primary-300; }
+.docs-layout-collapsed .docs-base-url button { @apply justify-center px-2; }
 
 .docs-main { @apply min-w-0; }
 .docs-mobile-nav { @apply mb-4 block rounded-xl border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900 xl:hidden; }
