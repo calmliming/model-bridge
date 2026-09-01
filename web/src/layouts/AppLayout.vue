@@ -67,7 +67,7 @@ const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = 
   { to: '/subscription-plans', key: 'subscription-plans', label: '订阅套餐', icon: 'subscription-plans' },
   { to: '/stats', key: 'stats', label: '用量统计', icon: 'stats' },
   { to: '/docs', key: 'docs', label: '使用文档', icon: 'docs' },
-  { to: '/api-docs', key: 'api-docs', label: 'API 文档', icon: 'api-docs' },
+  { to: '/docs/api', key: 'api-docs', label: 'API 文档', icon: 'api-docs' },
   { to: '/settings', key: 'settings', label: '设置', icon: 'settings' },
 ]
 

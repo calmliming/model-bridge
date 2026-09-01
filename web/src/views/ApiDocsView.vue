@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
 
 type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'streaming' | 'errors'
+type DocIcon = DocSection
 
 interface ParameterRow {
   name: string
@@ -16,7 +18,7 @@ interface ParameterRow {
 interface NavigationItem {
   id: DocSection
   label: string
-  shortLabel: string
+  icon: DocIcon
   description: string
   method?: 'POST'
 }
@@ -32,6 +34,7 @@ const docsSearch = ref('')
 const generationLanguage = ref<'curl' | 'javascript'>('curl')
 const editLanguage = ref<'curl' | 'javascript'>('curl')
 const { collapsed: docsSidebarCollapsed, toggle: toggleDocsSidebarCollapsed } = useCollapsibleSidebar('mb_api_docs_sidebar_collapsed')
+let previousDocumentTitle = ''
 
 const baseOrigin = computed(() => {
   if (typeof window === 'undefined') return 'http://localhost:3000'
@@ -39,25 +42,47 @@ const baseOrigin = computed(() => {
 })
 const apiBaseUrl = computed(() => `${baseOrigin.value}/v1`)
 
+const docsIconPaths: Record<DocIcon, string[]> = {
+  overview: [
+    'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z',
+  ],
+  authentication: [
+    'M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.03 5.91c-.56-.1-1.16.03-1.56.43l-2.66 2.66H8.25v2.25H6v2.25H2.25v-2.82c0-.6.24-1.17.66-1.59l6.5-6.5A6 6 0 1121.75 8.25z',
+  ],
+  'image-generation': [
+    'm2.25 15.75 5.16-5.16a2.25 2.25 0 013.18 0l5.16 5.16m-1.5-1.5 1.41-1.41a2.25 2.25 0 013.18 0l2.91 2.91M3.75 19.5h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.01v.01h-.01v-.01z',
+    'M18.75 2.25v3m1.5-1.5h-3',
+  ],
+  'image-edit': [
+    'm16.862 4.487 1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18V6A2.25 2.25 0 016 3.75h10.875',
+  ],
+  streaming: [
+    'M8.25 6.75a7.5 7.5 0 010 10.5M5.25 9.75a3.75 3.75 0 010 4.5M15.75 6.75a7.5 7.5 0 000 10.5M18.75 9.75a3.75 3.75 0 000 4.5M12 12h.008v.008H12V12z',
+  ],
+  errors: [
+    'M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.38c.865-1.5 3.03-1.5 3.896 0l7.355 12.746zM12 15.75h.008v.008H12v-.008z',
+  ],
+}
+
 const navigationGroups: NavigationGroup[] = [
   {
     label: '开始使用',
     items: [
-      { id: 'overview', label: '概览', shortLabel: '概', description: '能力、入口与快速开始' },
-      { id: 'authentication', label: '认证', shortLabel: '认', description: 'API Key 与安全建议' },
+      { id: 'overview', label: '概览', icon: 'overview', description: '能力、入口与快速开始' },
+      { id: 'authentication', label: '认证', icon: 'authentication', description: 'API Key 与安全建议' },
     ],
   },
   {
     label: '图片 API',
     items: [
-      { id: 'image-generation', label: '生成图片', shortLabel: '生', description: '/images/generations', method: 'POST' },
-      { id: 'image-edit', label: '编辑图片', shortLabel: '编', description: '/images/edits', method: 'POST' },
-      { id: 'streaming', label: '流式响应', shortLabel: '流', description: 'SSE 事件与前端读取' },
+      { id: 'image-generation', label: '生成图片', icon: 'image-generation', description: '/images/generations', method: 'POST' },
+      { id: 'image-edit', label: '编辑图片', icon: 'image-edit', description: '/images/edits', method: 'POST' },
+      { id: 'streaming', label: '流式响应', icon: 'streaming', description: 'SSE 事件与前端读取' },
     ],
   },
   {
     label: '通用说明',
-    items: [{ id: 'errors', label: '错误处理', shortLabel: '错', description: '状态码与错误结构' }],
+    items: [{ id: 'errors', label: '错误处理', icon: 'errors', description: '状态码与错误结构' }],
   },
 ]
 
@@ -236,15 +261,38 @@ async function copy(text: string): Promise<void> {
 }
 
 onMounted(() => {
+  previousDocumentTitle = document.title
+  document.title = 'API 文档 | Model Bridge'
   syncSectionFromHash()
   window.addEventListener('hashchange', syncSectionFromHash)
 })
-onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHash))
+onBeforeUnmount(() => {
+  document.title = previousDocumentTitle
+  window.removeEventListener('hashchange', syncSectionFromHash)
+})
 </script>
 
 <template>
-  <div class="docs-layout" :class="docsSidebarCollapsed ? 'docs-layout-collapsed' : 'docs-layout-expanded'">
-    <aside class="docs-sidebar" aria-label="API 文档目录">
+  <div class="docs-page">
+    <a class="docs-skip-link" href="#api-doc-content">跳到文档正文</a>
+    <header class="docs-topbar">
+      <div class="docs-topbar-inner">
+        <RouterLink to="/" class="docs-brand" aria-label="返回 Model Bridge 首页">
+          <span class="docs-brand-mark"><span /></span>
+          <strong>Model Bridge</strong>
+          <span>API 文档</span>
+        </RouterLink>
+        <nav class="docs-top-actions" aria-label="页面导航">
+          <RouterLink to="/">首页</RouterLink>
+          <RouterLink to="/app">用户控制台</RouterLink>
+          <RouterLink to="/overview" class="docs-console-link">管理控制台</RouterLink>
+        </nav>
+      </div>
+    </header>
+
+    <div class="docs-page-content">
+      <div class="docs-layout" :class="docsSidebarCollapsed ? 'docs-layout-collapsed' : 'docs-layout-expanded'">
+        <aside class="docs-sidebar" aria-label="API 文档目录">
       <div class="docs-sidebar-inner">
         <button
           type="button"
@@ -284,7 +332,17 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
               :title="docsSidebarCollapsed ? item.label : undefined"
               @click="selectSection(item.id)"
             >
-              <span class="docs-nav-symbol">{{ item.shortLabel }}</span>
+              <span class="docs-nav-symbol" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                  <path
+                    v-for="path in docsIconPaths[item.icon]"
+                    :key="path"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    :d="path"
+                  />
+                </svg>
+              </span>
               <span class="docs-nav-copy">
                 <span class="docs-nav-label">
                 <span v-if="item.method" class="nav-method">{{ item.method }}</span>
@@ -307,9 +365,9 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
           </button>
         </div>
       </div>
-    </aside>
+        </aside>
 
-    <main class="docs-main">
+        <main id="api-doc-content" class="docs-main">
       <label class="docs-mobile-nav">
         <span>文档目录</span>
         <select :value="activeSection" @change="handleMobileSection">
@@ -494,11 +552,48 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
           <button v-if="nextItem" type="button" class="next" @click="selectSection(nextItem.id)"><small>下一节</small><span>{{ nextItem.label }} →</span></button>
         </footer>
       </article>
-    </main>
+        </main>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.docs-page {
+  @apply min-h-dvh bg-gray-50 text-gray-900 dark:bg-dark-950 dark:text-dark-100;
+}
+
+.docs-skip-link {
+  @apply fixed left-4 top-3 z-50 -translate-y-20 rounded-lg bg-gray-950 px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-primary-400 dark:bg-white dark:text-dark-950;
+}
+
+.docs-topbar {
+  @apply sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-dark-800 dark:bg-dark-900/90;
+}
+
+.docs-topbar-inner {
+  @apply mx-auto flex min-h-[4.25rem] max-w-[1536px] items-center justify-between gap-5 px-4 sm:px-6 lg:px-8;
+}
+
+.docs-brand {
+  @apply flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30;
+}
+
+.docs-brand-mark {
+  @apply flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary-500 shadow-sm shadow-primary-500/20;
+}
+.docs-brand-mark > span { @apply h-3 w-3 rotate-45 rounded-[3px] bg-white; }
+.docs-brand strong { @apply truncate text-sm font-extrabold tracking-tight text-gray-950 dark:text-white; }
+.docs-brand > span:last-child { @apply hidden border-l border-gray-200 pl-2.5 text-xs font-semibold text-gray-400 dark:border-dark-700 dark:text-dark-400 sm:block; }
+
+.docs-top-actions { @apply flex items-center gap-1; }
+.docs-top-actions a { @apply hidden rounded-lg px-3 py-2 text-xs font-semibold text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:block; }
+.docs-top-actions .docs-console-link { @apply block border border-gray-200 bg-white text-gray-800 shadow-sm hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-100 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300; }
+
+.docs-page-content {
+  @apply px-4 pb-10 pt-6 sm:px-6 lg:px-8;
+}
+
 .docs-layout {
   @apply mx-auto grid max-w-[1440px] gap-6;
   transition: grid-template-columns 240ms ease;
@@ -512,7 +607,7 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 }
 
 .docs-sidebar-inner {
-  @apply sticky top-0 flex max-h-[calc(100vh-7.75rem)] flex-col border-r border-gray-200 pr-5 dark:border-dark-700;
+  @apply sticky top-[5.75rem] flex max-h-[calc(100dvh-7.25rem)] flex-col border-r border-gray-200 pr-5 dark:border-dark-700;
 }
 
 .docs-collapse-button {
@@ -547,7 +642,8 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncSectionFromHa
 .docs-nav-item-active .docs-nav-label { @apply text-primary-700 dark:text-primary-300; }
 .docs-nav-item small { @apply mt-0.5 block truncate text-[10px] text-gray-400 dark:text-dark-500; }
 .docs-nav-copy { @apply block min-w-0; }
-.docs-nav-symbol { @apply hidden h-8 w-8 items-center justify-center rounded-lg text-xs font-black text-gray-500 dark:text-dark-400; }
+.docs-nav-symbol { @apply hidden h-8 w-8 items-center justify-center rounded-lg text-gray-500 dark:text-dark-400; }
+.docs-nav-symbol svg { @apply h-[1.125rem] w-[1.125rem]; }
 .nav-method { @apply font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
 .docs-empty { @apply px-2 py-8 text-center text-xs text-gray-400; }
 

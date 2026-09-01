@@ -25,6 +25,12 @@ export const router = createRouter({
       component: () => import('../views/AcceptInviteView.vue'),
     },
     {
+      path: '/docs/api',
+      name: 'api-docs',
+      component: () => import('../views/ApiDocsView.vue'),
+      meta: { public: true },
+    },
+    {
       path: '/',
       component: () => import('../layouts/AppLayout.vue'),
       meta: { role: 'admin' },
@@ -40,7 +46,6 @@ export const router = createRouter({
         { path: 'subscription-plans', name: 'subscription-plans', component: () => import('../views/SubscriptionPlansView.vue') },
         { path: 'stats', name: 'stats', component: () => import('../views/StatsView.vue') },
         { path: 'docs', name: 'docs', component: () => import('../views/DocsView.vue') },
-        { path: 'api-docs', name: 'api-docs', component: () => import('../views/ApiDocsView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
       ],
     },
@@ -53,7 +58,7 @@ export const router = createRouter({
         { path: 'models', name: 'user-models', component: () => import('../views/ModelPlazaView.vue') },
         { path: 'keys', name: 'user-keys', component: () => import('../views/UserKeysView.vue') },
         { path: 'usage', name: 'user-usage', component: () => import('../views/UserUsageView.vue') },
-        { path: 'docs', name: 'user-api-docs', component: () => import('../views/ApiDocsView.vue') },
+        { path: 'docs', redirect: { name: 'api-docs' } },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -62,7 +67,7 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (to.name === 'accept-invite' || to.name === 'landing') return
+  if (to.matched.some((record) => record.meta.public) || to.name === 'accept-invite' || to.name === 'landing') return
   const requiredRole = to.matched.find((record) => record.meta.role)?.meta.role
   if (requiredRole === 'admin' || to.name === 'login') {
     auth.activateRole('admin')

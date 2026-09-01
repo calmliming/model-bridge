@@ -29,7 +29,7 @@ const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = 
   { to: '/app/models', key: 'user-models', label: '模型广场', icon: 'models' },
   { to: '/app/keys', key: 'user-keys', label: 'API Keys', icon: 'keys' },
   { to: '/app/usage', key: 'user-usage', label: '用量流水', icon: 'usage' },
-  { to: '/app/docs', key: 'user-api-docs', label: 'API 文档', icon: 'docs' },
+  { to: '/docs/api', key: 'user-api-docs', label: 'API 文档', icon: 'docs' },
 ]
 
 const titleMap: Record<string, string> = {
