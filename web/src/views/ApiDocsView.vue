@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import ImageApiExplorer from '../components/ImageApiExplorer.vue'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
 
@@ -33,6 +34,7 @@ const activeSection = ref<DocSection>('overview')
 const docsSearch = ref('')
 const generationLanguage = ref<'curl' | 'javascript'>('curl')
 const editLanguage = ref<'curl' | 'javascript'>('curl')
+const testerApiKey = ref('')
 const { collapsed: docsSidebarCollapsed, toggle: toggleDocsSidebarCollapsed } = useCollapsibleSidebar('mb_api_docs_sidebar_collapsed')
 let previousDocumentTitle = ''
 
@@ -471,6 +473,11 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="article-section">
+            <h2>在线调试</h2>
+            <ImageApiExplorer v-model:api-key="testerApiKey" mode="generation" :base-url="apiBaseUrl" />
+          </section>
+
+          <section class="article-section">
             <div class="section-heading"><h2>调用示例</h2><div class="language-switch"><button :class="generationLanguage === 'curl' && 'active'" @click="generationLanguage = 'curl'">cURL</button><button :class="generationLanguage === 'javascript' && 'active'" @click="generationLanguage = 'javascript'">JavaScript</button></div></div>
             <div class="code-shell"><button type="button" class="copy-code" @click="copy(generationLanguage === 'curl' ? generationCurl : generationJavaScript)">复制代码</button><pre><code>{{ generationLanguage === 'curl' ? generationCurl : generationJavaScript }}</code></pre></div>
           </section>
@@ -496,6 +503,11 @@ onBeforeUnmount(() => {
             <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>类型</th><th>必填</th><th>默认值</th><th>说明</th></tr></thead><tbody>
               <tr v-for="parameter in editParameters" :key="parameter.name"><td><code>{{ parameter.name }}</code></td><td>{{ parameter.type }}</td><td><span :class="parameter.required ? 'required' : 'optional'">{{ parameter.required ? '是' : '否' }}</span></td><td>{{ parameter.defaultValue }}</td><td>{{ parameter.description }}</td></tr>
             </tbody></table></div>
+          </section>
+
+          <section class="article-section">
+            <h2>在线调试</h2>
+            <ImageApiExplorer v-model:api-key="testerApiKey" mode="edit" :base-url="apiBaseUrl" />
           </section>
 
           <section class="article-section">
