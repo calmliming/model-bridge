@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import ApiDocsAuthorization from '../components/ApiDocsAuthorization.vue'
 import ImageApiExplorer from '../components/ImageApiExplorer.vue'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
+import { useAuthStore } from '../stores/auth'
 
 type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'streaming' | 'errors'
 type DocIcon = DocSection
@@ -30,11 +32,13 @@ interface NavigationGroup {
 }
 
 const message = useMessage()
+const auth = useAuthStore()
 const activeSection = ref<DocSection>('overview')
 const docsSearch = ref('')
 const generationLanguage = ref<'curl' | 'javascript'>('curl')
 const editLanguage = ref<'curl' | 'javascript'>('curl')
 const testerApiKey = ref('')
+const authorizationRef = ref<InstanceType<typeof ApiDocsAuthorization> | null>(null)
 const { collapsed: docsSidebarCollapsed, toggle: toggleDocsSidebarCollapsed } = useCollapsibleSidebar('mb_api_docs_sidebar_collapsed')
 let previousDocumentTitle = ''
 
@@ -43,6 +47,12 @@ const baseOrigin = computed(() => {
   return window.location.origin
 })
 const apiBaseUrl = computed(() => `${baseOrigin.value}/v1`)
+const consoleEntry = computed(() => {
+  const role = auth.preferredSessionRole()
+  if (role === 'admin') return { to: '/overview', title: '进入管理控制台', label: '控制台' }
+  if (role === 'user') return { to: '/app', title: '进入用户控制台', label: '控制台' }
+  return { to: '/login', title: '登录控制台', label: '登录' }
+})
 
 const docsIconPaths: Record<DocIcon, string[]> = {
   overview: [
@@ -243,6 +253,10 @@ function handleMobileSection(event: Event): void {
   if (isDocSection(value)) selectSection(value)
 }
 
+function openAuthorization(): void {
+  authorizationRef.value?.open()
+}
+
 async function copy(text: string): Promise<void> {
   try {
     if (!navigator.clipboard || !window.isSecureContext) throw new Error('clipboard unavailable')
@@ -286,8 +300,8 @@ onBeforeUnmount(() => {
         </RouterLink>
         <nav class="docs-top-actions" aria-label="页面导航">
           <RouterLink to="/">首页</RouterLink>
-          <RouterLink to="/app">用户控制台</RouterLink>
-          <RouterLink to="/overview" class="docs-console-link">管理控制台</RouterLink>
+          <ApiDocsAuthorization ref="authorizationRef" v-model:api-key="testerApiKey" />
+          <RouterLink :to="consoleEntry.to" class="docs-console-link" :title="consoleEntry.title">{{ consoleEntry.label }}</RouterLink>
         </nav>
       </div>
     </header>
@@ -295,34 +309,28 @@ onBeforeUnmount(() => {
     <div class="docs-page-content">
       <div class="docs-layout" :class="docsSidebarCollapsed ? 'docs-layout-collapsed' : 'docs-layout-expanded'">
         <aside class="docs-sidebar" aria-label="API 文档目录">
-      <div class="docs-sidebar-inner">
-        <button
-          type="button"
-          class="docs-collapse-button"
-          :aria-label="docsSidebarCollapsed ? '展开 API 文档目录' : '收起 API 文档目录'"
-          :title="docsSidebarCollapsed ? '展开文档目录' : '收起文档目录'"
-          @click="toggleDocsSidebarCollapsed"
-        >
-          <svg :class="docsSidebarCollapsed && 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
-          </svg>
-        </button>
-        <div class="docs-product">
-          <span class="docs-mark">MB</span>
-          <div class="docs-product-copy">
-            <strong>API Reference</strong>
-            <span>Model Bridge · v1</span>
-          </div>
-        </div>
+          <div class="docs-sidebar-inner">
+            <div class="docs-sidebar-toolbar">
+              <label class="docs-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" />
+                </svg>
+                <input v-model="docsSearch" type="search" placeholder="搜索文档" />
+              </label>
+              <button
+                type="button"
+                class="docs-collapse-button"
+                :aria-label="docsSidebarCollapsed ? '展开 API 文档目录' : '收起 API 文档目录'"
+                :title="docsSidebarCollapsed ? '展开文档目录' : '收起文档目录'"
+                @click="toggleDocsSidebarCollapsed"
+              >
+                <svg :class="docsSidebarCollapsed && 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+            </div>
 
-        <label class="docs-search">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" />
-          </svg>
-          <input v-model="docsSearch" type="search" placeholder="搜索文档" />
-        </label>
-
-        <nav class="docs-nav">
+            <nav class="docs-nav">
           <div v-for="group in filteredNavigationGroups" :key="group.label" class="docs-nav-group">
             <p>{{ group.label }}</p>
             <button
@@ -347,17 +355,17 @@ onBeforeUnmount(() => {
               </span>
               <span class="docs-nav-copy">
                 <span class="docs-nav-label">
-                <span v-if="item.method" class="nav-method">{{ item.method }}</span>
-                {{ item.label }}
+                  <span>{{ item.label }}</span>
+                  <span v-if="item.method" class="nav-method">{{ item.method }}</span>
                 </span>
                 <small>{{ item.description }}</small>
               </span>
             </button>
           </div>
           <p v-if="filteredNavigationGroups.length === 0" class="docs-empty">没有匹配的文档</p>
-        </nav>
+            </nav>
 
-        <div class="docs-base-url">
+            <div class="docs-base-url">
           <span>Base URL</span>
           <button type="button" title="复制 Base URL" @click="copy(apiBaseUrl)">
             <code>{{ apiBaseUrl }}</code>
@@ -365,8 +373,8 @@ onBeforeUnmount(() => {
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v1.125c0 .621-.504 1.125-1.125 1.125h-9.75A1.125 1.125 0 0 1 3.75 18.375v-9.75c0-.621.504-1.125 1.125-1.125H6m9.75 9.75h3.375c.621 0 1.125-.504 1.125-1.125v-9.75c0-.621-.504-1.125-1.125-1.125h-9.75c-.621 0-1.125.504-1.125 1.125V7.5m7.5 9.75h-7.5V7.5" />
             </svg>
           </button>
-        </div>
-      </div>
+            </div>
+          </div>
         </aside>
 
         <main id="api-doc-content" class="docs-main">
@@ -474,7 +482,7 @@ onBeforeUnmount(() => {
 
           <section class="article-section">
             <h2>在线调试</h2>
-            <ImageApiExplorer v-model:api-key="testerApiKey" mode="generation" :base-url="apiBaseUrl" />
+            <ImageApiExplorer :api-key="testerApiKey" mode="generation" :base-url="apiBaseUrl" @request-authorization="openAuthorization" />
           </section>
 
           <section class="article-section">
@@ -507,7 +515,7 @@ onBeforeUnmount(() => {
 
           <section class="article-section">
             <h2>在线调试</h2>
-            <ImageApiExplorer v-model:api-key="testerApiKey" mode="edit" :base-url="apiBaseUrl" />
+            <ImageApiExplorer :api-key="testerApiKey" mode="edit" :base-url="apiBaseUrl" @request-authorization="openAuthorization" />
           </section>
 
           <section class="article-section">
@@ -622,25 +630,17 @@ onBeforeUnmount(() => {
   @apply sticky top-[5.75rem] flex max-h-[calc(100dvh-7.25rem)] flex-col border-r border-gray-200 pr-5 dark:border-dark-700;
 }
 
+.docs-sidebar-toolbar {
+  @apply mb-5 flex items-center gap-2;
+}
+
 .docs-collapse-button {
-  @apply absolute -right-3 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition hover:border-primary-300 hover:text-primary-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400 dark:hover:border-primary-700 dark:hover:text-primary-300;
+  @apply flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-400 shadow-sm transition hover:border-primary-300 hover:text-primary-600 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-400 dark:hover:border-primary-700 dark:hover:text-primary-300;
 }
 .docs-collapse-button svg { @apply h-3.5 w-3.5 transition-transform; }
 
-.docs-product {
-  @apply mb-5 flex items-center gap-3 px-1;
-}
-
-.docs-mark {
-  @apply flex h-9 w-9 items-center justify-center rounded-lg bg-gray-950 text-[11px] font-black tracking-wider text-white dark:bg-white dark:text-dark-950;
-}
-
-.docs-product strong { @apply block text-sm font-extrabold tracking-tight text-gray-950 dark:text-white; }
-.docs-product div > span { @apply mt-0.5 block text-[11px] font-medium text-gray-400 dark:text-dark-400; }
-.docs-product-copy { @apply min-w-0; }
-
 .docs-search {
-  @apply mb-5 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/10 dark:border-dark-700 dark:bg-dark-900;
+  @apply flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 transition focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/10 dark:border-dark-700 dark:bg-dark-900;
 }
 .docs-search svg { @apply h-4 w-4 flex-shrink-0 text-gray-400; }
 .docs-search input { @apply min-w-0 flex-1 bg-transparent text-xs text-gray-800 outline-none placeholder:text-gray-400 dark:text-dark-100; }
@@ -656,7 +656,7 @@ onBeforeUnmount(() => {
 .docs-nav-copy { @apply block min-w-0; }
 .docs-nav-symbol { @apply hidden h-8 w-8 items-center justify-center rounded-lg text-gray-500 dark:text-dark-400; }
 .docs-nav-symbol svg { @apply h-[1.125rem] w-[1.125rem]; }
-.nav-method { @apply font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
+.nav-method { @apply ml-auto font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
 .docs-empty { @apply px-2 py-8 text-center text-xs text-gray-400; }
 
 .docs-base-url { @apply border-t border-gray-200 pt-4 dark:border-dark-700; }
@@ -666,8 +666,7 @@ onBeforeUnmount(() => {
 .docs-base-url svg { @apply h-3.5 w-3.5 flex-shrink-0 text-gray-400; }
 
 .docs-layout-collapsed .docs-sidebar-inner { @apply pr-3; }
-.docs-layout-collapsed .docs-product { @apply justify-center px-0; }
-.docs-layout-collapsed .docs-product-copy,
+.docs-layout-collapsed .docs-sidebar-toolbar { @apply justify-center; }
 .docs-layout-collapsed .docs-search,
 .docs-layout-collapsed .docs-nav-group > p,
 .docs-layout-collapsed .docs-nav-copy,

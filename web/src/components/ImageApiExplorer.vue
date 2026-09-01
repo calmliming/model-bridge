@@ -14,7 +14,7 @@ const props = defineProps<{
   apiKey: string
 }>()
 
-const emit = defineEmits<{ (event: 'update:apiKey', value: string): void }>()
+const emit = defineEmits<{ (event: 'requestAuthorization'): void }>()
 const message = useMessage()
 
 const prompt = ref('')
@@ -112,10 +112,6 @@ function errorFromBody(body: unknown, fallback: string): string {
   return fallback
 }
 
-function updateApiKey(value: string): void {
-  emit('update:apiKey', value)
-}
-
 function onFileSelected(event: Event): void {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
   errorMessage.value = ''
@@ -132,7 +128,7 @@ function onFileSelected(event: Event): void {
 
 async function runTest(): Promise<void> {
   if (!props.apiKey.trim()) {
-    errorMessage.value = '请输入用于本次请求的 API Key。'
+    errorMessage.value = '请先通过页面右上角配置 API Key。'
     return
   }
   if (!prompt.value.trim()) {
@@ -271,22 +267,23 @@ onBeforeUnmount(() => {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.38c.865-1.5 3.03-1.5 3.896 0l7.355 12.746zM12 15.75h.008v.008H12v-.008z" />
       </svg>
-      <p><strong>这是真实请求，会消耗账户额度。</strong>API Key 仅保存在当前页面内存，不会写入本地存储或显示在响应日志中。</p>
+      <p><strong>这是真实请求，会消耗账户额度。</strong>请求使用页面右上角保存的 API Key，密钥不会显示在响应日志中。</p>
     </div>
 
     <div class="explorer-grid">
       <form class="explorer-form" @submit.prevent="runTest">
-        <label class="field-group">
-          <span>API Key <b>必填</b></span>
-          <UiInput
-            :value="apiKey"
-            type="password"
-            autocomplete="off"
-            placeholder="mb-xxxxxxxx"
-            aria-label="API Key"
-            @update:value="updateApiKey"
-          />
-        </label>
+        <div class="explorer-auth-state" :class="apiKey ? 'explorer-auth-ready' : 'explorer-auth-missing'">
+          <span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.03 5.91c-.56-.1-1.16.03-1.56.43l-2.66 2.66H8.25v2.25H6v2.25H2.25v-2.82c0-.6.24-1.17.66-1.59l6.5-6.5A6 6 0 1121.75 8.25z" />
+            </svg>
+          </span>
+          <div>
+            <strong>{{ apiKey ? '已使用全局授权' : '尚未配置 API Key' }}</strong>
+            <small>{{ apiKey ? '可直接发送本次请求' : '配置后用于所有在线调试接口' }}</small>
+          </div>
+          <button type="button" @click="emit('requestAuthorization')">{{ apiKey ? '更换' : '配置' }}</button>
+        </div>
 
         <label v-if="isEdit" class="field-group">
           <span>原始图片 <b>必填</b></span>
@@ -421,6 +418,22 @@ onBeforeUnmount(() => {
 
 .explorer-grid { @apply grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]; }
 .explorer-form { @apply grid content-start gap-4 border-b border-gray-200 p-5 dark:border-dark-700 lg:border-b-0 lg:border-r; }
+.explorer-auth-state { @apply grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2.5; }
+.explorer-auth-state > span { @apply flex h-8 w-8 items-center justify-center rounded-lg; }
+.explorer-auth-state svg { @apply h-4 w-4; }
+.explorer-auth-state strong { @apply block text-xs font-bold; }
+.explorer-auth-state small { @apply mt-0.5 block text-[10px]; }
+.explorer-auth-state button { @apply rounded-md border px-2.5 py-1.5 text-[10px] font-bold transition active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30; }
+.explorer-auth-ready { @apply border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-900/10; }
+.explorer-auth-ready > span { @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300; }
+.explorer-auth-ready strong { @apply text-emerald-800 dark:text-emerald-300; }
+.explorer-auth-ready small { @apply text-emerald-600 dark:text-emerald-400; }
+.explorer-auth-ready button { @apply border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-dark-800 dark:text-emerald-300; }
+.explorer-auth-missing { @apply border-amber-200 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-900/10; }
+.explorer-auth-missing > span { @apply bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300; }
+.explorer-auth-missing strong { @apply text-amber-800 dark:text-amber-300; }
+.explorer-auth-missing small { @apply text-amber-600 dark:text-amber-400; }
+.explorer-auth-missing button { @apply border-amber-200 bg-white text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:bg-dark-800 dark:text-amber-300; }
 .field-group { @apply grid gap-1.5; }
 .field-group > span:first-child { @apply text-xs font-bold text-gray-700 dark:text-dark-200; }
 .field-group b { @apply ml-1 text-[9px] font-semibold text-red-500; }

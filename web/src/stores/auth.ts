@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 const LEGACY_TOKEN_KEY = 'mb_token'
 const LEGACY_USERNAME_KEY = 'mb_username'
 const LEGACY_ROLE_KEY = 'mb_role'
+const LAST_SESSION_ROLE_KEY = 'mb_last_session_role'
 
 export type SessionRole = 'admin' | 'user'
 
@@ -79,6 +80,7 @@ export const useAuthStore = defineStore('auth', () => {
     activeRole.value = newRole
     token.value = localStorage.getItem(TOKEN_KEY[newRole])
     username.value = localStorage.getItem(USERNAME_KEY[newRole])
+    if (token.value) localStorage.setItem(LAST_SESSION_ROLE_KEY, newRole)
   }
 
   function setSession(newToken: string, newUsername: string, newRole: SessionRole = 'admin'): void {
@@ -93,9 +95,30 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(LEGACY_TOKEN_KEY)
     localStorage.removeItem(LEGACY_USERNAME_KEY)
     localStorage.removeItem(LEGACY_ROLE_KEY)
+    if (localStorage.getItem(LAST_SESSION_ROLE_KEY) === roleToClear) {
+      const fallbackRole = roleToClear === 'admin' ? 'user' : 'admin'
+      if (localStorage.getItem(TOKEN_KEY[fallbackRole])) {
+        localStorage.setItem(LAST_SESSION_ROLE_KEY, fallbackRole)
+      } else {
+        localStorage.removeItem(LAST_SESSION_ROLE_KEY)
+      }
+    }
     if (roleToClear !== activeRole.value) return
     token.value = null
     username.value = null
+  }
+
+  function preferredSessionRole(): SessionRole | null {
+    const lastRole = localStorage.getItem(LAST_SESSION_ROLE_KEY)
+    if (
+      (lastRole === 'admin' || lastRole === 'user') &&
+      localStorage.getItem(TOKEN_KEY[lastRole])
+    ) {
+      return lastRole
+    }
+    if (localStorage.getItem(TOKEN_KEY.admin)) return 'admin'
+    if (localStorage.getItem(TOKEN_KEY.user)) return 'user'
+    return null
   }
 
   return {
@@ -106,6 +129,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAdmin,
     isUser,
     activateRole,
+    preferredSessionRole,
     setSession,
     clear,
   }
