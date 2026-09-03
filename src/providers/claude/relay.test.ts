@@ -139,4 +139,57 @@ describe('normalizeClaudeMessagesBody', () => {
       "<system-reminder>Today's date is 2026-07-05.</system-reminder>",
     )
   })
+
+  it('adapts forced tool use and legacy controls for Claude Fable 5.1', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-fable-5-1',
+      max_tokens: 1024,
+      temperature: 0.2,
+      top_p: 0.9,
+      thinking: { type: 'disabled' },
+      tools: [{ name: 'lookup', input_schema: { type: 'object', properties: {} } }],
+      tool_choice: { type: 'any' },
+      messages: [{ role: 'user', content: 'Find the answer.' }],
+    })
+
+    expect(body).not.toHaveProperty('temperature')
+    expect(body).not.toHaveProperty('top_p')
+    expect(body).not.toHaveProperty('thinking')
+    expect(body.tool_choice).toEqual({ type: 'auto' })
+    expect(body.tools).toEqual([
+      { name: 'lookup', input_schema: { type: 'object', properties: {} }, strict: true },
+    ])
+    expect((body.messages as Array<{ content: string }>)[0].content).toContain(
+      'You must call at least one available tool before responding.',
+    )
+  })
+
+  it('preserves the named-tool intent and parallel setting on Fable 5.1', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-fable-5-1',
+      tools: [
+        { name: 'lookup', input_schema: { type: 'object' } },
+        { name: 'other', input_schema: { type: 'object' } },
+      ],
+      tool_choice: { type: 'tool', name: 'lookup', disable_parallel_tool_use: true },
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Find it.' }] }],
+    })
+
+    expect(body.tool_choice).toEqual({ type: 'auto', disable_parallel_tool_use: true })
+    expect(body.tools).toEqual([
+      { name: 'lookup', input_schema: { type: 'object' }, strict: true },
+      { name: 'other', input_schema: { type: 'object' } },
+    ])
+    const content = (body.messages as Array<{ content: Array<{ text?: string }> }>)[0].content
+    expect(content.at(-1)?.text).toBe('You must call the "lookup" tool before responding.')
+  })
+
+  it('keeps forced tool choice unchanged on earlier Claude models', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-fable-5',
+      tool_choice: { type: 'any' },
+      messages: [{ role: 'user', content: 'Use a tool.' }],
+    })
+    expect(body.tool_choice).toEqual({ type: 'any' })
+  })
 })

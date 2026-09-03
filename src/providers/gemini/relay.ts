@@ -95,33 +95,69 @@ function sanitizeSchema(value: unknown): unknown {
 /**
  * Cleans tool/function-declaration JSON schemas in a Gemini request body so
  * fields the Code Assist backend rejects (e.g. `$schema`, `additionalProperties`)
- * don't 400 the request. Returns the body unchanged when it has no tools.
- * Operates on a shallow clone; the original body object is not mutated.
+ * don't 400 the request. Gemini 3.8-specific generation settings are also
+ * normalized when a model is supplied. The original body is not mutated.
  */
-export function sanitizeGeminiBody(body: Record<string, unknown>): Record<string, unknown> {
-  if (!Array.isArray(body.tools)) return body
-  const tools = body.tools.map((tool) => {
-    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool
-    const t = tool as Record<string, unknown>
-    if (!Array.isArray(t.functionDeclarations)) return tool
-    const functionDeclarations = t.functionDeclarations.map((decl) => {
-      if (!decl || typeof decl !== 'object' || Array.isArray(decl)) return decl
-      const d = decl as Record<string, unknown>
-      const next: Record<string, unknown> = { ...d }
-      if (d.parameters && typeof d.parameters === 'object') {
-        next.parameters = sanitizeSchema(d.parameters)
-      }
-      if (d.parametersJsonSchema && typeof d.parametersJsonSchema === 'object') {
-        next.parametersJsonSchema = sanitizeSchema(d.parametersJsonSchema)
-      }
-      if (d.response && typeof d.response === 'object') {
-        next.response = sanitizeSchema(d.response)
-      }
-      return next
+export function sanitizeGeminiBody(
+  body: Record<string, unknown>,
+  model = '',
+): Record<string, unknown> {
+  let cleaned = body
+  if (Array.isArray(body.tools)) {
+    const tools = body.tools.map((tool) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool
+      const t = tool as Record<string, unknown>
+      if (!Array.isArray(t.functionDeclarations)) return tool
+      const functionDeclarations = t.functionDeclarations.map((decl) => {
+        if (!decl || typeof decl !== 'object' || Array.isArray(decl)) return decl
+        const d = decl as Record<string, unknown>
+        const next: Record<string, unknown> = { ...d }
+        if (d.parameters && typeof d.parameters === 'object') {
+          next.parameters = sanitizeSchema(d.parameters)
+        }
+        if (d.parametersJsonSchema && typeof d.parametersJsonSchema === 'object') {
+          next.parametersJsonSchema = sanitizeSchema(d.parametersJsonSchema)
+        }
+        if (d.response && typeof d.response === 'object') {
+          next.response = sanitizeSchema(d.response)
+        }
+        return next
+      })
+      return { ...t, functionDeclarations }
     })
-    return { ...t, functionDeclarations }
-  })
-  return { ...body, tools }
+    cleaned = { ...body, tools }
+  }
+
+  // Gemini 3.8 Flash rejects the legacy sampling/candidate fields and the
+  // numeric thinking budget. Omit them so older clients use the model's
+  // supported default (`thinkingLevel: medium`) instead of receiving a 400.
+  const normalizedModel = model.toLowerCase().replace(/^models\//, '')
+  if (!normalizedModel.startsWith('gemini-3.8-flash')) return cleaned
+  const generationConfig = cleaned.generationConfig
+  if (!generationConfig || typeof generationConfig !== 'object' || Array.isArray(generationConfig)) {
+    return cleaned
+  }
+
+  const nextConfig = { ...(generationConfig as Record<string, unknown>) }
+  let changed = false
+  for (const key of ['temperature', 'topP', 'top_p', 'topK', 'top_k', 'candidateCount', 'candidate_count']) {
+    if (key in nextConfig) {
+      delete nextConfig[key]
+      changed = true
+    }
+  }
+  const thinkingConfig = nextConfig.thinkingConfig
+  if (thinkingConfig && typeof thinkingConfig === 'object' && !Array.isArray(thinkingConfig)) {
+    const nextThinking = { ...(thinkingConfig as Record<string, unknown>) }
+    for (const key of ['thinkingBudget', 'thinking_budget']) {
+      if (key in nextThinking) {
+        delete nextThinking[key]
+        changed = true
+      }
+    }
+    if (changed) nextConfig.thinkingConfig = nextThinking
+  }
+  return changed ? { ...cleaned, generationConfig: nextConfig } : cleaned
 }
 
 /** Builds the cloudcode-pa endpoint URL for a given client-requested action. */
@@ -159,7 +195,7 @@ export function relayGemini(
   body: Record<string, unknown>,
   ctx: GeminiRelayContext,
 ): Promise<Response> {
-  const cleaned = sanitizeGeminiBody(body)
+  const cleaned = sanitizeGeminiBody(body, ctx.model)
   return fetchWithConnectTimeout(endpointFor(ctx.action), {
     method: 'POST',
     headers: {

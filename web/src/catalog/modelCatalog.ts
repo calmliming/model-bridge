@@ -42,6 +42,7 @@ export interface PlazaModel {
   inputPrice: number
   outputPrice: number
   cacheReadPrice?: number
+  priceChange?: ModelPriceChange
   priceSchedule?: ModelPriceSchedule
   /** Optional highlight badge. */
   badge?: 'new' | 'recommended'
@@ -51,6 +52,11 @@ export interface ModelTokenPrice {
   inputPrice: number
   outputPrice: number
   cacheReadPrice?: number
+}
+
+export interface ModelPriceChange {
+  effectiveAt: number
+  price: ModelTokenPrice
 }
 
 export interface ModelPriceSchedule {
@@ -67,6 +73,9 @@ export interface ResolvedModelPrice extends ModelTokenPrice {
 }
 
 export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): ResolvedModelPrice {
+  if (model.priceChange && atMs >= model.priceChange.effectiveAt) {
+    return { ...model.priceChange.price, period: null }
+  }
   const schedule = model.priceSchedule
   if (!schedule || atMs < schedule.effectiveAt) {
     return {
@@ -151,6 +160,12 @@ export const CATEGORIES: CategoryMeta[] = [
 ]
 
 const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
+const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
+const GEMINI_FRONTIER_FLASH_STANDARD: ModelTokenPrice = {
+  inputPrice: 1.5,
+  outputPrice: 7.5,
+  cacheReadPrice: 0.15,
+}
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
   [6, 10],
@@ -171,6 +186,19 @@ function deepseekPriceSchedule(
 
 export const MODEL_CATALOG: PlazaModel[] = [
   // --- Anthropic / Claude --------------------------------------------------
+  {
+    id: 'claude-fable-5-1',
+    name: 'Claude Fable 5.1',
+    provider: 'claude',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最强能力', '长程 Agent', '科研'],
+    description: 'Anthropic 当前最强公开模型，面向长时间自主编码、复杂知识工作与多阶段研究任务。',
+    context: '1M',
+    inputPrice: 10,
+    outputPrice: 50,
+    cacheReadPrice: 0.25,
+    badge: 'new',
+  },
   {
     id: 'claude-opus-5',
     name: 'Claude Opus 5',
@@ -202,8 +230,9 @@ export const MODEL_CATALOG: PlazaModel[] = [
     tags: ['均衡', '高性价比', '代码'],
     description: '性能与成本平衡的主力模型，编码与 Agent 表现接近 Opus，日常对话与中等推理的首选。',
     context: '1M',
-    inputPrice: 3,
-    outputPrice: 15,
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.2,
     badge: 'new',
   },
   {
@@ -227,7 +256,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 10,
     outputPrice: 50,
-    badge: 'new',
+    cacheReadPrice: 1,
   },
 
   // --- OpenAI --------------------------------------------------------------
@@ -325,17 +354,37 @@ export const MODEL_CATALOG: PlazaModel[] = [
 
   // --- Google / Gemini -----------------------------------------------------
   {
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最新稳定版', '长程 Agent', '代码'],
+    description: 'Google 当前最强 Flash 模型，面向长程软件工程、自主 Agent 与复杂企业工作流。当前显示年末前优惠价。',
+    context: '1M',
+    inputPrice: 0.75,
+    outputPrice: 3.75,
+    cacheReadPrice: 0.075,
+    priceChange: {
+      effectiveAt: GEMINI_FRONTIER_FLASH_STANDARD_AT,
+      price: GEMINI_FRONTIER_FLASH_STANDARD,
+    },
+    badge: 'recommended',
+  },
+  {
     id: 'gemini-3.6-flash',
     name: 'Gemini 3.6 Flash',
     provider: 'gemini',
     categories: ['chat', 'reasoning', 'code', 'multimodal'],
-    tags: ['最新稳定版', 'Agent', '多模态'],
-    description: 'Google 当前最新稳定模型，在速度与智能之间取得平衡，适合 Agent 和多模态任务。',
+    tags: ['稳定版', 'Agent', '多模态'],
+    description: '成熟稳定的 Flash 模型，在速度与智能之间取得平衡，适合 Agent 和多模态任务。当前显示年末前优惠价。',
     context: '1M',
-    inputPrice: 1.5,
-    outputPrice: 7.5,
-    cacheReadPrice: 0.15,
-    badge: 'recommended',
+    inputPrice: 0.75,
+    outputPrice: 3.75,
+    cacheReadPrice: 0.075,
+    priceChange: {
+      effectiveAt: GEMINI_FRONTIER_FLASH_STANDARD_AT,
+      price: GEMINI_FRONTIER_FLASH_STANDARD,
+    },
   },
   {
     id: 'gemini-3.1-pro-preview',

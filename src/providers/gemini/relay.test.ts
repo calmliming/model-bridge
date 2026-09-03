@@ -185,4 +185,31 @@ describe('sanitizeGeminiBody', () => {
     const body = { tools: [{ googleSearch: {} }] }
     expect(sanitizeGeminiBody(body)).toEqual({ tools: [{ googleSearch: {} }] })
   })
+
+  it('removes Gemini 3.8-incompatible generation settings', () => {
+    const generationConfig = {
+      temperature: 0.2,
+      topP: 0.9,
+      topK: 20,
+      candidateCount: 2,
+      maxOutputTokens: 8192,
+      thinkingConfig: { thinkingBudget: 4096, thinkingLevel: 'high' },
+    }
+    const body = { contents: [{ role: 'user', parts: [{ text: 'hi' }] }], generationConfig }
+
+    expect(sanitizeGeminiBody(body, 'gemini-3.8-flash')).toEqual({
+      contents: body.contents,
+      generationConfig: {
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingLevel: 'high' },
+      },
+    })
+    expect(generationConfig).toHaveProperty('temperature', 0.2)
+    expect(generationConfig.thinkingConfig).toHaveProperty('thinkingBudget', 4096)
+  })
+
+  it('keeps legacy generation settings on older Gemini models', () => {
+    const body = { generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 1024 } } }
+    expect(sanitizeGeminiBody(body, 'gemini-3.6-flash')).toBe(body)
+  })
 })

@@ -387,6 +387,7 @@ describe('isAnthropicFableOnlyWindowExceeded', () => {
       'anthropic-ratelimit-unified-7d_oi-utilization': '1',
       'anthropic-ratelimit-unified-7d_oi-reset': String(Date.now() + 60_000),
     })
+    expect(isAnthropicFableModel('claude-fable-5-1')).toBe(true)
     expect(isAnthropicFableModel('claude-fable-5')).toBe(true)
     expect(isAnthropicFableModel('claude-mythos-5')).toBe(true)
     expect(isAnthropicFableModel('claude-sonnet-5')).toBe(false)

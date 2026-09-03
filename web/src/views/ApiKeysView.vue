@@ -178,8 +178,10 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
 
 const commonModelOptions = [
   'claude-*',
+  'claude-fable-5-1',
   'gpt-*',
   'gemini-*',
+  'gemini-3.8-flash',
   'gemini-3.6-flash',
   'gemini-3.1-pro-preview',
   'gemini-3.5-flash',

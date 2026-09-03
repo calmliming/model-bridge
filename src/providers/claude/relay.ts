@@ -121,6 +121,77 @@ function normalizeMessages(messages: unknown): unknown {
   return changed ? next : messages
 }
 
+function isClaudeFable51Model(model: unknown): boolean {
+  if (typeof model !== 'string') return false
+  return /^claude-(?:fable|mythos)-5-1(?:$|-)/i.test(model.trim())
+}
+
+function appendForcedToolInstruction(messages: unknown, instruction: string): unknown {
+  if (!Array.isArray(messages)) return messages
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (!message || typeof message !== 'object' || Array.isArray(message)) continue
+    const row = message as Record<string, unknown>
+    if (row.role !== 'user') continue
+    const next = [...messages]
+    if (typeof row.content === 'string') {
+      next[i] = { ...row, content: `${row.content}\n\n${instruction}` }
+    } else if (Array.isArray(row.content)) {
+      next[i] = { ...row, content: [...row.content, { type: 'text', text: instruction }] }
+    } else {
+      next[i] = { ...row, content: [{ type: 'text', text: instruction }] }
+    }
+    return next
+  }
+  return messages
+}
+
+function withStrictClientTools(tools: unknown, forcedName?: string): unknown {
+  if (!Array.isArray(tools)) return tools
+  return tools.map((tool) => {
+    if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool
+    const row = tool as Record<string, unknown>
+    if (!row.input_schema || (forcedName && row.name !== forcedName)) return tool
+    return { ...row, strict: true }
+  })
+}
+
+/** Applies the documented Fable/Mythos 5.1 migration rules that avoid 400s. */
+function normalizeFable51Compatibility(body: Record<string, unknown>): Record<string, unknown> {
+  if (!isClaudeFable51Model(body.model)) return body
+  const out: Record<string, unknown> = { ...body }
+
+  // Fable 5.1 always uses adaptive thinking and no longer accepts non-default
+  // sampling controls. Omitting these fields selects the supported defaults.
+  const thinking = body.thinking
+  if (thinking && typeof thinking === 'object' && !Array.isArray(thinking) &&
+      (thinking as Record<string, unknown>).type === 'disabled') {
+    delete out.thinking
+  }
+  delete out.temperature
+  delete out.top_p
+  delete out.top_k
+
+  const choice = body.tool_choice
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return out
+  const row = choice as Record<string, unknown>
+  if (row.type !== 'any' && row.type !== 'tool') return out
+
+  const forcedName = row.type === 'tool' && typeof row.name === 'string' ? row.name : undefined
+  const instruction = forcedName
+    ? `You must call the "${forcedName}" tool before responding.`
+    : 'You must call at least one available tool before responding.'
+  out.tool_choice = {
+    type: 'auto',
+    ...(typeof row.disable_parallel_tool_use === 'boolean'
+      ? { disable_parallel_tool_use: row.disable_parallel_tool_use }
+      : {}),
+  }
+  out.tools = withStrictClientTools(body.tools, forcedName)
+  out.messages = appendForcedToolInstruction(body.messages, instruction)
+  return out
+}
+
 function hasIdentityPrefix(text: unknown): boolean {
   return typeof text === 'string' && IDENTITY_PREFIXES.some((prefix) => text.startsWith(prefix))
 }
@@ -199,15 +270,16 @@ function withSystemCacheBreakpoint(system: SystemBlock[]): SystemBlock[] {
  * now in the beta set the field is accepted upstream.)
  */
 export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...body }
-  const system = normalizeSystem(body.system)
+  const compatibleBody = normalizeFable51Compatibility(body)
+  const out: Record<string, unknown> = { ...compatibleBody }
+  const system = normalizeSystem(compatibleBody.system)
   // Cache the stable tools+system prefix so it can be READ across requests.
   // Skip when the client (e.g. real Claude Code) already manages its own
   // breakpoints, to avoid competing markers / exceeding the 4-breakpoint cap.
   out.system =
-    body.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
-  const messages = normalizeMessages(body.messages)
-  if (messages !== body.messages) out.messages = messages
+    compatibleBody.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
+  const messages = normalizeMessages(compatibleBody.messages)
+  if (messages !== compatibleBody.messages) out.messages = messages
   return out
 }
 

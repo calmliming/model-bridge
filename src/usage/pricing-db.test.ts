@@ -23,7 +23,7 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
   }
 }
 
-describe('DeepSeek database price overrides', () => {
+describe('scheduled database price overrides', () => {
   const peakTime = Date.parse('2026-08-24T01:00:00Z')
 
   beforeEach(() => {
@@ -78,5 +78,30 @@ describe('DeepSeek database price overrides', () => {
       output: 14,
       cacheRead: 0.175,
     })
+  })
+
+  it('does not let seeded Gemini rows freeze the promotional price', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [
+        priceRow('gemini-3.8-flash', 0.75, 3.75, 0.075, 'gemini'),
+        priceRow('flash', 1.5, 7.5, 0.15, 'gemini'),
+      ],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('gemini', 'gemini-3.8-flash', Date.parse('2026-12-31T23:59:59.999Z')))
+      .toMatchObject({ input: 0.75, output: 3.75, cacheRead: 0.075 })
+    expect(resolvePrice('gemini', 'gemini-3.8-flash', Date.parse('2027-01-01T00:00:00Z')))
+      .toMatchObject({ input: 1.5, output: 7.5, cacheRead: 0.15 })
+  })
+
+  it('keeps administrator-edited Gemini prices as fixed overrides', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [priceRow('gemini-3.8-flash', 2, 8, 0.2, 'gemini')],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('gemini', 'gemini-3.8-flash', Date.parse('2026-09-03T00:00:00Z')))
+      .toMatchObject({ input: 2, output: 8, cacheRead: 0.2 })
   })
 })

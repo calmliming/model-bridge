@@ -74,10 +74,39 @@ describe('Codex Spark catalog', () => {
 
 describe('current provider model catalog', () => {
   it('shows the current Google and Qwen model families', () => {
-    expect(model('gemini-3.6-flash')).toMatchObject({ context: '1M', badge: 'recommended' })
+    expect(model('gemini-3.8-flash')).toMatchObject({
+      context: '1M',
+      inputPrice: 0.75,
+      outputPrice: 3.75,
+      cacheReadPrice: 0.075,
+      badge: 'recommended',
+    })
+    expect(model('gemini-3.6-flash')).toMatchObject({ context: '1M' })
     expect(model('gemini-3.1-pro-preview')).toMatchObject({ context: '1M' })
     expect(model('qwen3.8-max')).toMatchObject({ context: '1M', badge: 'recommended' })
     expect(model('qwen3.7-flash')).toMatchObject({ context: '1M' })
+  })
+
+  it('shows Claude Fable 5.1 with its reduced cache-read price', () => {
+    expect(model('claude-fable-5-1')).toMatchObject({
+      context: '1M',
+      inputPrice: 10,
+      outputPrice: 50,
+      cacheReadPrice: 0.25,
+      badge: 'new',
+    })
+    expect(model('claude-sonnet-5')).toMatchObject({ inputPrice: 2, outputPrice: 10 })
+  })
+
+  it('switches Gemini frontier Flash cards to standard pricing in 2027', () => {
+    expect(resolveModelPrice(
+      model('gemini-3.8-flash'),
+      Date.parse('2027-01-01T00:00:00Z'),
+    )).toMatchObject({ inputPrice: 1.5, outputPrice: 7.5, cacheReadPrice: 0.15 })
+    expect(resolveModelPrice(
+      model('gemini-3.6-flash'),
+      Date.parse('2026-12-31T23:59:59.999Z'),
+    )).toMatchObject({ inputPrice: 0.75, outputPrice: 3.75, cacheReadPrice: 0.075 })
   })
 
   it('shows current Xiaomi and GLM capabilities and context lengths', () => {
@@ -93,10 +122,10 @@ describe('current provider model catalog', () => {
     })
   })
 
-  it('does not advertise retired aliases or shut-down Gemini previews', () => {
+  it('does not advertise retired aliases, restricted models, or shut-down previews', () => {
     expect(MODEL_CATALOG.some((item) => item.id === 'deepseek-reasoner')).toBe(false)
+    expect(MODEL_CATALOG.some((item) => item.id === 'claude-mythos-5-1')).toBe(false)
     expect(MODEL_CATALOG.some((item) => item.id === 'gemini-3-pro-preview')).toBe(false)
-    expect(MODEL_CATALOG.some((item) => item.id === 'gemini-3.7-flash')).toBe(false)
     expect(MODEL_CATALOG.some((item) => item.id === 'qwen3.8-flash')).toBe(false)
   })
 })

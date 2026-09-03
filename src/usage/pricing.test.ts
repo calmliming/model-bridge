@@ -121,12 +121,41 @@ describe('Kimi Code pricing', () => {
   })
 })
 
+describe('current Claude pricing', () => {
+  it('uses Fable 5.1 cache-read pricing without changing Fable 5', () => {
+    expect(resolvePrice('claude', 'claude-fable-5-1')).toMatchObject({
+      input: 10,
+      output: 50,
+      cacheWrite: 12.5,
+      cacheRead: 0.25,
+    })
+    expect(resolvePrice('claude', 'claude-fable-5')).toMatchObject({ cacheRead: 1 })
+    expect(resolvePrice('sub2api', 'claude-fable-5-1')).toMatchObject({ cacheRead: 0.25 })
+  })
+
+  it('uses Sonnet 5 permanent pricing without repricing older Sonnet models', () => {
+    expect(resolvePrice('claude', 'claude-sonnet-5')).toMatchObject({
+      input: 2,
+      output: 10,
+      cacheWrite: 2.5,
+      cacheRead: 0.2,
+    })
+    expect(resolvePrice('claude', 'claude-sonnet-4-6')).toMatchObject({ input: 3, output: 15 })
+  })
+})
+
 describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
   it('prices the current Gemini tiers', () => {
-    expect(resolvePrice('gemini', 'gemini-3.6-flash')).toMatchObject({
-      input: 1.5,
-      output: 7.5,
-      cacheRead: 0.15,
+    const introductory = Date.parse('2026-09-03T00:00:00Z')
+    expect(resolvePrice('gemini', 'gemini-3.8-flash', introductory)).toMatchObject({
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
+    })
+    expect(resolvePrice('gemini', 'gemini-3.6-flash', introductory)).toMatchObject({
+      input: 0.75,
+      output: 3.75,
+      cacheRead: 0.075,
     })
     expect(resolvePrice('gemini', 'gemini-3.1-pro-preview')).toMatchObject({
       input: 2,
@@ -141,6 +170,20 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
     expect(resolvePrice('gemini', 'gemini-3.5-flash')).toMatchObject({
       input: 1.5,
       output: 9,
+      cacheRead: 0.15,
+    })
+  })
+
+  it('switches frontier Flash models to standard pricing after the promotion', () => {
+    const standard = Date.parse('2027-01-01T00:00:00Z')
+    expect(resolvePrice('gemini', 'gemini-3.8-flash', standard)).toMatchObject({
+      input: 1.5,
+      output: 7.5,
+      cacheRead: 0.15,
+    })
+    expect(resolvePrice('gemini', 'gemini-3.6-flash', standard)).toMatchObject({
+      input: 1.5,
+      output: 7.5,
       cacheRead: 0.15,
     })
   })
@@ -171,7 +214,10 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
   })
 
   it('routes the same current models through Sub2API pricing', () => {
-    expect(resolvePrice('sub2api', 'gemini-3.6-flash')).toMatchObject({ input: 1.5, output: 7.5 })
+    expect(resolvePrice('sub2api', 'gemini-3.8-flash', Date.parse('2026-09-03T00:00:00Z'))).toMatchObject({
+      input: 0.75,
+      output: 3.75,
+    })
     expect(resolvePrice('sub2api', 'mimo-v2.5')).toMatchObject({ input: 0.14, output: 0.28 })
     expect(resolvePrice('sub2api', 'glm-5.3')).toMatchObject({ input: 1.12, output: 3.92 })
     expect(resolvePrice('sub2api', 'qwen3.8-max')).toMatchObject({ input: 1.68, output: 5.04 })

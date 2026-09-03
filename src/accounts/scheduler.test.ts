@@ -64,6 +64,7 @@ describe('modelCooldownUntil (model-scoped cooldowns)', () => {
 
   it('shares a cooldown across Fable model aliases', () => {
     const metadata = { modelCooldowns: { 'claude-fable-5': NOW + 60_000 } }
+    expect(canonicalModelCooldownKey('claude-fable-5-1')).toBe('claude-fable-5')
     expect(canonicalModelCooldownKey('claude-fable-5-20260801')).toBe('claude-fable-5')
     expect(canonicalModelCooldownKey('claude-mythos-5')).toBe('claude-fable-5')
     expect(modelCooldownUntil(metadata, 'claude-fable-5-20260801')).toBe(NOW + 60_000)

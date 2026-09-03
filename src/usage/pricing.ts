@@ -20,7 +20,7 @@ const CNY_TO_USD = 0.14
 const cny = (yuan: number) => Math.round(yuan * CNY_TO_USD * 1e6) / 1e6
 
 // ---------------------------------------------------------------------------
-// Anthropic (Claude) list prices (as of 2026-07-25).
+// Anthropic (Claude) list prices (as of 2026-09-03).
 //
 // Opus 4.5 cut list prices to 5 / 25; Opus 4.1 (and earlier 4.0 / Claude 3
 // Opus) stay on the old 15 / 75. We therefore price Opus per version instead
@@ -32,15 +32,18 @@ const cny = (yuan: number) => Math.round(yuan * CNY_TO_USD * 1e6) / 1e6
 // ---------------------------------------------------------------------------
 const CLAUDE_OPUS_REDUCED: TierPrice = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }
 const CLAUDE_OPUS_LEGACY: TierPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }
-// Sonnet 5 introductory pricing ($2/$10) through August 31, 2026, then $3/$15.
-// Using standard pricing here since the promo ends soon; admins can override
-// the model_pricing table for the discounted rate during the promo period.
 const CLAUDE_SONNET: TierPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 }
+// Anthropic made Sonnet 5's original $2/$10 introductory rate permanent on
+// 2026-08-10. Older Sonnet generations remain on the generic $3/$15 tier.
+const CLAUDE_SONNET_5: TierPrice = { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 }
 const CLAUDE_HAIKU: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
 // Fable 5 (Mythos-class flagship) — Anthropic's most capable widely released
 // model, priced above the Opus tier at 10 / 50. Claude Mythos 5 shares the
 // same list price. Official pricing confirmed 2026-07-25.
 const CLAUDE_FABLE: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
+// Fable/Mythos 5.1 keeps the same base and cache-write prices, while cutting
+// cache reads from 0.1x to 0.025x input ($0.25/MTok).
+const CLAUDE_FABLE_51: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 0.25 }
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
 function isLegacyOpus(model: string): boolean {
@@ -58,9 +61,12 @@ function isLegacyOpus(model: string): boolean {
 
 function claudePrice(model: string): TierPrice {
   const m = model.toLowerCase()
-  if (m.includes('fable') || m.includes('mythos')) return CLAUDE_FABLE
+  if (m.includes('fable') || m.includes('mythos')) {
+    return /(?:fable|mythos)-5(?:-1|\.1)(?:$|-)/.test(m) ? CLAUDE_FABLE_51 : CLAUDE_FABLE
+  }
   if (m.includes('haiku')) return CLAUDE_HAIKU
   if (m.includes('opus')) return isLegacyOpus(m) ? CLAUDE_OPUS_LEGACY : CLAUDE_OPUS_REDUCED
+  if (m.includes('sonnet-5')) return CLAUDE_SONNET_5
   return CLAUDE_SONNET
 }
 
@@ -148,11 +154,13 @@ function openaiPrice(model: string): TierPrice {
 
 // ---------------------------------------------------------------------------
 // Gemini list prices, per 1M tokens (verified against the live Google pricing
-// page on 2026-08-31). The retained Gemini 2.5 tiers cover callers that
-// explicitly keep using those stable model IDs.
+// page on 2026-09-03). Gemini 3.8/3.7/3.6 Flash share introductory pricing
+// through 2026-12-31, then move to the published standard rate.
 // ---------------------------------------------------------------------------
 const GEMINI_31_PRO: TierPrice = { input: 2, output: 12, cacheWrite: 0, cacheRead: 0.2 }
-const GEMINI_36_FLASH: TierPrice = { input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.15 }
+const GEMINI_FRONTIER_FLASH_PROMO: TierPrice = { input: 0.75, output: 3.75, cacheWrite: 0, cacheRead: 0.075 }
+const GEMINI_FRONTIER_FLASH_STANDARD: TierPrice = { input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.15 }
+const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
 const GEMINI_35_FLASH: TierPrice = { input: 1.5, output: 9, cacheWrite: 0, cacheRead: 0.15 }
 const GEMINI_35_FLASH_LITE: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.03 }
 const GEMINI_25_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
@@ -160,13 +168,17 @@ const GEMINI_25_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cac
 const GEMINI_STALE_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.31 }
 const GEMINI_STALE_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.075 }
 
-function geminiPrice(model: string): TierPrice {
+function geminiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
   if (m.includes('2.5-pro')) return GEMINI_25_PRO
   if (m.includes('2.5-flash')) return GEMINI_25_FLASH
   if (m.includes('3.5-flash-lite')) return GEMINI_35_FLASH_LITE
   if (m.includes('3.5-flash')) return GEMINI_35_FLASH
-  if (m.includes('flash')) return GEMINI_36_FLASH
+  if (m.includes('flash')) {
+    return atMs < GEMINI_FRONTIER_FLASH_STANDARD_AT
+      ? GEMINI_FRONTIER_FLASH_PROMO
+      : GEMINI_FRONTIER_FLASH_STANDARD
+  }
   return GEMINI_31_PRO
 }
 
@@ -341,7 +353,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
   if (m.startsWith('claude-')) return claudePrice(model)
   if (m.startsWith('gpt-') || m.startsWith('o1') || m.startsWith('o3')) return openaiPrice(model)
-  if (m.startsWith('gemini-')) return geminiPrice(model)
+  if (m.startsWith('gemini-')) return geminiPrice(model, atMs)
   if (m.startsWith('deepseek-')) return deepseekPrice(model, atMs)
   if (m.startsWith('mimo-')) return XIAOMI_TIERS[xiaomiTier(model)]
   if (m.startsWith('glm-')) return ZHIPU_TIERS[zhipuTier(model)]
@@ -364,7 +376,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
 function builtinPrice(provider: string, model: string, atMs: number): TierPrice | null {
   if (provider === 'claude') return claudePrice(model)
   if (provider === 'openai') return openaiPrice(model)
-  if (provider === 'gemini') return geminiPrice(model)
+  if (provider === 'gemini') return geminiPrice(model, atMs)
   if (provider === 'deepseek') return deepseekPrice(model, atMs)
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
@@ -394,8 +406,10 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'opus', price: CLAUDE_OPUS_REDUCED },
   { provider: 'claude', model: 'claude-opus-4-1', price: CLAUDE_OPUS_LEGACY },
   { provider: 'claude', model: 'sonnet', price: CLAUDE_SONNET },
+  { provider: 'claude', model: 'claude-sonnet-5', price: CLAUDE_SONNET_5 },
   { provider: 'claude', model: 'haiku', price: CLAUDE_HAIKU },
   { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
+  { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
@@ -412,14 +426,15 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
-  { provider: 'gemini', model: 'gemini-3.6-flash', price: GEMINI_36_FLASH },
+  { provider: 'gemini', model: 'gemini-3.8-flash', price: GEMINI_FRONTIER_FLASH_PROMO },
+  { provider: 'gemini', model: 'gemini-3.6-flash', price: GEMINI_FRONTIER_FLASH_PROMO },
   { provider: 'gemini', model: 'gemini-3.1-pro-preview', price: GEMINI_31_PRO },
   { provider: 'gemini', model: 'gemini-3.5-flash', price: GEMINI_35_FLASH },
   { provider: 'gemini', model: 'gemini-3.5-flash-lite', price: GEMINI_35_FLASH_LITE },
   { provider: 'gemini', model: 'gemini-2.5-pro', price: GEMINI_25_PRO },
   { provider: 'gemini', model: 'gemini-2.5-flash', price: GEMINI_25_FLASH },
   { provider: 'gemini', model: 'pro', price: GEMINI_31_PRO },
-  { provider: 'gemini', model: 'flash', price: GEMINI_36_FLASH },
+  { provider: 'gemini', model: 'flash', price: GEMINI_FRONTIER_FLASH_PROMO },
   // DeepSeek / Xiaomi.
   // DeepSeek keeps the pre-schedule values as seed markers. resolvePrice()
   // recognises these exact values as managed defaults and applies the current
@@ -510,13 +525,13 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'gemini',
     model: 'flash',
     from: { input: 0.075, output: 0.3, cacheWrite: 0, cacheRead: 0.019 },
-    to: GEMINI_36_FLASH,
+    to: GEMINI_FRONTIER_FLASH_PROMO,
   },
   {
     provider: 'gemini',
     model: 'flash',
     from: GEMINI_STALE_FLASH,
-    to: GEMINI_36_FLASH,
+    to: GEMINI_FRONTIER_FLASH_PROMO,
   },
   {
     provider: 'gemini',
@@ -609,16 +624,29 @@ function sameTokenPrice(a: TierPrice, b: TierPrice): boolean {
 }
 
 /**
- * DeepSeek rows seeded by older releases contain the price that was current at
- * the time. Treat those exact tuples as managed defaults so they do not mask
- * the official schedule. Any other DB value remains an administrator override.
+ * Scheduled-price rows contain whichever built-in tuple was current when the
+ * database was seeded. Treat those exact tuples as managed defaults so they do
+ * not mask the time-aware built-in price. Any other DB value remains an admin
+ * override.
  */
-function isManagedDeepseekDefault(provider: string, model: string, price: TierPrice): boolean {
-  if (provider !== 'deepseek') return false
-  const tier = deepseekTier(model)
-  if (sameTokenPrice(price, DEEPSEEK_PRE_SCHEDULE_TIERS[tier])) return true
-  return (tier === 'pro' || model.toLowerCase().includes('reasoner')) &&
-    sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
+function isManagedScheduledDefault(provider: string, model: string, price: TierPrice): boolean {
+  if (provider === 'deepseek') {
+    const tier = deepseekTier(model)
+    if (sameTokenPrice(price, DEEPSEEK_PRE_SCHEDULE_TIERS[tier])) return true
+    return (tier === 'pro' || model.toLowerCase().includes('reasoner')) &&
+      sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
+  }
+
+  if (provider === 'gemini') {
+    const m = model.toLowerCase()
+    const isManagedFlash = m === 'flash' || /gemini-3\.(?:6|7|8)-flash/.test(m)
+    return isManagedFlash && (
+      sameTokenPrice(price, GEMINI_FRONTIER_FLASH_PROMO) ||
+      sameTokenPrice(price, GEMINI_FRONTIER_FLASH_STANDARD)
+    )
+  }
+
+  return false
 }
 
 /**
@@ -733,7 +761,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
 
   // 1) exact match
   const exact = priceCache.get(cacheKey(provider, model))
-  if (exact && !isManagedDeepseekDefault(provider, model, exact)) return exact
+  if (exact && !isManagedScheduledDefault(provider, model, exact)) return exact
 
   // A dedicated model family must win over a broader DB substring row. This
   // matters on upgraded installations where `gpt-5.3-codex` exists but the
@@ -758,7 +786,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   for (const [key, price] of priceCache) {
     const [p, dbModel] = key.split(':', 2)
     if (p !== provider) continue
-    if (isManagedDeepseekDefault(provider, dbModel, price)) continue
+    if (isManagedScheduledDefault(provider, dbModel, price)) continue
     const dm = dbModel.toLowerCase()
     if ((m.includes(dm) || dm.includes(m)) && dm.length > bestLen) {
       best = price

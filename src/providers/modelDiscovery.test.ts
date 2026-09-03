@@ -7,7 +7,9 @@ describe('model discovery', () => {
     expect(models).toEqual(
       expect.arrayContaining([
         'gpt-5.5',
+        'claude-fable-5-1',
         'claude-sonnet-5',
+        'gemini-3.8-flash',
         'gemini-3.6-flash',
         'mimo-v2.5-pro',
         'glm-5.3',
@@ -16,6 +18,7 @@ describe('model discovery', () => {
       ]),
     )
     expect(models).not.toEqual(expect.arrayContaining([
+      'claude-mythos-5-1',
       'gemini-3-pro-preview',
       'glm-5.1',
       'qwen3-coder-plus',
@@ -62,6 +65,14 @@ describe('model discovery', () => {
     expect(listModelIdsForKey(key)).toEqual(['gpt-custom'])
   })
 
+  it('only exposes limited-access Claude models when explicitly allowed', () => {
+    const key = {
+      allowedProviders: ['claude'] as const,
+      allowedModels: ['claude-mythos-5-1'],
+    }
+    expect(listModelIdsForKey(key)).toEqual(['claude-mythos-5-1'])
+  })
+
   it('includes client-facing model mapping names', () => {
     const key = {
       allowedProviders: ['openai'] as const,
@@ -97,6 +108,12 @@ describe('model discovery', () => {
   it('returns Gemini API model objects', () => {
     const key = { allowedProviders: ['gemini'] as const, allowedModels: ['gemini-*'] }
     expect(listGeminiModels(key)).toEqual([
+      {
+        name: 'models/gemini-3.8-flash',
+        version: '001',
+        displayName: 'Gemini 3.8 Flash',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+      },
       {
         name: 'models/gemini-3.6-flash',
         version: '001',
