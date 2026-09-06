@@ -16,8 +16,10 @@
     "fix:sub2api-cooldown": "tsx scripts/clear-sub2api-cooldown.ts"
   },
   "dependencies": {
+    "@fastify/formbody": "^9.0.0",
     "@fastify/jwt": "^9.0.0",
     "@fastify/static": "^8.0.0",
+    "alipay-sdk": "^4.14.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.5",

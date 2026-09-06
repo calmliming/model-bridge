@@ -23,15 +23,15 @@ export class AlipayProvider implements PaymentProvider {
     privateKey: string
     alipayPublicKey: string
     gatewayUrl?: string
-    notifyUrl: string
-    returnUrl: string
+    notifyUrl?: string
+    returnUrl?: string
   }) {
     this.appId = config.appId
     this.privateKey = config.privateKey
     this.alipayPublicKey = config.alipayPublicKey
     this.gatewayUrl = config.gatewayUrl || 'https://openapi.alipay.com/gateway.do'
-    this.notifyUrl = config.notifyUrl
-    this.returnUrl = config.returnUrl
+    this.notifyUrl = config.notifyUrl ?? ''
+    this.returnUrl = config.returnUrl ?? ''
   }
 
   async createPayment(params: CreatePaymentParams): Promise<CreatePaymentResult> {

@@ -63,9 +63,13 @@ import {
 import { adjustWalletUsd, listWalletTransactions } from '../wallet/manager'
 import {
   cancelPaymentOrder,
+  closeOnlinePaymentOrder,
   confirmPaymentOrder,
   listPaymentOrders,
   PaymentOrderError,
+  queryPaymentOrder,
+  queryPaymentRefund,
+  refundPaymentOrder,
 } from '../payments/manager'
 import {
   deleteRedeemCode,
@@ -378,6 +382,12 @@ const paymentOrderActionSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
+const paymentRefundSchema = z.object({
+  amount: z.number().positive(),
+  reason: z.string().trim().max(256).optional(),
+  outRequestNo: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/).optional(),
+})
+
 function sendUserManagerError(
   reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } },
   err: unknown,
@@ -661,6 +671,70 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         return { transaction }
       } catch (err) {
         return reply.code(400).send({ error: (err as Error).message })
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/payment-orders/:id/query',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      if (!params.success) return reply.code(400).send({ error: 'invalid payment order id' })
+      try {
+        return { order: await queryPaymentOrder({ id: params.data.id }) }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/payment-orders/:id/close',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      if (!params.success) return reply.code(400).send({ error: 'invalid payment order id' })
+      try {
+        const closedBy = (request.user as { sub?: string } | undefined)?.sub ?? 'admin'
+        return { order: await closeOnlinePaymentOrder({ id: params.data.id, closedBy }) }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/payment-orders/:id/refunds',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = idParamSchema.safeParse(request.params)
+      const body = paymentRefundSchema.safeParse(request.body)
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: 'invalid refund request' })
+      }
+      try {
+        const refund = await refundPaymentOrder({ id: params.data.id, ...body.data })
+        return reply.code(201).send({ refund })
+      } catch (err) {
+        return sendUserManagerError(reply, err)
+      }
+    },
+  )
+
+  app.get<{ Params: { id: string; outRequestNo: string } }>(
+    '/api/admin/payment-orders/:id/refunds/:outRequestNo',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const params = z.object({
+        id: z.string().trim().min(1),
+        outRequestNo: z.string().trim().min(1).max(64),
+      }).safeParse(request.params)
+      if (!params.success) return reply.code(400).send({ error: 'invalid refund query' })
+      try {
+        return { refund: await queryPaymentRefund(params.data) }
+      } catch (err) {
+        return sendUserManagerError(reply, err)
       }
     },
   )

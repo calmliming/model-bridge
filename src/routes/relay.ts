@@ -196,6 +196,10 @@ interface ProviderHandler {
     body: Record<string, unknown>,
     ctx: UpstreamContext,
   ): Promise<Response>
+  /** Optional provider-specific HTTP failure policy. */
+  classifyUpstreamFailure?: (response: Response, model: string) => Promise<UpstreamFailure>
+  /** Optional semantic failure policy for a buffered HTTP-200 SSE transcript. */
+  classifyBufferedFailure?: (text: string, model: string) => Promise<UpstreamFailure | null>
   createStreamParser(): { feed(event: unknown): void; result(): UsageData }
   parseJsonUsage(body: unknown): UsageData
   /**
@@ -1128,18 +1132,110 @@ export async function classifyBufferedResponsesFailure(
   return classifyUpstreamFailure(provider, synthetic, model)
 }
 
-async function inspectBufferedResponsesFailure(
+const OPENAI_IMAGE_CAPABILITY_LOSS_MARKERS = [
+  'image_generation',
+  "not found in 'tools' parameter",
+] as const
+
+function isOpenAIImageCapabilityLossText(text: string): boolean {
+  const normalized = text.toLowerCase()
+  return OPENAI_IMAGE_CAPABILITY_LOSS_MARKERS.every((marker) => normalized.includes(marker))
+}
+
+function openAIImageCapabilityFailure(cooldownMs: number): UpstreamFailure {
+  return {
+    penalty: 'rate_limited',
+    retryable: true,
+    resetAt: Date.now() + cooldownMs,
+    modelScoped: true,
+    accountScoped: false,
+  }
+}
+
+function openAIImageUnavailableCooldownMs(): number {
+  return config.OPENAI_IMAGE_UNAVAILABLE_COOLDOWN_MINUTES * 60_000
+}
+
+/**
+ * The Images endpoint builds the image_generation tool request itself, so this
+ * exact upstream 400 cannot be caused by an untrusted client omitting the tool.
+ * Cool only the account's image capability and try another account.
+ */
+export async function classifyOpenAIImageUpstreamFailure(
+  response: Response,
+  model: string,
+  cooldownMs = openAIImageUnavailableCooldownMs(),
+): Promise<UpstreamFailure> {
+  if (response.status === 400) {
+    const text = await readErrorText(response)
+    if (isOpenAIImageCapabilityLossText(text)) {
+      return openAIImageCapabilityFailure(cooldownMs)
+    }
+  }
+  return classifyUpstreamFailure('openai', response, model)
+}
+
+/**
+ * Classifies an image-generation failure carried by an HTTP-200 Responses SSE
+ * body before the buffered Images response is committed to the client.
+ */
+export async function classifyBufferedOpenAIImageFailure(
+  text: string,
+  request: OpenAIImagesRequestBody,
+  model: string,
+  cooldownMs = openAIImageUnavailableCooldownMs(),
+): Promise<UpstreamFailure | null> {
+  const converted = convertOpenAIImagesSse(text, request)
+  if (converted.status !== 'error') return null
+
+  const serialized = JSON.stringify(converted.body)
+  const error = parsedErrorObject(serialized)
+  const code = normalizedMessage(error?.code ?? error?.type)
+  const message = normalizedMessage(error?.message)
+  const combined = `${code} ${message}`
+
+  if (
+    converted.failureSource === 'upstream' &&
+    (code === 'image_generation_unavailable' || isOpenAIImageCapabilityLossText(serialized))
+  ) {
+    return openAIImageCapabilityFailure(cooldownMs)
+  }
+
+  // A policy/moderation decision belongs to this request and must not walk the
+  // account pool, even when its prose happens to mention limits or capacity.
+  if (isHardResponsesFailure(combined)) {
+    return { penalty: null, retryable: false }
+  }
+
+  // A plain-text answer or an empty successful terminal only says that this
+  // turn did not produce an image. Try another account, but do not persist any
+  // account/model state or a single prompt can cool the entire pool.
+  if (
+    converted.failureSource === 'model_text' ||
+    converted.failureSource === 'missing_output'
+  ) {
+    return { penalty: null, retryable: true }
+  }
+
+  const status = converted.httpStatus ?? 502
+  return classifyUpstreamFailure('openai', new Response(serialized, { status }), model)
+}
+
+async function inspectBufferedUpstreamFailure(
   upstream: Response,
   provider: ProviderHandler,
   model: string,
 ): Promise<UpstreamFailure | null> {
   if (
-    !provider.bufferedResponsesProtocol ||
+    (!provider.bufferedResponsesProtocol && !provider.classifyBufferedFailure) ||
     !upstream.ok ||
     !(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
   ) return null
   try {
     const text = await upstream.clone().text()
+    if (provider.classifyBufferedFailure) {
+      return await provider.classifyBufferedFailure(text, model)
+    }
     return await classifyBufferedResponsesFailure(provider.id, text, model)
   } catch {
     return null
@@ -1232,6 +1328,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
           action: `images.${endpoint}`,
         }),
         callUpstream: (token, input) => relayOpenaiImages(token, input),
+        classifyUpstreamFailure: (response, model) =>
+          classifyOpenAIImageUpstreamFailure(response, model),
+        classifyBufferedFailure: (text, model) =>
+          classifyBufferedOpenAIImageFailure(text, mappedRequest, model),
         createStreamParser: () => createOpenAIImagesUsageParser(mappedRequest),
         parseJsonUsage: () => emptyUsage(),
         parseStreamEventsFrom: 'upstream',
@@ -1828,7 +1928,9 @@ async function runRelayLoop(
       const quota = extractAccountQuota(provider.id, upstream.headers)
       if (quota) await updateAccountQuota(account.id, quota)
 
-      const failure = await classifyUpstreamFailure(provider.id, upstream, parsed.model)
+      const failure = provider.classifyUpstreamFailure
+        ? await provider.classifyUpstreamFailure(upstream, parsed.model)
+        : await classifyUpstreamFailure(provider.id, upstream, parsed.model)
       const lastAttempt = attempt === MAX_ATTEMPTS - 1
 
       if (failure.retryable && !lastAttempt) {
@@ -1849,7 +1951,7 @@ async function runRelayLoop(
       // response.failed/error event. Inspect a clone before sendBuffered() reads
       // the original body, so a transient terminal can still rotate accounts.
       const bufferedFailure = !wantStream
-        ? await inspectBufferedResponsesFailure(upstream, provider, parsed.model)
+        ? await inspectBufferedUpstreamFailure(upstream, provider, parsed.model)
         : null
       if (bufferedFailure) {
         if (bufferedFailure.retryable && !lastAttempt) {

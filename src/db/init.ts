@@ -145,6 +145,11 @@ export async function initDb(): Promise<void> {
       amount_micros BIGINT NOT NULL,
       provider_order_id TEXT,
       payment_url TEXT,
+      payment_html TEXT,
+      provider_amount TEXT,
+      provider_currency TEXT,
+      trade_status TEXT,
+      refunded_amount_micros BIGINT NOT NULL DEFAULT 0,
       wallet_transaction_id TEXT,
       note TEXT,
       expires_at BIGINT NOT NULL,
@@ -157,6 +162,33 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_payment_orders_status ON payment_orders (status);
     CREATE INDEX IF NOT EXISTS idx_payment_orders_created_at ON payment_orders (created_at);
     CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_order_id ON payment_orders (provider_order_id);
+
+    CREATE TABLE IF NOT EXISTS payment_notification_events (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      notify_id TEXT NOT NULL UNIQUE,
+      out_trade_no TEXT NOT NULL,
+      provider_order_id TEXT,
+      trade_status TEXT,
+      raw_data JSONB NOT NULL,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_notification_order ON payment_notification_events (out_trade_no);
+
+    CREATE TABLE IF NOT EXISTS payment_refunds (
+      id TEXT PRIMARY KEY,
+      payment_order_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      amount_micros BIGINT NOT NULL,
+      provider_amount TEXT NOT NULL,
+      provider_currency TEXT NOT NULL DEFAULT 'CNY',
+      reason TEXT,
+      wallet_transaction_id TEXT,
+      provider_response JSONB,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+      updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds (payment_order_id);
 
     CREATE TABLE IF NOT EXISTS api_keys (
       id TEXT PRIMARY KEY,
@@ -344,6 +376,36 @@ export async function initDb(): Promise<void> {
     created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
     updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
   );`)
+  await pool.query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS payment_html TEXT;`)
+  await pool.query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_amount TEXT;`)
+  await pool.query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS provider_currency TEXT;`)
+  await pool.query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS trade_status TEXT;`)
+  await pool.query(`ALTER TABLE payment_orders ADD COLUMN IF NOT EXISTS refunded_amount_micros BIGINT NOT NULL DEFAULT 0;`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS payment_notification_events (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    notify_id TEXT NOT NULL UNIQUE,
+    out_trade_no TEXT NOT NULL,
+    provider_order_id TEXT,
+    trade_status TEXT,
+    raw_data JSONB NOT NULL,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+  );`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_notification_order ON payment_notification_events (out_trade_no);`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS payment_refunds (
+    id TEXT PRIMARY KEY,
+    payment_order_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    amount_micros BIGINT NOT NULL,
+    provider_amount TEXT NOT NULL,
+    provider_currency TEXT NOT NULL DEFAULT 'CNY',
+    reason TEXT,
+    wallet_transaction_id TEXT,
+    provider_response JSONB,
+    created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+    updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+  );`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds (payment_order_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_user_id ON payment_orders (user_id);`)

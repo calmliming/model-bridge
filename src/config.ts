@@ -106,14 +106,29 @@ const schema = z.object({
   // image_generation tools on the Responses endpoint. Disable this when the
   // configured ChatGPT OAuth accounts do not have image-generation access.
   OPENAI_IMAGE_GENERATION_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
+  // When an OAuth account explicitly reports that image_generation is
+  // unavailable, cool only that account's image capability for this long.
+  // Text requests on the same account remain schedulable.
+  OPENAI_IMAGE_UNAVAILABLE_COOLDOWN_MINUTES: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(1).max(120).default(30),
+  ),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   // Payment providers
+  ALIPAY_ENV: z.enum(['production', 'sandbox']).default('production'),
   ALIPAY_APP_ID: z.string().optional(),
   ALIPAY_PRIVATE_KEY: z.string().optional(),
   ALIPAY_PUBLIC_KEY: z.string().optional(),
-  ALIPAY_NOTIFY_URL: z.string().optional(),
-  ALIPAY_RETURN_URL: z.string().optional(),
+  ALIPAY_GATEWAY: z.preprocess(blankToUndefined, z.string().url().optional()),
+  ALIPAY_NOTIFY_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+  ALIPAY_RETURN_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
+  ALIPAY_SELLER_ID: z.preprocess(blankToUndefined, z.string().optional()),
+  ALIPAY_SELLER_EMAIL: z.preprocess(blankToUndefined, z.string().email().optional()),
+  ALIPAY_USD_CNY_RATE: z.preprocess(
+    blankToUndefined,
+    z.string().regex(/^\d+(?:\.\d{1,4})?$/).default('7.20'),
+  ),
   WECHAT_APP_ID: z.string().optional(),
   WECHAT_MCH_ID: z.string().optional(),
   WECHAT_API_KEY: z.string().optional(),

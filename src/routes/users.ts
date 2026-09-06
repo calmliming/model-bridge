@@ -12,7 +12,12 @@ import {
   verifyUserCredentials,
 } from '../users/manager'
 import { listWalletTransactions } from '../wallet/manager'
-import { createPaymentOrder, listPaymentOrdersForUser, PaymentOrderError } from '../payments/manager'
+import {
+  createPaymentOrder,
+  listPaymentOrdersForUser,
+  PaymentOrderError,
+  queryPaymentOrder,
+} from '../payments/manager'
 import { getAvailableProviders } from '../payments/providers/index'
 import { redeemCode, RedeemError } from '../redeem/manager'
 import { checkRateLimit } from '../middleware/limits'
@@ -80,7 +85,7 @@ const createPaymentOrderSchema = z.object({
   amount: z.number().refine((v) => Number.isFinite(v) && v > 0, {
     message: 'amount must be positive',
   }),
-  provider: z.enum(['manual', 'alipay', 'wechat']).optional(),
+  provider: z.enum(['manual', 'alipay', 'alipay_web', 'wechat']).optional(),
 })
 
 const redeemSchema = z.object({
@@ -183,6 +188,21 @@ export function registerUserRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: 'invalid pagination query' })
       }
       return listPaymentOrdersForUser(request.currentUser!.id, query.data.page, query.data.pageSize)
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/users/payment-orders/:id/query',
+    { preHandler: requireUser },
+    async (request, reply) => {
+      const id = request.params.id?.trim()
+      if (!id) return reply.code(400).send({ error: 'invalid payment order id' })
+      try {
+        const order = await queryPaymentOrder({ id, userId: request.currentUser!.id })
+        return { order }
+      } catch (err) {
+        return sendUserError(reply, err)
+      }
     },
   )
 

@@ -4,6 +4,7 @@ import {
   grokFunctionParametersHaveInvalidUnionRoot,
   normalizeGrokChatCompletionsBody,
   normalizeGrokResponsesBody,
+  sanitizeGrokResponsesInput,
   sanitizeGrokResponsesTools,
 } from './relay'
 
@@ -86,6 +87,97 @@ describe('normalizeGrokResponsesBody', () => {
     expect(grokFunctionParametersHaveInvalidUnionRoot(parameters)).toBe(false)
     expect(out).toEqual(tools)
     expect(out).not.toBe(tools)
+  })
+
+  it('lifts Grok Shell output images into one following user message', () => {
+    const input = [
+      { type: 'function_call', call_id: 'call_a', name: 'read_file', arguments: '{}' },
+      {
+        type: 'function_call_output',
+        call_id: 'call_a',
+        content: 'Read image file: /tmp/a.png',
+        images: [{ type: 'image', url: 'data:image/png;base64,QUE=' }],
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call_b',
+        output: 'Read image file: /tmp/b.png',
+        images: [{ image_url: { url: 'data:image/jpeg;base64,QkI=' } }],
+      },
+    ]
+
+    const out = sanitizeGrokResponsesInput(input)
+    expect(out).toEqual([
+      input[0],
+      { type: 'function_call_output', call_id: 'call_a', output: 'Read image file: /tmp/a.png' },
+      { type: 'function_call_output', call_id: 'call_b', output: 'Read image file: /tmp/b.png' },
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Tool output media for call call_a]' },
+          { type: 'input_image', image_url: 'data:image/png;base64,QUE=' },
+          { type: 'input_text', text: '[Tool output media for call call_b]' },
+          { type: 'input_image', image_url: 'data:image/jpeg;base64,QkI=' },
+        ],
+      },
+    ])
+    expect(input[1]).toHaveProperty('images')
+  })
+
+  it('extracts structured Grok 1.0.5 output images and keeps its text', () => {
+    const out = sanitizeGrokResponsesInput([{
+      type: 'function_call_output',
+      call_id: 'call_read',
+      output: [
+        { type: 'input_text', text: 'Read image file: /tmp/example.png' },
+        { type: 'input_image', detail: 'auto', image_url: 'data:image/png;base64,QUE=' },
+      ],
+    }])
+
+    expect(out).toEqual([
+      {
+        type: 'function_call_output',
+        call_id: 'call_read',
+        output: 'Read image file: /tmp/example.png',
+      },
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Tool output media for call call_read]' },
+          { type: 'input_image', image_url: 'data:image/png;base64,QUE=' },
+        ],
+      },
+    ])
+  })
+
+  it('drops empty image data and flushes valid media before the next turn', () => {
+    const out = sanitizeGrokResponsesInput([
+      {
+        type: 'function_call_output',
+        call_id: 'call_read',
+        output: 'done',
+        images: [
+          { url: 'data:image/png;base64,' },
+          { url: 'https://example.com/result.png' },
+        ],
+      },
+      { type: 'message', role: 'user', content: 'continue' },
+    ])
+
+    expect(out).toEqual([
+      { type: 'function_call_output', call_id: 'call_read', output: 'done' },
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: '[Tool output media for call call_read]' },
+          { type: 'input_image', image_url: 'https://example.com/result.png' },
+        ],
+      },
+      { type: 'message', role: 'user', content: 'continue' },
+    ])
   })
 })
 

@@ -36,6 +36,205 @@ function recordOf(value: unknown): Record<string, unknown> | null {
     : null
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+interface GrokToolOutputImage {
+  callId: string
+  url: string
+}
+
+function firstDefined(...values: unknown[]): unknown {
+  return values.find((value) => value != null)
+}
+
+function grokToolOutputImageUrl(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  const image = recordOf(value)
+  if (!image) return ''
+  for (const field of ['url', 'image_url', 'file_url'] as const) {
+    const raw = image[field]
+    if (typeof raw === 'string' && raw.trim()) return raw.trim()
+    const nested = recordOf(raw)
+    if (nested && typeof nested.url === 'string' && nested.url.trim()) return nested.url.trim()
+  }
+  return ''
+}
+
+function isEmptyBase64Image(value: string): boolean {
+  return /^data:image\/[^;,]+;base64,\s*$/i.test(value.trim())
+}
+
+interface StrippedGrokToolOutput {
+  value: unknown
+  images: GrokToolOutputImage[]
+  keep: boolean
+}
+
+function stripGrokToolOutputImages(value: unknown, callId: string): StrippedGrokToolOutput {
+  if (Array.isArray(value)) {
+    const filtered: unknown[] = []
+    const images: GrokToolOutputImage[] = []
+    for (const item of value) {
+      const stripped = stripGrokToolOutputImages(item, callId)
+      images.push(...stripped.images)
+      if (stripped.keep) filtered.push(stripped.value)
+    }
+    return { value: filtered, images, keep: filtered.length > 0 }
+  }
+
+  const row = recordOf(value)
+  if (!row) return { value, images: [], keep: value != null }
+
+  const type = stringValue(row.type).toLowerCase()
+  if (['image', 'image_url', 'input_image'].includes(type)) {
+    const url = grokToolOutputImageUrl(row)
+    return {
+      value: null,
+      images: url && !isEmptyBase64Image(url) ? [{ callId, url }] : [],
+      keep: false,
+    }
+  }
+
+  const filtered: Record<string, unknown> = { ...row }
+  const images: GrokToolOutputImage[] = []
+  if (Array.isArray(filtered.images)) {
+    for (const rawImage of filtered.images) {
+      const url = grokToolOutputImageUrl(rawImage)
+      if (url && !isEmptyBase64Image(url)) images.push({ callId, url })
+    }
+    delete filtered.images
+  }
+  for (const field of ['content', 'output', 'results'] as const) {
+    if (!(field in filtered)) continue
+    const stripped = stripGrokToolOutputImages(filtered[field], callId)
+    images.push(...stripped.images)
+    if (stripped.keep) filtered[field] = stripped.value
+    else delete filtered[field]
+  }
+  return { value: filtered, images, keep: Object.keys(filtered).length > 0 }
+}
+
+function grokModelInputString(value: unknown, fallback = '(empty)'): string {
+  if (typeof value === 'string') return value.trim() || fallback
+  if (value == null) return fallback
+  try {
+    return JSON.stringify(value) || fallback
+  } catch {
+    return fallback
+  }
+}
+
+function grokStructuredToolOutputString(value: unknown, fallback = '(empty)'): string {
+  if (!Array.isArray(value) || value.length === 0) return grokModelInputString(value, fallback)
+  const texts: string[] = []
+  for (const rawPart of value) {
+    const part = recordOf(rawPart)
+    const type = stringValue(part?.type).toLowerCase()
+    if (!part || !['text', 'input_text', 'output_text'].includes(type)) {
+      return grokModelInputString(value, fallback)
+    }
+    const text = stringValue(part.text)
+    if (text) texts.push(text)
+  }
+  return texts.length ? texts.join('\n') : fallback
+}
+
+function normalizeGrokToolOutput(value: unknown, callId: string): {
+  output: string
+  images: GrokToolOutputImage[]
+} {
+  const stripped = stripGrokToolOutputImages(value, callId)
+  return {
+    output: stripped.images.length
+      ? stripped.keep
+        ? grokStructuredToolOutputString(stripped.value)
+        : '(empty)'
+      : grokModelInputString(value),
+    images: stripped.images,
+  }
+}
+
+function isGrokToolOutputItem(item: Record<string, unknown>): boolean {
+  const type = stringValue(item.type).toLowerCase()
+  const role = stringValue(item.role).toLowerCase()
+  return (
+    role === 'tool' ||
+    role === 'function' ||
+    type.endsWith('_call_output') ||
+    ['tool_result', 'tool_output', 'function_result'].includes(type)
+  )
+}
+
+function appendGrokToolOutputImageMessage(
+  items: unknown[],
+  images: GrokToolOutputImage[],
+): void {
+  if (!images.length) return
+  const content: Array<Record<string, unknown>> = []
+  let lastCallId = ''
+  for (const image of images) {
+    if (image.callId !== lastCallId) {
+      content.push({
+        type: 'input_text',
+        text: `[Tool output media for call ${image.callId}]`,
+      })
+      lastCallId = image.callId
+    }
+    content.push({ type: 'input_image', image_url: image.url })
+  }
+  items.push({ type: 'message', role: 'user', content })
+}
+
+/**
+ * xAI requires function_call_output.output to be a string. Grok Shell attaches
+ * read-file images either to `images` or as structured output parts, so lift
+ * those images into one following user message without breaking call/output
+ * adjacency.
+ */
+export function sanitizeGrokResponsesInput(input: unknown[]): unknown[] {
+  const filtered: unknown[] = []
+  let pendingImages: GrokToolOutputImage[] = []
+
+  for (const rawItem of input) {
+    const item = recordOf(rawItem)
+    if (!item || !isGrokToolOutputItem(item)) {
+      appendGrokToolOutputImageMessage(filtered, pendingImages)
+      pendingImages = []
+      filtered.push(rawItem)
+      continue
+    }
+
+    const callId =
+      stringValue(item.call_id) ||
+      stringValue(item.tool_call_id) ||
+      stringValue(item.id)
+    if (!callId) {
+      appendGrokToolOutputImageMessage(filtered, pendingImages)
+      pendingImages = []
+      filtered.push(rawItem)
+      continue
+    }
+
+    const normalized = normalizeGrokToolOutput(
+      firstDefined(item.output, item.content, item.results),
+      callId,
+    )
+    filtered.push({ type: 'function_call_output', call_id: callId, output: normalized.output })
+    pendingImages.push(...normalized.images)
+    if (Array.isArray(item.images)) {
+      for (const rawImage of item.images) {
+        const url = grokToolOutputImageUrl(rawImage)
+        if (url && !isEmptyBase64Image(url)) pendingImages.push({ callId, url })
+      }
+    }
+  }
+
+  appendGrokToolOutputImageMessage(filtered, pendingImages)
+  return filtered
+}
+
 function metadataSessionId(value: unknown): string | null {
   const metadata = recordOf(value)
   if (!metadata) return null
@@ -102,6 +301,7 @@ export function normalizeGrokResponsesBody(
   }
   delete out.metadata
   if (Array.isArray(out.tools)) out.tools = sanitizeGrokResponsesTools(out.tools)
+  if (Array.isArray(out.input)) out.input = sanitizeGrokResponsesInput(out.input)
   out.stream = true
   out.store = false
   return out

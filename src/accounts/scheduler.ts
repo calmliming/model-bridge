@@ -210,9 +210,12 @@ export function modelCooldownUntil(metadata: unknown, model: string): number | n
   return typeof family === 'number' && Number.isFinite(family) ? family : null
 }
 
-/** Shares one cooldown across dated/aliased Fable and Codex Spark names. */
+/** Shares one cooldown across Fable, Codex Spark, and GPT Image model aliases. */
 export function canonicalModelCooldownKey(model: string): string {
   const normalized = model.trim().toLowerCase()
+  if (normalized === 'openai:image_generation' || normalized.startsWith('gpt-image-')) {
+    return 'openai:image_generation'
+  }
   if (normalized.startsWith('claude-') && (normalized.includes('fable') || normalized.includes('mythos'))) {
     return 'claude-fable-5'
   }

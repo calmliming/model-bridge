@@ -77,6 +77,14 @@ describe('modelCooldownUntil (model-scoped cooldowns)', () => {
     expect(modelCooldownUntil(metadata, 'gpt-5.3-codex-spark-high')).toBe(NOW + 60_000)
   })
 
+  it('shares one image-capability cooldown across GPT Image models', () => {
+    const metadata = { modelCooldowns: { 'openai:image_generation': NOW + 60_000 } }
+    expect(canonicalModelCooldownKey('gpt-image-2')).toBe('openai:image_generation')
+    expect(canonicalModelCooldownKey('gpt-image-1.5')).toBe('openai:image_generation')
+    expect(modelCooldownUntil(metadata, 'gpt-image-2')).toBe(NOW + 60_000)
+    expect(modelCooldownUntil(metadata, 'gpt-5.6-sol')).toBeNull()
+  })
+
   it('filters accounts the way pickAccount does', () => {
     const accounts = [
       { id: 'cooling', metadata: { modelCooldowns: { m1: NOW + 5_000 } } },

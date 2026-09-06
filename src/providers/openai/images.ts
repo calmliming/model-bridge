@@ -55,11 +55,15 @@ interface ImageUpstreamError {
   param?: string
 }
 
+export type OpenAIImageFailureSource = 'upstream' | 'model_text' | 'missing_output'
+
 export interface BufferedImageConversion {
   body: unknown
   usage: UsageData
   status?: 'error'
   httpStatus?: number
+  /** Where a converted failure came from, used by account failover policy. */
+  failureSource?: OpenAIImageFailureSource
 }
 
 const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
@@ -429,6 +433,19 @@ function errorBody(error: ImageUpstreamError): { error: Record<string, unknown> 
   }
 }
 
+function looksLikeImagePolicyRefusal(text: string): boolean {
+  const normalized = text.trim().toLowerCase()
+  if (!normalized) return false
+  return [
+    'content policy',
+    'policy violation',
+    'safety policy',
+    'content moderation',
+    'moderation policy',
+    'blocked by policy',
+  ].some((marker) => normalized.includes(marker))
+}
+
 function toolUsage(response: Record<string, unknown>): Record<string, unknown> | null {
   return recordOf(recordOf(response.tool_usage)?.image_gen)
 }
@@ -517,14 +534,39 @@ export function convertOpenAIImagesSse(
   }
 
   if (upstreamError) {
-    return { body: errorBody(upstreamError), usage: emptyUsage(), status: 'error', httpStatus: upstreamError.status }
+    return {
+      body: errorBody(upstreamError),
+      usage: emptyUsage(),
+      status: 'error',
+      httpStatus: upstreamError.status,
+      failureSource: 'upstream',
+    }
   }
   if (!completedResponse || results.size === 0) {
     const refusal = refusals.join(' ').trim()
-    const error: ImageUpstreamError = refusal
+    const policyRefusal = looksLikeImagePolicyRefusal(refusal)
+    const error: ImageUpstreamError = policyRefusal
       ? { status: 400, type: 'image_generation_user_error', code: 'content_policy_violation', message: refusal }
-      : { status: 502, type: 'upstream_error', code: 'image_generation_no_output', message: 'Upstream did not return image output.' }
-    return { body: errorBody(error), usage: emptyUsage(), status: 'error', httpStatus: error.status }
+      : refusal
+        ? {
+            status: 502,
+            type: 'upstream_error',
+            code: 'image_generation_unavailable',
+            message: refusal,
+          }
+        : {
+            status: 502,
+            type: 'upstream_error',
+            code: 'image_generation_no_output',
+            message: 'Upstream did not return image output.',
+          }
+    return {
+      body: errorBody(error),
+      usage: emptyUsage(),
+      status: 'error',
+      httpStatus: error.status,
+      failureSource: refusal ? 'model_text' : 'missing_output',
+    }
   }
 
   const entries = [...results.values()]

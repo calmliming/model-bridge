@@ -1,7 +1,7 @@
 # model-bridge vs sub2api 差异化对比
 
-> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（正式版 **v0.1.183**，并核查主线至 **b5827cfd**，2026-08-29）
-> 更新日期：2026-08-31
+> 对比对象：[Wei-Shaw/sub2api](https://github.com/Wei-Shaw/sub2api)（正式版 **v0.1.184**，并核查主线至 **200602b4**，2026-08-31）
+> 更新日期：2026-09-01
 
 ## 一句话定位
 
@@ -70,9 +70,9 @@
 | 24 | **Gemini 工具 schema 兼容清理** | ✅ (v0.1.138) | ✅ 已实现（递归清理 function declarations 中不兼容的 JSON Schema 字段）| ✅ 已完成 |
 | 25 | **OpenAI `token_expired` refresh 永久失效分类** | ✅ (v0.1.144) | ✅ 已实现（命中即禁用账号并标记需重新授权，停止后台无效重试）| ✅ 已完成 |
 | 26 | **Claude Fable 7d_oi 模型级 quota 窗口** | ✅ (v0.1.144) | ⚠️ 已实现窗口采样/展示与 Fable-only 429 不整体 cooldown；未做持久化模型级调度黑名单 | 轻量完成 |
-| 27 | **Codex `image_generation` 工具策略** | ✅ (v0.1.144) | ✅ 网关开关开启时保留显式 tool / `tool_choice`，关闭时统一剥离 | ✅ 轻量完成 |
+| 27 | **Codex `image_generation` 工具策略** | ✅ (v0.1.144) | ✅ 网关开关开启时保留显式 tool / `tool_choice`，关闭时统一剥离；独立图片入口的能力失效按模型维度冷却 | ✅ 已完成 |
 | 28 | **Anthropic OAuth dateline 指纹归一化** | ✅ (v0.1.142) | ✅ 已实现（system 与 `<system-reminder>` 内日期句归一化，避免改用户正文） | ✅ 已完成 |
-| 29 | **OpenAI Images 网关**（generations / edits、JSON / multipart、JSON / SSE） | ✅ | ✅ 参考 sub2api OAuth Responses 图片桥实现 | ✅ 已完成 |
+| 29 | **OpenAI Images 网关**（generations / edits、JSON / multipart、JSON / SSE） | ✅ | ✅ OAuth Responses 图片桥；缓冲路径支持语义失败换号、能力失效冷却和错误分类 | ✅ 已完成 |
 | 30 | **Responses `input_tokens` 预检端点** | ✅ (v0.1.179) | ✅ 已实现本地结构化估算（最终用量仍以上游 usage 为准） | ✅ 兼容完成 |
 
 > 上表第 13–20 项为对照 sub2api **v0.1.119–v0.1.134** 新增能力补入；第 21–24 项为对照 **v0.1.137/v0.1.138** 补入；第 25–28 项为对照 **v0.1.142–v0.1.144** 补入。标 ✅ 的括号为该能力在 sub2api 的引入版本。这些多为偏 SaaS / 合规 / 计费精度方向，符合 model-bridge「轻量自托管」错位定位，按价值择优追赶即可。
@@ -106,17 +106,19 @@
 
 ## 六、本次更新整理
 
-### 跟踪 sub2api v0.1.183 之后主线（b5827cfd，尚未发布）
+### 跟踪 sub2api 至 v0.1.184 及之后主线（200602b4）
 
-对照上游 2026-08-26～2026-08-29 的主线修复，本项目已落地与现有 TypeScript 中转路径同构的部分：
+对照上游 2026-08-26～2026-08-31 的 v0.1.184 与后续主线修复，本项目已落地与现有 TypeScript 中转路径同构的部分：
 
 - **DeepSeek 官方峰谷计价**：高峰窗口仅工作日生效，北京时间周末全天低谷；模型广场与后端计费保持同一口径。
 - **OpenAI/Codex Spark 模型级限流**：即使 429 携带全局 `x-codex-*` 配额头，也只冷却 Spark 模型族，并补齐专用价卡。
 - **非流式 Responses 终止失败处理**：HTTP 200 内的 `response.failed` / `error` 在产生可见输出前按临时故障换号，策略错误不重试，最终响应返回正确 HTTP 状态。
 - **Fable 模型级冷却**：`7d_oi` 窗口只作用于 Fable/Mythos 模型，不暂停整个 Claude 账号。
 - **Grok Responses 兼容**：清理不支持的 `metadata`，保留稳定会话键，修复混合联合工具 Schema。
+- **OpenAI 图片账号故障转移**：自建图片请求明确返回 `image_generation` 能力失效时，只写图片模型族冷却并换号，默认 30 分钟且可配置；HTTP 200 SSE 内的结构化失败也会在缓冲响应提交前参与换号。模型仅回文字或成功终止但无图时只换号、不写账号状态，内容政策拒绝不遍历账号池。
+- **Grok 工具输出图片**：将 `function_call_output.images` 与 Grok 1.0.5 结构化图片块提升为后续用户 `input_image` 消息，同时把 xAI 要求的工具输出归一为字符串并保持连续工具回复顺序。
 
-WebSocket 专用调度、Fast/Flex 服务档位、Zhipu 团队 Coding Plan 查询和动态 Codex 模型目录仍未引入；这些功能依赖上游 Go 调度/账号模型，需单独设计。
+WebSocket 专用调度、Fast/Flex 服务档位、Zhipu 团队 Coding Plan 查询和动态 Codex 模型目录仍未引入；这些功能依赖上游 Go 调度/账号模型，需单独设计。v0.1.184 之后的自定义 OpenAI 兼容渠道图片能力声明属于动态 Codex Manifest 路径，本项目当前使用静态 OpenAI 风格 `/v1/models`，不直接移植。
 
 ### 核查 sub2api v0.1.175–v0.1.183（2026-08-12～2026-08-26）
 

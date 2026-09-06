@@ -52,6 +52,7 @@ function scriptOrder(row: Record<string, unknown>) {
     const normalized = sql.trim()
     if (/^(BEGIN|COMMIT|ROLLBACK)$/i.test(normalized)) return { rows: [], rowCount: 0 }
     if (/SELECT id, user_id, provider, status/.test(sql)) return { rows: [row], rowCount: 1 }
+    if (/INSERT INTO payment_notification_events/.test(sql)) return { rows: [], rowCount: 1 }
     if (/UPDATE payment_orders/.test(sql)) return { rows: [], rowCount: 1 }
     return { rows: [], rowCount: 0 }
   })
@@ -121,5 +122,21 @@ describe('handlePaymentNotification', () => {
       statusCode: 409,
     })
     expect(mocks.applyWalletTransactionWithClient).not.toHaveBeenCalled()
+  })
+
+  it('uses the persisted CNY amount for Alipay web notification checks', async () => {
+    scriptOrder(order({ provider: 'alipay_web', provider_amount: '72.00' }))
+    mocks.verifyNotification.mockResolvedValue({
+      providerOrderId: 'trade_1',
+      orderId: 'po_1',
+      status: 'success',
+      paidProviderAmount: '72.00',
+      tradeStatus: 'TRADE_SUCCESS',
+      rawData: {},
+    })
+
+    await expect(handlePaymentNotification({ provider: 'alipay', data: { notify_id: 'n1' } }))
+      .resolves.toEqual({ success: true, orderId: 'po_1' })
+    expect(mocks.applyWalletTransactionWithClient).toHaveBeenCalledOnce()
   })
 })

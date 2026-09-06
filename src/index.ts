@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import Fastify from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import fastifyStatic from '@fastify/static'
+import fastifyFormbody from '@fastify/formbody'
 import { config } from './config'
 import { pool } from './db/index'
 import { initDb } from './db/init'
@@ -20,6 +21,7 @@ import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startQuotaAutopauseJob } from './jobs/quotaAutopause'
 import { closeOauthCallbackServer, startOauthCallbackServer } from './oauthCallback'
 import { initPaymentProviders } from './payments/providers/index'
+import { loadAlipayPaymentConfig } from './payments/config'
 import { closeRedis } from './store/redis'
 import { waitForPendingUsage } from './usage/recorder'
 import { TRUSTED_LOCAL_PROXIES } from './http/trustProxy'
@@ -37,20 +39,7 @@ async function main(): Promise<void> {
 
   // 初始化支付提供商
   initPaymentProviders({
-    alipay:
-      config.ALIPAY_APP_ID &&
-      config.ALIPAY_PRIVATE_KEY &&
-      config.ALIPAY_PUBLIC_KEY &&
-      config.ALIPAY_NOTIFY_URL &&
-      config.ALIPAY_RETURN_URL
-        ? {
-            appId: config.ALIPAY_APP_ID,
-            privateKey: config.ALIPAY_PRIVATE_KEY,
-            alipayPublicKey: config.ALIPAY_PUBLIC_KEY,
-            notifyUrl: config.ALIPAY_NOTIFY_URL,
-            returnUrl: config.ALIPAY_RETURN_URL,
-          }
-        : undefined,
+    alipay: loadAlipayPaymentConfig(),
     wechat:
       config.WECHAT_APP_ID && config.WECHAT_MCH_ID && config.WECHAT_API_KEY && config.WECHAT_NOTIFY_URL
         ? {
@@ -82,6 +71,7 @@ async function main(): Promise<void> {
   })
 
   await app.register(fastifyJwt, { secret: config.JWT_SECRET })
+  await app.register(fastifyFormbody)
   registerSecurityHeaders(app)
   app.addHook('onRequest', panelRateLimit)
 

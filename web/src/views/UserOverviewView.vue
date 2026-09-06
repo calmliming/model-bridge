@@ -37,6 +37,7 @@ interface PaymentOrder {
   status: string
   amount: number
   paymentUrl: string | null
+  paymentHtml: string | null
   expiresAt: number
   paidAt: number | null
   createdAt: number
@@ -88,12 +89,14 @@ const purchasingId = ref<string | null>(null)
 const subscriptions = ref<Subscription[]>([])
 const storePlans = ref<StorePlan[]>([])
 const rechargeAmount = ref(10)
-const selectedProvider = ref<'manual' | 'alipay' | 'wechat'>('manual')
-const availableProviders = ref<Array<'manual' | 'alipay' | 'wechat'>>(['manual'])
+type PaymentProvider = 'manual' | 'alipay' | 'alipay_web' | 'wechat'
+const selectedProvider = ref<PaymentProvider>('manual')
+const availableProviders = ref<PaymentProvider[]>(['manual'])
 const currentPaymentOrder = ref<PaymentOrder | null>(null)
 const paymentQrDataUrl = ref('')
 const paymentQrLoading = ref(false)
 const paymentQrError = ref('')
+const queryingPayment = ref(false)
 const user = ref<UserMe | null>(null)
 const transactions = ref<WalletTransaction[]>([])
 const usageLogs = ref<UsageLog[]>([])
@@ -207,6 +210,7 @@ const metricCards = computed(() => [
 const providerLabels: Record<string, string> = {
   manual: '线下转账',
   alipay: '支付宝',
+  alipay_web: '支付宝网页支付',
   wechat: '微信支付',
 }
 
@@ -282,6 +286,11 @@ async function createRechargeOrder() {
     currentPaymentOrder.value = data.order
     showRecharge.value = false
 
+    if (selectedProvider.value === 'alipay_web') {
+      if (!data.order.paymentHtml) throw new Error('支付表单不可用，请检查支付宝网页支付配置')
+      submitAlipayPaymentForm(data.order.paymentHtml)
+      return
+    }
     if (selectedProvider.value === 'alipay' || selectedProvider.value === 'wechat') {
       showPaymentQr.value = true
       await generatePaymentQr(data.order)
@@ -296,6 +305,22 @@ async function createRechargeOrder() {
   } finally {
     creatingOrder.value = false
   }
+}
+
+function submitAlipayPaymentForm(paymentHtml: string) {
+  const container = document.createElement('div')
+  container.innerHTML = paymentHtml
+  container.style.position = 'fixed'
+  container.style.inset = '0'
+  container.style.zIndex = '9999'
+  container.style.background = '#fff'
+  document.body.appendChild(container)
+  const form = container.querySelector<HTMLFormElement>('form')
+  if (!form) {
+    container.remove()
+    throw new Error('支付宝返回的支付表单无效')
+  }
+  form.submit()
 }
 
 async function generatePaymentQr(order: PaymentOrder) {
@@ -317,6 +342,27 @@ async function generatePaymentQr(order: PaymentOrder) {
     paymentQrError.value = '二维码生成失败，请打开支付链接完成付款'
   } finally {
     paymentQrLoading.value = false
+  }
+}
+
+async function queryCurrentPayment() {
+  const order = currentPaymentOrder.value
+  if (!order) return
+  queryingPayment.value = true
+  try {
+    const { data } = await api.post(`/users/payment-orders/${order.id}/query`, {})
+    currentPaymentOrder.value = data.order
+    if (data.order.status === 'paid') {
+      showPaymentQr.value = false
+      message.success('支付已确认，充值金额已到账')
+    } else {
+      message.info('支付宝尚未确认付款，请稍后再试')
+    }
+    await load()
+  } catch (e) {
+    message.error(errMsg(e, '查询支付状态失败'))
+  } finally {
+    queryingPayment.value = false
   }
 }
 
@@ -606,7 +652,7 @@ onMounted(load)
       <template #footer>
         <UiSpace justify="end">
           <UiButton @click="showPaymentQr = false">稍后支付</UiButton>
-          <UiButton type="primary" @click="load">我已支付，刷新状态</UiButton>
+          <UiButton type="primary" :loading="queryingPayment" @click="queryCurrentPayment">我已支付，查询状态</UiButton>
         </UiSpace>
       </template>
     </UiModal>

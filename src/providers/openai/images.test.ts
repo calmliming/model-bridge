@@ -194,6 +194,64 @@ describe('OpenAI Images Responses bridge', () => {
     expect(converted.body).toEqual({
       error: { type: 'invalid_request_error', code: 'policy_violation', message: 'blocked' },
     })
+    expect(converted.failureSource).toBe('upstream')
+  })
+
+  it('treats a plain-text fallback as retryable image unavailability, not policy', () => {
+    const converted = convertOpenAIImagesSse(sse({
+      type: 'response.completed',
+      response: {
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: "Here's a polished image prompt." }],
+        }],
+      },
+    }), generation())
+
+    expect(converted).toMatchObject({
+      status: 'error',
+      httpStatus: 502,
+      failureSource: 'model_text',
+      body: {
+        error: {
+          code: 'image_generation_unavailable',
+          message: "Here's a polished image prompt.",
+        },
+      },
+    })
+  })
+
+  it('keeps an explicit model policy refusal terminal', () => {
+    const converted = convertOpenAIImagesSse(sse({
+      type: 'response.completed',
+      response: {
+        output: [{
+          type: 'message',
+          content: [{ type: 'output_text', text: 'Blocked by our content policy.' }],
+        }],
+      },
+    }), generation())
+
+    expect(converted).toMatchObject({
+      status: 'error',
+      httpStatus: 400,
+      failureSource: 'model_text',
+      body: { error: { code: 'content_policy_violation' } },
+    })
+  })
+
+  it('marks a successful terminal without image output as a missing-output failure', () => {
+    const converted = convertOpenAIImagesSse(sse({
+      type: 'response.completed',
+      response: { output: [] },
+    }), generation())
+
+    expect(converted).toMatchObject({
+      status: 'error',
+      httpStatus: 502,
+      failureSource: 'missing_output',
+      body: { error: { code: 'image_generation_no_output' } },
+    })
   })
 })
 

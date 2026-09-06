@@ -181,7 +181,9 @@ OpenAI 图片生成现已通过 ChatGPT OAuth 账号桥接到 Responses
 `image_generation` 工具，支持 `/v1/images/generations`、`/v1/images/edits`
 及对应的 `/api/openai/v1/...` 路径。embeddings 仍未暴露。默认图片模型为
 `gpt-image-2`；可用 `OPENAI_IMAGE_GENERATION_ENABLED=false` 关闭图片入口和
-Responses 中显式声明的图片工具。
+Responses 中显式声明的图片工具。账号明确报告图片能力不可用时，网关只冷却该
+账号的图片调度（默认 30 分钟），不会影响文本请求；可通过
+`OPENAI_IMAGE_UNAVAILABLE_COOLDOWN_MINUTES` 调整为 1～120 分钟。
 
 ```bash
 curl http://localhost:3000/v1/images/generations \
@@ -313,6 +315,23 @@ Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 
 服务收到 `SIGTERM`/`SIGINT` 后会停止接收新请求，等待在途请求、OAuth 回调、后台任务
 和用量扣费落库，再关闭 PostgreSQL/Redis 连接。关停超时固定为 30 秒；Docker Compose
 预留 35 秒停止宽限期。
+
+### 支付宝 AI 网页应用收款
+
+账户充值支持保留原有支付宝扫码支付，并新增基于官方 `alipay-sdk` 的支付宝网页支付。
+配置 `ALIPAY_APP_ID`、Node.js 所需的 PKCS#1 原始 `ALIPAY_PRIVATE_KEY`、
+`ALIPAY_PUBLIC_KEY`、`ALIPAY_SELLER_ID`（或 `ALIPAY_SELLER_EMAIL`）以及指向本站
+`/api/payment/return/alipay` 的 `ALIPAY_RETURN_URL` 后，用户充值页会显示“支付宝网页支付”。
+
+本地没有公网 HTTPS 地址时可以暂不设置 `ALIPAY_NOTIFY_URL`，服务端仍会实现并保留
+通知验签、业务字段校验、持久化幂等和主动交易查询；生产上线前必须把
+`ALIPAY_NOTIFY_URL` 配置为公网 HTTPS 的 `/api/payment/callback/alipay`，完成真实通知联调。
+沙箱联调时把 `ALIPAY_GATEWAY` 设为
+`https://openapi-sandbox.dl.alipaydev.com/gateway.do`，生产环境留空使用正式网关。
+
+网站支付覆盖下单、主动查询、管理员关单、退款、退款查询、同步回跳和异步通知。
+退款接口位于 `/api/admin/payment-orders/:id/refunds`，同一次未知结果重试必须复用
+原 `outRequestNo`；退款查询至少等待 10 秒。
 
 ### 从旧版 SQLite 升级到 PostgreSQL（一键迁移）
 

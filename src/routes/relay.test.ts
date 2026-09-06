@@ -4,6 +4,8 @@ import Fastify from 'fastify'
 import {
   classifyUpstreamFailure,
   classifyBufferedResponsesFailure,
+  classifyBufferedOpenAIImageFailure,
+  classifyOpenAIImageUpstreamFailure,
   isAnthropicFableModel,
   isAnthropicFableOnlyWindowExceeded,
   isOpenaiSparkModel,
@@ -16,6 +18,7 @@ import {
   startStreamingResponse,
   writeSseEventBlock,
 } from './relay'
+import { parseOpenAIImagesRequest } from '../providers/openai/images'
 
 describe('startStreamingResponse', () => {
   it('disables intermediary buffering and flushes SSE headers immediately', () => {
@@ -507,5 +510,108 @@ describe('classifyBufferedResponsesFailure', () => {
       ].join('\n'),
     )
     expect(failure).toBeNull()
+  })
+})
+
+describe('OpenAI Images account failover classification', () => {
+  const request = parseOpenAIImagesRequest(
+    { model: 'gpt-image-2', prompt: 'draw a cat' },
+    'application/json',
+    'generations',
+  )
+  const imageSse = (...events: unknown[]) =>
+    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+
+  it('cools only image capability for the self-built tool-missing HTTP 400', async () => {
+    const before = Date.now()
+    const failure = await classifyOpenAIImageUpstreamFailure(
+      new Response(JSON.stringify({
+        error: {
+          type: 'invalid_request_error',
+          message: "Tool choice 'image_generation' not found in 'tools' parameter.",
+        },
+      }), { status: 400 }),
+      'gpt-image-2',
+      7 * 60_000,
+    )
+
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: true,
+      accountScoped: false,
+    })
+    expect(failure.resetAt).toBeGreaterThanOrEqual(before + 7 * 60_000)
+  })
+
+  it('does not reinterpret an unrelated invalid image request as account failure', async () => {
+    const failure = await classifyOpenAIImageUpstreamFailure(
+      new Response(JSON.stringify({
+        error: { type: 'invalid_request_error', message: 'Invalid input image.' },
+      }), { status: 400 }),
+      'gpt-image-2',
+    )
+    expect(failure).toMatchObject({ penalty: null, retryable: false })
+  })
+
+  it('cools image capability for a structured unavailable SSE terminal', async () => {
+    const before = Date.now()
+    const failure = await classifyBufferedOpenAIImageFailure(
+      imageSse({
+        type: 'response.failed',
+        response: {
+          error: {
+            type: 'upstream_error',
+            code: 'image_generation_unavailable',
+            message: 'Image generation is unavailable for this account.',
+          },
+        },
+      }),
+      request,
+      'gpt-image-2',
+      5 * 60_000,
+    )
+
+    expect(failure).toMatchObject({
+      penalty: 'rate_limited',
+      retryable: true,
+      modelScoped: true,
+      accountScoped: false,
+    })
+    expect(failure?.resetAt).toBeGreaterThanOrEqual(before + 5 * 60_000)
+  })
+
+  it('retries a plain-text fallback without cooling account state', async () => {
+    const failure = await classifyBufferedOpenAIImageFailure(
+      imageSse({
+        type: 'response.completed',
+        response: {
+          output: [{
+            type: 'message',
+            content: [{ type: 'output_text', text: "Here's an improved prompt." }],
+          }],
+        },
+      }),
+      request,
+      'gpt-image-2',
+    )
+    expect(failure).toEqual({ penalty: null, retryable: true })
+  })
+
+  it('does not fail over a content-policy refusal', async () => {
+    const failure = await classifyBufferedOpenAIImageFailure(
+      imageSse({
+        type: 'response.completed',
+        response: {
+          output: [{
+            type: 'message',
+            content: [{ type: 'output_text', text: 'Blocked by our content policy.' }],
+          }],
+        },
+      }),
+      request,
+      'gpt-image-2',
+    )
+    expect(failure).toEqual({ penalty: null, retryable: false })
   })
 })

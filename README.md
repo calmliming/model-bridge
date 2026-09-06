@@ -227,8 +227,12 @@ curl http://localhost:3000/v1/images/edits \
 Set `stream:true` for `image_generation.partial_image` and
 `image_generation.completed` SSE events (`image_edit.*` for edits). The default
 image model is `gpt-image-2`; set `OPENAI_IMAGE_GENERATION_ENABLED=false` to
-disable the Images endpoints and explicit image tools on Responses. Image
-options follow the [OpenAI Image Generation guide](https://developers.openai.com/api/docs/guides/image-generation).
+disable the Images endpoints and explicit image tools on Responses. When an
+account explicitly reports that image generation is unavailable, only its
+image capability is cooled down (30 minutes by default) while text requests
+remain schedulable; configure 1–120 minutes with
+`OPENAI_IMAGE_UNAVAILABLE_COOLDOWN_MINUTES`. Image options follow the
+[OpenAI Image Generation guide](https://developers.openai.com/api/docs/guides/image-generation).
 
 ### Codex CLI on DeepSeek
 
@@ -349,6 +353,27 @@ On `SIGTERM`/`SIGINT`, the service stops accepting new requests and waits for
 in-flight requests, OAuth callbacks, background jobs, and usage billing writes
 before closing PostgreSQL/Redis. The shutdown timeout is fixed at 30 seconds;
 Docker Compose grants a 35-second stop grace period.
+
+### Alipay AI web application payment
+
+Wallet recharge keeps the existing Alipay QR flow and adds an official
+`alipay-sdk` web checkout. Configure `ALIPAY_APP_ID`, the raw PKCS#1 private key
+required by Node.js in `ALIPAY_PRIVATE_KEY`, `ALIPAY_PUBLIC_KEY`,
+`ALIPAY_SELLER_ID` (or `ALIPAY_SELLER_EMAIL`), and an `ALIPAY_RETURN_URL` that
+points to this deployment's `/api/payment/return/alipay` route.
+
+`ALIPAY_NOTIFY_URL` may be omitted for local development without public HTTPS;
+the notification verification, business checks, persistent idempotency, and
+active-query fallback remain implemented. Before production, configure the
+public HTTPS `/api/payment/callback/alipay` URL and complete a real notification
+test. Set `ALIPAY_GATEWAY` to
+`https://openapi-sandbox.dl.alipaydev.com/gateway.do` for sandbox testing; leave
+it empty to use the production gateway.
+
+The integration covers page payment, active query, admin close, refund, refund
+query, synchronous return, and asynchronous notification. Reuse the original
+`outRequestNo` when retrying an uncertain refund, and wait at least 10 seconds
+before querying it.
 
 ### Upgrading from the old SQLite version (one-click)
 

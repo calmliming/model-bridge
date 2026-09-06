@@ -166,11 +166,43 @@ export const paymentOrders = pgTable('payment_orders', {
   amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
   providerOrderId: text('provider_order_id'),
   paymentUrl: text('payment_url'),
+  paymentHtml: text('payment_html'),
+  providerAmount: text('provider_amount'),
+  providerCurrency: text('provider_currency'),
+  tradeStatus: text('trade_status'),
+  refundedAmountMicros: bigint('refunded_amount_micros', { mode: 'number' }).notNull().default(0),
   walletTransactionId: text('wallet_transaction_id'),
   note: text('note'),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   paidAt: bigint('paid_at', { mode: 'number' }),
   canceledAt: bigint('canceled_at', { mode: 'number' }),
+  createdAt: epochMs('created_at'),
+  updatedAt: epochMs('updated_at'),
+})
+
+/** Verified payment notifications, persisted for replay-safe processing. */
+export const paymentNotificationEvents = pgTable('payment_notification_events', {
+  id: text('id').primaryKey(),
+  provider: text('provider').notNull(),
+  notifyId: text('notify_id').notNull().unique(),
+  outTradeNo: text('out_trade_no').notNull(),
+  providerOrderId: text('provider_order_id'),
+  tradeStatus: text('trade_status'),
+  rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull(),
+  createdAt: epochMs('created_at'),
+})
+
+/** One idempotent refund request against a paid recharge order. */
+export const paymentRefunds = pgTable('payment_refunds', {
+  id: text('id').primaryKey(),
+  paymentOrderId: text('payment_order_id').notNull(),
+  status: text('status').notNull().default('pending'), // pending | succeeded | unknown | failed
+  amountMicros: bigint('amount_micros', { mode: 'number' }).notNull(),
+  providerAmount: text('provider_amount').notNull(),
+  providerCurrency: text('provider_currency').notNull().default('CNY'),
+  reason: text('reason'),
+  walletTransactionId: text('wallet_transaction_id'),
+  providerResponse: jsonb('provider_response').$type<Record<string, unknown>>(),
   createdAt: epochMs('created_at'),
   updatedAt: epochMs('updated_at'),
 })
