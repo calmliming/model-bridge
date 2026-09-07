@@ -82,7 +82,7 @@ import { mapModel as mapQwenResponsesModel } from '../providers/qwen/converter'
 import { relayKimiMessages } from '../providers/kimi/relay'
 import * as kimiUsage from '../providers/kimi/usage'
 import { relayKimiChatCompletions } from '../providers/kimi/chat-relay'
-import { relayKimiResponses } from '../providers/kimi/responses-relay'
+import { relayKimiResponses, relayNativeKimiResponses, supportsNativeKimiResponses } from '../providers/kimi/responses-relay'
 import * as kimiResponsesUsage from '../providers/kimi/responses-usage'
 import { createKimiResponsesStreamTransform } from '../providers/kimi/stream'
 import { mapModel as mapKimiResponsesModel } from '../providers/kimi/converter'
@@ -102,6 +102,7 @@ import type { ProviderId } from '../providers/types'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 import { estimateResponsesInputTokens } from './inputTokens'
+import { upstreamRequestId, streamFailureDetails, redactUpstreamError } from '../http/upstreamDiagnostics'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
@@ -247,7 +248,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   // chat.completion chunks (buffered to JSON for non-stream clients).
   'claude-chat': {
     id: 'claude',
-    forceStream: true,
+    forceStream: false,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
       action: 'chat.completions',
@@ -623,6 +624,8 @@ interface RelayMeta {
   billTo: 'subscription' | 'balance'
   subscriptionId: string | null
   attemptCount: number
+  upstreamRequestId?: string | null
+  reasoningEffort?: string | null
 }
 
 export interface UpstreamFailure {
@@ -640,6 +643,17 @@ export interface UpstreamFailure {
   modelScoped?: boolean
   /** The local credential/account is exhausted or invalid, so retries must rotate it. */
   accountScoped?: boolean
+  /** This credential lacks the model; try a different account, including relay gateways. */
+  modelUnavailable?: boolean
+}
+
+function isModelUnavailable(provider: string, text: string): boolean {
+  if (!['openai', 'sub2api', 'grok', 'deepseek', 'kimi', 'qwen', 'zhipu', 'xiaomi'].includes(provider)) return false
+  const error = parsedErrorObject(text)
+  const code = normalizedMessage(error?.code ?? error?.type)
+  if (['model_not_found', 'model_not_available', 'unsupported_model'].includes(code)) return true
+  const message = normalizedMessage(error?.message)
+  return /(?:model[^.\n]{0,160}(?:does not exist|not found|not available|not supported)|unknown model)/i.test(message)
 }
 
 function textLooksRateLimited(text: string): boolean {
@@ -958,6 +972,11 @@ export async function classifyUpstreamFailure(
   response: Response,
   model = '',
 ): Promise<UpstreamFailure> {
+  if (response.status === 400 || response.status === 404) {
+    if (isModelUnavailable(provider, await readErrorText(response))) {
+      return { penalty: 'error', retryable: true, modelScoped: true, modelUnavailable: true }
+    }
+  }
   if (response.status === 429) {
     const text = await readErrorText(response)
     if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers, model)) {
@@ -1032,7 +1051,7 @@ export async function classifyUpstreamFailure(
 
 /** Relay gateways retry transient backend failures in place, but rotate exhausted credentials. */
 export function shouldRetrySameRelayAccount(failure: UpstreamFailure): boolean {
-  return failure.retryable && failure.accountScoped !== true
+  return failure.retryable && failure.accountScoped !== true && !failure.modelUnavailable
 }
 
 type FailureRetryMode = 'same-account' | 'next-account'
@@ -1057,7 +1076,7 @@ async function applyFailureSideEffects(
   }
 
   if (failure.penalty) {
-    if (failure.modelScoped && !relayToRelay) {
+    if (failure.modelScoped && (!relayToRelay || failure.modelUnavailable)) {
       await penalizeAccountModel(accountId, model, failure.penalty, failure.resetAt)
     } else {
       const cooldownUntil = relayToRelay && !failure.accountScoped
@@ -1574,7 +1593,7 @@ function dispatchByModel(
     const body = (request.body ?? {}) as Record<string, unknown>
     const raw = typeof body.model === 'string' ? body.model : ''
     const mapped = mapRequestedModel(raw, apiKey.modelMappings)
-    const match = routed.find((r) => r.test.test(raw) || r.test.test(mapped))
+    const match = routed.find((r) => r.test.test(mapped))
     return executeRelay(request, reply, match ? match.handler : defaultHandler)
   }
 }
@@ -1673,6 +1692,14 @@ async function executeRelay(
   const parsed: ParsedRoute = {
     ...route,
     model: provider.normalizeModel ? provider.normalizeModel(mappedModel) : mappedModel,
+  }
+  if (provider === PROVIDERS['kimi-responses'] && supportsNativeKimiResponses(parsed.model)) {
+    provider = {
+      ...provider,
+      forceStream: false,
+      callUpstream: (token, input) => relayNativeKimiResponses(token, input),
+      createStreamTransform: undefined,
+    }
   }
 
   if (apiKey.allowedProviders && !apiKey.allowedProviders.includes(provider.id)) {
@@ -1775,6 +1802,7 @@ async function runRelayLoop(
   const sessionKey = session?.key ?? null
   const tried: string[] = []
   let terminalFailureRecorded = false
+  let lastModelUnavailable: { response: Response; meta: RelayMeta } | null = null
   // When a sticky account is temporarily full, a one-request spillover may be
   // selected. Keep the durable session binding on the original account so a
   // short capacity burst does not migrate the whole conversation to a
@@ -1806,6 +1834,13 @@ async function runRelayLoop(
       parsed.model,
     )
     if (!account) {
+      if (lastModelUnavailable) {
+        const { response, meta } = lastModelUnavailable
+        if (relayToRelay && !provider.responsesProtocol) await sendSanitizedRelayError(request, reply, response, meta)
+        else if (wantStream) await sendStreaming(reply, response, meta, provider)
+        else await sendBuffered(reply, response, meta, provider)
+        return
+      }
       const unavailableMessage = tried.length
         ? `all ${provider.id} accounts are unavailable`
         : `no ${provider.id} account configured`
@@ -1853,78 +1888,94 @@ async function runRelayLoop(
     }
     tried.push(account.id)
 
-    let token: string
     try {
-      token = await ensureFreshToken(account)
-    } catch (err) {
-      if (err instanceof PermanentRefreshError) {
-        // Account was already disabled inside refreshAccountToken. Do NOT
-        // penalize — that would overwrite `disabled` with `error` + cooldown
-        // and revive the dead token into the pool. Just release and move on.
-        request.log.warn(`account ${account.id} disabled: refresh token invalid (${err.signal})`)
-        if (sessionKey) await clearStickyAccount(sessionKey)
-        if (accountLimit != null) await releaseSlot(accountSlotKey)
+      let token: string
+      try {
+        token = await ensureFreshToken(account)
+      } catch (err) {
+        if (err instanceof PermanentRefreshError) {
+          // Account was already disabled inside refreshAccountToken. Do NOT
+          // penalize — that would overwrite `disabled` with `error` + cooldown
+          // and revive the dead token into the pool. Just release and move on.
+          request.log.warn(`account ${account.id} disabled: refresh token invalid (${err.signal})`)
+          if (sessionKey) await clearStickyAccount(sessionKey)
+          continue
+        }
+        request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
+        await penalizeAccount(account.id, 'error')
         continue
       }
-      request.log.warn(`token refresh failed for ${account.id}: ${(err as Error).message}`)
-      await penalizeAccount(account.id, 'error')
-      if (accountLimit != null) await releaseSlot(accountSlotKey)
-      continue
-    }
 
-    const startedAt = Date.now()
-    let upstream: Response
-    try {
-      upstream = await provider.callUpstream(token, body, {
-        model: parsed.model,
-        action: parsed.action,
-        account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
-      })
-    } catch (err) {
-      const upstreamError = err instanceof Error ? err.message : String(err)
-      request.log.warn(`upstream call failed for ${account.id}: ${upstreamError}`)
-      if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
-        // Transient network error reaching the sub2api gateway: retry the same
-        // account (don't cool it down or exclude it) so the next attempt can
-        // land on a healthy backend behind the gateway.
-        if (accountLimit != null) await releaseSlot(accountSlotKey)
-        tried.pop()
-        continue
-      }
-      await penalizeAccount(
-        account.id,
-        'error',
-        relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : undefined,
-      )
-      if (accountLimit != null) await releaseSlot(accountSlotKey)
-      if (attempt === MAX_ATTEMPTS - 1) {
-        await recordUsage({
-          apiKeyId: apiKey.id,
-          userId: apiKey.userId,
-          accountId: account.id,
-          provider: provider.id,
+      const startedAt = Date.now()
+      let upstream: Response
+      try {
+        upstream = await provider.callUpstream(token, body, {
           model: parsed.model,
-          multiplier: apiKey.groupMultiplier ?? 1,
-          billTo: apiKey.billTo,
-          subscriptionId: apiKey.subscriptionId,
-          usage: emptyUsage(),
-          status: 'error',
-          errorCode: 'upstream_network_error',
-          errorMessage: redactUrls(upstreamError),
-          attemptCount: attempt + 1,
-          latencyMs: Date.now() - startedAt,
-          requestInput: provider.summarizeRequestInput
-            ? provider.summarizeRequestInput(body)
-            : summarizeRequestInput(body),
-          sessionKeyHash: session?.hash ?? null,
-          sessionSource: session?.source ?? null,
+          action: parsed.action,
+          account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
         })
-        terminalFailureRecorded = true
+      } catch (err) {
+        const upstreamError = err instanceof Error ? err.message : String(err)
+        request.log.warn(`upstream call failed for ${account.id}: ${upstreamError}`)
+        if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
+          // Transient network error reaching the sub2api gateway: retry the same
+          // account (don't cool it down or exclude it) so the next attempt can
+          // land on a healthy backend behind the gateway.
+          tried.pop()
+          continue
+        }
+        await penalizeAccount(
+          account.id,
+          'error',
+          relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : undefined,
+        )
+        if (attempt === MAX_ATTEMPTS - 1) {
+          await recordUsage({
+            apiKeyId: apiKey.id,
+            userId: apiKey.userId,
+            accountId: account.id,
+            provider: provider.id,
+            model: parsed.model,
+            multiplier: apiKey.groupMultiplier ?? 1,
+            billTo: apiKey.billTo,
+            subscriptionId: apiKey.subscriptionId,
+            usage: emptyUsage(),
+            status: 'error',
+            errorCode: 'upstream_network_error',
+            errorMessage: redactUrls(upstreamError),
+            attemptCount: attempt + 1,
+            latencyMs: Date.now() - startedAt,
+            requestInput: provider.summarizeRequestInput
+              ? provider.summarizeRequestInput(body)
+              : summarizeRequestInput(body),
+            sessionKeyHash: session?.hash ?? null,
+            sessionSource: session?.source ?? null,
+          })
+          terminalFailureRecorded = true
+        }
+        continue
       }
-      continue
-    }
+      const meta: RelayMeta = {
+        apiKeyId: apiKey.id,
+        userId: apiKey.userId,
+        accountId: account.id,
+        provider: provider.id,
+        model: parsed.model,
+        requestInput: provider.summarizeRequestInput
+          ? provider.summarizeRequestInput(body)
+          : summarizeRequestInput(body),
+        sessionKeyHash: session?.hash ?? null,
+        sessionSource: session?.source ?? null,
+        startedAt,
+        multiplier: apiKey.groupMultiplier ?? 1,
+        billTo: apiKey.billTo,
+        subscriptionId: apiKey.subscriptionId,
+        attemptCount: attempt + 1,
+        upstreamRequestId: upstreamRequestId(upstream.headers, (account.metadata as Record<string, unknown> | null)?.upstreamRequestIdHeader),
+        reasoningEffort: typeof body.reasoning_effort === 'string' ? body.reasoning_effort
+          : typeof jsonRecord(body.reasoning)?.effort === 'string' ? jsonRecord(body.reasoning)!.effort as string : null,
+      }
 
-    try {
       const quota = extractAccountQuota(provider.id, upstream.headers)
       if (quota) await updateAccountQuota(account.id, quota)
 
@@ -1932,6 +1983,9 @@ async function runRelayLoop(
         ? await provider.classifyUpstreamFailure(upstream, parsed.model)
         : await classifyUpstreamFailure(provider.id, upstream, parsed.model)
       const lastAttempt = attempt === MAX_ATTEMPTS - 1
+      lastModelUnavailable = failure.modelUnavailable
+        ? { response: new Response(await readErrorText(upstream), { status: upstream.status, headers: upstream.headers }), meta }
+        : null
 
       if (failure.retryable && !lastAttempt) {
         const retryMode = await applyFailureSideEffects(
@@ -2004,23 +2058,7 @@ async function runRelayLoop(
         }
       }
 
-      const meta: RelayMeta = {
-        apiKeyId: apiKey.id,
-        userId: apiKey.userId,
-        accountId: account.id,
-        provider: provider.id,
-        model: parsed.model,
-        requestInput: provider.summarizeRequestInput
-          ? provider.summarizeRequestInput(body)
-          : summarizeRequestInput(body),
-        sessionKeyHash: session?.hash ?? null,
-        sessionSource: session?.source ?? null,
-        startedAt,
-        multiplier: apiKey.groupMultiplier ?? 1,
-        billTo: apiKey.billTo,
-        subscriptionId: apiKey.subscriptionId,
-        attemptCount: attempt + 1,
-      }
+
       // Relay-to-relay upstreams are third-party gateways: their error bodies
       // can embed backend hosts, channel names or other internal config. Send
       // this gateway's own sanitized envelope instead of the verbatim body
@@ -2192,6 +2230,9 @@ async function sendStreaming(
       errorMessage: redactUrls(message),
       upstreamStatus: upstream.status,
       attemptCount: meta.attemptCount,
+      upstreamRequestId: meta.upstreamRequestId,
+      reasoningEffort: meta.reasoningEffort,
+      requestStartedAt: meta.startedAt,
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,
@@ -2217,7 +2258,9 @@ async function sendStreaming(
     const responseObject = parseResponseObject(bodyText)
     const upstreamModel = extractDeclaredModel(responseObject)
     if (responseObject) {
-      const event = { type: 'response.completed', response: responseObject }
+      const type = responseObject.status === 'failed' ? 'response.failed'
+        : responseObject.status === 'incomplete' ? 'response.incomplete' : 'response.completed'
+      const event = { type, response: responseObject }
       jsonParser.feed(event)
       noteResponsesTerminal(event, jsonState)
       writeSseData(raw, event)
@@ -2241,10 +2284,13 @@ async function sendStreaming(
       subscriptionId: meta.subscriptionId,
       usage: jsonParser.result(),
       status: responsesStreamStatus(upstream.ok, responsesProtocol, jsonState),
-      errorCode: jsonState.sawFailure ? 'invalid_upstream_response' : null,
-      errorMessage: jsonState.sawFailure ? 'Upstream returned an invalid non-stream response.' : null,
+      errorCode: jsonState.errorCode ?? (jsonState.sawFailure ? 'invalid_upstream_response' : null),
+      errorMessage: jsonState.errorMessage ?? (jsonState.sawFailure ? 'Upstream returned an invalid non-stream response.' : null),
       upstreamStatus: upstream.status,
       attemptCount: meta.attemptCount,
+      upstreamRequestId: meta.upstreamRequestId,
+      reasoningEffort: meta.reasoningEffort,
+      requestStartedAt: meta.startedAt,
       upstreamModel,
       modelMismatch: upstreamModel != null
         && normalizeModelForAudit(upstreamModel) !== normalizeModelForAudit(meta.model),
@@ -2389,10 +2435,17 @@ async function sendStreaming(
   // Some upstreams close immediately after the final SSE line without the
   // customary blank separator. Preserve that final event instead of dropping
   // it while still keeping the normal event-level write path.
-  if (!streamTransform && !transform && sseOutput && buffer.length > 0) {
-    feedSseBlock(buffer, parser, streamState, modelAudit)
-    if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
-    markFirstToken()
+  if (sseOutput && buffer.trim()) {
+    if (streamTransform) {
+      if (!emitFromStreamTransform(downstreamClosed ? null : raw, buffer, streamTransform, parser,
+        parseUpstreamStream, markFirstToken, streamState, modelAudit)) downstreamClosed = true
+    } else if (transform) {
+      if (!rewriteAndEmit(downstreamClosed ? null : raw, buffer, transform, parser, markFirstToken, modelAudit)) downstreamClosed = true
+    } else {
+      feedSseBlock(buffer, parser, streamState, modelAudit)
+      if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
+      markFirstToken()
+    }
   }
   if (streamTransform) {
     for (const event of streamTransform.flush()) {
@@ -2440,19 +2493,22 @@ async function sendStreaming(
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
     status: streamStatus,
     errorCode: streamStatus === 'error'
-      ? !upstream.ok
+      ? streamState.errorCode ?? (!upstream.ok
         ? `upstream_${upstream.status}`
-        : streamState.sawTerminal ? 'upstream_stream_failed' : 'upstream_stream_closed'
+        : streamState.sawTerminal ? 'upstream_stream_failed' : 'upstream_stream_closed')
       : null,
     errorMessage: streamStatus === 'error'
-      ? !upstream.ok
+      ? streamState.errorMessage ?? (!upstream.ok
         ? `Upstream returned HTTP ${upstream.status}.`
         : streamState.sawTerminal
           ? 'Upstream stream reported an unsuccessful terminal event.'
-          : 'Upstream stream closed before completion.'
+          : 'Upstream stream closed before completion.')
       : null,
     upstreamStatus: upstream.status,
     attemptCount: meta.attemptCount,
+    upstreamRequestId: meta.upstreamRequestId,
+    reasoningEffort: meta.reasoningEffort,
+    requestStartedAt: meta.startedAt,
     upstreamModel: modelAudit.upstreamModel,
     modelMismatch: modelAudit.upstreamModel != null
       && normalizeModelForAudit(modelAudit.upstreamModel) !== normalizeModelForAudit(meta.model),
@@ -2493,6 +2549,8 @@ function responsesTerminalKind(event: unknown): 'completed' | 'failed' | 'incomp
 interface ResponsesStreamState {
   sawTerminal: boolean
   sawFailure: boolean
+  errorCode?: string
+  errorMessage?: string
 }
 
 /** A fresh stream state for tracking Responses terminal events. */
@@ -2502,6 +2560,13 @@ export function newResponsesStreamState(): ResponsesStreamState {
 
 /** Records an event's terminal kind into the stream state. */
 export function noteResponsesTerminal(event: unknown, state: ResponsesStreamState): void {
+  const error = streamFailureDetails(event)
+  if (error) {
+    state.errorCode = error.code
+    state.errorMessage = error.message
+    state.sawFailure = true
+    state.sawTerminal = true
+  }
   const kind = responsesTerminalKind(event)
   if (!kind) return
   state.sawTerminal = true
@@ -2518,7 +2583,7 @@ export function responsesStreamStatus(
   responsesProtocol: boolean,
   state: ResponsesStreamState,
 ): 'success' | 'error' {
-  if (!upstreamOk) return 'error'
+  if (!upstreamOk || state.sawFailure) return 'error'
   if (!responsesProtocol) return 'success'
   return state.sawTerminal && !state.sawFailure ? 'success' : 'error'
 }
@@ -2561,6 +2626,9 @@ async function sendSanitizedRelayError(
     errorMessage: redactUrls(message),
     upstreamStatus: upstream.status,
     attemptCount: meta.attemptCount,
+    upstreamRequestId: meta.upstreamRequestId,
+    reasoningEffort: meta.reasoningEffort,
+    requestStartedAt: meta.startedAt,
     latencyMs: Date.now() - meta.startedAt,
     requestInput: meta.requestInput,
     sessionKeyHash: meta.sessionKeyHash,
@@ -2641,9 +2709,12 @@ async function sendBuffered(
       usage,
       status: convertedStatus ?? (upstream.ok ? 'success' : 'error'),
       errorCode: errorDetails?.code ?? (convertedStatus ? 'upstream_response_failed' : null),
-      errorMessage: errorDetails ? redactUrls(errorDetails.message) : null,
+      errorMessage: errorDetails ? redactUpstreamError(errorDetails.message) : null,
       upstreamStatus: upstream.status,
       attemptCount: meta.attemptCount,
+      upstreamRequestId: meta.upstreamRequestId,
+      reasoningEffort: meta.reasoningEffort,
+      requestStartedAt: meta.startedAt,
       latencyMs: Date.now() - meta.startedAt,
       requestInput: meta.requestInput,
       sessionKeyHash: meta.sessionKeyHash,
@@ -2687,9 +2758,12 @@ async function sendBuffered(
     usage,
     status: upstream.ok ? 'success' : 'error',
     errorCode: errorDetails?.code ?? null,
-    errorMessage: errorDetails ? redactUrls(errorDetails.message) : null,
+    errorMessage: errorDetails ? redactUpstreamError(errorDetails.message) : null,
     upstreamStatus: upstream.status,
     attemptCount: meta.attemptCount,
+    upstreamRequestId: meta.upstreamRequestId,
+    reasoningEffort: meta.reasoningEffort,
+    requestStartedAt: meta.startedAt,
     upstreamModel,
     modelMismatch: upstreamModel != null && normalizeModelForAudit(upstreamModel) !== normalizeModelForAudit(meta.model),
     latencyMs: Date.now() - meta.startedAt,
@@ -2816,6 +2890,7 @@ function emitFromStreamTransform(
     return true
   }
   noteDeclaredModel(parsed, modelAudit)
+  if (parseUpstream) noteResponsesTerminal(parsed, state)
   if (parseUpstream) parser.feed(parsed)
   let wrote = true
   for (const event of xform.transform(parsed)) {

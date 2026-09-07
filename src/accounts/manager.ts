@@ -41,6 +41,7 @@ export interface CreateAccountInput {
 }
 
 export interface AccountUpdatePatch {
+  upstreamRequestIdHeader?: string | null
   status?: 'active' | 'disabled'
   weight?: number
   concurrencyLimit?: number | null
@@ -168,6 +169,8 @@ export async function listAccounts() {
 
   return Promise.all(rows.map(async ({ metadata, ...account }) => ({
     ...account,
+    upstreamRequestIdHeader: typeof metadataObject(metadata).upstreamRequestIdHeader === 'string'
+      ? metadataObject(metadata).upstreamRequestIdHeader : null,
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
@@ -224,6 +227,9 @@ async function applyAccountPatch(id: string, patch: AccountUpdatePatch): Promise
   if (patch.notes !== undefined) await setAccountNotes(id, patch.notes)
   if (patch.autopausePercent !== undefined) await setAccountAutopause(id, patch.autopausePercent)
   if (patch.proxyUrl !== undefined) await setAccountProxyUrl(id, patch.proxyUrl)
+  if (patch.upstreamRequestIdHeader !== undefined) {
+    await updateAccountMetadata(id, { upstreamRequestIdHeader: patch.upstreamRequestIdHeader })
+  }
 }
 
 function uniqueIds(ids: string[]): string[] {

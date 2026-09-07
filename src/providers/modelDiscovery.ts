@@ -1,4 +1,5 @@
 import { isAllowedModel } from '../keys/modelAllowlist'
+import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 
 export interface ModelDiscoveryKey {
@@ -40,7 +41,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
     'claude-haiku-4-5',
     'claude-fable-5',
   ],
-  openai: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2'],
+  openai: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2'],
   gemini: [
     'gemini-3.8-flash',
     'gemini-3.6-flash',
@@ -132,7 +133,7 @@ function includeCustomAllowedModels(
 ): void {
   for (const model of exactAllowedModelEntries(key)) {
     if (ids.includes(model)) continue
-    const inferred = inferProvider(model)
+    const inferred = inferProvider(mapRequestedModel(model, key.modelMappings))
     if (inferred) {
       if (providers.includes(inferred) && (!requested || requested === inferred)) ids.push(model)
       continue
@@ -150,9 +151,7 @@ function includeMappedModels(
   for (const { from, to } of exactMappingSources(key)) {
     if (ids.includes(from)) continue
     if (!isAllowedModel(from, key.allowedModels) && !isAllowedModel(to, key.allowedModels)) continue
-    const sourceProvider = inferProvider(from)
-    const targetProvider = inferProvider(to)
-    const provider = sourceProvider ?? targetProvider
+    const provider = inferProvider(to)
     if (provider) {
       if (providers.includes(provider) && (!requested || requested === provider)) ids.push(from)
       continue
@@ -170,6 +169,8 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   const ids: string[] = []
   for (const provider of providers) {
     for (const model of DEFAULT_MODELS[provider]) {
+      const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
+      if (provider !== 'sub2api' && targetProvider && !providers.includes(targetProvider)) continue
       if (isAllowedModel(model, key.allowedModels) && !ids.includes(model)) ids.push(model)
     }
   }
@@ -183,7 +184,7 @@ export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: Provid
     id,
     object: 'model',
     created: CREATED_AT,
-    owned_by: inferProvider(id) ?? requested ?? 'model-bridge',
+    owned_by: inferProvider(mapRequestedModel(id, key.modelMappings)) ?? requested ?? 'model-bridge',
     type: 'model',
     display_name: displayName(id),
   }))

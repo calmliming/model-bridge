@@ -70,9 +70,13 @@ export async function applyWalletTransactionWithClient(
     throw new Error('user not found')
   }
   const balanceAfterMicros = Number(current.balance_micros) + input.amountMicros
-  if (input.type === 'usage' && balanceAfterMicros < 0) {
-    throw new Error('insufficient balance')
+  if (!Number.isSafeInteger(balanceAfterMicros)) {
+    throw new Error('resulting balance must be a safe integer')
   }
+  // Usage settles work already performed upstream, including concurrent calls
+  // admitted before the balance was exhausted. Persist the full charge even
+  // when it creates a debt; auth blocks subsequent calls until it is repaid.
+  // Rejecting here would roll back the usage log and key quota as well.
   await client.query(
     'UPDATE users SET balance_micros = $1 WHERE id = $2',
     [balanceAfterMicros, input.userId],

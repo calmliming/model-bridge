@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
-import { estimateCost } from './pricing'
+import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
 import { consumeSubscriptionUsage } from '../subscriptions/manager'
@@ -25,6 +25,9 @@ export interface UsageRecord {
   upstreamStatus?: number | null
   attemptCount?: number
   upstreamModel?: string | null
+  upstreamRequestId?: string | null
+  reasoningEffort?: string | null
+  requestStartedAt?: number
   modelMismatch?: boolean
   /** Group billing markup applied to the base list-price cost. Defaults to 1. */
   multiplier?: number
@@ -45,7 +48,12 @@ const pendingUsageWrites = new Set<Promise<boolean>>()
 async function persistUsage(record: UsageRecord): Promise<boolean> {
   let client: PoolClient | null = null
   try {
-    const baseCost = estimateCost(record.provider, record.model, record.usage)
+    const pricedAt = record.requestStartedAt ?? Date.now()
+    const usage = { ...record.usage }
+    if (record.reasoningEffort) usage.reasoningEffort = record.reasoningEffort
+    const baseCost = estimateCost(record.provider, record.model, usage, pricedAt)
+    const price = resolveUsagePrice(record.provider, record.model, usage, pricedAt)
+    const imagePrice = usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price
     const multiplier =
       Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
     const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
@@ -77,10 +85,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
            input_tokens, output_tokens, reasoning_tokens, cache_create_tokens, cache_read_tokens,
            image_input_tokens, image_output_tokens, image_count, image_size, image_model,
            cost, base_cost, bill_to, status, error_code, error_message, upstream_status,
-           attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms)
+           attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms, upstream_request_id,
+           service_tier, reasoning_effort, billing_price)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-               $27, $28, $29, $30, $31)`,
+               $27, $28, $29, $30, $31, $32, $33, $34, $35)`,
       [
         id,
         record.apiKeyId,
@@ -113,6 +122,10 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         record.modelMismatch === true,
         record.latencyMs,
         record.firstTokenMs ?? null,
+        record.upstreamRequestId?.trim().slice(0, 200) || null,
+        usage.serviceTier?.slice(0, 100) || null,
+        usage.reasoningEffort?.slice(0, 100) || null,
+        JSON.stringify({ price, imagePrice }),
       ],
     )
     if (record.apiKeyId && cost > 0) {

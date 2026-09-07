@@ -261,6 +261,19 @@ export const MODEL_CATALOG: PlazaModel[] = [
 
   // --- OpenAI --------------------------------------------------------------
   {
+    id: 'gpt-6-astra',
+    name: 'GPT-6 Astra',
+    provider: 'openai',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['推理', 'Agent', '图像理解'],
+    description: '面向复杂推理与端到端任务；实际可用性取决于上游账号。输入超过 272K 时整次请求采用长上下文费率。',
+    context: '1.05M',
+    inputPrice: 10,
+    outputPrice: 50,
+    cacheReadPrice: 1,
+    badge: 'new',
+  },
+  {
     id: 'gpt-5.6-sol',
     name: 'GPT-5.6 Sol',
     provider: 'openai',

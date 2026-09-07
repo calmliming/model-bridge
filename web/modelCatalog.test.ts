@@ -73,6 +73,10 @@ describe('Codex Spark catalog', () => {
 })
 
 describe('current provider model catalog', () => {
+  it('exposes Astra with verified base prices and image input capability', () => {
+    expect(model('gpt-6-astra')).toMatchObject({ context: '1.05M', inputPrice: 10, outputPrice: 50,
+      cacheReadPrice: 1, categories: expect.arrayContaining(['multimodal']) })
+  })
   it('shows the current Google and Qwen model families', () => {
     expect(model('gemini-3.8-flash')).toMatchObject({
       context: '1M',

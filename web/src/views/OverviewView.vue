@@ -54,6 +54,9 @@ interface DashboardRecentLog {
   errorCode: string | null
   errorMessage: string | null
   upstreamStatus: number | null
+  upstreamRequestId: string | null
+  serviceTier: string | null
+  reasoningEffort: string | null
   attemptCount: number
   upstreamModel: string | null
   modelMismatch: boolean
@@ -897,6 +900,8 @@ function openRequestInput(row: DashboardRecentLog) {
           <span class="text-amber-700/70 font-[650]">上游审计</span>
           <strong class="font-[780] text-amber-900">尝试 {{ selectedLog?.attemptCount }} 次 · 账号 {{ selectedLog?.accountId || '—' }}</strong>
           <span class="text-amber-800">声明模型：{{ selectedLog?.upstreamModel || '未声明' }}</span>
+          <span v-if="selectedLog?.upstreamRequestId" class="text-amber-800 break-all">上游请求 ID：{{ selectedLog.upstreamRequestId }}</span>
+          <span v-if="selectedLog?.serviceTier || selectedLog?.reasoningEffort" class="text-amber-800">服务层级：{{ selectedLog.serviceTier || '未报告' }} · 推理强度：{{ selectedLog.reasoningEffort || '默认' }}</span>
         </div>
       </div>
       <div v-if="selectedLog?.sessionKeyHash" class="grid grid-cols-2 gap-2 mb-3 text-xs">

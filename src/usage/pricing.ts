@@ -1,5 +1,6 @@
 import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
+import { resolvePricingOverride } from './pricingOverrides'
 
 /** USD price per 1M tokens, by model tier. */
 export interface TierPrice {
@@ -98,6 +99,8 @@ const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRe
 const OPENAI_GPT56_SOL: TierPrice = { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 }
 const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 }
 const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
+// https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
+const OPENAI_ASTRA: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
 const OPENAI_IMAGE_2: TierPrice = {
   input: 5,
   output: 10,
@@ -132,6 +135,7 @@ const OPENAI_IMAGE_MINI: TierPrice = {
 }
 
 function openaiPrice(model: string): TierPrice {
+  if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
   const m = model.toLowerCase()
   if (m.startsWith('gpt-image-2')) return OPENAI_IMAGE_2
   if (m.startsWith('gpt-image-1.5')) return OPENAI_IMAGE_15
@@ -411,6 +415,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
+  { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
   { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
@@ -757,6 +762,8 @@ export async function initPricing(): Promise<void> {
  * back to the built-in tiers.
  */
 export function resolvePrice(provider: string, model: string, atMs = Date.now()): TierPrice | null {
+  const override = resolvePricingOverride(provider, model)
+  if (override?.price) return { ...override.price }
   if (!loaded) return builtinPrice(provider, model, atMs)
 
   // 1) exact match
@@ -770,7 +777,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // short-circuited here.
   const normalizedModel = model.toLowerCase()
   if (
-    normalizedModel.includes('codex-spark') &&
+    (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel)) &&
     (provider === 'openai' || provider === 'sub2api')
   ) {
     return builtinPrice(provider, model, atMs)
@@ -799,9 +806,34 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   return builtinPrice(provider, model, atMs)
 }
 
+/** Effective rates for the full request, including configured tier/effort rules. */
+export function resolveUsagePrice(provider: string, model: string, usage: UsageData, atMs = Date.now()): TierPrice | null {
+  const override = resolvePricingOverride(provider, model)
+  const effortPrices = override?.effortPrices as Record<string, TierPrice> | undefined
+  const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
+  if (!base) return null
+  const astra = (provider === 'openai' || provider === 'sub2api') && /^gpt-6-astra(?:$|-)/i.test(model)
+  const longContext = override?.longContext !== undefined ? override.longContext
+    : astra ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 } : null
+  const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0)
+  const long = longContext && totalInput > longContext.threshold ? longContext : null
+  const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
+  const tier = usage.serviceTier
+  const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
+  // Only Astra's verified default factors are automatic. Other models retain
+  // the gateway's base-price policy unless the operator supplies a tier rule.
+  const tierMultiplier = configuredMultiplier ?? (astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
+  const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
+  const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
+  return {
+    ...base, input: base.input * inputMultiplier, output: base.output * outputMultiplier,
+    cacheWrite: base.cacheWrite * inputMultiplier, cacheRead: base.cacheRead * inputMultiplier,
+  }
+}
+
 /** Estimates the USD cost of one request from its token usage. */
 export function estimateCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
-  const p = resolvePrice(provider, model, atMs)
+  const p = resolveUsagePrice(provider, model, usage, atMs)
   if (!p) return 0
   const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p
   const cost =

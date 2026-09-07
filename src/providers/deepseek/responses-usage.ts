@@ -32,7 +32,7 @@ export function createStreamParser() {
   return {
     feed(event: unknown): void {
       const e = event as ResponsesStreamEvent
-      if (e?.type === 'response.completed' && e.response?.usage) {
+      if (['response.completed', 'response.failed', 'response.incomplete'].includes(e?.type ?? '') && e.response?.usage) {
         Object.assign(usage, mapUsage(e.response.usage))
       }
     },

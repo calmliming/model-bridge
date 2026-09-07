@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => {
     update,
     set,
     where,
+    resolveActiveSubscription: vi.fn(),
+    hasWindowHeadroom: vi.fn(),
   }
 })
 
@@ -20,6 +22,11 @@ vi.mock('../keys/manager', () => ({
 
 vi.mock('../db/index', () => ({
   db: mocks.db,
+}))
+
+vi.mock('../subscriptions/manager', () => ({
+  resolveActiveSubscription: mocks.resolveActiveSubscription,
+  hasWindowHeadroom: mocks.hasWindowHeadroom,
 }))
 
 import { requireApiKey } from './apiKeyAuth'
@@ -72,9 +79,43 @@ beforeEach(() => {
   mocks.update.mockClear()
   mocks.set.mockClear()
   mocks.where.mockClear()
+  mocks.resolveActiveSubscription.mockReset()
+  mocks.hasWindowHeadroom.mockReset()
 })
 
 describe('requireApiKey', () => {
+  it('blocks existing wallet debt even when a subscription has remaining quota', async () => {
+    const request = fakeRequest()
+    const reply = fakeReply()
+    mocks.findApiKeyBySecret.mockResolvedValue(apiKeyRecord({
+      userId: 'user-1', userStatus: 'active', userBalanceMicros: -1,
+      accountGroupId: 'group-1',
+    }))
+    mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-1', planLimits: {} })
+    mocks.hasWindowHeadroom.mockResolvedValue(true)
+
+    await requireApiKey(request, reply)
+
+    expect(reply.statusCode).toBe(402)
+    expect(request.apiKey).toBeUndefined()
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  it('still allows a zero-balance user to use an active subscription', async () => {
+    const request = fakeRequest()
+    const reply = fakeReply()
+    mocks.findApiKeyBySecret.mockResolvedValue(apiKeyRecord({
+      userId: 'user-1', userStatus: 'active', userBalanceMicros: 0,
+      accountGroupId: 'group-1',
+    }))
+    mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-1', planLimits: {} })
+    mocks.hasWindowHeadroom.mockResolvedValue(true)
+
+    await requireApiKey(request, reply)
+
+    expect(reply.statusCode).toBe(200)
+    expect(request.apiKey).toMatchObject({ billTo: 'subscription', subscriptionId: 'sub-1' })
+  })
   it('rejects keys without an owner user', async () => {
     const request = fakeRequest()
     const reply = fakeReply()

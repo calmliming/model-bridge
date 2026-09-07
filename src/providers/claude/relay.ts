@@ -1,5 +1,6 @@
 import { chatCompletionsToClaudeMessages } from './chat'
 import { fetchWithConnectTimeout } from '../../http/upstream'
+import { config } from '../../config'
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
@@ -7,7 +8,7 @@ const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 // undocumented — update here if Anthropic changes the requirements.
 // 对齐 sub2api constants.go（截至 2026-06）的 FullClaudeCodeMimicryBetas。
 const ANTHROPIC_VERSION = '2023-06-01'
-const CLI_VERSION = '2.1.161'
+const CLI_VERSION = config.CLAUDE_CLI_VERSION
 
 // Beta flags — 顺序与真实 Claude Code CLI 抓包一致。
 // Anthropic 基于完整 beta 集合判定请求来源；缺少任何官方 beta 会被降级到第三方额度。
@@ -83,7 +84,10 @@ function normalizeReminderDatelines(text: string): string {
 
 function normalizeSystemBlock(block: SystemBlock): SystemBlock {
   if (block?.type !== 'text' || typeof block.text !== 'string') return block
-  const text = normalizeDatelineText(block.text)
+  let text = normalizeDatelineText(block.text)
+  if (text.startsWith(BILLING_HEADER_PREFIX)) {
+    text = text.replace(/\bcc_version=\d+\.\d+\.\d+/g, `cc_version=${CLI_VERSION}`)
+  }
   return text === block.text ? block : { ...block, text }
 }
 
@@ -285,9 +289,9 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
 
 /**
  * Relays an OpenAI Chat Completions request to Anthropic by converting it to a
- * Messages request first. Always asks the upstream to stream (the relay handler
- * is forceStream) so the response can be translated event-by-event; non-stream
- * clients get the stream buffered back into one Chat Completion JSON.
+ * Messages request first. Always asks the upstream to stream so the response
+ * can be translated event-by-event; non-stream clients get the stream
+ * buffered back into one Chat Completion JSON.
  */
 export function relayClaudeChatCompletions(
   accessToken: string,

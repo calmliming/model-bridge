@@ -15,6 +15,7 @@ interface OpenAIUsage {
 }
 
 interface OpenAIResponsePayload {
+  service_tier?: string
   usage?: OpenAIUsage
   tools?: unknown[]
   output?: unknown[]
@@ -58,6 +59,7 @@ function recordOf(value: unknown): Record<string, unknown> | null {
 
 function applyImageMetadata(usage: UsageData, response: OpenAIResponsePayload | undefined): UsageData {
   if (!response) return usage
+  if (typeof response.service_tier === 'string') usage.serviceTier = response.service_tier
   const imageTool = response.tools
     ?.map(recordOf)
     .find((tool) => tool?.type === 'image_generation')
@@ -98,7 +100,8 @@ export function createStreamParser() {
   return {
     feed(event: unknown): void {
       const e = event as OpenAIStreamEvent
-      if (e?.type === 'response.completed' && e.response?.usage) {
+      if (typeof e?.response?.service_tier === 'string') usage.serviceTier = e.response.service_tier
+      if (['response.completed', 'response.failed', 'response.incomplete'].includes(e?.type ?? '') && e.response?.usage) {
         Object.assign(usage, applyImageMetadata(parseOpenAIUsagePayload(e.response.usage), e.response))
       }
     },

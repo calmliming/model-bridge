@@ -71,6 +71,13 @@
       "when": 1788455096178,
       "tag": "0009_fat_la_nuit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788786816298,
+      "tag": "0010_warm_tusk",
+      "breakpoints": true
     }
   ]
 }

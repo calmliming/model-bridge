@@ -89,8 +89,16 @@ export async function requireApiKey(
   }
   // Billing decision: prefer an active subscription for the key's group when
   // it still has window headroom; otherwise fall through to wallet balance.
-  // Block (402) only when neither budget can cover further usage.
+  // Existing wallet debt blocks admission; otherwise block (402) only when
+  // neither budget can cover further usage.
   const balanceMicros = record.userBalanceMicros ?? 0
+  // A request may settle above the balance or fall back from a subscription
+  // whose remaining window cannot cover its final cost. Do not let another
+  // subscription admission repeatedly incur wallet debt in that situation.
+  if (balanceMicros < 0) {
+    reply.code(402).send({ error: 'insufficient balance' })
+    return
+  }
   let subscriptionUsable = false
   if (record.accountGroupId) {
     const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)

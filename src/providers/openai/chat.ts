@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
+import { createFunctionCallTracker } from './toolCalls'
 
 interface ChatMessage {
   role?: string
@@ -46,6 +47,7 @@ interface ResponsesStreamEvent {
   item?: ResponsesOutputItem
   arguments?: string
   response?: {
+    service_tier?: string
     id?: string
     model?: string
     created_at?: number
@@ -257,6 +259,10 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
     out.max_output_tokens = body.max_tokens
   }
   if (body.tool_choice != null) out.tool_choice = body.tool_choice
+  if (typeof body.reasoning_effort === 'string') out.reasoning = { effort: body.reasoning_effort }
+  for (const field of ['service_tier', 'prompt_cache_key', 'prompt_cache_options', 'safety_identifier']) {
+    if (body[field] !== undefined) out[field] = body[field]
+  }
   if (typeof body.user === 'string' && body.user) out.user = body.user
   if (typeof body.user_id === 'string' && body.user_id) out.user = body.user_id
   if (Array.isArray(body.tools)) {
@@ -295,19 +301,24 @@ export function parseChatCompletionUsage(body: unknown): UsageData {
   const usage = (body as { usage?: ChatUsage } | null)?.usage
   if (!usage) return emptyUsage()
   const d = usage.prompt_tokens_details
-  return usageWithCachedInput(
+  const parsed = usageWithCachedInput(
     usage.prompt_tokens,
     usage.completion_tokens,
     d?.cached_tokens,
     usage.completion_tokens_details?.reasoning_tokens,
     d?.cache_write_tokens ?? d?.cache_creation_tokens,
   )
+  const tier = (body as { service_tier?: unknown })?.service_tier
+  if (typeof tier === 'string') parsed.serviceTier = tier
+  return parsed
 }
 
 export function createChatCompletionStreamParser() {
   const usage = emptyUsage()
   return {
     feed(event: unknown): void {
+      const tier = (event as { service_tier?: unknown } | null)?.service_tier
+      if (typeof tier === 'string') usage.serviceTier = tier
       const parsed = parseChatCompletionUsage(event)
       if (
         parsed.inputTokens ||
@@ -492,9 +503,13 @@ export function responsesSseToChatCompletion(
   let rawUsage: ResponsesUsage | undefined
   let failure: { code: string; message: string } | undefined
   let incompleteFinish: 'length' | 'content_filter' | null = null
+  let serviceTier: string | undefined
+  const calls = createFunctionCallTracker()
 
   for (const event of parseResponsesSseEvents(text)) {
+    calls.feed(event)
     const e = event as ResponsesStreamEvent
+    if (e.response?.service_tier) serviceTier = e.response.service_tier
     if (e.response?.id) upstreamId = e.response.id
     if (e.response?.model) model = e.response.model
     if (typeof e.response?.created_at === 'number') created = e.response.created_at
@@ -530,15 +545,17 @@ export function responsesSseToChatCompletion(
   }
 
   const chatUsage = chatUsageFromResponses(rawUsage)
-  const toolCalls = toolCallsFromOutputItems(output)
+  const parsedUsage = usageDataFromResponses(rawUsage)
+  if (serviceTier) parsedUsage.serviceTier = serviceTier
+  const toolCalls = toolCallsFromOutputItems(calls.output())
   const hasToolCalls = toolCalls.length > 0
 
   // Failure with no usable content/tool output: surface an OpenAI-style error
   // body instead of a hollow success, and flag the usage record as an error.
-  if (failure && !content && !hasToolCalls) {
+  if (failure && !incompleteFinish) {
     return {
       body: { error: { message: failure.message, type: failure.code, code: failure.code } },
-      usage: usageDataFromResponses(rawUsage),
+      usage: parsedUsage,
       status: 'error',
       httpStatus: responseFailureHttpStatus(failure.code, failure.message),
     }
@@ -550,6 +567,7 @@ export function responsesSseToChatCompletion(
       object: 'chat.completion',
       created,
       model,
+      ...(serviceTier ? { service_tier: serviceTier } : {}),
       choices: [
         {
           index: 0,
@@ -563,7 +581,7 @@ export function responsesSseToChatCompletion(
       ],
       ...(chatUsage ? { usage: chatUsage } : {}),
     },
-    usage: usageDataFromResponses(rawUsage),
+    usage: parsedUsage,
   }
 }
 
@@ -586,16 +604,17 @@ function chatChunk(
 export function createOpenaiChatCompletionsStreamTransform(): {
   transform(data: unknown): unknown[]
   flush(): unknown[]
+  status(): 'success' | 'error'
 } {
+  const calls = createFunctionCallTracker()
+  let failed = false
   const state = {
     id: `chatcmpl-${randomUUID()}`,
     created: Math.floor(Date.now() / 1000),
     model: '',
     sentRole: false,
     completed: false,
-    toolIndex: 0,
     hasToolCalls: false,
-    toolIndexesByItemId: new Map<string, number>(),
   }
 
   function roleDelta(delta: Record<string, unknown>): Record<string, unknown> {
@@ -612,52 +631,14 @@ export function createOpenaiChatCompletionsStreamTransform(): {
       if (event.response?.id) state.id = event.response.id
       if (event.response?.model) state.model = event.response.model
       if (typeof event.response?.created_at === 'number') state.created = event.response.created_at
+      const toolDeltas = calls.feed(event)
+      const toolChunks = toolDeltas.map(delta =>
+        chatChunk(state.id, state.created, state.model, roleDelta({ tool_calls: [delta] }), null),
+      )
+      if (calls.output().length) state.hasToolCalls = true
 
       if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
         return [chatChunk(state.id, state.created, state.model, roleDelta({ content: event.delta }), null)]
-      }
-
-      if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') {
-        state.hasToolCalls = true
-        const itemId = event.item.id ?? event.item_id ?? randomUUID()
-        const index = state.toolIndex++
-        state.toolIndexesByItemId.set(itemId, index)
-        const toolCall: Record<string, unknown> = {
-          index,
-          id: event.item.call_id ?? itemId,
-          type: 'function',
-          function: {
-            name: event.item.name ?? '',
-            arguments: event.item.arguments ?? '',
-          },
-        }
-        return [
-          chatChunk(
-            state.id,
-            state.created,
-            state.model,
-            roleDelta({ tool_calls: [toolCall] }),
-            null,
-          ),
-        ]
-      }
-
-      if (
-        event.type === 'response.function_call_arguments.delta' &&
-        typeof event.delta === 'string'
-      ) {
-        const itemId = event.item_id ?? ''
-        const index = state.toolIndexesByItemId.get(itemId)
-        if (index == null) return []
-        return [
-          chatChunk(
-            state.id,
-            state.created,
-            state.model,
-            { tool_calls: [{ index, function: { arguments: event.delta } }] },
-            null,
-          ),
-        ]
       }
 
       if (event.type === 'response.completed') {
@@ -665,7 +646,7 @@ export function createOpenaiChatCompletionsStreamTransform(): {
         const output = event.response?.output ?? []
         const hasToolCalls = state.hasToolCalls || toolCallsFromOutputItems(output).length > 0
         const delta = state.sentRole ? {} : { role: 'assistant' }
-        return [chatChunk(state.id, state.created, state.model, delta, hasToolCalls ? 'tool_calls' : 'stop'), '[DONE]']
+        return [...toolChunks, chatChunk(state.id, state.created, state.model, delta, hasToolCalls ? 'tool_calls' : 'stop'), '[DONE]']
       }
 
       // Truncated-but-usable terminal: finish with the mapped reason (length /
@@ -675,15 +656,16 @@ export function createOpenaiChatCompletionsStreamTransform(): {
         const finish =
           finishReasonFromIncomplete(event.response?.incomplete_details?.reason) ?? 'stop'
         const delta = state.sentRole ? {} : { role: 'assistant' }
-        return [chatChunk(state.id, state.created, state.model, delta, finish), '[DONE]']
+        return [...toolChunks, chatChunk(state.id, state.created, state.model, delta, finish), '[DONE]']
       }
 
       // Mid-stream terminal failure (upstream sent 200 then failed). Surface it
       // as an OpenAI-style error chunk and terminate, instead of silently
       // ending with an empty, successful-looking finish.
-      if (event.type === 'response.failed') {
+      if (event.type === 'response.failed' || event.type === 'error') {
+        failed = true
         state.completed = true
-        const err = event.response?.error
+        const err = event.response?.error ?? (event as { error?: { message?: unknown; code?: unknown; type?: unknown } }).error
         const message =
           typeof err?.message === 'string' && err.message
             ? err.message
@@ -693,13 +675,14 @@ export function createOpenaiChatCompletionsStreamTransform(): {
         return [{ error: { message, type: code, code } }, '[DONE]']
       }
 
-      return []
+      return toolChunks
     },
     flush(): unknown[] {
       if (state.completed) return []
-      const delta = state.sentRole ? {} : { role: 'assistant' }
       state.completed = true
-      return [chatChunk(state.id, state.created, state.model, delta, 'stop'), '[DONE]']
+      failed = true
+      return [{ error: { code: 'upstream_stream_closed', type: 'upstream_error', message: 'Upstream stream closed before completion.' } }, '[DONE]']
     },
+    status: () => failed ? 'error' : 'success',
   }
 }

@@ -25,6 +25,20 @@ beforeEach(() => {
 })
 
 describe('dashboardRecentLogs', () => {
+  it('keeps historical component prices stable after pricing rules change', async () => {
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (/COUNT\(\*\)/.test(sql)) return { rows: [{ total: 1 }] }
+      return { rows: [{ id: 'usage-1', ts: Date.now(), provider: 'openai', model: 'gpt-6-astra',
+        inputtokens: 1_000_000, outputtokens: 100_000, cost: 27.5, basecost: 27.5,
+        upstreamrequestid: 'request-123', servicetier: 'default', reasoningeffort: 'high',
+        billingprice: { price: { input: 20, output: 75, cacheWrite: 25, cacheRead: 2 } },
+      }] }
+    })
+    const result = await dashboardRecentLogs(1, 10)
+    expect(result.logs[0]).toMatchObject({ inputPrice: 20, outputPrice: 75,
+      inputCost: 20, outputCost: 7.5, upstreamRequestId: 'request-123', serviceTier: 'default' })
+    expect(mocks.resolvePrice).not.toHaveBeenCalled()
+  })
   it('applies provider, model, and key filters to the recent logs query', async () => {
     await dashboardRecentLogs(2, 25, {
       provider: 'openai',

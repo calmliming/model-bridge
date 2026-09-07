@@ -72,6 +72,22 @@ beforeEach(() => {
 })
 
 describe('handlePaymentNotification', () => {
+  it('credits a verified payment even when local checkout expiry ran before the callback', async () => {
+    scriptOrder(order({ status: 'expired', expires_at: Date.now() - 60_000 }))
+    await expect(handlePaymentNotification({ provider: 'alipay', data: { notify_id: 'late-1' } }))
+      .resolves.toMatchObject({ success: true })
+    expect(mocks.applyWalletTransactionWithClient).toHaveBeenCalledOnce()
+    const update = mocks.query.mock.calls.find(call => /SET status = 'paid'/.test(call[0] as string))
+    expect(update?.[0]).toContain("status IN ('pending', 'expired')")
+    expect(mocks.query).toHaveBeenCalledWith('COMMIT')
+  })
+
+  it('still rejects mismatched amounts for expired orders', async () => {
+    scriptOrder(order({ status: 'expired' }))
+    mocks.verifyNotification.mockResolvedValue({ orderId: 'po_1', providerOrderId: 'trade-1', status: 'success', paidAmount: 1 })
+    await expect(handlePaymentNotification({ provider: 'alipay', data: {} })).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.applyWalletTransactionWithClient).not.toHaveBeenCalled()
+  })
   it('locks and credits a matching pending order once', async () => {
     scriptOrder(order())
 

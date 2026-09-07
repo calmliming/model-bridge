@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMessage } from '../composables/useMessage'
+import { api } from '../api/client'
 import {
   CATEGORIES,
   MODEL_CATALOG,
@@ -18,15 +19,29 @@ const activeCategory = ref<string>('all')
 const activeProvider = ref<'all' | ProviderId>('all')
 const selected = ref<PlazaModel | null>(null)
 const priceClock = ref(Date.now())
+const livePrices = ref<Record<string, { inputPrice: number; outputPrice: number; cacheReadPrice?: number }>>({})
 let priceClockTimer: ReturnType<typeof setInterval> | null = null
+let stopped = false
+async function refreshPrices() {
+  try {
+    const { data } = await api.get('/auth/model-prices')
+    if (stopped) return
+    livePrices.value = Object.fromEntries(data.prices.map((price: { model: string; inputPrice: number; outputPrice: number; cacheReadPrice?: number }) => [price.model, price]))
+  } catch {
+    // Keep the last received catalog; initial offline rendering uses local reference prices.
+  }
+}
 
 onMounted(() => {
+  void refreshPrices()
   priceClockTimer = setInterval(() => {
     priceClock.value = Date.now()
+    void refreshPrices()
   }, 30_000)
 })
 
 onUnmounted(() => {
+  stopped = true
   if (priceClockTimer) clearInterval(priceClockTimer)
 })
 
@@ -58,7 +73,11 @@ function formatPrice(value: number): string {
 }
 
 function currentPrice(model: PlazaModel): ResolvedModelPrice {
-  return resolveModelPrice(model, priceClock.value)
+  const fallback = resolveModelPrice(model, priceClock.value)
+  const live = livePrices.value[model.id]
+  if (!live) return fallback
+  return { ...live, period: live.inputPrice === fallback.inputPrice && live.outputPrice === fallback.outputPrice
+    ? fallback.period : null }
 }
 
 function pricePeriodLabel(period: ResolvedModelPrice['period']): string {

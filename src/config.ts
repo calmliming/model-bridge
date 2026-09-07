@@ -51,19 +51,24 @@ const schema = z.object({
   // 可选的 Redis 后端，用于跨实例共享状态（限流、并发门、粘性会话）。
   // 不配置时这些状态存在进程内存里——单节点没问题，但无法在多副本间共享。
   // 需要在负载均衡后跑多个实例时，配置这个。
-  REDIS_URL: z
-    .string()
-    .url()
-    .refine((v) => v.startsWith('redis://') || v.startsWith('rediss://'), {
+  REDIS_URL: z.preprocess(
+    blankToUndefined,
+    z.string().url().refine((v) => v.startsWith('redis://') || v.startsWith('rediss://'), {
       message: 'must be a redis:// or rediss:// URL',
-    })
-    .optional(),
+    }).optional(),
+  ),
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),
   JWT_SECRET: z.string().min(16, 'must be at least 16 characters'),
   ADMIN_USERNAME: z.string().min(1).default('admin'),
   ADMIN_PASSWORD: z.string().min(1).default('admin'),
+  CLAUDE_CLI_VERSION: z.preprocess(blankToUndefined, z.string().max(30).regex(/^\d+\.\d+\.\d+$/)
+    .refine((value) => {
+      const [major, minor, patch] = value.split('.').map(Number)
+      return major! > 2 || (major === 2 && (minor! > 1 || (minor === 1 && patch! >= 251)))
+    }, 'must be 2.1.251 or newer for Fable 5.1 compatibility').default('2.1.263')),
+  PRICING_OVERRIDE_FILE: z.preprocess(blankToUndefined, z.string().optional()),
   UPDATER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
   UPDATE_TOKEN: z.preprocess(blankToUndefined, z.string().min(16).optional()),
   TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),

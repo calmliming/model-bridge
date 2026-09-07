@@ -169,14 +169,19 @@ export async function updateApiKey(
   patch: UpdateApiKeyPatch,
   userId?: string,
 ): Promise<void> {
-  if (Object.keys(patch).length === 0) return
-  if ('modelMappings' in patch) {
-    patch.modelMappings = normalizeModelMappings(patch.modelMappings)
+  // Undefined fields mean "leave unchanged"; explicit null clears a value.
+  // Panel routes can include undefined properties even for a name-only PATCH.
+  const changes = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  ) as UpdateApiKeyPatch
+  if (Object.keys(changes).length === 0) return
+  if ('modelMappings' in changes) {
+    changes.modelMappings = normalizeModelMappings(changes.modelMappings)
   }
   const where = userId
     ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
     : eq(apiKeys.id, id)
-  await db.update(apiKeys).set(patch).where(where)
+  await db.update(apiKeys).set(changes).where(where)
 }
 
 export async function deleteApiKey(id: string, userId?: string): Promise<void> {

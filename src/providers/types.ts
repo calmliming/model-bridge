@@ -25,6 +25,9 @@ export interface TokenSet {
 
 /** Token counts extracted from one relayed request. */
 export interface UsageData {
+  /** Actual processing tier reported upstream; not the requested tier. */
+  serviceTier?: string
+  reasoningEffort?: string
   inputTokens: number
   outputTokens: number
   /**

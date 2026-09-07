@@ -24,6 +24,11 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('scheduled database price overrides', () => {
+  it('does not bill Astra at the generic GPT fallback on an existing database', async () => {
+    mocks.query.mockResolvedValue({ rows: [priceRow('gpt', 1.25, 10, 0.125, 'openai')] })
+    await loadPricing()
+    expect(resolvePrice('openai', 'gpt-6-astra')).toMatchObject({ input: 10, output: 50, cacheWrite: 12.5 })
+  })
   const peakTime = Date.parse('2026-08-24T01:00:00Z')
 
   beforeEach(() => {

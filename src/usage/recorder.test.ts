@@ -20,6 +20,8 @@ vi.mock('../db/index', () => ({
 
 vi.mock('./pricing', () => ({
   estimateCost: mocks.estimateCost,
+  resolvePrice: () => null,
+  resolveUsagePrice: () => null,
 }))
 
 vi.mock('../wallet/manager', () => ({

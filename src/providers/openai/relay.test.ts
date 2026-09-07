@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest'
 import { normalizeOpenaiResponsesBody } from './relay'
 
 describe('normalizeOpenaiResponsesBody', () => {
+  it('adapts Astra sampling and reasoning without dropping native continuation items', () => {
+    const input = [{ type: 'configuration_update', reasoning: { effort: 'high' } }]
+    const body = { model: 'gpt-6-astra', temperature: 0.5, top_p: 0.9, top_logprobs: 3,
+      reasoning: { effort: 'none' }, include: ['message.output_text.logprobs', 'reasoning.encrypted_content'],
+      service_tier: 'priority', input }
+    const result = normalizeOpenaiResponsesBody(body)
+    expect(result).toMatchObject({ reasoning: { effort: 'low' }, service_tier: 'priority', input,
+      include: ['reasoning.encrypted_content'] })
+    expect(result).not.toHaveProperty('temperature')
+    expect(result).not.toHaveProperty('top_p')
+    expect(body.reasoning.effort).toBe('none')
+  })
   it('converts string input and applies Codex-required defaults', () => {
     const body = normalizeOpenaiResponsesBody({
       model: 'gpt-5.4',

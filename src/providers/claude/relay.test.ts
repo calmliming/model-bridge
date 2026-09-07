@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { normalizeClaudeMessagesBody } from './relay'
+import { config } from '../../config'
 
 const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 // 真实 Claude Code 2.1.x 的 system[0]:cch 是对整个请求体的签名,每个请求都不同。
 const BILLING_BLOCK = {
   type: 'text',
-  text: 'x-anthropic-billing-header: cc_version=2.1.161.a1b; cc_entrypoint=cli; cch=3f09a;',
+  text: `x-anthropic-billing-header: cc_version=${config.CLAUDE_CLI_VERSION}.a1b; cc_entrypoint=cli; cch=3f09a;`,
 }
 
 describe('normalizeClaudeMessagesBody', () => {

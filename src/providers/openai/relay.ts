@@ -116,6 +116,15 @@ export function normalizeOpenaiResponsesBody(
   }
   out.stream = true
   out.store = false
+  if (typeof out.model === 'string' && /^gpt-6-astra(?:$|-)/i.test(out.model)) {
+    for (const field of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) delete out[field]
+    if (Array.isArray(out.include)) out.include = out.include.filter(value => value !== 'message.output_text.logprobs')
+    const reasoning = out.reasoning
+    if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)) {
+      const effort = (reasoning as Record<string, unknown>).effort
+      if (effort === 'none' || effort === 'minimal') out.reasoning = { ...reasoning, effort: 'low' }
+    }
+  }
   if (out.instructions == null || out.instructions === '') {
     out.instructions = DEFAULT_INSTRUCTIONS
   }

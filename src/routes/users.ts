@@ -4,6 +4,7 @@ import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, update
 import { normalizeModelMappings } from '../keys/modelMapping'
 import { groupExists, listGroups } from '../accounts/groups'
 import { requireUser } from '../middleware/userAuth'
+import { checkLoginRateLimit, verifyTurnstileToken } from '../auth/security'
 import {
   acceptInvite,
   listUserUsage,
@@ -33,6 +34,7 @@ const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  turnstileToken: z.string().optional(),
 })
 
 const acceptInviteSchema = z.object({
@@ -124,6 +126,12 @@ export function registerUserRoutes(app: FastifyInstance): void {
     const body = loginSchema.safeParse(request.body)
     if (!body.success) {
       return reply.code(400).send({ error: 'invalid request body' })
+    }
+    if (!(await checkLoginRateLimit(request.ip, body.data.email))) {
+      return reply.code(429).send({ error: '登录尝试过于频繁，请稍后再试' })
+    }
+    if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
+      return reply.code(400).send({ error: '人机验证失败，请重试' })
     }
     const user = await verifyUserCredentials(body.data.email, body.data.password)
     if (!user) {

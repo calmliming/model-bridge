@@ -9,6 +9,8 @@ import { checkRateLimit } from '../middleware/limits'
 import { db } from '../db'
 import { accounts, usageLogs } from '../db/schema'
 import { count, sql } from 'drizzle-orm'
+import { inferProviderForModel, listModelIdsForKey } from '../providers/modelDiscovery'
+import { resolvePrice } from '../usage/pricing'
 
 const loginSchema = z.object({
   account: z.string().trim().min(1),
@@ -31,6 +33,16 @@ function userSessionPayload(user: UserView) {
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
+  // Public base-price catalog. Excludes account credentials and user/group markups.
+  app.get('/api/auth/model-prices', async () => {
+    const at = Date.now()
+    const prices = listModelIdsForKey({ allowedProviders: null, allowedModels: null }).flatMap(model => {
+      const provider = inferProviderForModel(model)
+      const price = provider ? resolvePrice(provider, model, at) : null
+      return price ? [{ model, inputPrice: price.input, outputPrice: price.output, cacheReadPrice: price.cacheRead }] : []
+    })
+    return { updatedAt: at, prices }
+  })
   app.post('/api/auth/login', async (request, reply) => {
     const body = loginSchema.safeParse(request.body)
     if (!body.success) {

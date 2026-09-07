@@ -511,8 +511,10 @@ export async function handlePaymentNotification(input: {
       committed = true
       return { success: true, orderId: notification.orderId }
     }
-    if (order.status !== 'pending') {
-      throw new PaymentOrderError('payment order is not pending', 409)
+    // Local checkout expiry is not evidence that the provider did not receive
+    // payment. A verified late notification must still credit the order once.
+    if (order.status !== 'pending' && order.status !== 'expired') {
+      throw new PaymentOrderError('payment order cannot be settled', 409)
     }
 
     const transaction = await applyWalletTransactionWithClient(client, {
@@ -533,7 +535,7 @@ export async function handlePaymentNotification(input: {
            trade_status = $3,
            paid_at = $4,
            updated_at = $4
-       WHERE id = $5 AND status = 'pending'`,
+       WHERE id = $5 AND status IN ('pending', 'expired')`,
       [
         notification.providerOrderId,
         transaction.id,
@@ -651,7 +653,9 @@ async function reconcileQueriedPayment(
       committed = true
       return asPaymentOrder({ ...order, user_email: null, user_name: null })
     }
-    if (order.status !== 'pending') throw new PaymentOrderError('payment order is not pending', 409)
+    if (order.status !== 'pending' && order.status !== 'expired') {
+      throw new PaymentOrderError('payment order cannot be settled', 409)
+    }
 
     const transaction = await applyWalletTransactionWithClient(client, {
       userId: order.user_id as string,
@@ -665,7 +669,7 @@ async function reconcileQueriedPayment(
       `UPDATE payment_orders
        SET status = 'paid', provider_order_id = $1, wallet_transaction_id = $2,
            trade_status = $3, paid_at = $4, updated_at = $4
-       WHERE id = $5 AND status = 'pending'
+       WHERE id = $5 AND status IN ('pending', 'expired')
        RETURNING id, user_id, NULL::text AS user_email, NULL::text AS user_name,
                  provider, status, amount_micros, provider_order_id, payment_url,
                  payment_html, provider_amount, provider_currency, trade_status,

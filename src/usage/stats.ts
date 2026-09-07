@@ -1,7 +1,7 @@
 import { pool } from '../db/index'
 import { config } from '../config'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
-import { resolvePrice } from './pricing'
+import { resolvePrice, type TierPrice } from './pricing'
 import { dayKeyInTz, startOfTodayMs } from '../time'
 
 export interface DailyStat {
@@ -76,6 +76,9 @@ export interface DashboardRecentLog {
   upstreamStatus: number | null
   attemptCount: number
   upstreamModel: string | null
+  upstreamRequestId: string | null
+  serviceTier: string | null
+  reasoningEffort: string | null
   modelMismatch: boolean
   latencyMs: number | null
   firstTokenMs: number | null
@@ -245,7 +248,8 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const provider = row.provider as string
   const model = (row.model as string | null) ?? null
   const ts = toNum(row.ts)
-  const price = resolvePrice(provider, model ?? '', ts)
+  const snapshot = row.billingprice as { price?: TierPrice | null; imagePrice?: TierPrice | null } | null
+  const price = snapshot?.price ?? resolvePrice(provider, model ?? '', ts)
   const inputTokens = toNum(row.inputtokens)
   const outputTokens = toNum(row.outputtokens)
   const reasoningTokens = toNum(row.reasoningtokens)
@@ -254,7 +258,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const imageInputTokens = toNum(row.imageinputtokens)
   const imageOutputTokens = toNum(row.imageoutputtokens)
   const imageModel = (row.imagemodel as string | null) ?? null
-  const imagePrice = imageModel ? resolvePrice(provider, imageModel, ts) : price
+  const imagePrice = snapshot?.imagePrice ?? (imageModel ? resolvePrice(provider, imageModel, ts) : price)
   const cost = toNum(row.cost)
   const rawBaseCost = toNum(row.basecost)
   const baseCost = rawBaseCost > 0 ? rawBaseCost : cost
@@ -270,6 +274,9 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     upstreamStatus: row.upstreamstatus == null ? null : toNum(row.upstreamstatus),
     attemptCount: Math.max(1, toNum(row.attemptcount)),
     upstreamModel: (row.upstreammodel as string | null) ?? null,
+    upstreamRequestId: (row.upstreamrequestid as string | null) ?? null,
+    serviceTier: (row.servicetier as string | null) ?? null,
+    reasoningEffort: (row.reasoningeffort as string | null) ?? null,
     modelMismatch: row.modelmismatch === true,
     latencyMs: row.latencyms == null ? null : toNum(row.latencyms),
     firstTokenMs: row.firsttokenms == null ? null : toNum(row.firsttokenms),
@@ -587,6 +594,10 @@ export async function dashboardRecentLogs(
               usage_logs.error_code AS errorCode,
               usage_logs.error_message AS errorMessage,
               usage_logs.upstream_status AS upstreamStatus,
+              usage_logs.upstream_request_id AS upstreamRequestId,
+              usage_logs.service_tier AS serviceTier,
+              usage_logs.reasoning_effort AS reasoningEffort,
+              usage_logs.billing_price AS billingPrice,
               usage_logs.attempt_count AS attemptCount,
               usage_logs.upstream_model AS upstreamModel,
               usage_logs.model_mismatch AS modelMismatch,

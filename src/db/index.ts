@@ -11,7 +11,7 @@ const { Pool, types } = pg
 types.setTypeParser(types.builtins.INT8, (val) => Number(val))
 
 /** Shared pg.Pool — also used by stats.ts / recorder.ts for raw SQL. */
-export const pool = new Pool({ connectionString: config.DATABASE_URL })
+export const pool = new Pool({ connectionString: config.DATABASE_URL, connectionTimeoutMillis: 5_000 })
 
 /** Drizzle ORM client used throughout the app. */
 export const db = drizzle(pool, { schema })

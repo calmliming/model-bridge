@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { isProviderAllowed, listGeminiModels, listModelIdsForKey } from './modelDiscovery'
+import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels } from './modelDiscovery'
 
 describe('model discovery', () => {
+  it('discovers cross-provider aliases under the mapped provider', () => {
+    const key = {
+      allowedProviders: ['openai'], allowedModels: ['deepseek-v4-pro'],
+      modelMappings: { 'deepseek-v4-pro': 'gpt-5.4' },
+    }
+    expect(listModelIdsForKey(key, 'openai')).toEqual(['deepseek-v4-pro'])
+    expect(listOpenAIStyleModels(key)[0]).toMatchObject({ id: 'deepseek-v4-pro', owned_by: 'openai' })
+  })
+
+  it('hides both curated and custom aliases whose mapped provider is forbidden', () => {
+    const key = {
+      allowedProviders: ['deepseek'], allowedModels: ['deepseek-v4-pro', 'deepseek-custom'],
+      modelMappings: { 'deepseek-v4-pro': 'gpt-5.4', 'deepseek-custom': 'gpt-5.4' },
+    }
+    expect(listModelIdsForKey(key)).toEqual([])
+  })
   it('returns all default models for unrestricted keys', () => {
     const models = listModelIdsForKey({ allowedProviders: null, allowedModels: null })
     expect(models).toEqual(
@@ -32,6 +48,7 @@ describe('model discovery', () => {
     expect(isProviderAllowed('openai', key)).toBe(true)
     expect(isProviderAllowed('deepseek', key)).toBe(false)
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -47,6 +64,7 @@ describe('model discovery', () => {
   it('honors exact and wildcard model restrictions', () => {
     const key = { allowedProviders: null, allowedModels: ['gpt-*', 'deepseek-v4-pro'] }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
@@ -80,6 +98,7 @@ describe('model discovery', () => {
       modelMappings: { 'gpt-public': 'gpt-5.4' },
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',

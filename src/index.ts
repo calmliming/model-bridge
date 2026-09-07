@@ -8,7 +8,9 @@ import fastifyFormbody from '@fastify/formbody'
 import { config } from './config'
 import { pool } from './db/index'
 import { initDb } from './db/init'
+import { waitForDatabase } from './db/ready'
 import { initPricing } from './usage/pricing'
+import { startPricingOverrideReload } from './usage/pricingOverrides'
 import { ensureAdmin } from './auth/admin'
 import { registerAuthRoutes } from './routes/auth'
 import { registerAdminRoutes } from './routes/admin'
@@ -32,8 +34,10 @@ import { closeUpstreamDispatcher } from './http/upstream'
 const SHUTDOWN_TIMEOUT_MS = 30_000
 
 async function main(): Promise<void> {
+  await waitForDatabase(pool)
   await initDb()
   await initPricing()
+  const stopPricingOverrideReload = await startPricingOverrideReload(config.PRICING_OVERRIDE_FILE)
   await ensureAdmin()
   await warnUnsafeStoredUpstreamUrls()
 
@@ -62,6 +66,7 @@ async function main(): Promise<void> {
   let oauthCallbackServer: Server | null = null
 
   app.addHook('onClose', async () => {
+    await stopPricingOverrideReload()
     await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob()])
     await closeOauthCallbackServer(oauthCallbackServer)
     await waitForPendingUsage()

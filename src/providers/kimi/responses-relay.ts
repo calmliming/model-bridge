@@ -1,7 +1,24 @@
-import { responsesToChatCompletions } from './converter'
+import { mapModel, responsesToChatCompletions } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const KIMI_CHAT_COMPLETIONS_URL = 'https://api.moonshot.cn/v1/chat/completions'
+const KIMI_RESPONSES_URL = 'https://api.moonshot.cn/v1/responses'
+
+/** The native endpoint currently supports K3; K2 retains the chat adapter. */
+export function supportsNativeKimiResponses(model: string): boolean {
+  return mapModel(model).toLowerCase() === 'kimi-k3'
+}
+
+export function relayNativeKimiResponses(apiKey: string, body: Record<string, unknown>): Promise<Response> {
+  return fetchWithConnectTimeout(KIMI_RESPONSES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`, 'content-type': 'application/json',
+      accept: body.stream === true ? 'text/event-stream' : 'application/json',
+    },
+    body: JSON.stringify({ ...body, model: mapModel(body.model), stream: body.stream === true }),
+  })
+}
 
 /**
  * Relays a Responses-API request (from Codex CLI) to Kimi's Moonshot OpenAI-compatible

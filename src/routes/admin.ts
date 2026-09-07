@@ -22,7 +22,9 @@ import {
   setAccountStatus,
   setAccountWeight,
   updateAccounts,
+  updateAccountMetadata,
 } from '../accounts/manager'
+import { isRequestIdHeader } from '../http/upstreamDiagnostics'
 import { addGroupMember, createGroup, deleteGroup, listGroupMembers, listGroups, removeGroupMember, setMemberWeight, updateGroup } from '../accounts/groups'
 import { AccountTestError, refreshAccountQuota, testAccountConnectivity } from '../accounts/tester'
 import {
@@ -192,6 +194,7 @@ const oauthFinishSchema = z
 
 const accountUpdateSchema = z
   .object({
+    upstreamRequestIdHeader: z.string().trim().refine(isRequestIdHeader).nullable().optional(),
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
     concurrencyLimit: z.number().int().min(1).max(1000).nullable().optional(),
@@ -1451,6 +1454,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
       if (body.data.proxyUrl !== undefined) {
         await setAccountProxyUrl(request.params.id, body.data.proxyUrl ?? null)
+      }
+      if (body.data.upstreamRequestIdHeader !== undefined) {
+        await updateAccountMetadata(request.params.id, { upstreamRequestIdHeader: body.data.upstreamRequestIdHeader })
       }
       return { ok: true }
     },
