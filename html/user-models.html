@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Model Bridge 全新界面设计：统一管理模型、账户、密钥和用量。离线交互演示。"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>模型广场 · Model Bridge</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/styles.css" />
+    <!-- Keep all offline navigation and demo storage on a single document. -->
+    <script>
+      window.location.replace("index.html#user-models");
+    </script>
+    <script src="assets/icons.js" defer></script>
+    <script src="assets/catalog.js" defer></script>
+    <script src="assets/vendor/echarts.min.js" defer></script>
+    <script src="assets/app.js" defer></script>
+  </head>
+  <body data-page="user-models">
+    <a class="skip-link" href="#main">跳至主要内容</a>
+    <div id="app"></div>
+    <dialog id="modal" aria-labelledby="modal-title"></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <noscript
+      >请在浏览器中启用 JavaScript，以查看和操作 HTML 界面演示。</noscript
+    >
+  </body>
+</html>
