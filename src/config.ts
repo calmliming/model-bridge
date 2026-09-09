@@ -73,6 +73,9 @@ const schema = z.object({
   UPDATE_TOKEN: z.preprocess(blankToUndefined, z.string().min(16).optional()),
   TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),
   TURNSTILE_SECRET_KEY: z.preprocess(blankToUndefined, z.string().optional()),
+  // Website sign-in client, separate from upstream Gemini/Antigravity OAuth.
+  GOOGLE_LOGIN_CLIENT_ID: z.preprocess(blankToUndefined, z.string().trim()
+    .regex(/^[a-zA-Z0-9-]+\.apps\.googleusercontent\.com$/, 'must be a Google Web OAuth client ID').optional()),
   SECURITY_HEADERS_ENABLED: z.preprocess(envBoolean, z.boolean().default(true)),
   PANEL_AUTHENTICATED_RATE_LIMIT: z.preprocess(
     blankToUndefined,

@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, jsonb, pgTable, primaryKey, text } from 'drizzle-orm/pg-core'
+import { bigint, boolean, doublePrecision, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
 
 const epochMs = (name: string) =>
   bigint(name, { mode: 'number' })
@@ -125,13 +125,14 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   name: text('name').notNull(),
   passwordHash: text('password_hash'),
+  googleSub: text('google_sub'), // Google's stable identity; never use email as the identity key.
   status: text('status').notNull().default('active'), // active | disabled
   concurrencyLimit: bigint('concurrency_limit', { mode: 'number' }), // max simultaneous in-flight requests across all the user's keys; null = unlimited
   balanceMicros: bigint('balance_micros', { mode: 'number' }).notNull().default(0),
   acceptedAt: bigint('accepted_at', { mode: 'number' }),
   lastLoginAt: bigint('last_login_at', { mode: 'number' }),
   createdAt: epochMs('created_at'),
-})
+}, (table) => ({ googleSubUnique: uniqueIndex('users_google_sub_unique').on(table.googleSub) }))
 
 /** One-time invitation token for customer signup. */
 export const userInvites = pgTable('user_invites', {

@@ -5,6 +5,7 @@ import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
+import GoogleSignIn from '../components/GoogleSignIn.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -13,6 +14,8 @@ const auth = useAuthStore()
 const account = ref('')
 const password = ref('')
 const loading = ref(false)
+const googleLoading = ref(false)
+const googleClientId = ref<string | null>(null)
 const turnstileSiteKey = ref<string | null>(null)
 const turnstileToken = ref('')
 const turnstileRef = ref<{ reset: () => void } | null>(null)
@@ -30,6 +33,7 @@ onMounted(async () => {
   try {
     const { data } = await api.get('/auth/registration-status')
     registrationEnabled.value = !!data.enabled
+    googleClientId.value = typeof data.googleClientId === 'string' ? data.googleClientId : null
     turnstileSiteKey.value = typeof data.turnstileSiteKey === 'string' && data.turnstileSiteKey
       ? data.turnstileSiteKey
       : null
@@ -43,12 +47,18 @@ function resetTurnstile() {
   turnstileRef.value?.reset()
 }
 
+function googleSignedIn(session: { token: string; user: { email: string } }) {
+  auth.setSession(session.token, session.user.email, 'user')
+  void router.push({ name: 'user-overview' })
+}
+
 function setMode(next: 'login' | 'register') {
   mode.value = next
   resetTurnstile()
 }
 
 async function login() {
+  if (loading.value || googleLoading.value) return
   const accountValue = account.value.trim()
   if (!accountValue || !password.value) {
     message.warning('请输入账号和密码')
@@ -81,6 +91,7 @@ async function login() {
 }
 
 async function register() {
+  if (loading.value || googleLoading.value) return
   const email = regEmail.value.trim()
   if (!email || !regPassword.value) {
     message.warning('请输入邮箱和密码')
@@ -202,7 +213,7 @@ async function register() {
             :site-key="turnstileSiteKey"
             @update:token="turnstileToken = $event"
           />
-          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing">
+          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing || googleLoading">
             登录
           </UiButton>
           <p v-if="registrationEnabled" class="form-switch">
@@ -264,13 +275,14 @@ async function register() {
             :site-key="turnstileSiteKey"
             @update:token="turnstileToken = $event"
           />
-          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing">
+          <UiButton type="primary" size="large" block native-type="submit" :loading="loading" :disabled="captchaMissing || googleLoading">
             注册
           </UiButton>
           <p class="form-switch">
             已有账号？<button type="button" class="form-switch-link" @click="setMode('login')">返回登录</button>
           </p>
         </UiForm>
+        <GoogleSignIn v-if="googleClientId" :client-id="googleClientId" :disabled="loading" @busy="googleLoading = $event" @success="googleSignedIn" />
         </div>
       </main>
     </div>
@@ -280,12 +292,12 @@ async function register() {
 <style scoped>
 .login-wrap {
   position: relative;
-  height: 100vh;
-  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 32px;
-  overflow: hidden;
+  overflow-x: hidden;
   color: #111827;
   background:
     linear-gradient(115deg, rgba(255, 255, 255, 0.92), rgba(245, 249, 255, 0.78) 54%, rgba(239, 252, 250, 0.82)),

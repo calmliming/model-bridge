@@ -39,3 +39,20 @@ describe('Claude CLI compatibility configuration', () => {
     await expect(import('./config')).rejects.toThrow('invalid environment')
   })
 })
+
+describe('Google website login configuration', () => {
+  it.each([undefined, '', '  '])('keeps Google login disabled for %s', async (value) => {
+    vi.stubEnv('GOOGLE_LOGIN_CLIENT_ID', value)
+    expect((await import('./config')).config.GOOGLE_LOGIN_CLIENT_ID).toBeUndefined()
+  })
+  it('accepts a Web client ID independently of upstream credentials', async () => {
+    vi.stubEnv('GOOGLE_LOGIN_CLIENT_ID', '123-web.apps.googleusercontent.com')
+    expect((await import('./config')).config.GOOGLE_LOGIN_CLIENT_ID).toBe('123-web.apps.googleusercontent.com')
+  })
+  it('rejects a value that is not a Google client ID', async () => {
+    vi.stubEnv('GOOGLE_LOGIN_CLIENT_ID', 'not-a-client')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('invalid environment') })
+    await expect(import('./config')).rejects.toThrow('invalid environment')
+  })
+})

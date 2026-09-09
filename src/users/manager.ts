@@ -281,7 +281,7 @@ export async function acceptInvite(input: {
 /**
  * Self-service registration. Creates an active user with a password set, or
  * adopts a pre-created invite-only row that never set a password. Rejects an
- * email that already has a usable password. The `FOR UPDATE` row lock makes
+ * email that already has a password or Google identity. The `FOR UPDATE` row lock makes
  * concurrent registrations of the same email safe.
  */
 export async function registerUser(input: {
@@ -297,11 +297,11 @@ export async function registerUser(input: {
   try {
     await client.query('BEGIN')
     const existing = await client.query<Record<string, unknown>>(
-      'SELECT id, password_hash, status FROM users WHERE email = $1 FOR UPDATE',
+      'SELECT id, password_hash, status, google_sub FROM users WHERE email = $1 FOR UPDATE',
       [email],
     )
     const found = existing.rows[0]
-    if (found?.password_hash) {
+    if (found?.password_hash || found?.google_sub) {
       throw new UserManagerError('该邮箱已被注册', 409)
     }
     const now = Date.now()

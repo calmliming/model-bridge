@@ -111,6 +111,9 @@ export async function initDb(): Promise<void> {
       created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
     );
 
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique ON users (google_sub);
+
     CREATE TABLE IF NOT EXISTS user_invites (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

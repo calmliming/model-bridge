@@ -54,7 +54,7 @@ beforeEach(() => {
 describe('registerUser', () => {
   it('inserts a new active user for an unused email', async () => {
     scriptQueries([
-      { match: /SELECT id, password_hash, status FROM users/, rows: [] }, // no existing row
+      { match: /SELECT id, password_hash, status, google_sub FROM users/, rows: [] }, // no existing row
       { match: /INSERT INTO users/, rowCount: 1 },
       { match: /SELECT id, email, name, status/, rows: [USER_ROW] },
     ])
@@ -70,7 +70,7 @@ describe('registerUser', () => {
 
   it('rejects an email that already has a password (409)', async () => {
     scriptQueries([
-      { match: /SELECT id, password_hash, status FROM users/, rows: [{ id: 'u_x', password_hash: 'hashed:x', status: 'active' }] },
+      { match: /SELECT id, password_hash, status, google_sub FROM users/, rows: [{ id: 'u_x', password_hash: 'hashed:x', status: 'active' }] },
     ])
 
     await expect(registerUser({ email: 'taken@example.com', password: 'secret1' })).rejects.toMatchObject({
@@ -83,7 +83,7 @@ describe('registerUser', () => {
 
   it('adopts an invite-only row that never set a password', async () => {
     scriptQueries([
-      { match: /SELECT id, password_hash, status FROM users/, rows: [{ id: 'u_inv', password_hash: null, status: 'active' }] },
+      { match: /SELECT id, password_hash, status, google_sub FROM users/, rows: [{ id: 'u_inv', password_hash: null, status: 'active' }] },
       { match: /UPDATE users SET name = \$1, password_hash/, rowCount: 1 },
       { match: /SELECT id, email, name, status/, rows: [{ ...USER_ROW, id: 'u_inv' }] },
     ])
@@ -98,7 +98,7 @@ describe('registerUser', () => {
 
   it('rejects a disabled invite-only row (403)', async () => {
     scriptQueries([
-      { match: /SELECT id, password_hash, status FROM users/, rows: [{ id: 'u_d', password_hash: null, status: 'disabled' }] },
+      { match: /SELECT id, password_hash, status, google_sub FROM users/, rows: [{ id: 'u_d', password_hash: null, status: 'disabled' }] },
     ])
 
     await expect(registerUser({ email: 'disabled@example.com', password: 'secret1' })).rejects.toMatchObject({
@@ -109,5 +109,13 @@ describe('registerUser', () => {
   it('rejects an empty email without opening a transaction', async () => {
     await expect(registerUser({ email: '   ', password: 'secret1' })).rejects.toBeInstanceOf(UserManagerError)
     expect(mocks.connect).not.toHaveBeenCalled()
+  })
+
+  it('cannot adopt a Google-only account by registering its email with a password', async () => {
+    scriptQueries([
+      { match: /SELECT id, password_hash, status, google_sub FROM users/, rows: [{ id: 'u_google', password_hash: null, google_sub: 'google-1', status: 'active' }] },
+    ])
+    await expect(registerUser({ email: 'google@example.com', password: 'attacker-password' })).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.query.mock.calls.some(([sql]) => /UPDATE users|INSERT INTO users/.test(sql))).toBe(false)
   })
 })

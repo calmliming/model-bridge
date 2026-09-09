@@ -11,6 +11,8 @@ import { accounts, usageLogs } from '../db/schema'
 import { count, sql } from 'drizzle-orm'
 import { inferProviderForModel, listModelIdsForKey } from '../providers/modelDiscovery'
 import { resolvePrice } from '../usage/pricing'
+import { getGoogleLoginClientId } from '../auth/google'
+import { registerGoogleAuthRoutes } from './googleAuth'
 
 const loginSchema = z.object({
   account: z.string().trim().min(1),
@@ -33,6 +35,7 @@ function userSessionPayload(user: UserView) {
 }
 
 export function registerAuthRoutes(app: FastifyInstance): void {
+  registerGoogleAuthRoutes(app)
   // Public base-price catalog. Excludes account credentials and user/group markups.
   app.get('/api/auth/model-prices', async () => {
     const at = Date.now()
@@ -77,6 +80,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return {
       enabled: await isRegistrationEnabled(),
       turnstileSiteKey: getTurnstileSiteKey(),
+      googleClientId: getGoogleLoginClientId(),
     }
   })
 
