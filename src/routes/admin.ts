@@ -33,6 +33,7 @@ import {
   resetOpenAIAccountQuota,
 } from '../accounts/openaiQuota'
 import { getProvider, isSupportedProvider } from '../providers/registry'
+import { OAuthConfigurationError } from '../providers/oauthErrors'
 import { requireAdmin } from '../middleware/adminAuth'
 import { normalizeModelMappings } from '../keys/modelMapping'
 import {
@@ -1147,6 +1148,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   //   'paste'    — Claude: user pastes the code back into the modal.
   //   'callback' — OpenAI: localhost:1455 callback completes the flow.
   app.post('/api/admin/accounts/oauth/start', { preHandler: requireAdmin }, async (request, reply) => {
+    reply.header('Cache-Control', 'no-store')
     const body = oauthStartSchema.safeParse(request.body)
     if (!body.success || !isSupportedProvider(body.data.provider)) {
       return reply.code(400).send({ error: 'unsupported provider or missing name' })
@@ -1154,16 +1156,45 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const oauth = getProvider(body.data.provider)!
     const { verifier, challenge } = oauth.generatePkce()
     const state = randomBytes(16).toString('hex')
-    await db.insert(oauthSessions)
-      .values({
-        state,
-        provider: body.data.provider,
-        codeVerifier: verifier,
-        accountName: body.data.name,
+    let authorizeUrl: string
+    try {
+      // Validate configuration before creating a session that cannot be used.
+      authorizeUrl = oauth.buildAuthorizeUrl(state, challenge)
+    } catch (error) {
+      if (!(error instanceof OAuthConfigurationError)) throw error
+      return reply.code(error.statusCode).send({
+        error: error.message,
+        code: error.code,
+        provider: error.provider,
+        missingVariables: error.missingVariables,
       })
+    }
+    try {
+      await db.insert(oauthSessions)
+        .values({
+          state,
+          provider: body.data.provider,
+          codeVerifier: verifier,
+          accountName: body.data.name,
+        })
+    } catch (error) {
+      // Drizzle errors can contain SQL parameters, including the PKCE verifier.
+      // Log only the safe database code; request.log supplies the request ID.
+      const cause = error instanceof Error && error.cause ? error.cause : error
+      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
+      request.log.error({
+        provider: body.data.provider,
+        errorCode: typeof code === 'string' && /^[A-Z0-9_]{2,40}$/.test(code) ? code : 'UNKNOWN',
+      }, 'OAuth session storage failed')
+      return reply.code(503).send({
+        error: '无法保存授权会话，请检查 PostgreSQL 连接与数据库表结构后重试',
+        code: 'oauth_session_unavailable',
+        requestId: request.id,
+      })
+    }
     return {
       state,
-      authorizeUrl: oauth.buildAuthorizeUrl(state, challenge),
+      authorizeUrl,
       mode: oauth.mode,
     }
   })

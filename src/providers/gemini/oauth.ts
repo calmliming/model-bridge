@@ -1,21 +1,28 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { TokenSet } from '../types'
+import { OAuthConfigurationError } from '../oauthErrors'
 
 // ── Gemini CLI / Code Assist OAuth constants ──────────────────────
 // The Gemini CLI ships with a public "installed app" client embedded
 // in its binary (see packages/core/src/code_assist/oauth2.ts in
 // google-gemini/gemini-cli). To keep those identifiers out of this
 // repo, model-bridge reads them from the environment at startup.
-const CLIENT_ID = process.env.GEMINI_OAUTH_CLIENT_ID ?? ''
-const CLIENT_SECRET = process.env.GEMINI_OAUTH_CLIENT_SECRET ?? ''
-
-function requireGeminiCredentials(): void {
-  if (!CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error(
-      'GEMINI_OAUTH_CLIENT_ID / GEMINI_OAUTH_CLIENT_SECRET must be set. ' +
-        'See .env.example for where to obtain the Gemini CLI public client.',
+function requireGeminiCredentials(): { clientId: string; clientSecret: string } {
+  const clientId = process.env.GEMINI_OAUTH_CLIENT_ID?.trim() ?? ''
+  const clientSecret = process.env.GEMINI_OAUTH_CLIENT_SECRET?.trim() ?? ''
+  if (!clientId || !clientSecret) {
+    const missingVariables = [
+      ...(!clientId ? ['GEMINI_OAUTH_CLIENT_ID'] : []),
+      ...(!clientSecret ? ['GEMINI_OAUTH_CLIENT_SECRET'] : []),
+    ]
+    throw new OAuthConfigurationError(
+      'gemini', missingVariables,
+      `Gemini 上游授权缺少配置：${missingVariables.join('、')}。` +
+        '请设置 Gemini CLI OAuth 客户端配置并重新启动服务；Docker 部署需将变量传入容器后重新创建容器。' +
+        '网站登录的 GOOGLE_LOGIN_CLIENT_ID 不能替代这两项配置。',
     )
   }
+  return { clientId, clientSecret }
 }
 const AUTHORIZE_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -47,9 +54,9 @@ export function generatePkce(): PkcePair {
 
 /** Builds the accounts.google.com authorization URL the admin opens in a browser. */
 export function buildAuthorizeUrl(state: string, challenge: string): string {
-  requireGeminiCredentials()
+  const credentials = requireGeminiCredentials()
   const params = new URLSearchParams({
-    client_id: CLIENT_ID,
+    client_id: credentials.clientId,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
     scope: SCOPES,
@@ -83,13 +90,13 @@ export async function exchangeCode(
   verifier: string,
   _state: string,
 ): Promise<TokenSet> {
-  requireGeminiCredentials()
+  const credentials = requireGeminiCredentials()
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code: code.trim(),
     redirect_uri: REDIRECT_URI,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
     code_verifier: verifier,
   })
   const res = await fetch(TOKEN_URL, {
@@ -104,12 +111,12 @@ export async function exchangeCode(
 }
 
 export async function refreshToken(refreshTokenValue: string): Promise<TokenSet> {
-  requireGeminiCredentials()
+  const credentials = requireGeminiCredentials()
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshTokenValue,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
   })
   const res = await fetch(TOKEN_URL, {
     method: 'POST',

@@ -52,6 +52,10 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       CLAUDE_CLI_VERSION: ${CLAUDE_CLI_VERSION:-2.1.263}
+      # Gemini account onboarding needs both variables inside the container.
+      # GOOGLE_LOGIN_CLIENT_ID below only configures website user sign-in.
+      GEMINI_OAUTH_CLIENT_ID: ${GEMINI_OAUTH_CLIENT_ID:-}
+      GEMINI_OAUTH_CLIENT_SECRET: ${GEMINI_OAUTH_CLIENT_SECRET:-}
       PRICING_OVERRIDE_FILE: ${PRICING_OVERRIDE_FILE:-}
       UPDATER_URL: http://model-bridge-updater:3002
       UPDATE_TOKEN: ${UPDATE_TOKEN:-}
