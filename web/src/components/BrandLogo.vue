@@ -8,7 +8,7 @@ withDefaults(defineProps<{ size?: number; alt?: string }>(), {
 <template>
   <img
     class="brand-logo"
-    src="/brand/model-bridge-mark-192-v1.png"
+    src="/brand/model-bridge-mark-192-v2.png"
     :alt="alt"
     :width="size"
     :height="size"
