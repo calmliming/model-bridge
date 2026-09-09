@@ -4,6 +4,7 @@ import { RouterLink, useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import BrandLogo from '../components/BrandLogo.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -38,7 +39,7 @@ async function login() {
   <div class="login-wrap">
     <UiCard class="login-card" :bordered="false">
       <div class="brand">
-        <span class="brand-mark"><span /></span>
+        <BrandLogo :size="38" />
         <div>
           <strong>Model Bridge</strong>
           <small>User Console</small>
@@ -90,23 +91,6 @@ async function login() {
   align-items: center;
   gap: 12px;
   margin-bottom: 24px;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: #0f172a;
-}
-
-.brand-mark span {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #22c55e, #38bdf8);
-  transform: rotate(45deg);
 }
 
 .brand strong,

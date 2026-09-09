@@ -4,6 +4,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api } from '../api/client'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
+import BrandLogo from '../components/BrandLogo.vue'
 
 interface HeaderUser {
   email: string
@@ -143,9 +144,7 @@ function logout() {
         </svg>
       </button>
       <div class="flex items-center gap-3 px-5 py-5">
-        <span class="flex items-center justify-center h-9 w-9 rounded-xl bg-gradient-primary shadow-glow">
-          <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
-        </span>
+        <BrandLogo :size="36" :alt="sidebarCollapsed ? 'Model Bridge' : ''" />
         <div class="leading-tight" :class="sidebarCollapsed && 'lg:hidden'">
           <strong class="block text-[15px] font-bold text-gray-900 dark:text-white">Model Bridge</strong>
           <small class="text-xs text-gray-400 dark:text-dark-400">User Console</small>

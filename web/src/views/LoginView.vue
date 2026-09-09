@@ -6,6 +6,7 @@ import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
 import GoogleSignIn from '../components/GoogleSignIn.vue'
+import BrandLogo from '../components/BrandLogo.vue'
 
 const router = useRouter()
 const message = useMessage()
@@ -134,9 +135,7 @@ async function register() {
     <div class="ambient-grid" />
     <div class="login-shell">
       <div class="login-brand">
-        <span class="brand-mark">
-          <span />
-        </span>
+        <BrandLogo :size="38" />
         <span>Model Bridge</span>
       </div>
 
@@ -344,25 +343,6 @@ async function register() {
   font-size: 18px;
   font-weight: 760;
   letter-spacing: 0;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-}
-
-.brand-mark span {
-  width: 16px;
-  height: 16px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, #00c2a8, #4f7cff);
-  transform: rotate(45deg);
 }
 
 .login-main {

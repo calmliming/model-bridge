@@ -427,7 +427,8 @@ code {
 .brand img {
   width: 33px;
   height: 33px;
-  border-radius: 9px;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .brand span:last-child {
   font-weight: 600;

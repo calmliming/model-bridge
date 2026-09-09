@@ -6,6 +6,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime } from '../utils'
+import BrandLogo from '../components/BrandLogo.vue'
 
 interface UserMe {
   email: string
@@ -598,7 +599,7 @@ onMounted(load)
         :class="`checkout--${currentPaymentOrder.provider}`"
       >
         <div class="checkout-brand">
-          <span class="checkout-logo">MB</span>
+          <BrandLogo :size="38" />
           <span>
             <strong>Model Bridge</strong>
             <small>平台账户充值</small>
@@ -882,20 +883,6 @@ onMounted(load)
   margin-top: 1px;
   color: #6b7280;
   font-size: 12px;
-}
-
-.checkout-logo {
-  display: inline-flex;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: #111827;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 800;
 }
 
 .checkout-summary {

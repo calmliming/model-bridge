@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../api/client'
+import BrandLogo from '../components/BrandLogo.vue'
 
 type SnippetKey = 'curl' | 'python' | 'js'
 
@@ -115,11 +116,7 @@ const openai = new OpenAI({
     >
       <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <div class="flex items-center gap-3">
-          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-600 shadow-md">
-            <svg class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </span>
+          <BrandLogo :size="36" />
           <span class="text-xl font-bold tracking-tight">Model Bridge</span>
         </div>
         
@@ -295,11 +292,7 @@ const openai = new OpenAI({
     <footer class="border-t border-slate-100 dark:border-dark-800 py-16">
       <div class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row items-center justify-between gap-10">
         <div class="flex items-center gap-3">
-          <span class="text-primary-600">
-            <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </span>
+          <BrandLogo :size="36" />
           <span class="text-2xl font-black tracking-tighter uppercase">Model Bridge</span>
         </div>
         <p class="text-sm font-medium text-slate-400 dark:text-dark-500">© 2026 Model Bridge Protocol. Open source infrastructure.</p>

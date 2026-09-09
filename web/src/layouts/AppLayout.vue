@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import SystemVersionBadge from '../components/SystemVersionBadge.vue'
+import BrandLogo from '../components/BrandLogo.vue'
 import { api } from '../api/client'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
@@ -216,9 +217,7 @@ function logout() {
         </svg>
       </button>
       <div class="flex items-center gap-3 px-5 py-5">
-        <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow">
-          <span class="h-3.5 w-3.5 rotate-45 rounded-[4px] bg-white" />
-        </span>
+        <BrandLogo :size="36" :alt="sidebarCollapsed ? 'Model Bridge' : ''" />
         <div class="min-w-0 leading-tight" :class="sidebarCollapsed && 'lg:hidden'">
           <strong class="block text-base font-bold text-gray-900 dark:text-white">Model Bridge</strong>
           <SystemVersionBadge class="mt-1" />

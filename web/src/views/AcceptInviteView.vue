@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import BrandLogo from '../components/BrandLogo.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,8 +46,11 @@ async function accept() {
   <div class="accept-wrap">
     <UiCard class="accept-card" :bordered="false">
       <div class="head">
-        <strong>接受邀请</strong>
-        <span>Model Bridge</span>
+        <BrandLogo :size="40" />
+        <div>
+          <strong>接受邀请</strong>
+          <span>Model Bridge</span>
+        </div>
       </div>
       <UiAlert v-if="!token" type="error" style="margin-bottom: 14px">邀请链接缺少 token。</UiAlert>
       <UiForm label-placement="top">
@@ -85,6 +89,9 @@ async function accept() {
 }
 
 .head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 22px;
 }
 

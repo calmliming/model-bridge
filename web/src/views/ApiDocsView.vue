@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import ApiDocsAuthorization from '../components/ApiDocsAuthorization.vue'
 import ImageApiExplorer from '../components/ImageApiExplorer.vue'
+import BrandLogo from '../components/BrandLogo.vue'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
 import { useAuthStore } from '../stores/auth'
@@ -294,7 +295,7 @@ onBeforeUnmount(() => {
     <header class="docs-topbar">
       <div class="docs-topbar-inner">
         <RouterLink to="/" class="docs-brand" aria-label="返回 Model Bridge 首页">
-          <span class="docs-brand-mark"><span /></span>
+          <BrandLogo :size="32" />
           <strong>Model Bridge</strong>
           <span>API 文档</span>
         </RouterLink>
@@ -599,10 +600,6 @@ onBeforeUnmount(() => {
   @apply flex min-w-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30;
 }
 
-.docs-brand-mark {
-  @apply flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary-500 shadow-sm shadow-primary-500/20;
-}
-.docs-brand-mark > span { @apply h-3 w-3 rotate-45 rounded-[3px] bg-white; }
 .docs-brand strong { @apply truncate text-sm font-extrabold tracking-tight text-gray-950 dark:text-white; }
 .docs-brand > span:last-child { @apply hidden border-l border-gray-200 pl-2.5 text-xs font-semibold text-gray-400 dark:border-dark-700 dark:text-dark-400 sm:block; }
 
