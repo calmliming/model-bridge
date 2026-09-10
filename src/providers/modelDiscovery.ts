@@ -51,7 +51,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
     'gemini-2.5-pro',
     'gemini-2.5-flash',
   ],
-  deepseek: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'],
+  deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
   zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
   qwen: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash'],

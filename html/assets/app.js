@@ -638,7 +638,7 @@
       claude: "claude-sonnet-4-6",
       openai: "gpt-5.5",
       gemini: "gemini-2.5-pro",
-      deepseek: "deepseek-chat",
+      deepseek: "deepseek-flash",
     };
     return {
       id: "req-demo-" + (8432 - i),

@@ -63,10 +63,10 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     vendor: 'DeepSeek',
     endpoint: (origin) => origin,
     models: {
-      model: 'deepseek-v4-pro',
-      sonnetModel: 'deepseek-v4-pro',
-      haikuModel: 'deepseek-v4-flash',
-      opusModel: 'deepseek-v4-pro',
+      model: 'deepseek-flash',
+      sonnetModel: 'deepseek-flash',
+      haikuModel: 'deepseek-flash',
+      opusModel: 'deepseek-flash',
     },
     provider: 'deepseek',
   },
@@ -85,7 +85,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI · DeepSeek',
     vendor: 'DeepSeek',
     endpoint: (origin) => origin,
-    models: { model: 'deepseek-v4-pro' },
+    models: { model: 'deepseek-flash' },
     provider: 'deepseek',
   },
   {

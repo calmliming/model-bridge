@@ -235,6 +235,48 @@ describe('Claude Chat Completions response format', () => {
 })
 
 describe('mapped provider dispatch', () => {
+  it.each(['/v1/responses', '/api/deepseek/v1/responses', '/v1/chat/completions', '/api/deepseek/v1/chat/completions'])(
+    'routes V4.1 Flash images and tools through %s', (url) => withRelay(async (request) => {
+      const chat = url.endsWith('/chat/completions')
+      const imageUrl = 'https://example.com/chart.png'
+      const payload = chat ? {
+        messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: imageUrl } }] }],
+        tools: [{ type: 'function', function: { name: 'inspect_chart', parameters: { type: 'object' } } }],
+      } : {
+        input: [{ role: 'user', content: [{ type: 'input_image', image_url: imageUrl }] }],
+        tools: [{ type: 'function', name: 'inspect_chart', parameters: { type: 'object' } }],
+      }
+      mocks.key.allowedProviders = ['deepseek']
+      const response = await request({ ...payload, model: 'deepseek-flash', stream: false }, url)
+      expect(response.status).toBe(200)
+      const [upstreamUrl, init] = mocks.fetch.mock.calls[0]!
+      expect(upstreamUrl).toBe('https://api.deepseek.com/v1/responses')
+      const upstreamBody = JSON.parse(init.body)
+      expect(upstreamBody.model).toBe('deepseek-flash')
+      expect(JSON.stringify(upstreamBody.input)).toContain(imageUrl)
+      expect(upstreamBody.tools[0].name).toBe('inspect_chart')
+      expect(mocks.logs[0]?.slice(4, 6)).toEqual(['deepseek', 'deepseek-flash'])
+    }),
+  )
+
+  it.each(['/v1/messages', '/api/deepseek/v1/messages'])(
+    'routes V4.1 Flash images through the Anthropic endpoint at %s', (url) => withRelay(async (request) => {
+      mocks.key.allowedProviders = ['deepseek']
+      mocks.fetch.mockImplementation(async () => new Response(JSON.stringify({
+        id: 'msg_deepseek', type: 'message', role: 'assistant', model: 'deepseek-flash',
+        content: [{ type: 'text', text: 'A chart' }], stop_reason: 'end_turn',
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { headers: { 'content-type': 'application/json' } }))
+      const messages = [{ role: 'user', content: [{ type: 'image', source: { type: 'url', url: 'https://example.com/chart.png' } }] }]
+      const response = await request({ model: 'deepseek-flash', messages, max_tokens: 100, stream: false }, url)
+      expect(response.status).toBe(200)
+      const [upstreamUrl, init] = mocks.fetch.mock.calls[0]!
+      expect(upstreamUrl).toBe('https://api.deepseek.com/anthropic/v1/messages')
+      expect(JSON.parse(init.body)).toMatchObject({ model: 'deepseek-flash', messages })
+      expect(mocks.logs[0]?.slice(4, 6)).toEqual(['deepseek', 'deepseek-flash'])
+    }),
+  )
+
   it.each(['/v1/responses', '/responses'])('routes a cross-provider alias to OpenAI at %s', (url) => withRelay(async (request) => {
     mocks.key.modelMappings = { 'deepseek-v4-pro': 'gpt-5.4' }
     mocks.key.allowedProviders = ['openai']

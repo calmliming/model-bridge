@@ -376,7 +376,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   // Route key only — provider.id stays 'deepseek' so account pool, allowed-
   // provider checks, and usage records all reuse the existing deepseek setup.
   // Backed by DeepSeek's native Responses endpoint. DeepSeek supports this
-  // surface on V4 Flash and V4 Pro; unknown model names default to V4 Flash.
+  // surface on V4.1 Flash and V4 Pro; unknown names default to V4.1 Flash.
   'deepseek-responses': {
     id: 'deepseek',
     forceStream: false,

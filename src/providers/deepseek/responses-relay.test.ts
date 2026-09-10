@@ -4,6 +4,21 @@ import { normalizeDeepseekResponsesBody, relayDeepseekResponses } from './respon
 afterEach(() => vi.unstubAllGlobals())
 
 describe('normalizeDeepseekResponsesBody', () => {
+  it('preserves V4.1 Flash multimodal input and tool parameters on the wire', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    const body = {
+      model: 'deepseek-flash',
+      input: [{ role: 'user', content: [{ type: 'input_image', image_url: 'https://example.com/chart.png' }] }],
+      tools: [{ type: 'web_search' }],
+      reasoning: { effort: 'max' },
+      stream: false,
+    }
+    await relayDeepseekResponses('sk-test', body)
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual(body)
+  })
+
   it('preserves V4 Pro and keeps native Responses tools intact', () => {
     const out = normalizeDeepseekResponsesBody({
       model: 'deepseek-v4-pro',

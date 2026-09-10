@@ -187,9 +187,8 @@ const commonModelOptions = [
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'deepseek-*',
+  'deepseek-flash',
   'deepseek-v4-pro',
-  'deepseek-v4-flash',
-  'deepseek-v4-flash-vision-exp',
   'mimo-*',
   'mimo-v2.5-pro',
   'mimo-v2.5',
@@ -211,7 +210,7 @@ const commonMappingOptions = [
   'gpt-public=gpt-5.4',
   'gpt-fast=gpt-5.4-mini',
   'deepseek-pro=deepseek-v4-pro',
-  'deepseek-fast=deepseek-v4-flash',
+  'deepseek-fast=deepseek-flash',
   'glm-pro=glm-5.3',
   'glm-fast=glm-5.3-flash',
   'qwen-pro=qwen3.8-max',
@@ -548,9 +547,9 @@ export ANTHROPIC_AUTH_TOKEN=${key}
 claude`,
     deepseek: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/deepseek
 export ANTHROPIC_AUTH_TOKEN=${key}
-export ANTHROPIC_MODEL=deepseek-v4-pro
-export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
+export ANTHROPIC_MODEL=deepseek-flash
+export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-flash
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash
 claude`,
     codex: `[profiles.model-bridge]
 model_provider = "model-bridge"
@@ -567,7 +566,7 @@ export MODEL_BRIDGE_API_KEY=${key}
 codex --profile model-bridge`,
     codexDeepseek: `[profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-pro"
+model = "deepseek-flash"
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"

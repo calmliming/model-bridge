@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels } from './modelDiscovery'
 
 describe('model discovery', () => {
+  it('advertises V4.1 Flash while keeping explicit legacy names discoverable', () => {
+    expect(listModelIdsForKey({ allowedProviders: ['deepseek'], allowedModels: null }))
+      .toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+    const legacy = ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
+    expect(listModelIdsForKey({ allowedProviders: ['deepseek'], allowedModels: legacy })).toEqual(legacy)
+  })
   it('discovers cross-provider aliases under the mapped provider', () => {
     const key = {
       allowedProviders: ['openai'], allowedModels: ['deepseek-v4-pro'],

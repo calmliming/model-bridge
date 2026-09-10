@@ -256,7 +256,7 @@ DeepSeek Responses upstream.
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-flash"  # or "deepseek-v4-pro"
+model = "deepseek-flash"  # DeepSeek V4.1 Flash
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -284,7 +284,7 @@ If you're unsure the route works, smoke-test it with curl:
 curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
   -H "Authorization: Bearer mb-xxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","input":"say hi","stream":true}'
+  -d '{"model":"deepseek-flash","input":"say hi","stream":true}'
 ```
 
 A healthy response is an SSE stream: `response.created` → several
@@ -292,7 +292,7 @@ A healthy response is an SSE stream: `response.created` → several
 
 #### Notes
 
-- **Model-name rewrite**: Responses preserves `deepseek-v4-flash` and `deepseek-v4-pro`; unknown non-DeepSeek model names default to `deepseek-v4-flash`. Chat/Anthropic also keeps concrete V4 model names available, while the legacy `deepseek-chat` / `deepseek-reasoner` aliases map to V4 Flash.
+- **Model-name rewrite**: Use `deepseek-flash` for V4.1 Flash with native vision. Chat, Anthropic and Responses default to this name; legacy `deepseek-chat` / `deepseek-reasoner` aliases also map to it. Explicit `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, and `deepseek-v4-pro` names remain accepted. From September 14, 2026 at 12:00 Beijing time, the upstream routes V4 Pro to V4.1 Flash until V4.1 Pro launches; built-in billing switches to Flash prices at that instant. Administrator price overrides remain unchanged.
 - **Isolation**: the relay derives an anonymous `user_id` / `user` from the tenant and optional client identity for DeepSeek content-safety, KV-cache, and scheduling isolation.
 - **Streaming compatibility**: `stream:true` returns Responses SSE for Codex; `stream:false` or an omitted field returns native JSON.
 - **Usage stats**: calls are recorded under `provider=deepseek` and share the same dashboard with the messages endpoint.

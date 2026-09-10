@@ -213,7 +213,7 @@ async function testDeepSeek(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      model: 'deepseek-v4-pro',
+      model: 'deepseek-flash',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),

@@ -44,6 +44,8 @@ export interface PlazaModel {
   cacheReadPrice?: number
   priceChange?: ModelPriceChange
   priceSchedule?: ModelPriceSchedule
+  /** Later schedules, applied at their effective instant. */
+  priceSchedules?: ModelPriceSchedule[]
   /** Optional highlight badge. */
   badge?: 'new' | 'recommended'
 }
@@ -76,7 +78,12 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
   if (model.priceChange && atMs >= model.priceChange.effectiveAt) {
     return { ...model.priceChange.price, period: null }
   }
-  const schedule = model.priceSchedule
+  let schedule = model.priceSchedule
+  for (const candidate of model.priceSchedules ?? []) {
+    if (atMs >= candidate.effectiveAt && (!schedule || candidate.effectiveAt >= schedule.effectiveAt)) {
+      schedule = candidate
+    }
+  }
   if (!schedule || atMs < schedule.effectiveAt) {
     return {
       inputPrice: model.inputPrice,
@@ -160,6 +167,10 @@ export const CATEGORIES: CategoryMeta[] = [
 ]
 
 const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
+const DEEPSEEK_V41_FLASH_EFFECTIVE_AT = Date.parse('2026-09-10T12:00:00+08:00')
+const DEEPSEEK_V4_PRO_RETIRE_AT = Date.parse('2026-09-14T12:00:00+08:00')
+const DEEPSEEK_V41_FLASH_OFF_PEAK: ModelTokenPrice = { inputPrice: 0.15, outputPrice: 0.6, cacheReadPrice: 0.003 }
+const DEEPSEEK_V41_FLASH_PEAK: ModelTokenPrice = { inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.006 }
 const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
 const GEMINI_FRONTIER_FLASH_STANDARD: ModelTokenPrice = {
   inputPrice: 1.5,
@@ -174,9 +185,10 @@ const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
 function deepseekPriceSchedule(
   offPeak: ModelTokenPrice,
   peak: ModelTokenPrice,
+  effectiveAt = DEEPSEEK_SCHEDULE_EFFECTIVE_AT,
 ): ModelPriceSchedule {
   return {
-    effectiveAt: DEEPSEEK_SCHEDULE_EFFECTIVE_AT,
+    effectiveAt,
     peakUtcHours: DEEPSEEK_PEAK_WINDOWS_UTC,
     weekendBeijingOffPeak: true,
     offPeak,
@@ -467,8 +479,8 @@ export const MODEL_CATALOG: PlazaModel[] = [
     name: 'DeepSeek V4 Pro',
     provider: 'deepseek',
     categories: ['chat', 'reasoning', 'code'],
-    tags: ['强推理', '高性价比', '代码'],
-    description: '强推理主力模型，代码与数理能力突出，价格极具竞争力。',
+    tags: ['过渡模型', '兼容名称', '代码'],
+    description: '北京时间 2026 年 9 月 14 日 12:00 起，至 V4.1 Pro 上线前，此名称由 V4.1 Flash 提供服务并按 Flash 价格计费。建议使用 deepseek-flash。',
     context: '1M',
     inputPrice: 0.435,
     outputPrice: 0.87,
@@ -477,39 +489,27 @@ export const MODEL_CATALOG: PlazaModel[] = [
       { inputPrice: 0.66, outputPrice: 1.98, cacheReadPrice: 0.022 },
       { inputPrice: 1.32, outputPrice: 3.96, cacheReadPrice: 0.044 },
     ),
+    priceSchedules: [deepseekPriceSchedule(
+      DEEPSEEK_V41_FLASH_OFF_PEAK,
+      DEEPSEEK_V41_FLASH_PEAK,
+      DEEPSEEK_V4_PRO_RETIRE_AT,
+    )],
+  },
+  {
+    id: 'deepseek-flash',
+    name: 'DeepSeek V4.1 Flash',
+    provider: 'deepseek',
+    categories: ['chat', 'reasoning', 'code', 'lightweight', 'multimodal'],
+    tags: ['原生多模态', '图像理解', '高速', '最大输出 384K'],
+    description: 'DeepSeek 新架构 Flash 模型，原生支持视觉理解、思考模式和工具调用。旧 V4 Flash 与视觉实验版名称暂时兼容，均由此模型提供服务。',
+    context: '1M',
+    ...DEEPSEEK_V41_FLASH_OFF_PEAK,
+    priceSchedule: deepseekPriceSchedule(
+      DEEPSEEK_V41_FLASH_OFF_PEAK,
+      DEEPSEEK_V41_FLASH_PEAK,
+      DEEPSEEK_V41_FLASH_EFFECTIVE_AT,
+    ),
     badge: 'recommended',
-  },
-  {
-    id: 'deepseek-v4-flash',
-    name: 'DeepSeek V4 Flash',
-    provider: 'deepseek',
-    categories: ['chat', 'lightweight'],
-    tags: ['轻量', '极低成本', '高速'],
-    description: '轻量高速版本，成本极低，适合大批量对话与轻任务。',
-    context: '1M',
-    inputPrice: 0.14,
-    outputPrice: 0.28,
-    cacheReadPrice: 0.0028,
-    priceSchedule: deepseekPriceSchedule(
-      { inputPrice: 0.22, outputPrice: 0.66, cacheReadPrice: 0.007 },
-      { inputPrice: 0.44, outputPrice: 1.32, cacheReadPrice: 0.014 },
-    ),
-  },
-  {
-    id: 'deepseek-v4-flash-vision-exp',
-    name: 'DeepSeek V4 Flash Vision',
-    provider: 'deepseek',
-    categories: ['chat', 'lightweight', 'multimodal'],
-    tags: ['多模态', '图像理解', '高速'],
-    description: 'DeepSeek V4 Flash 视觉实验模型，支持图片理解、截图文字识别与图表分析。',
-    context: '1M',
-    inputPrice: 0.14,
-    outputPrice: 0.28,
-    cacheReadPrice: 0.0028,
-    priceSchedule: deepseekPriceSchedule(
-      { inputPrice: 0.22, outputPrice: 0.66, cacheReadPrice: 0.007 },
-      { inputPrice: 0.44, outputPrice: 1.32, cacheReadPrice: 0.014 },
-    ),
   },
   // --- 小米 MiMo -----------------------------------------------------------
   {

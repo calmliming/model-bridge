@@ -8,21 +8,24 @@ function model(id: string) {
 }
 
 describe('DeepSeek catalog pricing schedule', () => {
-  it('exposes the official DeepSeek vision model as multimodal', () => {
-    expect(model('deepseek-v4-flash-vision-exp')).toMatchObject({
+  it('exposes V4.1 Flash as multimodal and retires the old Flash cards', () => {
+    expect(model('deepseek-flash')).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
       provider: 'deepseek',
+      context: '1M',
       categories: expect.arrayContaining(['multimodal']),
     })
+    expect(MODEL_CATALOG.some((item) => ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'].includes(item.id))).toBe(false)
   })
 
   it('shows the previous price before the schedule takes effect', () => {
     expect(resolveModelPrice(
-      model('deepseek-v4-flash'),
+      model('deepseek-v4-pro'),
       Date.parse('2026-08-22T15:59:59.999Z'),
     )).toMatchObject({
-      inputPrice: 0.14,
-      outputPrice: 0.28,
-      cacheReadPrice: 0.0028,
+      inputPrice: 0.435,
+      outputPrice: 0.87,
+      cacheReadPrice: 0.003625,
       period: null,
     })
   })
@@ -50,14 +53,26 @@ describe('DeepSeek catalog pricing schedule', () => {
 
   it('shows Beijing weekends as off-peak even during UTC peak hours', () => {
     expect(resolveModelPrice(
-      model('deepseek-v4-flash'),
-      Date.parse('2026-08-29T02:00:00Z'),
+      model('deepseek-flash'),
+      Date.parse('2026-09-12T02:00:00Z'),
     )).toMatchObject({
-      inputPrice: 0.22,
-      outputPrice: 0.66,
-      cacheReadPrice: 0.007,
+      inputPrice: 0.15,
+      outputPrice: 0.6,
+      cacheReadPrice: 0.003,
       period: 'off-peak',
     })
+  })
+
+  it('shows new Flash peak rates and switches Pro at the announced retirement time', () => {
+    expect(resolveModelPrice(model('deepseek-flash'), Date.parse('2026-09-10T14:00:00+08:00')))
+      .toMatchObject({ inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.006, period: 'peak' })
+    const retire = Date.parse('2026-09-14T12:00:00+08:00')
+    expect(resolveModelPrice(model('deepseek-v4-pro'), retire - 1))
+      .toMatchObject({ inputPrice: 1.32, outputPrice: 3.96, period: 'peak' })
+    expect(resolveModelPrice(model('deepseek-v4-pro'), retire))
+      .toMatchObject({ inputPrice: 0.15, outputPrice: 0.6, cacheReadPrice: 0.003, period: 'off-peak' })
+    expect(resolveModelPrice(model('deepseek-v4-pro'), retire + 2 * 60 * 60_000))
+      .toMatchObject({ inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.006, period: 'peak' })
   })
 })
 

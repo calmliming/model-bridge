@@ -4,7 +4,7 @@ import { normalizeDeepseekChatCompletionsBody } from './chat-relay'
 describe('normalizeDeepseekChatCompletionsBody', () => {
   it('maps non-DeepSeek model names to the default DeepSeek model', () => {
     expect(normalizeDeepseekChatCompletionsBody({ model: 'gpt-5.5', messages: [] })).toMatchObject({
-      model: 'deepseek-v4-pro',
+      model: 'deepseek-flash',
     })
   })
 
@@ -17,9 +17,9 @@ describe('normalizeDeepseekChatCompletionsBody', () => {
     })
   })
 
-  it('maps legacy reasoner alias to V4 Flash thinking mode', () => {
+  it('maps legacy reasoner alias to V4.1 Flash', () => {
     expect(normalizeDeepseekChatCompletionsBody({ model: 'deepseek-reasoner' })).toMatchObject({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
     })
   })
 
@@ -33,5 +33,16 @@ describe('normalizeDeepseekChatCompletionsBody', () => {
     ).toMatchObject({
       stream_options: { extra: 'keep', include_usage: true },
     })
+  })
+
+  it('preserves V4.1 Flash image inputs, reasoning settings, and tools', () => {
+    const body = {
+      model: 'deepseek-flash',
+      messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/chart.png' } }] }],
+      tools: [{ type: 'function', function: { name: 'inspect_chart', parameters: { type: 'object' } } }],
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'max',
+    }
+    expect(normalizeDeepseekChatCompletionsBody(body)).toEqual(body)
   })
 })

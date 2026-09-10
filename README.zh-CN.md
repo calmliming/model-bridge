@@ -223,7 +223,7 @@ curl http://localhost:3000/v1/images/edits \
 ```toml
 [profiles.model-bridge-deepseek]
 model_provider = "model-bridge-deepseek"
-model = "deepseek-v4-flash"  # 也可使用 "deepseek-v4-pro"
+model = "deepseek-flash"  # DeepSeek V4.1 Flash
 
 [model_providers.model-bridge-deepseek]
 name = "model-bridge-deepseek"
@@ -251,14 +251,14 @@ codex --profile model-bridge-deepseek
 curl -N -X POST http://localhost:3000/api/deepseek/v1/responses \
   -H "Authorization: Bearer mb-xxxxxxxx" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-v4-flash","input":"say hi","stream":true}'
+  -d '{"model":"deepseek-flash","input":"say hi","stream":true}'
 ```
 
 正常会看到 SSE：`response.created` → 若干 `response.output_text.delta` → `response.completed`。
 
 #### 说明
 
-- **模型名重写**：Responses 会保留 `deepseek-v4-flash` 和 `deepseek-v4-pro`；非 DeepSeek 模型名默认改写为 `deepseek-v4-flash`。Chat/Anthropic 也保留具体 V4 模型名，旧别名 `deepseek-chat` / `deepseek-reasoner` 均映射到 V4 Flash
+- **模型名重写**：使用 `deepseek-flash` 调用原生支持视觉的 V4.1 Flash。Chat、Anthropic 和 Responses 均默认使用该名称，旧别名 `deepseek-chat` / `deepseek-reasoner` 也映射到它。显式传入 `deepseek-v4-flash`、`deepseek-v4-flash-vision-exp` 和 `deepseek-v4-pro` 仍可调用。北京时间 2026 年 9 月 14 日 12:00 起，上游将 V4 Pro 路由到 V4.1 Flash，直到 V4.1 Pro 上线；内置计费同步切换为 Flash 价格，管理员自定义价格仍优先。
 - **隔离标识**：网关按租户和客户端身份生成匿名 `user_id` / `user`，用于 DeepSeek 内容安全、KV Cache 和调度隔离
 - **流式兼容**：`stream:true` 返回完整 Responses SSE（适用于 Codex）；`stream:false` 或省略时返回原生 JSON
 - **用量统计**：调用记在 `provider=deepseek` 下，与 messages 端点共用同一份统计

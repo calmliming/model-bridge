@@ -2,6 +2,47 @@ import { describe, expect, it } from 'vitest'
 import { emptyUsage } from '../providers/types'
 import { estimateCost, resolvePrice } from './pricing'
 
+describe('DeepSeek V4.1 Flash pricing', () => {
+  const launch = Date.parse('2026-09-10T12:00:00+08:00')
+  const retire = Date.parse('2026-09-14T12:00:00+08:00')
+  const offPeak = { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.003 }
+  const peak = { input: 0.3, output: 1.2, cacheWrite: 0, cacheRead: 0.006 }
+
+  it.each(['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-chat', 'deepseek-reasoner'])(
+    'prices %s and its Sub2API route at the new Flash rate', (model) => {
+      for (const provider of ['deepseek', 'sub2api']) {
+        expect(resolvePrice(provider, model, launch)).toEqual(offPeak)
+        expect(resolvePrice(provider, model, Date.parse('2026-09-10T14:00:00+08:00'))).toEqual(peak)
+        expect(resolvePrice(provider, model, Date.parse('2026-09-12T10:00:00+08:00'))).toEqual(offPeak)
+      }
+    },
+  )
+
+  it('preserves the old Flash rate before the price reduction', () => {
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', launch - 1))
+      .toMatchObject({ input: 0.44, output: 1.32, cacheRead: 0.014 })
+    expect(resolvePrice('deepseek', 'deepseek-v4-flash', launch - 3 * 60 * 60_000 - 1))
+      .toMatchObject({ input: 0.22, output: 0.66, cacheRead: 0.007 })
+  })
+
+  it('switches only V4 Pro to Flash pricing at the retirement instant', () => {
+    for (const provider of ['deepseek', 'sub2api']) {
+      expect(resolvePrice(provider, 'deepseek-v4-pro', retire - 1))
+        .toMatchObject({ input: 1.32, output: 3.96, cacheRead: 0.044 })
+      expect(resolvePrice(provider, 'deepseek-v4-pro', retire)).toEqual(offPeak)
+      expect(resolvePrice(provider, 'deepseek-v4-pro', retire + 2 * 60 * 60_000)).toEqual(peak)
+      expect(resolvePrice(provider, 'deepseek-v4-pro', Date.parse('2026-09-19T10:00:00+08:00'))).toEqual(offPeak)
+      expect(resolvePrice(provider, 'deepseek-v4.1-pro', retire)).toMatchObject({ input: 0.66, output: 1.98 })
+    }
+  })
+
+  it('charges input, output, and cache hits using the new USD prices', () => {
+    const usage = { ...emptyUsage(), inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 1_000_000 }
+    expect(estimateCost('deepseek', 'deepseek-flash', usage, launch)).toBeCloseTo(0.753)
+    expect(estimateCost('deepseek', 'deepseek-v4-pro', usage, retire + 2 * 60 * 60_000)).toBeCloseTo(1.506)
+  })
+})
+
 // resolvePrice() returns the built-in tier before loadPricing() runs, so these
 // exercise the pricing math without a database. They pin the gpt-5.6 family
 // (Sol/Terra/Luna) list prices added for sub2api v0.1.146 parity.

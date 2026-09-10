@@ -3,21 +3,23 @@
  * Anthropic-compatible endpoints.
  */
 export function mapModel(input: unknown): string {
-  if (typeof input !== 'string' || !input) return 'deepseek-v4-pro'
-  if (input === 'deepseek-chat') return 'deepseek-v4-flash'
-  if (input === 'deepseek-reasoner') return 'deepseek-v4-flash'
-  return input.startsWith('deepseek-') ? input : 'deepseek-v4-pro'
+  if (typeof input !== 'string' || !input) return 'deepseek-flash'
+  if (input === 'deepseek-chat' || input === 'deepseek-reasoner') return 'deepseek-flash'
+  // Preserve explicit upstream names, including the temporary V4 aliases.
+  // DeepSeek handles the scheduled V4 Pro routing change on its side.
+  return input.startsWith('deepseek-') ? input : 'deepseek-flash'
 }
 
-/** DeepSeek's native Responses API supports V4 Flash, V4 Pro, and the V4 Flash vision experiment. */
+/** Native Responses supports V4.1 Flash, V4 Pro, and temporary V4 Flash aliases. */
 export function mapResponsesModel(input: unknown): string {
   if (
     typeof input === 'string' &&
-    (input === 'deepseek-v4-flash' ||
+    (input === 'deepseek-flash' ||
+      input === 'deepseek-v4-flash' ||
       input === 'deepseek-v4-pro' ||
       input === 'deepseek-v4-flash-vision-exp')
   ) {
     return input
   }
-  return 'deepseek-v4-flash'
+  return 'deepseek-flash'
 }

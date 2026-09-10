@@ -24,6 +24,32 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('scheduled database price overrides', () => {
+  it('updates seeded Flash and Pro prices without freezing new Flash at its seed rate', async () => {
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('deepseek-flash', 0.15, 0.6, 0.003),
+      priceRow('deepseek-v4-flash', 0.14, 0.28, 0.0028),
+      priceRow('deepseek-v4-pro', 0.435, 0.87, 0.003625),
+    ] })
+    await loadPricing()
+    for (const model of ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro']) {
+      expect(resolvePrice('deepseek', model, Date.parse('2026-09-14T14:00:00+08:00')))
+        .toMatchObject({ input: 0.3, output: 1.2, cacheRead: 0.006 })
+    }
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-09-14T11:59:59+08:00')))
+      .toMatchObject({ input: 1.32, output: 3.96 })
+  })
+
+  it('preserves custom prices through the Flash launch and Pro retirement', async () => {
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('deepseek-flash', 0.5, 2, 0.05),
+      priceRow('deepseek-v4-pro', 2, 4, 0.2),
+    ] })
+    await loadPricing()
+    expect(resolvePrice('deepseek', 'deepseek-flash', Date.parse('2026-09-10T14:00:00+08:00')))
+      .toMatchObject({ input: 0.5, output: 2, cacheRead: 0.05 })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-09-14T14:00:00+08:00')))
+      .toMatchObject({ input: 2, output: 4, cacheRead: 0.2 })
+  })
   it('does not bill Astra at the generic GPT fallback on an existing database', async () => {
     mocks.query.mockResolvedValue({ rows: [priceRow('gpt', 1.25, 10, 0.125, 'openai')] })
     await loadPricing()

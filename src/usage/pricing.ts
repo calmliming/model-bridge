@@ -186,8 +186,8 @@ function geminiPrice(model: string, atMs: number): TierPrice {
   return GEMINI_31_PRO
 }
 
-// DeepSeek list prices per 1M tokens. The current official schedule is
-// effective from 2026-08-23 (Beijing time). Peak windows are 01:00-04:00 and
+// DeepSeek USD list prices per 1M tokens, including the 2026-09-10 Flash
+// reduction and 2026-09-14 Pro routing change. Peak windows are 01:00-04:00 and
 // 06:00-10:00 UTC on weekdays only; Beijing Saturday/Sunday is always
 // off-peak. There is no separate cache-write fee.
 type DeepseekTier = 'flash' | 'pro'
@@ -197,6 +197,10 @@ type DeepseekPricePeriod = 'pre-schedule' | 'off-peak' | 'peak'
 // the instant explicit so historical usage rows continue to use the rate that
 // was active when they were recorded.
 const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
+// Historical cutoff assumption: the current public changelog gives only the
+// release date. Keep the noon boundary explicit for later reconciliation.
+const DEEPSEEK_V41_FLASH_EFFECTIVE_AT = Date.parse('2026-09-10T12:00:00+08:00')
+const DEEPSEEK_V4_PRO_RETIRE_AT = Date.parse('2026-09-14T12:00:00+08:00')
 const BEIJING_OFFSET_MS = 8 * 60 * 60_000
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
@@ -225,9 +229,16 @@ const DEEPSEEK_SCHEDULED_TIERS: Record<Exclude<DeepseekPricePeriod, 'pre-schedul
   },
 }
 
+// https://api-docs.deepseek.com/quick_start/pricing/ — official USD prices,
+// not a conversion of the separately published CNY prices.
+const DEEPSEEK_V41_FLASH_PRICES = {
+  'off-peak': { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.003 },
+  peak: { input: 0.3, output: 1.2, cacheWrite: 0, cacheRead: 0.006 },
+} satisfies Record<'off-peak' | 'peak', TierPrice>
+
 function deepseekTier(model: string): DeepseekTier {
   const m = model.toLowerCase()
-  // deepseek-v4-flash plus legacy deepseek-chat / deepseek-reasoner aliases.
+  // deepseek-flash, temporary V4 names, and legacy chat / reasoner aliases.
   if (m.includes('flash') || m.includes('chat') || m.includes('reasoner')) return 'flash'
   // deepseek-v4-pro
   return 'pro'
@@ -248,6 +259,10 @@ function deepseekPricePeriod(atMs: number): DeepseekPricePeriod {
 function deepseekPrice(model: string, atMs: number): TierPrice {
   const tier = deepseekTier(model)
   const period = deepseekPricePeriod(atMs)
+  if (period !== 'pre-schedule' && (
+    (tier === 'flash' && atMs >= DEEPSEEK_V41_FLASH_EFFECTIVE_AT) ||
+    (/^deepseek-v4-pro(?:$|-)/i.test(model) && atMs >= DEEPSEEK_V4_PRO_RETIRE_AT)
+  )) return DEEPSEEK_V41_FLASH_PRICES[period]
   return period === 'pre-schedule'
     ? DEEPSEEK_PRE_SCHEDULE_TIERS[tier]
     : DEEPSEEK_SCHEDULED_TIERS[period][tier]
@@ -441,9 +456,11 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'gemini', model: 'pro', price: GEMINI_31_PRO },
   { provider: 'gemini', model: 'flash', price: GEMINI_FRONTIER_FLASH_PROMO },
   // DeepSeek / Xiaomi.
-  // DeepSeek keeps the pre-schedule values as seed markers. resolvePrice()
+  // Legacy DeepSeek rows keep pre-schedule seed markers; the new Flash name
+  // uses its launch off-peak price as the marker. resolvePrice()
   // recognises these exact values as managed defaults and applies the current
   // scheduled rate; any administrator-edited value still wins.
+  { provider: 'deepseek', model: 'deepseek-flash', price: DEEPSEEK_V41_FLASH_PRICES['off-peak'] },
   { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
   { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_PRE_SCHEDULE_TIERS.pro },
@@ -637,6 +654,7 @@ function sameTokenPrice(a: TierPrice, b: TierPrice): boolean {
 function isManagedScheduledDefault(provider: string, model: string, price: TierPrice): boolean {
   if (provider === 'deepseek') {
     const tier = deepseekTier(model)
+    if (model === 'deepseek-flash' && sameTokenPrice(price, DEEPSEEK_V41_FLASH_PRICES['off-peak'])) return true
     if (sameTokenPrice(price, DEEPSEEK_PRE_SCHEDULE_TIERS[tier])) return true
     return (tier === 'pro' || model.toLowerCase().includes('reasoner')) &&
       sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
