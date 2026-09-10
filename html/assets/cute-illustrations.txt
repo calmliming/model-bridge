@@ -1,0 +1,30 @@
+Model Bridge · 两套可爱首页插画
+
+生成方式：内置 image_gen，每张生成一次，保留原始透明 PNG。
+
+项目资产
+html/assets/peach-companions.png：1254 × 1254，RGBA，桃桃首页插画。
+html/assets/garden-companions.png：1536 × 1024，RGBA，芽芽首页插画。
+
+精确生成提示词
+
+Mode: built-in image_gen, one call per asset in a single parallel Promise.allSettled batch.
+
+PEACH
+Use case: stylized-concept
+Asset type: Model Bridge 多模型 API 平台可爱首页右侧 hero 插画资产。
+Primary request: 1024x1024 方图，真正透明背景，保留透明 alpha。一个圆滚滚奶油白小兔子，桃粉耳朵，短手短脚，两位更小的淡黄和浅蓝软团子伙伴，三位朋友一起把三颗小彩色模块用短柔软连线接到中央的桃粉圆角小模块。
+Style/medium: 软萌高质量 3D 黏土与毛绒混合材质，精致商业网站插画品质，亲切而简洁。
+Composition/framing: 主体清楚，轮廓完整不裁切，画面内部四边留约 10% 呼吸空间。
+Lighting/mood: 暖光柔影，柔和友好。
+Color palette: creamy ivory, peach pink, butter yellow, a small sky-blue accent。
+Constraints: 无文字、无商标、无水印、无 UI；不要儿童玩具广告式过度繁杂；不要有色背景、白色底板或棋盘格图案，背景像素必须真实透明。
+
+GARDEN
+Use case: illustration-story
+Asset type: Model Bridge 第二套可爱首页的横向主插画资产。
+Primary request: 1536x1024 横图，真正透明背景，保留透明 alpha。一只友好的圆滚滚奶油黄水豚和一只小小薄荷绿鸟在一座小型拱桥两端，水豚正给桥边三个圆角盆栽浇水，盆栽里长出用短弧线相连的粉蓝黄小圆角模块，隐喻培育想法和连接模型。
+Style/medium: 日本绘本风格、轻微 risograph 质感的平面插画，深森林绿柔和手绘粗线，友好克制精致。
+Composition/framing: 左右舒展的横向构图，所有轮廓完整，四边有呼吸空间；有一个小笑脸太阳或星星作为点缀，无背景景观填满。
+Color palette: 淡绿、奶油黄、柔和珊瑚、天蓝，深森林绿线条。
+Constraints: 无文字、无商标、无水印、无 UI；不要有色背景、白色底板或棋盘格图案，背景像素必须真实透明。

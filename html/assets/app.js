@@ -62,7 +62,7 @@
       maximumFractionDigits: digits,
     });
   const num = (n) => Number(n).toLocaleString("en-US");
-  const file = (route) => "index.html#" + route;
+  const file = (route) => "overview.html#" + route;
   const href = (route) =>
     file(
       isUser && ["overview", "keys", "models", "api-docs"].includes(route)
@@ -653,7 +653,7 @@
     };
   });
   const brand = (publicPage = false) =>
-    `<a class="brand" href="${publicPage ? "landing.html" : "index.html"}" aria-label="Model Bridge ${publicPage ? "首页" : "总览"}"><img src="assets/model-bridge-logo.png?v=bridge-v2" alt=""><div>${state.settings.name === "Model Bridge" ? "Model<span>Bridge</span>" : esc(state.settings.name)}</div></a>`;
+    `<a class="brand" href="${publicPage ? "landing.html" : "overview.html"}" aria-label="Model Bridge ${publicPage ? "首页" : "总览"}"><img src="assets/model-bridge-logo.png?v=bridge-v2" alt=""><div>${state.settings.name === "Model Bridge" ? "Model<span>Bridge</span>" : esc(state.settings.name)}</div></a>`;
   function navigation() {
     return (isUser ? userNav : adminNav)
       .map(
@@ -1661,7 +1661,7 @@
     return `<div class="landing"><header class="public-header">${brand(true)}<nav class="public-nav" aria-label="首页导航"><a href="#features">产品能力</a><a href="models.html">模型广场</a><a href="docs.html">开发文档</a><a class="btn btn-primary" href="login.html">登录工作空间 ${I('arrow','icon-sm')}</a></nav></header><main id="main">
       <section class="landing-hero hero-centered"><span class="launch-label"><span class="dot"></span>为你的 AI 工作流而生 ${I('arrow','icon-sm')}</span><h1>所有模型。<br><em>一个连接。</em></h1><p class="lead">把 Claude、OpenAI、Gemini 和更多模型，<br class="desktop-break">连接到统一的 API。你的工具，你的模型，你的工作空间。</p><div class="hero-actions"><a class="btn btn-primary" href="user-overview.html">开始探索 ${I('arrow')}</a><a class="btn" href="docs.html">查看开发文档 ${I('code')}</a></div><div class="hero-capabilities"><span>${I('check','icon-sm')}自托管</span><span>${I('check','icon-sm')}标准 API</span><span>${I('check','icon-sm')}灵活的账户调度</span></div></section>
       <section class="landing-workbench" aria-label="模型接入方式"><div class="workbench-intro"><span class="eyebrow">ONE BRIDGE, EVERY MODEL</span><h2>熟悉的工具，<br>更多的选择。</h2><p>沿用现有 SDK，仅需更换 API 地址与密钥。</p><div class="workbench-providers">${['claude','openai','gemini','deepseek'].map(p=>`<a href="models.html">${providerAvatar(p)}<span>${providers[p].name}</span>${I('chevron','icon-sm')}</a>`).join('')}</div></div><div class="code-block landing-code"><div class="code-header"><span>${I('code','icon-sm')} quickstart.ts</span>${iconButton('copy','copy','复制接入示例',`data-copy="${esc(snippets.node)}"`)}</div><pre><code><span class="code-comment">// 一个端点。所有可能。</span>\nimport OpenAI from 'openai';\n\nconst bridge = new OpenAI({\n  baseURL: 'http://localhost:3000/v1',\n  apiKey: process.env.MODEL_BRIDGE_API_KEY\n});\n\nconst response = await bridge.chat\n  .completions.create({\n    model: 'gpt-5.5',\n    messages: [{\n      role: 'user',\n      content: 'Let’s build something.'\n    }]\n  });</code></pre><div class="code-status">${I('check','icon-sm')}兼容 OpenAI SDK <span>READY TO CONNECT</span></div></div></section>
-      <section id="features" class="landing-section"><div class="landing-section-head"><div><span class="eyebrow">BUILT FOR YOUR WORKFLOW</span><h2>从连接，到掌控。</h2></div><p>把复杂的模型管理，留在一个清晰的工作空间里。</p></div><div class="feature-grid">${[['01','code','统一接口','兼容 OpenAI、Anthropic 与 Gemini，连接你熟悉的开发工具。'],['02','account-groups','灵活调度','通过分组、优先级与多账户轮换，为不同任务分配合适资源。'],['03','stats','透明用量','从请求到 Token，从密钥到用户，清楚了解每一笔模型消耗。']].map(([n,i,t,p])=>`<article class="feature"><div class="feature-heading">${I(i)}<span>${n}</span></div><h3>${t}</h3><p>${p}</p></article>`).join('')}</div><div class="landing-cta"><div><h2>开始你的下一个项目。</h2><p>打开演示工作空间，体验完整的模型管理流程。</p></div><a class="btn btn-primary" href="index.html">进入工作空间 ${I('arrow')}</a></div></section></main><footer class="public-footer"><span>© 2026 Model Bridge</span><span>All models. One bridge.</span><a href="docs.html">开发文档 ${I('external','icon-sm')}</a></footer></div>`;
+      <section id="features" class="landing-section"><div class="landing-section-head"><div><span class="eyebrow">BUILT FOR YOUR WORKFLOW</span><h2>从连接，到掌控。</h2></div><p>把复杂的模型管理，留在一个清晰的工作空间里。</p></div><div class="feature-grid">${[['01','code','统一接口','兼容 OpenAI、Anthropic 与 Gemini，连接你熟悉的开发工具。'],['02','account-groups','灵活调度','通过分组、优先级与多账户轮换，为不同任务分配合适资源。'],['03','stats','透明用量','从请求到 Token，从密钥到用户，清楚了解每一笔模型消耗。']].map(([n,i,t,p])=>`<article class="feature"><div class="feature-heading">${I(i)}<span>${n}</span></div><h3>${t}</h3><p>${p}</p></article>`).join('')}</div><div class="landing-cta"><div><h2>开始你的下一个项目。</h2><p>打开演示工作空间，体验完整的模型管理流程。</p></div><a class="btn btn-primary" href="overview.html">进入工作空间 ${I('arrow')}</a></div></section></main><footer class="public-footer"><span>© 2026 Model Bridge</span><span>All models. One bridge.</span><a href="docs.html">开发文档 ${I('external','icon-sm')}</a></footer></div>`;
   }
   const authAside = () =>
     `<aside class="auth-aside"><span class="auth-aside-label">MODEL BRIDGE / WORKSPACE</span><div class="auth-statement"><span class="eyebrow">ALL MODELS. ONE BRIDGE.</span><h2>把想法，<br>连接到<span>可能。</span></h2><p>你的模型、工具与工作流。<br>在一个工作空间里，从容连接。</p><div class="auth-provider-stack">${['claude','openai','gemini','deepseek'].map(providerAvatar).join('')}<span>与你熟悉的模型，一起工作</span></div><div class="auth-proof"><div><strong>8<span>+</span></strong><small>模型服务商</small></div><div><strong>36</strong><small>目录模型</small></div><div><strong>01</strong><small>统一接入端点</small></div></div></div><div class="auth-aside-footer">Your models. Your workspace. Your next idea.</div></aside>`;
@@ -1679,7 +1679,7 @@
       if (/^[a-z-]+\.html$/.test(raw)) {
         a.setAttribute(
           "href",
-          file(raw === "index.html" ? "overview" : raw.replace(".html", "")),
+          file(raw === "overview.html" ? "overview" : raw.replace(".html", "")),
         );
       }
     });
@@ -2244,7 +2244,7 @@
       render();
       showModal(
         "演示邀请已创建",
-        `<div class="flex positive mb">${I("check")}邀请信息已准备就绪</div><p>${esc(str("name"))} · ${esc(str("email"))}</p><div class="inline-note mt">邀请邮件未发送。打开下方页面可体验接受邀请流程。</div><div class="form-actions">${btn("复制演示邀请地址", "copy", "copy", false, `data-copy="${esc(new URL("index.html#accept-invite", location.href).href)}"`)}<a class="btn btn-primary" href="${file("accept-invite")}">查看邀请 ${I("arrow")}</a></div>`,
+        `<div class="flex positive mb">${I("check")}邀请信息已准备就绪</div><p>${esc(str("name"))} · ${esc(str("email"))}</p><div class="inline-note mt">邀请邮件未发送。打开下方页面可体验接受邀请流程。</div><div class="form-actions">${btn("复制演示邀请地址", "copy", "copy", false, `data-copy="${esc(new URL("overview.html#accept-invite", location.href).href)}"`)}<a class="btn btn-primary" href="${file("accept-invite")}">查看邀请 ${I("arrow")}</a></div>`,
         "本地邀请演示",
       );
     }
@@ -2503,7 +2503,7 @@
         ?.scrollIntoView({ behavior: "smooth" });
       return;
     }
-    if (anchor?.getAttribute("href")?.startsWith("index.html#")) {
+    if (anchor?.getAttribute("href")?.startsWith("overview.html#")) {
       e.preventDefault();
       navigate(anchor.getAttribute("href").split("#")[1]);
       return;

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="让模型，围绕你的想法运转。 Model Bridge 自托管多模型 API 平台，连接模型、调度账户并了解用量。">
+  <meta name="theme-color" content="#100e1b">
+  <meta name="color-scheme" content="dark">
+  <title>星轨 · 智能引力 · Model Bridge</title>
+  <link rel="icon" href="assets/favicon.png" type="image/png">
+  <link rel="stylesheet" href="assets/landings.css">
+  <script src="assets/landings.js" defer></script>
+</head>
+<body class="theme-orbit">
+<a class="skip-link" href="#main">跳至主要内容</a>
+<header class="site-header wrap"><a class="brand" href="landing-04.html" aria-label="Model Bridge 首页"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span>Model Bridge</span></a><button class="menu-button" type="button" data-menu aria-expanded="false" aria-controls="site-nav">菜单 ☰</button><nav class="site-nav" id="site-nav" aria-label="首页导航"><a href="#features">产品能力</a><a href="models.html">模型广场</a><a href="docs.html">开发文档</a><a class="button small" href="overview.html">工作空间 <span aria-hidden="true">↗</span></a></nav></header>
+<main id="main">
+<section class="hero hero-centered wrap"><div class="eyebrow"><span class="status-dot"></span>ONE CENTER. ENDLESS POSSIBILITIES.</div><h1>让模型，围绕<br><em>你的想法运转。</em></h1><p class="lead">连接分散的模型资源，汇聚到你的工作流。<br>一个入口，抵达更广阔的智能世界。</p><div class="actions"><a class="button primary" href="user-overview.html">开启连接 <span aria-hidden="true">↗</span></a><a class="button" href="docs.html">探索接入方式 <span aria-hidden="true">→</span></a></div><div class="orbit-board" role="img" aria-label="Model Bridge 位于中心，连接 Claude、OpenAI、Gemini、DeepSeek 和 MiMo 的模型网络示意"><div class="orbit-ring outer"></div><div class="orbit-ring"></div><div class="orbit-ring inner"></div><div class="orbit-core">Model<br>Bridge ↗</div><span class="orbit-model">✳ Claude</span><span class="orbit-model">◎ OpenAI</span><span class="orbit-model">✦ Gemini</span><span class="orbit-model">≈ DeepSeek</span><span class="orbit-model">m MiMo</span><span class="orbit-caption">YOUR MODELS, CONNECTED</span></div></section>
+<div class="providers wrap" aria-label="可接入的模型服务商"><span class="provider-label">CONNECT YOUR MODELS</span><span class="provider-name"><b aria-hidden="true">✳</b>Claude</span><span class="provider-name"><b aria-hidden="true">◎</b>OpenAI</span><span class="provider-name"><b aria-hidden="true">✦</b>Gemini</span><span class="provider-name"><b aria-hidden="true">≈</b>DeepSeek</span><span class="provider-name"><b aria-hidden="true">m</b>MiMo</span></div>
+<section class="section wrap" id="features"><div class="section-heading"><div><div class="section-label">THE ESSENTIALS / 产品能力</div><h2>围绕你，连接更多。</h2></div><p>给每个想法，找到合适的模型与资源。</p></div><div class="feature-grid"><article class="feature-card"><div class="feature-top"><span class="feature-icon" aria-hidden="true">⤴</span><span class="feature-number">01</span></div><h3>一种接入，更多模型</h3><p>连接 Claude、OpenAI、Gemini 等服务商，使用兼容的标准 API，延续你熟悉的开发方式。</p><a class="text-link" href="models.html">探索模型 <span aria-hidden="true">↗</span></a></article><article class="feature-card"><div class="feature-top"><span class="feature-icon" aria-hidden="true">⇄</span><span class="feature-number">02</span></div><h3>合适的资源，给合适的任务</h3><p>通过账户分组、优先级与并发上限组织账号池，让不同应用按各自的规则使用资源。</p><a class="text-link" href="account-groups.html">了解调度 <span aria-hidden="true">↗</span></a></article><article class="feature-card"><div class="feature-top"><span class="feature-icon" aria-hidden="true">⌁</span><span class="feature-number">03</span></div><h3>每一次调用，清晰可见</h3><p>按用户、密钥、模型和服务商查看用量，为 API Key 配置成本配额，管理模型消耗。</p><a class="text-link" href="stats.html">查看用量 <span aria-hidden="true">↗</span></a></article></div></section>
+<section class="section wrap connection-section" id="connect"><div><div class="section-label">QUICK START / 快速接入</div><h2>你的下一次连接，<br>从这里开始。</h2><p class="lead">配置 API 地址和密钥，让应用连接到自己的模型资源。</p><div class="steps"><div class="step"><span>1</span><div><h3>连接上游账户</h3><p>添加服务商账户，确认可用的模型与资源。</p></div></div><div class="step"><span>2</span><div><h3>创建应用密钥</h3><p>设置模型权限、账户分组与用量上限。</p></div></div><div class="step"><span>3</span><div><h3>发送第一条请求</h3><p>将示例地址替换为你的部署地址，在服务端调用。</p></div></div></div><a class="text-link" style="margin-top:26px" href="docs.html">阅读完整接入文档 <span aria-hidden="true">↗</span></a></div><div class="code-panel"><div class="code-top"><span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>bridge / quickstart</span><button class="copy-button" data-copy type="button" aria-label="复制当前接入示例">复制 ↗</button></div><div class="code-tabs" role="tablist" aria-label="接入示例语言" data-code-tabs><button id="connect-tab-curl" role="tab" type="button" aria-selected="true" aria-controls="connect-curl" tabindex="0">cURL</button><button id="connect-tab-javascript" role="tab" type="button" aria-selected="false" aria-controls="connect-javascript" tabindex="-1">JavaScript</button><button id="connect-tab-python" role="tab" type="button" aria-selected="false" aria-controls="connect-python" tabindex="-1">Python</button></div><div id="connect-curl" role="tabpanel" aria-labelledby="connect-tab-curl" tabindex="0" ><pre><code><span class="code-comment"># 设置好 MODEL_BRIDGE_API_KEY 后运行</span>
+curl http://localhost:3000/v1/models \
+  -H &quot;Authorization: Bearer $MODEL_BRIDGE_API_KEY&quot;</code></pre></div><div id="connect-javascript" role="tabpanel" aria-labelledby="connect-tab-javascript" tabindex="0" hidden><pre><code><span class="code-comment">// 在服务端调用，密钥从环境变量读取</span>
+const response = await fetch(
+  &#x27;http://localhost:3000/v1/models&#x27;,
+  {
+    headers: {
+      Authorization:
+        `Bearer ${process.env.MODEL_BRIDGE_API_KEY}`
+    }
+  }
+);
+const models = await response.json();
+console.log(models);</code></pre></div><div id="connect-python" role="tabpanel" aria-labelledby="connect-tab-python" tabindex="0" hidden><pre><code><span class="code-comment"># 在服务端调用，密钥从环境变量读取</span>
+import os
+import json
+from urllib.request import Request, urlopen
+
+request = Request(
+    &quot;http://localhost:3000/v1/models&quot;,
+    headers={&quot;Authorization&quot;: &quot;Bearer &quot; +
+             os.environ[&quot;MODEL_BRIDGE_API_KEY&quot;]}
+)
+with urlopen(request) as response:
+    print(json.load(response))</code></pre></div><div class="code-bottom"><span>本地接入示例 · 不发送请求</span><span>GET /v1/models</span></div></div></section>
+<section class="cta wrap"><div><div class="section-label">YOUR NEXT IDEA STARTS HERE</div><h2>把想法，连接到可能。</h2><p>打开演示工作空间，体验你的模型管理方式。</p></div><a class="button primary" href="user-overview.html">进入演示工作空间 <span aria-hidden="true">↗</span></a></section>
+</main>
+<footer class="site-footer wrap"><span>© 2026 Model Bridge · All models. One bridge.</span><div><span>本地设计演示</span><a href="docs.html">开发文档 ↗</a><a href="index.html">查看全部设计 ↗</a></div></footer>
+<nav class="design-dock" aria-label="落地页方案切换"><a class="dock-home" href="index.html">▦ 全部方案</a><a href="landing-03.html" aria-label="上一套：编序 · 模型新刊">←</a><span class="dock-label">04 / 18 &nbsp; 星轨</span><a href="landing-05.html" aria-label="下一套：蓝图 · 连接架构">→</a></nav>
+<div class="toast" role="status" aria-live="polite" data-status></div>
+</body>
+</html>
