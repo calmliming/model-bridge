@@ -165,10 +165,15 @@ export async function clearAccountCooldown(id: string): Promise<void> {
     .where(and(eq(accounts.id, id), inArray(accounts.status, ['rate_limited', 'error'])))
 }
 
-/** Marks an account as healthy and just used (clears any cooldown). */
+/** A late success must not erase a concurrent cooldown or revive a disabled account. */
 export async function markAccountUsed(id: string): Promise<void> {
+  const now = Date.now()
   await db.update(accounts)
-    .set({ lastUsedAt: Date.now(), status: 'active', cooldownUntil: null })
+    .set({
+      lastUsedAt: now,
+      status: sql`CASE WHEN ${accounts.status} = 'disabled' OR ${accounts.cooldownUntil} > ${now} THEN ${accounts.status} ELSE 'active' END`,
+      cooldownUntil: sql`CASE WHEN ${accounts.cooldownUntil} > ${now} THEN ${accounts.cooldownUntil} ELSE NULL END`,
+    })
     .where(eq(accounts.id, id))
 }
 
@@ -188,8 +193,8 @@ export async function penalizeAccount(
   const fallbackUntil = Date.now() + COOLDOWN_MS[kind]
   const until = cooldownUntil && cooldownUntil > Date.now() ? cooldownUntil : fallbackUntil
   await db.update(accounts)
-    .set({ status: kind, cooldownUntil: until })
-    .where(eq(accounts.id, id))
+    .set({ status: kind, cooldownUntil: sql`GREATEST(COALESCE(${accounts.cooldownUntil}, 0), ${until})` })
+    .where(and(eq(accounts.id, id), sql`${accounts.status} <> 'disabled'`))
 }
 
 /**
@@ -249,23 +254,19 @@ export async function penalizeAccountModel(
   const now = Date.now()
   const fallbackUntil = now + COOLDOWN_MS[kind]
   const until = cooldownUntil && cooldownUntil > now ? cooldownUntil : fallbackUntil
-  const [row] = await db
-    .select({ metadata: accounts.metadata })
-    .from(accounts)
-    .where(eq(accounts.id, id))
-  if (!row) return
-  const metadata =
-    row.metadata && typeof row.metadata === 'object'
-      ? { ...(row.metadata as Record<string, unknown>) }
-      : ({} as Record<string, unknown>)
-  const existing = metadata.modelCooldowns
-  const pruned: Record<string, number> = {}
-  if (existing && typeof existing === 'object') {
-    for (const [key, value] of Object.entries(existing as Record<string, unknown>)) {
-      if (typeof value === 'number' && value > now) pruned[key] = value
-    }
-  }
-  pruned[canonicalModelCooldownKey(model)] = until
-  metadata.modelCooldowns = pruned
-  await db.update(accounts).set({ metadata }).where(eq(accounts.id, id))
+  const key = canonicalModelCooldownKey(model)
+  // Merge against the row locked by UPDATE, so parallel model failures and
+  // quota/token metadata updates cannot overwrite each other.
+  await db.update(accounts).set({ metadata: sql`
+    jsonb_set(COALESCE(${accounts.metadata}, '{}'::jsonb), '{modelCooldowns}',
+      COALESCE((SELECT jsonb_object_agg(entry.key, entry.value)
+        FROM jsonb_each(CASE WHEN jsonb_typeof(${accounts.metadata}->'modelCooldowns') = 'object'
+          THEN ${accounts.metadata}->'modelCooldowns' ELSE '{}'::jsonb END) AS entry
+        WHERE CASE WHEN jsonb_typeof(entry.value) = 'number'
+          THEN (entry.value::text)::numeric > ${now} ELSE false END), '{}'::jsonb)
+      || jsonb_build_object(${key}::text, GREATEST(${until}::bigint,
+        CASE WHEN jsonb_typeof(${accounts.metadata}->'modelCooldowns'->${key}::text) = 'number'
+          THEN (${accounts.metadata}->'modelCooldowns'->>${key}::text)::numeric ELSE 0 END)), true)
+  ` }).where(eq(accounts.id, id))
+
 }

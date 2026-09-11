@@ -1,3 +1,4 @@
+import { closeAntigravityDispatcher } from './providers/antigravity/client'
 import { existsSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { join } from 'node:path'
@@ -64,13 +65,14 @@ async function main(): Promise<void> {
   let stopTokenRefreshJob: () => Promise<void> = async () => {}
   let stopQuotaAutopauseJob: () => Promise<void> = async () => {}
   let oauthCallbackServer: Server | null = null
+  let antigravityCallbackServer: Server | null = null
 
   app.addHook('onClose', async () => {
     await stopPricingOverrideReload()
     await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob()])
-    await closeOauthCallbackServer(oauthCallbackServer)
+    await Promise.all([closeOauthCallbackServer(oauthCallbackServer), closeOauthCallbackServer(antigravityCallbackServer)])
     await waitForPendingUsage()
-    await closeUpstreamDispatcher()
+    await Promise.all([closeUpstreamDispatcher(), closeAntigravityDispatcher()])
     await closeRedis()
     await pool.end()
   })
@@ -115,6 +117,7 @@ async function main(): Promise<void> {
   // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
   // as a redirect URI, so we run a small dedicated listener on 1455.
   oauthCallbackServer = startOauthCallbackServer()
+  if (config.ANTIGRAVITY_OAUTH_CLIENT_SECRET) antigravityCallbackServer = startOauthCallbackServer({ port: 8085, paths: ['/callback'], provider: 'antigravity' })
 
   let shuttingDown = false
   const shutdown = async (signal: NodeJS.Signals) => {

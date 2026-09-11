@@ -62,13 +62,14 @@ let statusInitialized = false
 const updateBusy = computed(() => updateTask.value.status === 'checking' || updateTask.value.status === 'updating')
 
 const displayedVersion = computed(() => {
-  return updateCheck.value?.currentVersion || updateTask.value.currentVersion || appVersion.value
+  // The updater reports its Git checkout, which can differ from the running app.
+  return appVersion.value || updateCheck.value?.currentVersion || updateTask.value.currentVersion
 })
 
 const versionLabel = computed(() => formatVersion(displayedVersion.value, 'v--'))
 
 const versionTitle = computed(() => {
-  const commit = updateCheck.value?.currentCommit || updateTask.value.currentCommit || appCommit.value
+  const commit = appCommit.value || updateCheck.value?.currentCommit || updateTask.value.currentCommit
   if (!commit) return '当前版本'
   return `当前提交 ${shortCommit(commit)}`
 })
@@ -357,7 +358,7 @@ function confirmSystemUpdate() {
             <div class="rounded-xl border border-gray-100 p-2.5 dark:border-dark-800">
               <span class="text-gray-500 dark:text-dark-400">当前版本</span>
               <strong class="mt-1 block truncate font-mono text-gray-900 dark:text-white">
-                {{ formatVersion(updateCheck?.currentVersion || displayedVersion) }}
+                {{ formatVersion(displayedVersion) }}
               </strong>
               <small class="mt-1 block truncate font-mono text-gray-400 dark:text-dark-500">
                 {{ shortCommit(updateCheck?.currentCommit || appCommit) }}

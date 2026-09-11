@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { emptyUsage } from '../providers/types'
-import { estimateCost, resolvePrice } from './pricing'
+import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 
 describe('DeepSeek V4.1 Flash pricing', () => {
   const launch = Date.parse('2026-09-10T12:00:00+08:00')
@@ -380,5 +380,24 @@ describe('OpenAI image pricing', () => {
       imageOutputTokens: 1_000_000,
       imageModel: 'gpt-image-2',
     })).toBe(32.5)
+  })
+})
+
+
+describe('MiniMax pricing', () => {
+  it('prices native and aggregator models consistently', () => {
+    expect(resolvePrice('minimax', 'MiniMax-M3')).toMatchObject({ input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0 })
+    expect(resolvePrice('sub2api', 'MiniMax-M3')).toEqual(resolvePrice('minimax', 'MiniMax-M3'))
+    expect(resolvePrice('minimax', 'MiniMax-M2.7-highspeed')).toMatchObject({ input: 0.6, output: 2.4, cacheRead: 0.06, cacheWrite: 0.375 })
+    expect(resolvePrice('minimax', 'MiniMax-M2.5')).toMatchObject({ cacheRead: 0.03 })
+  })
+  it('applies the >512K boundary including cache and only the actual priority tier', () => {
+    const usage = { ...emptyUsage(), inputTokens: 500000, cacheReadTokens: 12000 }
+    expect(resolveUsagePrice('minimax', 'MiniMax-M3', usage)?.input).toBe(0.3)
+    expect(resolveUsagePrice('minimax', 'MiniMax-M3', { ...usage, cacheReadTokens: 12001 })?.input).toBe(0.6)
+    const price = resolveUsagePrice('sub2api', 'MiniMax-M3', { ...usage, cacheReadTokens: 12001, serviceTier: 'priority' })!
+    expect(price.input).toBeCloseTo(0.9)
+    expect(price.output).toBeCloseTo(3.6)
+    expect(resolveUsagePrice('minimax', 'MiniMax-M2.7', { ...usage, serviceTier: 'priority' })?.input).toBe(0.3)
   })
 })

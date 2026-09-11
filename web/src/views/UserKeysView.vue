@@ -97,11 +97,13 @@ const providerOptions = [
   { label: 'Claude', value: 'claude' },
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
+  { label: 'Antigravity（反重力）', value: 'antigravity' },
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
+  { label: 'MiniMax', value: 'minimax' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
 
@@ -109,11 +111,13 @@ const providerLabel: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  antigravity: 'Antigravity（反重力）',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
+  minimax: 'MiniMax',
   sub2api: 'Sub2API',
 }
 

@@ -7,10 +7,15 @@ const BUILTIN_UPSTREAM_HOSTS = new Set([
   'api.deepseek.com',
   'api.x.ai',
   'cloudcode-pa.googleapis.com',
+  'daily-cloudcode-pa.googleapis.com',
+  'oauth2.googleapis.com',
   'dashscope.aliyuncs.com',
   'api.xiaomimimo.com',
   'open.bigmodel.cn',
   'api.moonshot.cn',
+  'api.minimaxi.com',
+  'api.minimax.io',
+  'api.minimax.cn',
   'challenges.cloudflare.com',
 ])
 

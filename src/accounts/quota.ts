@@ -5,8 +5,10 @@ export type AccountQuotaWindowKey =
   | 'weekly_fable'
   | 'primary'
   | 'secondary'
+  | 'model'
 
 export interface AccountQuotaWindow {
+  model?: string
   key: AccountQuotaWindowKey
   label: string
   usedPercent: number | null
@@ -15,7 +17,7 @@ export interface AccountQuotaWindow {
 }
 
 export interface AccountQuotaSnapshot {
-  source: 'claude' | 'openai'
+  source: 'claude' | 'openai' | 'minimax' | 'antigravity'
   updatedAt: number
   windows: AccountQuotaWindow[]
   /**
@@ -242,11 +244,16 @@ export function extractAccountQuota(
  * that can still serve non-Fable Claude models.
  */
 export function isAccountScopedQuotaWindow(window: AccountQuotaWindow): boolean {
-  return window.key !== 'weekly_fable'
+  return window.key !== 'weekly_fable' && window.key !== 'model'
+}
+
+export function quotaWindowPauseUntil(window: AccountQuotaWindow, thresholdPercent: number, now = Date.now()): number | null {
+  if (window.resetAt == null || window.resetAt <= now) return null
+  return window.exceeded || (thresholdPercent > 0 && window.usedPercent != null && window.usedPercent >= thresholdPercent) ? window.resetAt : null
 }
 
 /**
- * Earliest future window reset that should pause the account, given a usage
+ * Latest breached window reset that should pause the account, given a usage
  * threshold. A window pauses when the upstream already marks it `exceeded`, or
  * when its `usedPercent` has reached `thresholdPercent`. Returns null if none.
  *
@@ -269,7 +276,7 @@ export function quotaPauseUntil(
       return threshold > 0 && window.usedPercent != null && window.usedPercent >= threshold
     })
     .map((window) => window.resetAt!)
-  return resetTimes.length ? Math.min(...resetTimes) : null
+  return resetTimes.length ? Math.max(...resetTimes) : null
 }
 
 /** Legacy helper: pause only on windows the upstream marks exceeded. */
@@ -308,11 +315,13 @@ function isQuotaWindow(value: unknown): value is AccountQuotaWindow {
     'weekly_fable',
     'primary',
     'secondary',
+    'model',
   ]
   return (
     typeof row.key === 'string' &&
     keys.includes(row.key as AccountQuotaWindowKey) &&
     typeof row.label === 'string' &&
+    (row.key !== 'model' || (typeof row.model === 'string' && row.model.length > 0)) &&
     (typeof row.usedPercent === 'number' || row.usedPercent === null) &&
     (typeof row.resetAt === 'number' || row.resetAt === null) &&
     typeof row.exceeded === 'boolean'
@@ -336,7 +345,7 @@ export function accountQuotaFromMetadata(metadata: unknown): AccountQuotaSnapsho
       : { source: 'openai', updatedAt: 0, windows: [], resetCredits: resetCreditsOverride }
   }
   const row = quota as Partial<AccountQuotaSnapshot>
-  if (row.source !== 'claude' && row.source !== 'openai') return null
+  if (row.source !== 'claude' && row.source !== 'openai' && row.source !== 'minimax' && row.source !== 'antigravity') return null
   if (typeof row.updatedAt !== 'number' || !Array.isArray(row.windows)) return null
   const windows = row.windows.filter(isQuotaWindow)
   const inlineCredits = typeof row.resetCredits === 'number' ? row.resetCredits : null

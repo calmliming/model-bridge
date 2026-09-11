@@ -178,3 +178,29 @@ describe('model discovery', () => {
     ])
   })
 })
+
+
+describe('group model restrictions', () => {
+  it('intersects group policy with key policy and filters aliases by their requested name', () => {
+    const key = { allowedProviders: ['minimax'], allowedModels: ['MiniMax-M3', 'alias'],
+      groupAllowedModels: ['minimax-*'], modelMappings: { alias: 'MiniMax-M3' } }
+    expect(listModelIdsForKey(key)).toEqual(['MiniMax-M3'])
+    expect(listModelIdsForKey({ ...key, groupAllowedModels: ['alias'] })).toEqual(['alias'])
+    expect(listModelIdsForKey({ ...key, groupAllowedModels: [] })).toEqual([])
+  })
+  it('includes custom exact group entries without widening key restrictions', () => {
+    expect(listModelIdsForKey({ allowedProviders: ['minimax'], allowedModels: null, groupAllowedModels: ['MiniMax-custom'] })).toEqual(['MiniMax-custom'])
+    expect(listModelIdsForKey({ allowedProviders: ['minimax'], allowedModels: ['MiniMax-M3'], groupAllowedModels: ['MiniMax-custom'] })).toEqual([])
+    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null })).toContain('MiniMax-M3')
+    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['MiniMax-custom'] })).toEqual(['MiniMax-custom'])
+    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['alias'], modelMappings: { alias: 'MiniMax-custom' } })).toEqual(['alias'])
+  })
+})
+
+
+it('lists Gemini models through Sub2API while retaining group restrictions', () => {
+  const key = { allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['gemini-3.8-*'] }
+  const models = listGeminiModels(key, 'sub2api')
+  expect(models.map(x => x.name)).toEqual(['models/gemini-3.8-flash'])
+  expect(listGeminiModels(key)).toEqual([])
+})

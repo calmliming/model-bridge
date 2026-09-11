@@ -11,18 +11,43 @@ export function normalizeSub2ApiBaseUrl(raw: string | null | undefined): string 
   if (!base) throw new Error('Sub2API account has no Base URL')
   try {
     const url = new URL(base)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.search || url.hash || url.username || url.password) {
       throw new Error('invalid protocol')
     }
     const normalized = url.toString().replace(/\/+$/, '')
-    return normalized.endsWith('/v1') ? normalized.slice(0, -3) : normalized
+    return normalized.replace(/\/(?:v1|v1beta)$/, '')
   } catch {
     throw new Error('Sub2API account Base URL is invalid')
   }
 }
 
+/** Native Gemini gateway path, including Sub2API's /antigravity prefix when configured. */
+export function relaySub2ApiGemini(
+  apiKey: string,
+  baseUrl: string | null,
+  body: Record<string, unknown>,
+  model: string,
+  action: string,
+): Promise<Response> {
+  const streaming = action === 'streamGenerateContent'
+  const path = `/v1beta/models/${encodeURIComponent(model)}:${action}${streaming ? '?alt=sse' : ''}`
+  return fetchWithConnectTimeout(endpoint(baseUrl, path), {
+    method: 'POST',
+    headers: { ...jsonHeaders(apiKey, streaming ? 'text/event-stream' : 'application/json'), 'x-goog-api-key': apiKey },
+    body: JSON.stringify(body),
+  }, SUB2API_TIMEOUT_MS)
+}
+
 function endpoint(baseUrl: string | null, path: string): string {
   return `${normalizeSub2ApiBaseUrl(baseUrl)}${path}`
+}
+
+function unsupportedAntigravityProtocol(baseUrl: string | null): Response | null {
+  if (!normalizeSub2ApiBaseUrl(baseUrl).endsWith('/antigravity')) return null
+  return new Response(JSON.stringify({ error: {
+    type: 'invalid_request_error', code: 'antigravity_endpoint_unsupported',
+    message: 'Antigravity 专用入口支持 Messages 和 Gemini 原生协议。Chat Completions / Responses 请使用 Sub2API 根地址，并在上游将 Key 绑定到 Antigravity 分组。',
+  } }), { status: 400, headers: { 'content-type': 'application/json' } })
 }
 
 function jsonHeaders(apiKey: string, accept: string): Record<string, string> {
@@ -54,6 +79,8 @@ export function relaySub2ApiChatCompletions(
   baseUrl: string | null,
   body: Record<string, unknown>,
 ): Promise<Response> {
+  const unsupported = unsupportedAntigravityProtocol(baseUrl)
+  if (unsupported) return Promise.resolve(unsupported)
   const upstreamBody = { ...body }
   if (upstreamBody.stream === true) {
     const streamOptions =
@@ -78,6 +105,8 @@ export function relaySub2ApiResponses(
   baseUrl: string | null,
   body: Record<string, unknown>,
 ): Promise<Response> {
+  const unsupported = unsupportedAntigravityProtocol(baseUrl)
+  if (unsupported) return Promise.resolve(unsupported)
   const upstreamBody = { ...body, stream: true }
   return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/responses'), {
     method: 'POST',

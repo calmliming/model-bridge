@@ -168,11 +168,13 @@ const providerLabels: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  antigravity: 'Antigravity（反重力）',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
+  minimax: 'MiniMax',
   sub2api: 'Sub2API',
 }
 
@@ -180,6 +182,7 @@ const providerColors: Record<string, string> = {
   claude: '#d97757',
   openai: '#10a37f',
   gemini: '#4285f4',
+  antigravity: '#7c3aed',
   deepseek: '#6366f1',
   xiaomi: '#ff6900',
   zhipu: '#7c3aed',

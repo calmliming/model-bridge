@@ -1,3 +1,4 @@
+import { upstreamSignal } from '../http/cancellation'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Fastify from 'fastify'
 
@@ -8,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   consumeSubscriptionUsage: vi.fn(), resolveActiveSubscription: vi.fn(),
   pickAccount: vi.fn(), markAccountUsed: vi.fn(), penalizeAccount: vi.fn(), penalizeAccountModel: vi.fn(),
   ensureFreshToken: vi.fn(),
-  accounts: [] as Array<{ id: string; concurrencyLimit: number | null; metadata: Record<string, unknown> | null }>,
+  cachedAntigravityModels: vi.fn(),
+  accounts: [] as Array<{ id: string; concurrencyLimit: number | null; metadata: Record<string, unknown> | null; proxyUrl?: string | null }>,
 }))
 
 vi.mock('../db/index', () => ({
@@ -18,6 +20,7 @@ vi.mock('../db/index', () => ({
 vi.mock('../keys/manager', () => ({
   findApiKeyBySecret: async () => ({ ...mocks.key, userBalanceMicros: mocks.balance }),
 }))
+vi.mock('../accounts/antigravityModels', () => ({ cachedAntigravityModels: mocks.cachedAntigravityModels }))
 vi.mock('../accounts/scheduler', () => ({
   pickAccount: mocks.pickAccount,
   markAccountUsed: mocks.markAccountUsed,
@@ -81,6 +84,7 @@ beforeEach(async () => {
   mocks.penalizeAccount.mockResolvedValue(undefined)
   mocks.penalizeAccountModel.mockResolvedValue(undefined)
   mocks.ensureFreshToken.mockResolvedValue('test-upstream-token')
+  mocks.cachedAntigravityModels.mockResolvedValue(['gemini-3.8-flash', 'claude-sonnet-5'])
   mocks.key = {
     id: 'key-1', name: 'Test', enabled: true, expiresAt: null,
     quotaLimit: null, quotaUsed: 0, userId: 'user-1', userStatus: 'active',
@@ -380,4 +384,263 @@ describe('upstream compatibility regressions', () => {
     expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model: 'kimi-k3', tools: [{ type: 'web_search' }] })
     expect(mocks.logs[0]?.slice(9, 11)).toEqual([10, 5])
   }))
+})
+
+
+describe('MiniMax and group admission', () => {
+  it.each(['/v1/responses', '/api/minimax/v1/responses'])('routes MiniMax natively at %s and records JSON usage', url => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ object: 'response', model: 'MiniMax-M3', status: 'completed', output: [],
+      usage: { input_tokens: 50, output_tokens: 12, input_tokens_details: { cached_tokens: 10, image_tokens: 20 } } }),
+      { headers: { 'content-type': 'application/json' } }))
+    const result = await request({ model: 'MiniMax-M3', input: 'Hello', stream: false }, url)
+    expect(result.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://api.minimaxi.com/v1/responses')
+    expect(mocks.logs[0]?.[4]).toBe('minimax')
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([40, 12])
+  }))
+
+  it('records unsuccessful native JSON as an error while retaining its usage', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ object: 'response', model: 'MiniMax-M3', status: 'incomplete', output: [],
+      usage: { input_tokens: 50, output_tokens: 12 } }), { headers: { 'content-type': 'application/json' } }))
+    await request({ model: 'MiniMax-M3', input: 'Hello', stream: false })
+    expect(mocks.logs[0]?.[22]).toBe('error')
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([50, 12])
+  }))
+
+  it.each(['/v1/responses', '/api/minimax/v1/responses', '/v1/chat/completions', '/v1/messages', '/v1/responses/input_tokens'])('blocks an alias outside the group before any upstream call at %s', url => withRelay(async request => {
+    mocks.key.groupAllowedModels = ['MiniMax-*']
+    mocks.key.modelMappings = { alias: 'MiniMax-M3' }
+    const result = await request({ model: 'alias', stream: false, input: 'Hi' }, url)
+    expect(result.status).toBe(404)
+    expect(result.body).toContain('model_not_allowed')
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(0)
+  }))
+
+  it('keeps key restrictions when the group allows a model', () => withRelay(async request => {
+    mocks.key.groupAllowedModels = ['MiniMax-*']
+    mocks.key.allowedModels = ['gpt-*']
+    expect((await request({ model: 'MiniMax-M3', input: 'Hi' })).status).toBe(403)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  }))
+
+  it('uses the Gemini path model for group policy', () => withRelay(async request => {
+    mocks.key.groupAllowedModels = ['MiniMax-*']
+    expect((await request({ contents: [] }, '/v1beta/models/gemini-3.8-flash:generateContent')).status).toBe(404)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  }))
+})
+
+describe('client cancellation', () => {
+  it.each([false, true])('aborts upstream and releases all slots after disconnect (headers sent: %s)', async headersSent => {
+    mocks.accounts[0]!.concurrencyLimit = 1
+    mocks.key.concurrencyLimit = 1
+    mocks.key.userConcurrencyLimit = 1
+    let started!: () => void
+    const upstreamStarted = new Promise<void>(resolve => { started = resolve })
+    let canceled = false
+    mocks.fetch.mockImplementation(async () => {
+      const signal = upstreamSignal()!
+      started()
+      if (!headersSent) return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener('abort', () => { canceled = true; reject(signal.reason) }, { once: true })
+      })
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"type":"message_start","message":{"usage":{"input_tokens":42}}}\n\n'))
+        signal.addEventListener('abort', () => { canceled = true; controller.error(signal.reason) }, { once: true })
+      } }), { headers: { 'content-type': 'text/event-stream' } })
+    })
+    const app = Fastify()
+    registerRelayRoutes(app)
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    const client = new AbortController()
+    try {
+      const pending = fetch(`${origin}/v1/messages`, {
+        method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-5', stream: true, messages: [{ role: 'user', content: 'Hello' }] }),
+        signal: client.signal,
+      })
+      const result = pending.catch(() => null)
+      await upstreamStarted
+      if (headersSent) {
+        const response = await result
+        const reader = response!.body!.getReader()
+        await reader.read()
+        client.abort()
+        await reader.cancel().catch(() => {})
+      } else client.abort()
+      await result
+      await vi.waitFor(async () => {
+        expect(canceled).toBe(true)
+        expect(await currentConcurrency('account:account-1')).toBe(0)
+        expect(await currentConcurrency('key-1')).toBe(0)
+        expect(await currentConcurrency('user:user-1')).toBe(0)
+      })
+      expect(mocks.fetch).toHaveBeenCalledOnce()
+      expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+      expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+      expect(mocks.logs[0]?.[23]).toBe('client_disconnected')
+      if (headersSent) expect(mocks.logs[0]?.[9]).toBe(42)
+    } finally {
+      client.abort()
+      await app.close()
+      await waitForPendingUsage()
+    }
+  })
+})
+
+
+describe('Antigravity through Sub2API', () => {
+  it('serves group-filtered Gemini discovery through the same gateway scope', async () => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.key.groupAllowedModels = ['gemini-3.8-*']
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      for (const url of ['/v1beta/models', '/api/sub2api/v1beta/models']) {
+        const response = await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer mb-test' } })
+        expect(response.statusCode).toBe(200)
+        expect(response.json().models.map((m: { name: string }) => m.name)).toEqual(['models/gemini-3.8-flash'])
+      }
+      const rejected = await app.inject({ method: 'GET', url: '/api/gemini/v1beta/models', headers: { authorization: 'Bearer mb-test' } })
+      expect(rejected.statusCode).toBe(403)
+      expect(mocks.fetch).not.toHaveBeenCalled()
+    } finally { await app.close() }
+  })
+  it.each(['/api/sub2api/v1beta/models/gemini-3.8-flash:generateContent', '/v1beta/models/gemini-3.8-flash:generateContent'])('routes native Gemini via the gateway at %s', url => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example/antigravity'
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Hi' }] } }],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 15, cachedContentTokenCount: 40 } }),
+      { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ contents: [{ role: 'user', parts: [{ text: 'Hi' }] }] }, url)
+    expect(response.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://gateway.example/antigravity/v1beta/models/gemini-3.8-flash:generateContent')
+    expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('sub2api')
+    expect(mocks.logs[0]?.[4]).toBe('sub2api')
+    expect(mocks.logs[0]?.slice(9, 12)).toEqual([60, 35, 15])
+  }))
+
+  it('streams native Gemini without wrapping or removing signed parts', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example/antigravity/v1beta'
+    mocks.fetch.mockResolvedValueOnce(sse([{ candidates: [{ content: { parts: [{ text: 'ok', thoughtSignature: 'signed' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, thoughtsTokenCount: 3 } }]))
+    const response = await request({ contents: [] }, '/v1beta/models/gemini-3.8-flash:streamGenerateContent')
+    expect(response.body).toContain('thoughtSignature')
+    expect(response.body).not.toContain('response.completed')
+    expect(mocks.fetch.mock.calls[0]?.[0]).toContain(':streamGenerateContent?alt=sse')
+    expect(mocks.logs[0]?.slice(9, 12)).toEqual([10, 5, 3])
+  }))
+
+  it('keeps region failures local to one gateway account and preserves the final diagnosis', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example/antigravity'
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 400, status: 'FAILED_PRECONDITION', message: 'User location is not supported for the API use.' } }), { status: 400 }))
+    const response = await request({ contents: [] }, '/v1beta/models/gemini-3.8-flash:generateContent')
+    expect(response.status).toBe(400)
+    expect(response.body).toContain('google_location_unsupported')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.penalizeAccount).toHaveBeenCalledWith('account-1', 'error', undefined)
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+    expect(mocks.logs[0]?.[23]).toBe('google_location_unsupported')
+  }))
+
+  it('rotates to another gateway account after a region rejection', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example/antigravity'
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null, proxyUrl: 'https://other-gateway.example/antigravity' })
+    mocks.fetch.mockResolvedValueOnce(new Response('User location is not supported for the API use.', { status: 403 }))
+    mocks.fetch.mockResolvedValueOnce(new Response('{"candidates":[]}', { headers: { 'content-type': 'application/json' } }))
+    expect((await request({ contents: [] }, '/v1beta/models/gemini-3.8-flash:generateContent')).status).toBe(200)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.fetch.mock.calls[1]?.[0]).toContain('other-gateway.example/antigravity')
+    expect(mocks.penalizeAccount).toHaveBeenCalledTimes(1)
+  }))
+
+  it('rejects invalid tool references and non-inference actions before account selection', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    const response = await request({ tools: [{ functionDeclarations: [{ name: 'bad', parameters: { $ref: '#/missing' } }] }] },
+      '/v1beta/models/gemini-3.8-flash:generateContent')
+    expect(response.status).toBe(400)
+    expect(response.body).toContain('invalid_tool_schema')
+    expect((await request({}, '/v1beta/models/gemini-3.8-flash:loadCodeAssist')).status).toBe(400)
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+  }))
+})
+
+
+describe('native Antigravity relay', () => {
+  it('provides a guarded local token preflight without consuming Google quota', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    const result = await request({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Estimate this request' }] }, '/api/antigravity/v1/messages/count_tokens')
+    expect(result.status).toBe(200)
+    expect(JSON.parse(result.body).input_tokens).toBeGreaterThan(0)
+    mocks.key.groupAllowedModels = ['gemini-*']
+    expect((await request({ model: 'claude-sonnet-5', messages: [] }, '/v1/messages/count_tokens')).status).toBe(404)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+  }))
+  function nativeResponse() {
+    return sse([{ response: { candidates: [{ content: { parts: [{ text: 'Native answer' }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 5, cachedContentTokenCount: 30 } } }])
+  }
+  it.each([true, false])('serves Messages directly from Google (stream=%s)', stream => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'google-project' }
+    mocks.fetch.mockResolvedValueOnce(nativeResponse())
+    const response = await request({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Hello' }], stream }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Native answer')
+    if (stream) expect(response.body).toContain('message_start')
+    else expect(JSON.parse(response.body)).toMatchObject({ type: 'message', stop_reason: 'end_turn' })
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse')
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ project: 'google-project', model: 'claude-sonnet-5', request: { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] } })
+    expect(mocks.logs[0]?.[4]).toBe('antigravity')
+    expect(mocks.logs[0]?.slice(9, 12)).toEqual([70, 25, 5])
+  }))
+
+  it('routes an Antigravity-only key from the common Messages endpoint', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockResolvedValueOnce(nativeResponse())
+    expect((await request({ model: 'claude-sonnet-5', messages: [], stream: true }, '/v1/messages')).status).toBe(200)
+    expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('antigravity')
+  }))
+
+  it.each(['/api/antigravity/v1beta/models/gemini-3.8-flash:generateContent', '/v1beta/models/gemini-3.8-flash:generateContent'])('unwraps native Gemini JSON at %s', url => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockResolvedValueOnce(new Response('{"response":{"candidates":[{"content":{"parts":[{"text":"Gemini native","thoughtSignature":"sig"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2}}}', { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ contents: [{ role: 'user', parts: [{ text: 'Hi' }] }] }, url)
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body)).toMatchObject({ candidates: [{ content: { parts: [{ text: 'Gemini native', thoughtSignature: 'sig' }] } }] })
+    expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('antigravity')
+  }))
+
+  it('returns an error and retains usage after an incomplete native Messages stream', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockResolvedValueOnce(sse([{ response: { candidates: [{ content: { parts: [{ text: 'partial' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2 } } }]))
+    const response = await request({ model: 'claude-sonnet-5', messages: [], stream: false }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(502)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([10, 2])
+  }))
+
+  it('uses cached model discovery only within the key account group', async () => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.key.groupAllowedModels = ['gemini-*']
+    mocks.key.accountGroupId = 'group-native'
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/antigravity/v1/models', headers: { authorization: 'Bearer mb-test' } })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().data.map((item: { id: string }) => item.id)).toEqual(['gemini-3.8-flash'])
+      expect(mocks.cachedAntigravityModels).toHaveBeenCalledWith('group-native')
+    } finally { await app.close() }
+  })
 })

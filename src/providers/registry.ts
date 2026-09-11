@@ -1,3 +1,4 @@
+import * as antigravityOauth from './antigravity/oauth'
 import * as claudeOauth from './claude/oauth'
 import * as openaiOauth from './openai/oauth'
 import * as geminiOauth from './gemini/oauth'
@@ -54,6 +55,14 @@ const registry: Record<string, OAuthProvider> = {
     exchangeCode: geminiOauth.exchangeCode,
     refreshToken: geminiOauth.refreshToken,
     fetchAccountMetadata: geminiOauth.fetchAccountMetadata,
+  },
+  antigravity: {
+    id: 'antigravity', mode: 'callback',
+    generatePkce: antigravityOauth.generatePkce,
+    buildAuthorizeUrl: antigravityOauth.buildAuthorizeUrl,
+    exchangeCode: antigravityOauth.exchangeCode,
+    refreshToken: antigravityOauth.refreshToken,
+    fetchAccountMetadata: antigravityOauth.fetchAccountMetadata,
   },
   grok: {
     id: 'grok',
@@ -121,6 +130,20 @@ const registry: Record<string, OAuthProvider> = {
   kimi: {
     id: 'kimi',
     // Kimi (月之暗面 / Moonshot) uses API keys — same API-key flow as DeepSeek,
+    // no OAuth. Accounts are added via the import/token endpoint with
+    // expiresAt: 0.
+    mode: 'paste' as const,
+    generatePkce(): never { return notSupported('generatePkce') },
+    buildAuthorizeUrl(): never { return notSupported('buildAuthorizeUrl') },
+    async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
+    async refreshToken(token: string): Promise<TokenSet> {
+      // API keys don't expire — return unchanged.
+      return { accessToken: token, refreshToken: '', expiresAt: 0 }
+    },
+  },
+  minimax: {
+    id: 'minimax',
+    // MiniMax uses API keys — same API-key flow as DeepSeek,
     // no OAuth. Accounts are added via the import/token endpoint with
     // expiresAt: 0.
     mode: 'paste' as const,

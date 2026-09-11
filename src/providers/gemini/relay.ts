@@ -1,3 +1,4 @@
+import { expandLocalSchemaReferences } from './schema'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const CODE_ASSIST_BASE = 'https://cloudcode-pa.googleapis.com/v1internal'
@@ -64,8 +65,8 @@ function normalizeGeminiEnum(value: unknown): unknown[] | null {
 }
 
 /** Recursively strips Gemini-incompatible JSON Schema fields from a tool schema. */
-function sanitizeSchema(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sanitizeSchema)
+function cleanSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cleanSchema)
   if (!value || typeof value !== 'object') return value
   const input = value as Record<string, unknown>
   const out: Record<string, unknown> = {}
@@ -74,11 +75,11 @@ function sanitizeSchema(value: unknown): unknown {
     if (SCHEMA_MAP_KEYS.has(key) && val && typeof val === 'object' && !Array.isArray(val)) {
       const props: Record<string, unknown> = {}
       for (const [propName, propSchema] of Object.entries(val as Record<string, unknown>)) {
-        props[propName] = sanitizeSchema(propSchema)
+        props[propName] = cleanSchema(propSchema)
       }
       out[key] = props
     } else if (SCHEMA_LIST_OR_NODE_KEYS.has(key)) {
-      out[key] = sanitizeSchema(val)
+      out[key] = cleanSchema(val)
     } else {
       // Scalars (type, description, enum, required, format, …) pass through.
       out[key] = val
@@ -90,6 +91,10 @@ function sanitizeSchema(value: unknown): unknown {
     else delete out.enum
   }
   return out
+}
+
+function sanitizeSchema(value: unknown): unknown {
+  return cleanSchema(expandLocalSchemaReferences(value))
 }
 
 /**

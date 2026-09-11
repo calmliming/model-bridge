@@ -11,7 +11,7 @@ interface GeminiUsageMetadata {
 function mapUsage(u: GeminiUsageMetadata | undefined): UsageData {
   return usageWithCachedInput(
     u?.promptTokenCount,
-    u?.candidatesTokenCount,
+    Math.max(0, u?.candidatesTokenCount ?? 0) + Math.max(0, u?.thoughtsTokenCount ?? 0),
     u?.cachedContentTokenCount,
     u?.thoughtsTokenCount,
   )

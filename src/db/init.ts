@@ -34,6 +34,8 @@ export async function initDb(): Promise<void> {
       created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
     );
 
+    ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS allowed_models JSONB;
+
     CREATE TABLE IF NOT EXISTS account_group_members (
       account_id TEXT NOT NULL,
       group_id TEXT NOT NULL,

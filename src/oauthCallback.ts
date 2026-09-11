@@ -1,14 +1,14 @@
-import { createServer, type Server } from 'node:http'
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { eq } from 'drizzle-orm'
 import { db } from './db/index'
 import { oauthSessions } from './db/schema'
 import { getProvider } from './providers/registry'
 import { createAccount } from './accounts/manager'
 
-const PORT = 1455
 const HOST = '127.0.0.1'
 
 function resultPage(message: string, ok: boolean): string {
+  message = message.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]!))
   const accent = ok ? '#5b8cff' : '#ef4444'
   const title = ok ? '授权完成' : '授权失败'
   return `<!doctype html>
@@ -30,16 +30,18 @@ p{margin:0;opacity:.72;font-size:14px;line-height:1.7}
  * as a redirect URI, so a small dedicated server has to listen there to
  * complete the flow. Other providers using a redirect-style flow can share it.
  */
-export function startOauthCallbackServer(): Server {
-  const server = createServer(async (req, res) => {
+export function startOauthCallbackServer(options: { port?: number; paths?: string[]; provider?: string } = {}): Server {
+  const port = options.port ?? 1455
+  const paths = options.paths ?? ['/auth/callback', '/oauth2callback']
+  const handle = async (req: IncomingMessage, res: ServerResponse) => {
     if (!req.url) {
       res.writeHead(400).end()
       return
     }
-    const url = new URL(req.url, `http://${HOST}:${PORT}`)
+    const url = new URL(req.url, `http://${HOST}:${port}`)
     // OpenAI registered /auth/callback; Google's installed-app flow uses
     // /oauth2callback. Accept both — both deliver `code` and `state`.
-    if (url.pathname !== '/auth/callback' && url.pathname !== '/oauth2callback') {
+    if (!paths.includes(url.pathname)) {
       res.writeHead(404, { 'content-type': 'text/plain' }).end('Not found')
       return
     }
@@ -54,10 +56,10 @@ export function startOauthCallbackServer(): Server {
     if (!code || !state) return writeResult(400, false, '缺少 code 或 state 参数')
 
     const [session] = await db
-      .select()
-      .from(oauthSessions)
+      .delete(oauthSessions)
       .where(eq(oauthSessions.state, state))
-    if (!session) {
+      .returning()
+    if (!session || session.createdAt + 30 * 60_000 < Date.now() || (options.provider && session.provider !== options.provider)) {
       return writeResult(400, false, 'OAuth 会话已过期或不存在，请重新发起授权')
     }
     const provider = getProvider(session.provider)
@@ -76,18 +78,24 @@ export function startOauthCallbackServer(): Server {
         tokens,
         metadata,
       })
-      await db.delete(oauthSessions).where(eq(oauthSessions.state, state))
       writeResult(200, true, '您可以关闭此页面，回到 model-bridge 后台。')
     } catch (err) {
       writeResult(400, false, `授权失败：${(err as Error).message}`)
     }
+  }
+  const server = createServer((req, res) => {
+    void handle(req, res).catch(() => {
+      if (res.destroyed || res.writableEnded) return
+      res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(resultPage('授权处理失败，请稍后重新发起授权', false))
+    })
   })
   server.on('error', (err) => {
     // EADDRINUSE typically means a leftover orphan; log but don't crash.
-    console.error(`[oauth-callback] failed to bind ${HOST}:${PORT}: ${(err as Error).message}`)
+    console.error(`[oauth-callback] failed to bind ${HOST}:${port}: ${(err as Error).message}`)
   })
-  server.listen(PORT, HOST, () => {
-    console.log(`[oauth-callback] listening on http://${HOST}:${PORT}/auth/callback`)
+  server.listen(port, HOST, () => {
+    console.log(`[oauth-callback] listening on http://${HOST}:${port}${paths[0]}`)
   })
   return server
 }

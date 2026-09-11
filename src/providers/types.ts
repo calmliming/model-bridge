@@ -1,12 +1,13 @@
 export type ProviderId =
   | 'claude'
   | 'openai'
-  | 'gemini'
+  | 'gemini' | 'antigravity'
   | 'deepseek'
   | 'xiaomi'
   | 'zhipu'
   | 'qwen'
   | 'kimi'
+  | 'minimax'
   | 'grok'
   | 'sub2api'
 
@@ -33,8 +34,9 @@ export interface UsageData {
   /**
    * Reasoning/thinking tokens, tracked separately for reporting only — never
    * added on top when computing cost. For OpenAI-style providers it is a subset
-   * of outputTokens; Gemini reports it (thoughtsTokenCount) outside
-   * candidatesTokenCount. 0 when the provider does not report it.
+   * of outputTokens. Gemini's adapter adds thoughtsTokenCount to
+   * candidatesTokenCount to normalize to the same inclusive output count.
+   * 0 when the provider does not report it.
    */
   reasoningTokens: number
   cacheCreateTokens: number

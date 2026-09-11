@@ -74,6 +74,7 @@ export async function accountHealth(
             AVG(latency_ms) FILTER (WHERE latency_ms IS NOT NULL) AS avg_latency
      FROM usage_logs
      WHERE account_id = ANY($1) AND ts >= $2
+       AND error_code IS DISTINCT FROM 'client_disconnected'
      GROUP BY account_id`,
     [accountIds, since],
   )

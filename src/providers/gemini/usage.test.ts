@@ -20,7 +20,7 @@ describe('Gemini usage parsing', () => {
     })
   })
 
-  it('reports thoughtsTokenCount as reasoning tokens', () => {
+  it('includes separately reported thought tokens in billable output', () => {
     expect(
       parseJsonUsage({
         usageMetadata: {
@@ -31,7 +31,7 @@ describe('Gemini usage parsing', () => {
       }),
     ).toEqual({
       inputTokens: 100,
-      outputTokens: 20,
+      outputTokens: 35,
       reasoningTokens: 15,
       cacheCreateTokens: 0,
       cacheReadTokens: 0,

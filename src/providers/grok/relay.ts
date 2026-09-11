@@ -330,6 +330,7 @@ export function normalizeGrokChatCompletionsBody(
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...body }
   delete out.safety_identifier
+  delete out.external_web_access
   if (out.stream === true) {
     const streamOptions =
       out.stream_options && typeof out.stream_options === 'object'

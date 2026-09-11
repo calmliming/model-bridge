@@ -98,7 +98,7 @@ const loginSchema = z.object({
   turnstileToken: z.string().optional(),
 })
 
-const providerSchema = z.enum(['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'grok', 'sub2api'])
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api'])
 
 function safeBaseUrl(value: string): boolean {
   try {
@@ -179,7 +179,7 @@ const idParamSchema = z.object({
 })
 
 const oauthStartSchema = z.object({
-  provider: z.enum(['claude', 'openai', 'gemini', 'grok']),
+  provider: z.enum(['claude', 'openai', 'gemini', 'antigravity', 'grok']),
   name: z.string().min(1),
 })
 
@@ -220,6 +220,7 @@ const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).nullable().optional(),
   rateMultiplier: z.number().positive().max(100).optional(),
+  allowedModels: z.array(z.string().trim().min(1).max(200)).min(1).max(200).nullable().optional(),
 })
 
 const updateGroupSchema = z
@@ -227,6 +228,7 @@ const updateGroupSchema = z
     name: z.string().trim().min(1).max(100).optional(),
     description: z.string().trim().max(500).nullable().optional(),
     rateMultiplier: z.number().positive().max(100).optional(),
+    allowedModels: z.array(z.string().trim().min(1).max(200)).min(1).max(200).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -1235,7 +1237,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       .delete(oauthSessions)
       .where(eq(oauthSessions.state, state))
       .returning()
-    if (!session) {
+    if (!session || session.createdAt + 30 * 60_000 < Date.now()) {
       return reply.code(400).send({ error: 'OAuth session expired — please restart authorization' })
     }
     const oauth = getProvider(session.provider)

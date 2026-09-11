@@ -73,6 +73,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   claude: '#d97757',
   openai: '#10a37f',
   gemini: '#4285f4',
+  antigravity: '#7c3aed',
   deepseek: '#6366f1',
   xiaomi: '#ff6900',
   zhipu: '#7c3aed',

@@ -206,7 +206,7 @@ describe('accountQuotaFromMetadata', () => {
 })
 
 describe('quotaCooldownUntil', () => {
-  it('uses the nearest future reset time from exceeded quota windows', () => {
+  it('uses the last reset time when multiple quota windows are exhausted', () => {
     expect(
       quotaCooldownUntil(
         {
@@ -220,7 +220,7 @@ describe('quotaCooldownUntil', () => {
         },
         1700000000000,
       ),
-    ).toBe(1700007200000)
+    ).toBe(1700604800000)
   })
 
   it('ignores exceeded quota windows without a future reset time', () => {
@@ -274,8 +274,8 @@ describe('quotaPauseUntil', () => {
     expect(quotaPauseUntil(snapshot, 80, now)).toBe(now + 3_600_000)
   })
 
-  it('picks the nearest future reset when several windows cross the threshold', () => {
-    expect(quotaPauseUntil(snapshot, 30, now)).toBe(now + 3_600_000)
+  it('keeps the account paused until every breached window resets', () => {
+    expect(quotaPauseUntil(snapshot, 30, now)).toBe(now + 86_400_000)
   })
 
   it('threshold 0 disables the early pause but still respects exceeded windows', () => {

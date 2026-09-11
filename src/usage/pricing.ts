@@ -368,6 +368,18 @@ function grokPrice(model: string): TierPrice {
   return GROK_45
 }
 
+// MiniMax public USD prices, verified 2026-09-09 against its official paygo table.
+function minimaxPrice(model: string): TierPrice {
+  const m = model.toLowerCase()
+  const highspeed = m.endsWith('-highspeed')
+  return {
+    input: highspeed ? 0.6 : 0.3, output: highspeed ? 2.4 : 1.2,
+    cacheRead: /^minimax-m(?:3|2\.7)(?:$|-)/.test(m) ? 0.06 : 0.03,
+    // M3 has automatic read caching and no separately listed cache-write fee.
+    cacheWrite: /^minimax-m3(?:$|-)/.test(m) ? 0 : 0.375,
+  }
+}
+
 function sub2apiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
   if (m.startsWith('claude-')) return claudePrice(model)
@@ -387,6 +399,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
     m === 'k3-256k' ||
     m === 'kimi-code/k3'
   ) return KIMI_TIERS.k3
+  if (m.startsWith('minimax-')) return minimaxPrice(model)
   if (m.startsWith('grok')) return grokPrice(model)
   return CLAUDE_SONNET
 }
@@ -396,11 +409,13 @@ function builtinPrice(provider: string, model: string, atMs: number): TierPrice 
   if (provider === 'claude') return claudePrice(model)
   if (provider === 'openai') return openaiPrice(model)
   if (provider === 'gemini') return geminiPrice(model, atMs)
+  if (provider === 'antigravity') return model.toLowerCase().startsWith('claude-') ? claudePrice(model) : geminiPrice(model, atMs)
   if (provider === 'deepseek') return deepseekPrice(model, atMs)
   if (provider === 'xiaomi') return XIAOMI_TIERS[xiaomiTier(model)]
   if (provider === 'zhipu') return ZHIPU_TIERS[zhipuTier(model)]
   if (provider === 'qwen') return QWEN_TIERS[qwenTier(model)]
   if (provider === 'kimi') return KIMI_TIERS[kimiTier(model)]
+  if (provider === 'minimax') return minimaxPrice(model)
   if (provider === 'grok') return grokPrice(model)
   if (provider === 'sub2api') return sub2apiPrice(model, atMs)
   return null
@@ -487,6 +502,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.legacyPlus },
   // Kimi — exact rows for the discoverable models; kimiTier() covers other
   // kimi-* / moonshot-* variants via substring tiers.
+  ...['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'].map(model => ({ provider: 'minimax', model, price: minimaxPrice(model) })),
   { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
   { provider: 'kimi', model: 'kimi-k2.7-code', price: KIMI_TIERS.k2 },
   { provider: 'kimi', model: 'kimi-k2.6', price: KIMI_TIERS.k2 },
@@ -831,16 +847,18 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
   if (!base) return null
   const astra = (provider === 'openai' || provider === 'sub2api') && /^gpt-6-astra(?:$|-)/i.test(model)
+  const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
   const longContext = override?.longContext !== undefined ? override.longContext
-    : astra ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 } : null
+    : astra ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
+    : minimaxM3 ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 } : null
   const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0)
   const long = longContext && totalInput > longContext.threshold ? longContext : null
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
   const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
-  // Only Astra's verified default factors are automatic. Other models retain
+  // Astra and MiniMax M3 have verified default factors. Other models retain
   // the gateway's base-price policy unless the operator supplies a tier rule.
-  const tierMultiplier = configuredMultiplier ?? (astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
+  const tierMultiplier = configuredMultiplier ?? (minimaxM3 && tier === 'priority' ? 1.5 : astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
   const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
   const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
   return {

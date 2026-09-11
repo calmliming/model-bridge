@@ -1,3 +1,9 @@
+import { fetchAccountMetadata as fetchGeminiAccountMetadata } from '../providers/gemini/oauth'
+import { fetchAccountMetadata as fetchAntigravityMetadata } from '../providers/antigravity/oauth'
+import { fetchAntigravityModels } from '../providers/antigravity/quota'
+import { object } from '../providers/antigravity/client'
+import { testMiniMax } from '../providers/minimax/relay'
+import { fetchMiniMaxQuota } from '../providers/minimax/quota'
 import { randomUUID } from 'node:crypto'
 import {
   ensureFreshToken,
@@ -9,11 +15,12 @@ import {
   extractAccountQuota,
   extractClaudeOAuthUsageQuota,
   quotaPauseUntil,
+  quotaWindowPauseUntil,
   resolveAutopausePercent,
   type AccountQuotaSnapshot,
 } from './quota'
 import { getQuotaAutopausePercent } from '../db/settings'
-import { markAccountUsed, penalizeAccount } from './scheduler'
+import { markAccountUsed, penalizeAccount, penalizeAccountModel } from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
 import {
@@ -27,7 +34,6 @@ import { fetchWithConnectTimeout } from '../http/upstream'
 const TEST_TIMEOUT_MS = 15_000
 const ANTHROPIC_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
-const GEMINI_LOAD_CODE_ASSIST_URL = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
 const DEEPSEEK_MESSAGES_URL = 'https://api.deepseek.com/anthropic/v1/messages'
 const XIAOMI_MESSAGES_URL = 'https://api.xiaomimimo.com/anthropic/v1/messages'
 const ZHIPU_MESSAGES_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages'
@@ -35,6 +41,7 @@ const QWEN_MESSAGES_URL = 'https://dashscope.aliyuncs.com/apps/anthropic/v1/mess
 const KIMI_MESSAGES_URL = 'https://api.moonshot.cn/anthropic/v1/messages'
 
 interface AccountRow {
+  metadata?: unknown
   id: string
   provider: string
   name: string
@@ -174,33 +181,7 @@ async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
 }
 
 async function testGemini(accessToken: string): Promise<ProviderTestOutcome> {
-  const response = await fetchWithTimeout(GEMINI_LOAD_CODE_ASSIST_URL, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({
-      cloudaicompanionProject: '',
-      metadata: {
-        ideType: 'IDE_UNSPECIFIED',
-        platform: 'PLATFORM_UNSPECIFIED',
-        pluginType: 'GEMINI',
-      },
-    }),
-  })
-  if (!response.ok) {
-    await assertOk(response)
-  }
-  const data = (await response.json()) as { cloudaicompanionProject?: string }
-  if (!data.cloudaicompanionProject) {
-    throw new Error('Gemini loadCodeAssist 未返回项目信息')
-  }
-  return {
-    message: 'Gemini Code Assist 端点可访问',
-    metadata: { project: data.cloudaicompanionProject },
-  }
+  return { message: 'Gemini Code Assist 端点可访问', metadata: await fetchGeminiAccountMetadata(accessToken) }
 }
 
 async function testDeepSeek(apiKey: string): Promise<ProviderTestOutcome> {
@@ -335,11 +316,21 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
   if (account.provider === 'claude') result = await testClaude(accessToken)
   else if (account.provider === 'openai') result = await testOpenAI(accessToken)
   else if (account.provider === 'gemini') result = await testGemini(accessToken)
+  else if (account.provider === 'antigravity') {
+    const metadata = { ...object(account.metadata), ...await fetchAntigravityMetadata(accessToken) }
+    const { models, quota } = await fetchAntigravityModels(accessToken, metadata.project as string)
+    result = { message: `Antigravity 可访问，发现 ${models.length} 个模型`, quota,
+      metadata: { ...metadata, antigravityModels: models } }
+  }
   else if (account.provider === 'deepseek') result = await testDeepSeek(accessToken)
   else if (account.provider === 'xiaomi') result = await testXiaomi(accessToken)
   else if (account.provider === 'zhipu') result = await testZhipu(accessToken)
   else if (account.provider === 'qwen') result = await testQwen(accessToken)
   else if (account.provider === 'kimi') result = await testKimi(accessToken)
+  else if (account.provider === 'minimax') {
+    await testMiniMax(accessToken, account.proxyUrl)
+    result = { message: 'MiniMax /v1/models 端点可访问' }
+  }
   else if (account.provider === 'grok') result = await testGrok(accessToken)
   else if (account.provider === 'sub2api') result = await testSub2Api(accessToken, account.proxyUrl)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
@@ -370,6 +361,11 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
   const latencyMs = Date.now() - startedAt
 
   const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+  for (const window of result.quota?.windows ?? []) {
+    if (window.key !== 'model' || !window.model) continue
+    const until = quotaWindowPauseUntil(window, threshold)
+    if (until) await penalizeAccountModel(account.id, window.model, 'rate_limited', until)
+  }
   const cooldownUntil = quotaPauseUntil(result.quota, threshold)
   if (cooldownUntil) {
     await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
@@ -394,6 +390,16 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
 export async function refreshAccountQuota(id: string): Promise<AccountTestResult> {
   const account = await getAccount(id)
   if (!account) throw new AccountTestError('account not found', 404)
+  if (account.provider === 'minimax') {
+    const startedAt = Date.now()
+    const quota = await fetchMiniMaxQuota(await ensureFreshToken(account), account.proxyUrl)
+    await updateAccountQuota(id, quota)
+    const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+    const until = quotaPauseUntil(quota, threshold)
+    if (until) await penalizeAccount(id, 'rate_limited', until)
+    return { success: true, provider: 'minimax', message: 'MiniMax 套餐额度已更新',
+      latencyMs: Date.now() - startedAt, checkedAt: Date.now() }
+  }
   if (account.provider !== 'sub2api') return testAccountConnectivity(id)
 
   const startedAt = Date.now()

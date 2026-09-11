@@ -192,3 +192,10 @@ describe('normalizeGrokChatCompletionsBody', () => {
     expect(out.stream_options).toBeUndefined()
   })
 })
+
+
+it('does not send unsupported external_web_access to Grok Chat', () => {
+  const body = { external_web_access: true, messages: [], stream: true }
+  expect(normalizeGrokChatCompletionsBody(body).external_web_access).toBeUndefined()
+  expect(body.external_web_access).toBe(true)
+})

@@ -1,3 +1,4 @@
+import { cachedAntigravityModels } from '../accounts/antigravityModels'
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
@@ -20,7 +21,7 @@ import {
   getStickyAccountId,
 } from '../accounts/session'
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
-import { isAllowedModel } from '../keys/modelAllowlist'
+import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import { relayClaudeChatCompletions, relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
@@ -50,7 +51,7 @@ import {
   chatCompletionsToResponses,
 } from '../providers/openai/chat'
 import * as openaiUsage from '../providers/openai/usage'
-import { relayGemini, unwrapResponseEnvelope } from '../providers/gemini/relay'
+import { relayGemini, sanitizeGeminiBody, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
 import { relayDeepseekMessages } from '../providers/deepseek/relay'
 import * as deepseekUsage from '../providers/deepseek/usage'
@@ -86,10 +87,17 @@ import { relayKimiResponses, relayNativeKimiResponses, supportsNativeKimiRespons
 import * as kimiResponsesUsage from '../providers/kimi/responses-usage'
 import { createKimiResponsesStreamTransform } from '../providers/kimi/stream'
 import { mapModel as mapKimiResponsesModel } from '../providers/kimi/converter'
+import { relayAntigravity } from '../providers/antigravity/relay'
+import { messagesToGemini, prepareAntigravityGemini, AntigravityRequestError } from '../providers/antigravity/converter'
+import { createAntigravityUsageParser, parseAntigravityUsage, createAntigravityMessagesTransform, antigravitySseToMessages, antigravityJsonToMessages } from '../providers/antigravity/response'
+import { relayMiniMax, mapMiniMaxModel } from '../providers/minimax/relay'
+import * as minimaxUsage from '../providers/minimax/usage'
+import { cancelUpstreamResponse, upstreamSignal, withUpstreamSignal } from '../http/cancellation'
 import {
   relaySub2ApiChatCompletions,
   relaySub2ApiMessages,
   relaySub2ApiResponses,
+  relaySub2ApiGemini,
 } from '../providers/sub2api/relay'
 import { mapGrokModel, relayGrokChatCompletions, relayGrokResponses } from '../providers/grok/relay'
 import {
@@ -98,6 +106,7 @@ import {
   listGeminiModels,
   listOpenAIStyleModels,
 } from '../providers/modelDiscovery'
+import { isGoogleLocationUnsupported, googleErrorMessage } from '../providers/google/errors'
 import type { ProviderId } from '../providers/types'
 import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
@@ -144,12 +153,15 @@ interface ParsedRoute {
 }
 
 interface UpstreamContext {
+  apiKeyId: string
+  sessionKeyHash?: string | null
   model: string
   action: string
   account: { id: string; metadata: unknown; proxyUrl: string | null }
 }
 
 interface PrepareBodyContext {
+  model: string
   apiKeyId: string
   userId: string | null
   action: string
@@ -217,14 +229,14 @@ interface ProviderHandler {
   /** The buffered response is an OpenAI Responses SSE transcript. */
   bufferedResponsesProtocol?: boolean
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
-  transformEventData?: (data: unknown) => unknown
+  transformEventData?: (data: unknown, meta?: RelayMeta) => unknown
   /**
    * Optional stateful, one-chunk-to-many-events stream transform. Mutually
    * exclusive with `transformEventData` — providers should pick one. Used by
    * the DeepSeek Responses adapter to translate chat/completions chunks into
    * a Responses-API event sequence.
    */
-  createStreamTransform?: () => StreamTransform
+  createStreamTransform?: (meta: RelayMeta) => StreamTransform
   /** Provider-aware request summary used for usage logs. */
   summarizeRequestInput?: (body: Record<string, unknown>) => string | null
 }
@@ -320,14 +332,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   gemini: {
     id: 'gemini',
     forceStream: false,
-    parseRoute: (req, _body) => {
-      // URL form: /api/gemini/v1beta/models/{model}:{action}
-      const wild = (req.params as { '*'?: string } | undefined)?.['*'] ?? ''
-      const colon = wild.lastIndexOf(':')
-      return colon >= 0
-        ? { model: wild.slice(0, colon), action: wild.slice(colon + 1) }
-        : { model: wild, action: 'generateContent' }
-    },
+    parseRoute: parseGeminiRoute,
+    prepareBody: (body, ctx) => sanitizeGeminiBody(body, ctx.model),
     callUpstream: (token, body, ctx) => {
       const project = (ctx.account.metadata as { project?: string } | null)?.project
       if (!project) {
@@ -337,6 +343,29 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       }
       return relayGemini(token, body, { model: ctx.model, action: ctx.action, project })
     },
+    createStreamParser: geminiUsage.createStreamParser,
+    parseJsonUsage: geminiUsage.parseJsonUsage,
+    transformEventData: unwrapResponseEnvelope,
+  },
+  antigravity: {
+    id: 'antigravity', forceStream: false,
+    parseRoute: (_request, body) => ({ model: typeof body.model === 'string' ? body.model : '', action: 'messages' }),
+    normalizeModel: validateAntigravityModel,
+    prepareBody: (body, ctx) => messagesToGemini(body, ctx.model),
+    callUpstream: callAntigravity,
+    createStreamParser: createAntigravityUsageParser,
+    parseJsonUsage: claudeUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
+    createStreamTransform: createAntigravityMessagesTransform,
+    bufferSseResponse: antigravitySseToMessages,
+    transformEventData: (data, meta) => meta ? antigravityJsonToMessages(data, meta).body : data,
+  },
+  'antigravity-gemini': {
+    id: 'antigravity', forceStream: false,
+    parseRoute: parseGeminiRoute,
+    normalizeModel: validateAntigravityModel,
+    prepareBody: (body, ctx) => prepareAntigravityGemini(body, ctx.model),
+    callUpstream: callAntigravity,
     createStreamParser: geminiUsage.createStreamParser,
     parseJsonUsage: geminiUsage.parseJsonUsage,
     transformEventData: unwrapResponseEnvelope,
@@ -571,6 +600,34 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: kimiResponsesUsage.parseJsonUsage,
     createStreamTransform: createKimiResponsesStreamTransform,
   },
+  minimax: {
+    id: 'minimax',
+    forceStream: false,
+    parseRoute: (_req, body) => ({ model: String(body.model ?? ''), action: 'messages' }),
+    normalizeModel: mapMiniMaxModel,
+    callUpstream: (token, body, ctx) => relayMiniMax(token, body, 'messages', ctx.account.proxyUrl),
+    createStreamParser: minimaxUsage.createMessagesStreamParser,
+    parseJsonUsage: minimaxUsage.parseMessagesUsage,
+  },
+  'minimax-chat': {
+    id: 'minimax',
+    forceStream: false,
+    parseRoute: (_req, body) => ({ model: String(body.model ?? ''), action: 'chat/completions' }),
+    normalizeModel: mapMiniMaxModel,
+    callUpstream: (token, body, ctx) => relayMiniMax(token, body, 'chat', ctx.account.proxyUrl),
+    createStreamParser: createChatCompletionStreamParser,
+    parseJsonUsage: parseChatCompletionUsage,
+  },
+  'minimax-responses': {
+    id: 'minimax',
+    forceStream: false,
+    responsesProtocol: true,
+    parseRoute: (_req, body) => ({ model: String(body.model ?? ''), action: 'responses' }),
+    normalizeModel: mapMiniMaxModel,
+    callUpstream: (token, body, ctx) => relayMiniMax(token, body, 'responses', ctx.account.proxyUrl),
+    createStreamParser: minimaxUsage.createStreamParser,
+    parseJsonUsage: minimaxUsage.parseJsonUsage,
+  },
   sub2api: {
     id: 'sub2api',
     forceStream: false,
@@ -594,6 +651,14 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, ctx) => relaySub2ApiChatCompletions(token, ctx.account.proxyUrl, body),
     createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
+  },
+  'sub2api-gemini': {
+    id: 'sub2api', forceStream: false, relayToRelay: true,
+    parseRoute: parseGeminiRoute,
+    prepareBody: (body, ctx) => sanitizeGeminiBody(body, ctx.model),
+    callUpstream: (token, body, ctx) => relaySub2ApiGemini(token, ctx.account.proxyUrl, body, ctx.model, ctx.action),
+    createStreamParser: geminiUsage.createStreamParser,
+    parseJsonUsage: geminiUsage.parseJsonUsage,
   },
   'sub2api-responses': {
     id: 'sub2api',
@@ -645,10 +710,11 @@ export interface UpstreamFailure {
   accountScoped?: boolean
   /** This credential lacks the model; try a different account, including relay gateways. */
   modelUnavailable?: boolean
+  locationUnsupported?: boolean
 }
 
 function isModelUnavailable(provider: string, text: string): boolean {
-  if (!['openai', 'sub2api', 'grok', 'deepseek', 'kimi', 'qwen', 'zhipu', 'xiaomi'].includes(provider)) return false
+  if (!['openai', 'sub2api', 'grok', 'deepseek', 'kimi', 'qwen', 'zhipu', 'xiaomi', 'minimax', 'antigravity'].includes(provider)) return false
   const error = parsedErrorObject(text)
   const code = normalizedMessage(error?.code ?? error?.type)
   if (['model_not_found', 'model_not_available', 'unsupported_model'].includes(code)) return true
@@ -844,10 +910,9 @@ function parseCodexReset(headers: Headers): number | null {
   if (exceeded.length) return pickLater(exceeded.map((window) => window.resetAt))
   // A successful/non-exhausted quota snapshot can be attached to a later 429
   // (especially on streaming responses). Do not inherit its 5h/7d reset and
-  // park an otherwise healthy account for days. If no utilization was sent at
-  // all, a reset-only snapshot remains useful account-level evidence.
-  if (quota.windows.some((window) => window.usedPercent != null)) return null
-  return pickLater(quota.windows.map((window) => window.resetAt))
+  // park an otherwise healthy account for days. Reset-only headers also do
+  // not establish exhaustion; use explicit body errors / Retry-After instead.
+  return null
 }
 
 function parseDurationMs(raw: string): number | null {
@@ -972,6 +1037,10 @@ export async function classifyUpstreamFailure(
   response: Response,
   model = '',
 ): Promise<UpstreamFailure> {
+  if ((provider === 'gemini' || provider === 'antigravity' || provider === 'sub2api') &&
+      isGoogleLocationUnsupported(response.status, await readErrorTextForLocation(response))) {
+    return { penalty: 'error', retryable: true, accountScoped: true, locationUnsupported: true }
+  }
   if (response.status === 400 || response.status === 404) {
     if (isModelUnavailable(provider, await readErrorText(response))) {
       return { penalty: 'error', retryable: true, modelScoped: true, modelUnavailable: true }
@@ -1003,7 +1072,7 @@ export async function classifyUpstreamFailure(
       resetAt: parseRateLimitReset(provider, response, text),
       // Spark's quota headers describe the Spark model dimension, not the
       // account. Keep the reset timestamp but write a model cooldown.
-      modelScoped: openaiSpark
+      modelScoped: provider === 'antigravity' ? !openaiBalanceExhausted : openaiSpark
         ? !openaiBalanceExhausted
         : openaiAccountQuota
           ? false
@@ -1400,6 +1469,8 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.sub2api!)
   const sub2apiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['sub2api-chat']!)
+  const sub2apiGeminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
+    executeRelay(request, reply, PROVIDERS['sub2api-gemini']!)
   const sub2apiResponsesHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['sub2api-responses']!)
 
@@ -1409,12 +1480,26 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/claude/v1/chat/completions', { preHandler: requireApiKey }, claudeChatHandler)
   app.post('/api/openai/v1/responses', { preHandler: requireApiKey }, openaiHandler)
   app.post('/api/openai/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
+  app.post('/api/minimax/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
   app.post('/api/openai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
   app.post('/api/openai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+  app.post('/api/antigravity/v1/messages', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit },
+    (request, reply) => executeRelay(request, reply, PROVIDERS.antigravity!))
+  app.post('/api/antigravity/v1/messages/count_tokens', { preHandler: requireApiKey }, sendAntigravityInputTokens)
+  app.post('/v1/messages/count_tokens', { preHandler: requireApiKey }, (request, reply) => {
+    if (request.apiKey?.allowedProviders?.length !== 1 || request.apiKey.allowedProviders[0] !== 'antigravity') return reply.code(404).send({ error: 'not found' })
+    return sendAntigravityInputTokens(request, reply)
+  })
+  app.post('/api/antigravity/v1beta/models/*', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit },
+    (request, reply) => executeRelay(request, reply, PROVIDERS['antigravity-gemini']!))
+  app.get('/api/antigravity/v1/models', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, 'antigravity'))
+  app.get('/api/antigravity/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
+  app.get('/api/antigravity/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
+
   // DeepSeek: Anthropic-compatible endpoint under /api/deepseek prefix.
   // Claude Code: ANTHROPIC_BASE_URL=https://your-host/api/deepseek
   app.post('/api/deepseek/v1/messages', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, deepseekHandler)
@@ -1466,6 +1551,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/kimi
   app.post('/api/kimi/v1/responses', { preHandler: requireApiKey }, kimiResponsesHandler)
+  // MiniMax exposes all three native protocols; Responses supports JSON and SSE.
+  for (const [path, handler] of [
+    ['messages', 'minimax'], ['chat/completions', 'minimax-chat'], ['responses', 'minimax-responses'],
+  ] as const) {
+    app.post(`/api/minimax/v1/${path}`, { preHandler: requireApiKey }, (request, reply) =>
+      executeRelay(request, reply, PROVIDERS[handler]!))
+  }
+  app.get('/api/minimax/v1/models', { preHandler: requireApiKey }, (request, reply) =>
+    sendOpenAIStyleModelList(request, reply, 'minimax'))
+
   // Grok (xAI): OpenAI Responses-API surface for Codex CLI.
   // Codex: configure base_url=https://your-host/api/grok
   app.post('/api/grok/v1/responses', { preHandler: requireApiKey }, grokHandler)
@@ -1477,6 +1572,9 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/sub2api/v1/messages', { preHandler: requireApiKey }, sub2apiHandler)
   app.post('/api/sub2api/v1/chat/completions', { preHandler: requireApiKey }, sub2apiChatHandler)
   app.post('/api/sub2api/v1/responses', { preHandler: requireApiKey }, sub2apiResponsesHandler)
+  app.post('/api/sub2api/v1beta/models/*', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, sub2apiGeminiHandler)
+  app.get('/api/sub2api/v1beta/models', { preHandler: requireApiKey }, sendGeminiModelList)
+  app.get('/api/sub2api/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
 
 
   // ── Model discovery (GET /v1/models) ───────────────────
@@ -1528,14 +1626,16 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS.xiaomi! },
     { test: /^glm/i, handler: PROVIDERS.zhipu! },
     { test: /^qwen/i, handler: PROVIDERS.qwen! },
+    { test: /^minimax-/i, handler: PROVIDERS['minimax']! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS.kimi! },
     { test: /^(k3|k3-256k)$/i, handler: PROVIDERS.kimi! },
-  ], PROVIDERS.sub2api!)
+  ], PROVIDERS.sub2api!, PROVIDERS.antigravity!)
   const responsesHandler = dispatchByModel(PROVIDERS.openai!, [
     { test: /^deepseek/i, handler: PROVIDERS['deepseek-responses']! },
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-responses']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-responses']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-responses']! },
+    { test: /^minimax-/i, handler: PROVIDERS['minimax-responses']! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-responses']! },
     { test: /^(k3|k3-256k)$/i, handler: PROVIDERS['kimi-responses']! },
     { test: /^grok/i, handler: PROVIDERS.grok! },
@@ -1546,6 +1646,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     { test: /^mimo/i, handler: PROVIDERS['xiaomi-chat']! },
     { test: /^glm/i, handler: PROVIDERS['zhipu-chat']! },
     { test: /^qwen/i, handler: PROVIDERS['qwen-chat']! },
+    { test: /^minimax-/i, handler: PROVIDERS['minimax-chat']! },
     { test: /^(kimi|moonshot)/i, handler: PROVIDERS['kimi-chat']! },
     { test: /^(k3|k3-256k)$/i, handler: PROVIDERS['kimi-chat']! },
     { test: /^grok/i, handler: PROVIDERS['grok-chat']! },
@@ -1562,7 +1663,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/responses', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, responsesHandler)
   app.post('/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/chat/completions', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, chatHandler)
-  app.post('/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
+  app.post('/v1beta/models/*', { preHandler: requireApiKey, bodyLimit: multimodalBodyLimit }, (request, reply) =>
+    geminiGatewayProvider(request) === 'sub2api' ? sub2apiGeminiHandler(request, reply)
+      : geminiGatewayProvider(request) === 'antigravity' ? executeRelay(request, reply, PROVIDERS['antigravity-gemini']!)
+      : geminiHandler(request, reply))
 }
 
 /**
@@ -1576,9 +1680,13 @@ function dispatchByModel(
   defaultHandler: ProviderHandler,
   routed: Array<{ test: RegExp; handler: ProviderHandler }>,
   sub2apiHandler?: ProviderHandler,
+  antigravityHandler?: ProviderHandler,
 ) {
   return (request: FastifyRequest, reply: FastifyReply) => {
     const apiKey = request.apiKey!
+    if (antigravityHandler && apiKey.allowedProviders?.length === 1 && apiKey.allowedProviders[0] === 'antigravity') {
+      return executeRelay(request, reply, antigravityHandler)
+    }
     // A key scoped exclusively to sub2api routes every bare-domain request to
     // its sub2api upstream. Sub2API forwards model names verbatim and they
     // overlap with the native providers, so there is no way to tell them apart
@@ -1598,11 +1706,11 @@ function dispatchByModel(
   }
 }
 
-function sendOpenAIStyleModelList(
+async function sendOpenAIStyleModelList(
   request: FastifyRequest,
   reply: FastifyReply,
   provider?: ProviderId,
-): void {
+): Promise<void> {
   const apiKey = request.apiKey!
   if (provider && !isProviderAllowed(provider, apiKey)) {
     void reply.code(403).send({ error: `this API key may not use ${provider}` })
@@ -1610,28 +1718,30 @@ function sendOpenAIStyleModelList(
   }
   void reply.send({
     object: 'list',
-    data: listOpenAIStyleModels(apiKey, provider),
+    data: listOpenAIStyleModels(await modelDiscoveryKey(request, provider), provider),
   })
 }
 
-function sendGeminiModelList(request: FastifyRequest, reply: FastifyReply): void {
+async function sendGeminiModelList(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const apiKey = request.apiKey!
-  if (!isProviderAllowed('gemini', apiKey)) {
-    void reply.code(403).send({ error: 'this API key may not use gemini' })
+  const provider = geminiGatewayProvider(request)
+  if (!isProviderAllowed(provider, apiKey)) {
+    void reply.code(403).send({ error: `this API key may not use ${provider}` })
     return
   }
-  void reply.send({ models: listGeminiModels(apiKey) })
+  void reply.send({ models: listGeminiModels(await modelDiscoveryKey(request, provider), provider) })
 }
 
-function sendGeminiModel(request: FastifyRequest, reply: FastifyReply): void {
+async function sendGeminiModel(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const apiKey = request.apiKey!
-  if (!isProviderAllowed('gemini', apiKey)) {
-    void reply.code(403).send({ error: 'this API key may not use gemini' })
+  const provider = geminiGatewayProvider(request)
+  if (!isProviderAllowed(provider, apiKey)) {
+    void reply.code(403).send({ error: `this API key may not use ${provider}` })
     return
   }
   const modelName = (request.params as { '*'?: string } | undefined)?.['*'] ?? ''
   const normalized = modelName.startsWith('models/') ? modelName : `models/${modelName}`
-  const model = listGeminiModels(apiKey).find((item) => item.name === normalized)
+  const model = listGeminiModels(await modelDiscoveryKey(request, provider), provider).find((item) => item.name === normalized)
   if (!model) {
     void reply.code(404).send({ error: `model ${modelName || '(missing)'} not found` })
     return
@@ -1654,6 +1764,7 @@ function sendResponsesInputTokens(request: FastifyRequest, reply: FastifyReply):
     return
   }
 
+  if (!enforceGroupModel(requestedModel, request, reply)) return
   const mappedModel = mapRequestedModel(requestedModel, apiKey.modelMappings)
   if (!isAnyAllowedModel([requestedModel, mappedModel], apiKey.allowedModels)) {
     void reply.code(403).send({ error: `this API key may not use model ${mappedModel}` })
@@ -1688,6 +1799,7 @@ async function executeRelay(
   const apiKey = request.apiKey!
   const body = bodyOverride ?? (request.body ?? {}) as Record<string, unknown>
   const route = provider.parseRoute(request, body)
+  if (!enforceGroupModel(route.model, request, reply)) return
   const mappedModel = mapRequestedModel(route.model, apiKey.modelMappings)
   const parsed: ParsedRoute = {
     ...route,
@@ -1746,9 +1858,21 @@ async function executeRelay(
           apiKeyId: apiKey.id,
           userId: apiKey.userId,
           action: parsed.action,
+          model: parsed.model,
         })
       : mappedBody
-    await runRelayLoop(request, reply, provider, preparedBody, parsed)
+    const controller = new AbortController()
+    const onClose = () => {
+      if (!reply.raw.writableEnded) controller.abort(new Error('client_disconnected'))
+    }
+    reply.raw.once('close', onClose)
+    if (reply.raw.destroyed) onClose()
+    try {
+      await withUpstreamSignal(controller.signal, () => runRelayLoop(request, reply, provider, preparedBody, parsed))
+    } finally {
+      reply.raw.off('close', onClose)
+      controller.abort()
+    }
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
     if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
@@ -1802,7 +1926,7 @@ async function runRelayLoop(
   const sessionKey = session?.key ?? null
   const tried: string[] = []
   let terminalFailureRecorded = false
-  let lastModelUnavailable: { response: Response; meta: RelayMeta } | null = null
+  let lastRoutingFailure: { response: Response; meta: RelayMeta } | null = null
   // When a sticky account is temporarily full, a one-request spillover may be
   // selected. Keep the durable session binding on the original account so a
   // short capacity burst does not migrate the whole conversation to a
@@ -1812,17 +1936,8 @@ async function runRelayLoop(
   // (the gateway rotates its own backends), not "blackball this credential".
   const relayToRelay = provider.relayToRelay === true
 
-  // A vanished client shouldn't burn more upstream quota: note the disconnect
-  // and stop before starting the NEXT attempt. In-flight upstream requests are
-  // deliberately left alone — they complete and their usage is recorded
-  // normally, so billing never sees a half-aborted request.
-  let clientGone = false
-  reply.raw.once('close', () => {
-    if (!reply.raw.writableEnded) clientGone = true
-  })
-
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    if (clientGone) {
+    if (upstreamSignal()?.aborted) {
       request.log.info(`client disconnected; skipping further ${provider.id} attempts`)
       return
     }
@@ -1834,8 +1949,8 @@ async function runRelayLoop(
       parsed.model,
     )
     if (!account) {
-      if (lastModelUnavailable) {
-        const { response, meta } = lastModelUnavailable
+      if (lastRoutingFailure) {
+        const { response, meta } = lastRoutingFailure
         if (relayToRelay && !provider.responsesProtocol) await sendSanitizedRelayError(request, reply, response, meta)
         else if (wantStream) await sendStreaming(reply, response, meta, provider)
         else await sendBuffered(reply, response, meta, provider)
@@ -1910,11 +2025,24 @@ async function runRelayLoop(
       let upstream: Response
       try {
         upstream = await provider.callUpstream(token, body, {
+          apiKeyId: apiKey.id,
+          sessionKeyHash: session?.hash ?? null,
           model: parsed.model,
           action: parsed.action,
           account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
         })
       } catch (err) {
+        if (upstreamSignal()?.aborted) {
+          await recordUsage({
+            apiKeyId: apiKey.id, userId: apiKey.userId, accountId: account.id,
+            provider: provider.id, model: parsed.model, multiplier: apiKey.groupMultiplier ?? 1,
+            billTo: apiKey.billTo, subscriptionId: apiKey.subscriptionId,
+            usage: emptyUsage(), status: 'error', errorCode: 'client_disconnected',
+            errorMessage: 'Client disconnected before upstream response headers.',
+            attemptCount: attempt + 1, latencyMs: Date.now() - startedAt,
+          })
+          return
+        }
         const upstreamError = err instanceof Error ? err.message : String(err)
         request.log.warn(`upstream call failed for ${account.id}: ${upstreamError}`)
         if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
@@ -1983,7 +2111,7 @@ async function runRelayLoop(
         ? await provider.classifyUpstreamFailure(upstream, parsed.model)
         : await classifyUpstreamFailure(provider.id, upstream, parsed.model)
       const lastAttempt = attempt === MAX_ATTEMPTS - 1
-      lastModelUnavailable = failure.modelUnavailable
+      lastRoutingFailure = failure.modelUnavailable || failure.locationUnsupported
         ? { response: new Response(await readErrorText(upstream), { status: upstream.status, headers: upstream.headers }), meta }
         : null
 
@@ -1997,7 +2125,7 @@ async function runRelayLoop(
           true,
         )
         if (retryMode === 'same-account') tried.pop()
-        await upstream.body?.cancel().catch(() => {})
+        await cancelUpstreamResponse(upstream)
         continue
       }
 
@@ -2018,7 +2146,7 @@ async function runRelayLoop(
             true,
           )
           if (retryMode === 'same-account') tried.pop()
-          await upstream.body?.cancel().catch(() => {})
+          await cancelUpstreamResponse(upstream)
           continue
         }
         if (bufferedFailure.disable || bufferedFailure.penalty) {
@@ -2068,10 +2196,16 @@ async function runRelayLoop(
         await sendSanitizedRelayError(request, reply, upstream, meta)
         return
       }
-      if (wantStream) {
-        await sendStreaming(reply, upstream, meta, provider)
-      } else {
-        await sendBuffered(reply, upstream, meta, provider)
+      try {
+        if (wantStream) await sendStreaming(reply, upstream, meta, provider)
+        else await sendBuffered(reply, upstream, meta, provider)
+      } catch (error) {
+        if (!upstreamSignal()?.aborted) throw error
+        await recordUsage({
+          ...meta, usage: emptyUsage(), status: 'error', errorCode: 'client_disconnected',
+          errorMessage: 'Client disconnected before buffered usage was available.',
+          latencyMs: Date.now() - meta.startedAt,
+        })
       }
       return
     } finally {
@@ -2141,7 +2275,7 @@ export function startStreamingResponse(
     return true
   } catch {
     // A client can close between the state check and header write. Callers
-    // that still need upstream usage can continue draining the body.
+    // see the request cancellation signal through the upstream transport.
     return false
   }
 }
@@ -2320,7 +2454,7 @@ async function sendStreaming(
 
   const parser = provider.createStreamParser()
   const transform = provider.transformEventData
-  const streamTransform = useStreamTransform ? provider.createStreamTransform!() : null
+  const streamTransform = useStreamTransform ? provider.createStreamTransform!(meta) : null
   const parseUpstreamStream = provider.parseStreamEventsFrom === 'upstream'
   let buffer = ''
   let firstTokenMs: number | null = null
@@ -2345,7 +2479,7 @@ async function sendStreaming(
               raw.write(': keepalive\n\n')
               lastActivity = Date.now()
             } catch {
-              // Downstream gone; continue draining the upstream below.
+              // The close listener aborts the upstream; retain usage already parsed.
               downstreamClosed = true
             }
           }
@@ -2406,8 +2540,7 @@ async function sendStreaming(
               const block = buffer.slice(0, sep)
               feedSseBlock(block, parser, streamState, modelAudit)
               if (!downstreamClosed && !writeSseEventBlock(raw, block)) {
-                // Do not stop reading: the upstream may still send the usage
-                // event after the client has disconnected.
+                // The request close listener aborts the upstream transport.
                 downstreamClosed = true
               }
               markFirstToken()
@@ -2430,6 +2563,7 @@ async function sendStreaming(
       streamReadFailed = true
     } finally {
       if (heartbeat) clearInterval(heartbeat)
+      reader.releaseLock()
     }
   }
   // Some upstreams close immediately after the final SSE line without the
@@ -2475,7 +2609,8 @@ async function sendStreaming(
     }
   }
 
-  const streamStatus = streamReadFailed
+  const clientCanceled = upstreamSignal()?.aborted && !streamState.sawTerminal
+  const streamStatus = streamReadFailed || clientCanceled
     ? 'error'
     : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)
   await recordUsage({
@@ -2493,12 +2628,12 @@ async function sendStreaming(
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
     status: streamStatus,
     errorCode: streamStatus === 'error'
-      ? streamState.errorCode ?? (!upstream.ok
+      ? clientCanceled ? 'client_disconnected' : streamState.errorCode ?? (!upstream.ok
         ? `upstream_${upstream.status}`
         : streamState.sawTerminal ? 'upstream_stream_failed' : 'upstream_stream_closed')
       : null,
     errorMessage: streamStatus === 'error'
-      ? streamState.errorMessage ?? (!upstream.ok
+      ? clientCanceled ? 'Client disconnected during upstream generation; recorded usage may be partial.' : streamState.errorMessage ?? (!upstream.ok
         ? `Upstream returned HTTP ${upstream.status}.`
         : streamState.sawTerminal
           ? 'Upstream stream reported an unsuccessful terminal event.'
@@ -2643,6 +2778,7 @@ async function sendSanitizedRelayError(
 
 /** Extracts a displayable error code + message from an upstream error body. */
 function extractUpstreamError(text: string, status: number): { code: string; message: string } {
+  if (isGoogleLocationUnsupported(status, text)) return { code: 'google_location_unsupported', message: googleErrorMessage(status, text) }
   try {
     const body = JSON.parse(text) as {
       error?: { message?: unknown; code?: unknown; type?: unknown }
@@ -2734,18 +2870,30 @@ async function sendBuffered(
   let text = await upstream.text()
   let usage: UsageData = emptyUsage()
   let upstreamModel: string | null = null
+  let semanticFailure = false
+  let convertedFailure: ReturnType<typeof streamFailureDetails> = null
   try {
     let json = JSON.parse(text) as unknown
     upstreamModel = extractDeclaredModel(json)
     if (provider.transformEventData) {
-      json = provider.transformEventData(json)
+      json = provider.transformEventData(json, meta)
       text = JSON.stringify(json)
     }
     usage = provider.parseJsonUsage(json)
+    if (provider.id === 'antigravity' && jsonRecord(json)?.error) {
+      semanticFailure = true
+      convertedFailure = streamFailureDetails(json)
+    }
+    if (provider.responsesProtocol) {
+      const object = parseResponseObject(text)
+      semanticFailure = object?.status === 'failed' || object?.status === 'incomplete'
+    }
   } catch {
     // Error responses aren't valid JSON — leave usage empty.
   }
-  const errorDetails = upstream.ok ? null : extractUpstreamError(text, upstream.status)
+  const errorDetails = convertedFailure ?? (semanticFailure
+    ? { code: 'upstream_response_failed', message: 'Upstream returned an unsuccessful Responses result.' }
+    : upstream.ok ? null : extractUpstreamError(text, upstream.status))
   const recorded = await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
@@ -2756,7 +2904,7 @@ async function sendBuffered(
     billTo: meta.billTo,
     subscriptionId: meta.subscriptionId,
     usage,
-    status: upstream.ok ? 'success' : 'error',
+    status: upstream.ok && !semanticFailure ? 'success' : 'error',
     errorCode: errorDetails?.code ?? null,
     errorMessage: errorDetails ? redactUpstreamError(errorDetails.message) : null,
     upstreamStatus: upstream.status,
@@ -2776,7 +2924,7 @@ async function sendBuffered(
     return
   }
   await reply
-    .code(upstream.status)
+    .code(provider.id === 'antigravity' && semanticFailure ? 502 : upstream.status)
     .header('content-type', contentType)
     .send(text)
 }
@@ -2975,4 +3123,73 @@ function rewriteAndEmit(
   } catch {
     return false
   }
+}
+
+function enforceGroupModel(model: string, request: FastifyRequest, reply: FastifyReply): boolean {
+  if (isGroupModelAllowed(model, request.apiKey?.groupAllowedModels)) return true
+  void reply.code(404).send({ error: {
+    type: 'invalid_request_error', code: 'model_not_allowed',
+    message: 'This account group does not allow the requested model.',
+  } })
+  return false
+}
+
+
+function parseGeminiRoute(request: FastifyRequest): ParsedRoute {
+  const wild = (request.params as { '*'?: string })['*'] ?? ''
+  const colon = wild.lastIndexOf(':')
+  const model = colon >= 0 ? wild.slice(0, colon) : wild
+  const action = colon >= 0 ? wild.slice(colon + 1) : 'generateContent'
+  if (!model || model.length > 200 || !['generateContent', 'streamGenerateContent', 'countTokens'].includes(action)) {
+    throw Object.assign(new Error('Unsupported Gemini model or action'), { statusCode: 400 })
+  }
+  return { model, action }
+}
+
+function geminiGatewayProvider(request: FastifyRequest): 'gemini' | 'sub2api' | 'antigravity' {
+  if (request.url.startsWith('/api/antigravity/')) return 'antigravity'
+  if (!request.url.startsWith('/api/') && request.apiKey?.allowedProviders?.length === 1 && request.apiKey.allowedProviders[0] === 'antigravity') return 'antigravity'
+  if (request.url.startsWith('/api/sub2api/')) return 'sub2api'
+  if (!request.url.startsWith('/api/gemini/') && request.apiKey?.allowedProviders?.length === 1
+    && request.apiKey.allowedProviders[0] === 'sub2api') return 'sub2api'
+  return 'gemini'
+}
+
+async function readErrorTextForLocation(response: Response): Promise<string> {
+  return response.status === 400 || response.status === 403 ? readErrorText(response) : ''
+}
+
+
+function validateAntigravityModel(model: string): string {
+  const normalized = model.trim().replace(/^models\//, '')
+  if (!/^(gemini|claude)-[a-z\d._-]+$/i.test(normalized)) throw new AntigravityRequestError('Antigravity requires an explicit Gemini or Claude model name')
+  return normalized
+}
+
+function callAntigravity(token: string, body: Record<string, unknown>, ctx: UpstreamContext): Promise<Response> {
+  const project = (ctx.account.metadata as { project?: unknown } | null)?.project
+  if (typeof project !== 'string' || !project) throw new Error('Antigravity account is missing project metadata; refresh its quota or authorize again')
+  return relayAntigravity(token, body, { apiKeyId: ctx.apiKeyId, accountId: ctx.account.id, model: ctx.model, project, action: ctx.action, sessionKeyHash: ctx.sessionKeyHash })
+}
+
+
+async function modelDiscoveryKey(request: FastifyRequest, provider?: ProviderId) {
+  const key = request.apiKey!
+  if (provider !== 'antigravity' && !(provider == null && key.allowedProviders?.length === 1 && key.allowedProviders[0] === 'antigravity')) return key
+  const models = await cachedAntigravityModels(key.accountGroupId)
+  return models == null ? key : { ...key, providerModels: { antigravity: models } }
+}
+
+function sendAntigravityInputTokens(request: FastifyRequest, reply: FastifyReply): void {
+  const key = request.apiKey!
+  if (!isProviderAllowed('antigravity', key)) { void reply.code(403).send({ error: 'this API key may not use antigravity' }); return }
+  const body = (request.body ?? {}) as Record<string, unknown>
+  const requested = typeof body.model === 'string' ? body.model : ''
+  const model = validateAntigravityModel(mapRequestedModel(requested, key.modelMappings))
+  if (!enforceGroupModel(requested, request, reply)) return
+  if (!isAnyAllowedModel([requested, model], key.allowedModels)) { void reply.code(403).send({ error: 'this API key may not use the requested model' }); return }
+  if (!Array.isArray(body.messages)) { void reply.code(400).send({ error: 'messages must be an array' }); return }
+  void reply.header('x-model-bridge-token-estimate', 'approximate').send({
+    input_tokens: estimateResponsesInputTokens({ messages: body.messages, system: body.system, tools: body.tools }),
+  })
 }

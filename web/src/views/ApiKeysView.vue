@@ -144,11 +144,13 @@ const providerOptions = [
   { label: 'Claude', value: 'claude' },
   { label: 'OpenAI', value: 'openai' },
   { label: 'Gemini', value: 'gemini' },
+  { label: 'Antigravity（反重力）', value: 'antigravity' },
   { label: 'DeepSeek', value: 'deepseek' },
   { label: 'Xiaomi MiMo', value: 'xiaomi' },
   { label: 'Zhipu GLM', value: 'zhipu' },
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
+  { label: 'MiniMax', value: 'minimax' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
 
@@ -156,11 +158,13 @@ const providerLabel: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  antigravity: 'Antigravity（反重力）',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
+  minimax: 'MiniMax',
   sub2api: 'Sub2API',
 }
 
@@ -168,11 +172,13 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   claude: 'info',
   openai: 'success',
   gemini: 'warning',
+  antigravity: 'info',
   deepseek: 'error',
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
   kimi: 'default',
+  minimax: 'error',
   sub2api: 'success',
 }
 
@@ -200,6 +206,8 @@ const commonModelOptions = [
   'qwen3.8-max',
   'qwen3.7-plus',
   'qwen3.7-flash',
+  'minimax-*',
+  'MiniMax-M3',
   'kimi-*',
   'kimi-k3',
   'kimi-k2.7-code',

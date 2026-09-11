@@ -615,3 +615,17 @@ describe('OpenAI Images account failover classification', () => {
     expect(failure).toEqual({ penalty: null, retryable: false })
   })
 })
+
+
+describe('unproven quota exhaustion', () => {
+  it('uses Retry-After rather than a reset-only weekly snapshot', async () => {
+    const before = Date.now()
+    const failure = await classifyUpstreamFailure('openai', new Response('rate limit', { status: 429, headers: {
+      'x-codex-primary-reset-after-seconds': '604800', 'retry-after': '2',
+    } }), 'gpt-6-astra')
+    expect(failure.accountScoped).toBe(false)
+    expect(failure.modelScoped).toBe(true)
+    expect(failure.resetAt).toBeGreaterThanOrEqual(before + 2000)
+    expect(failure.resetAt).toBeLessThanOrEqual(Date.now() + 2000)
+  })
+})

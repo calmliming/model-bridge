@@ -1,4 +1,4 @@
-import { isAllowedModel } from '../keys/modelAllowlist'
+import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 
@@ -6,6 +6,8 @@ export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
   allowedModels: string[] | null
   modelMappings?: Record<string, string> | null
+  groupAllowedModels?: string[] | null
+  providerModels?: Partial<Record<ProviderId, string[]>>
 }
 
 export interface ModelItem {
@@ -32,7 +34,7 @@ const CREATED_AT = 1_704_067_200
 // key pins an exact allowedModels allow-list). Keep the current flagship of
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
-const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
+const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, string[]> = {
   claude: [
     'claude-fable-5-1',
     'claude-opus-5',
@@ -59,18 +61,20 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api'>, string[]> = {
   // provider-qualified name. Keep them discoverable so a Composite-style key
   // can route the same identifiers that Sub2API v0.1.183 accepts.
   kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
+  minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
   grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1'],
 }
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   ...NATIVE_MODELS,
+  antigravity: [...NATIVE_MODELS.gemini, ...NATIVE_MODELS.claude],
   // Sub2API is an aggregator upstream that forwards model names verbatim and
   // has access to every model, so its discovery list is the union of all
   // native providers' lists — no separate list to keep in sync.
   sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())],
 }
 
-const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'grok', 'sub2api']
+const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api']
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
@@ -88,6 +92,7 @@ function inferProvider(model: string): ProviderId | null {
     lower === 'k3-256k' ||
     lower === 'kimi-code/k3'
   ) return 'kimi'
+  if (lower.startsWith('minimax-')) return 'minimax'
   if (lower.startsWith('grok')) return 'grok'
   return null
 }
@@ -114,7 +119,7 @@ function providerScope(key: ModelDiscoveryKey, requested?: ProviderId): Provider
 }
 
 function exactAllowedModelEntries(key: ModelDiscoveryKey): string[] {
-  return (key.allowedModels ?? [])
+  return [...(key.allowedModels ?? []), ...(key.groupAllowedModels ?? [])]
     .map((model) => model.trim())
     .filter((model) => model && !model.includes('*'))
 }
@@ -132,7 +137,12 @@ function includeCustomAllowedModels(
   requested?: ProviderId,
 ): void {
   for (const model of exactAllowedModelEntries(key)) {
+    if (!isAllowedModel(model, key.allowedModels)) continue
     if (ids.includes(model)) continue
+    if (providers.includes('sub2api') || (providers.includes('antigravity') && ['gemini', 'claude'].includes(inferProvider(mapRequestedModel(model, key.modelMappings)) ?? ''))) {
+      ids.push(model)
+      continue
+    }
     const inferred = inferProvider(mapRequestedModel(model, key.modelMappings))
     if (inferred) {
       if (providers.includes(inferred) && (!requested || requested === inferred)) ids.push(model)
@@ -151,6 +161,10 @@ function includeMappedModels(
   for (const { from, to } of exactMappingSources(key)) {
     if (ids.includes(from)) continue
     if (!isAllowedModel(from, key.allowedModels) && !isAllowedModel(to, key.allowedModels)) continue
+    if (providers.includes('sub2api') || (providers.includes('antigravity') && ['gemini', 'claude'].includes(inferProvider(to) ?? ''))) {
+      ids.push(from)
+      continue
+    }
     const provider = inferProvider(to)
     if (provider) {
       if (providers.includes(provider) && (!requested || requested === provider)) ids.push(from)
@@ -168,15 +182,16 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   const providers = providerScope(key, requested)
   const ids: string[] = []
   for (const provider of providers) {
-    for (const model of DEFAULT_MODELS[provider]) {
+    for (const model of key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]) {
       const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
-      if (provider !== 'sub2api' && targetProvider && !providers.includes(targetProvider)) continue
+      if (provider === 'antigravity' && targetProvider && !['gemini', 'claude'].includes(targetProvider)) continue
+      if (provider !== 'sub2api' && provider !== 'antigravity' && targetProvider && !providers.includes(targetProvider)) continue
       if (isAllowedModel(model, key.allowedModels) && !ids.includes(model)) ids.push(model)
     }
   }
   includeMappedModels(ids, key, providers, requested)
   includeCustomAllowedModels(ids, key, providers, requested)
-  return ids
+  return ids.filter((model) => isGroupModelAllowed(model, key.groupAllowedModels))
 }
 
 export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: ProviderId): ModelItem[] {
@@ -190,8 +205,10 @@ export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: Provid
   }))
 }
 
-export function listGeminiModels(key: ModelDiscoveryKey): GeminiModelItem[] {
-  return listModelIdsForKey(key, 'gemini').map((id) => ({
+export function listGeminiModels(key: ModelDiscoveryKey, provider: 'gemini' | 'sub2api' | 'antigravity' = 'gemini'): GeminiModelItem[] {
+  return listModelIdsForKey(key, provider)
+    .filter(id => (provider === 'gemini' || provider === 'antigravity') || inferProvider(mapRequestedModel(id, key.modelMappings)) === 'gemini')
+    .map((id) => ({
     name: `models/${id}`,
     version: '001',
     displayName: displayName(id),

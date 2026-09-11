@@ -103,7 +103,10 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
     : null
   // Merge provider metadata fetched separately (e.g. Gemini project) with any
   // non-secret identity the token exchange derived (e.g. OpenAI id_token claims).
-  const metadata = mergeMetadata(input.metadata, input.tokens.metadata)
+  let metadata = mergeMetadata(input.metadata, input.tokens.metadata)
+  if (input.provider === 'antigravity' && !metadata?.project) {
+    metadata = mergeMetadata(metadata, await getProvider('antigravity')!.fetchAccountMetadata!(input.tokens.accessToken))
+  }
   await db.insert(accounts)
     .values({
       id,
@@ -111,7 +114,7 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
       name: input.name,
       oauthAccessToken: encrypt(input.tokens.accessToken),
       oauthRefreshToken: encrypt(input.tokens.refreshToken),
-      tokenExpiresAt: input.tokens.expiresAt,
+      tokenExpiresAt: input.tokens.expiresAt || (input.provider === 'antigravity' ? Date.now() + 3600_000 : 0),
       status: 'active',
       proxyUrl,
       concurrencyLimit: normalizeConcurrencyLimit(input.concurrencyLimit),

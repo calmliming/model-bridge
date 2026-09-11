@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -149,6 +149,7 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     initials: '通',
     chipClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300',
   },
+  minimax: { id: 'minimax', label: 'MiniMax', initials: 'M', chipClass: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300' },
   kimi: {
     id: 'kimi',
     label: 'Kimi 月之暗面',
@@ -617,6 +618,19 @@ export const MODEL_CATALOG: PlazaModel[] = [
     cacheReadPrice: 0.0056,
   },
 
+  {
+    id: 'MiniMax-M3', name: 'MiniMax M3', provider: 'minimax',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['工具调用', '可选思考', '1M 上下文'],
+    description: '支持图像与视频输入、工具调用和原生 Responses。输入超过 512K 时计价翻倍，Priority 按标准价的 1.5 倍计费。',
+    context: '1M', inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.06, badge: 'new',
+  },
+  {
+    id: 'MiniMax-M2.7', name: 'MiniMax M2.7', provider: 'minimax',
+    categories: ['chat', 'reasoning', 'code'], tags: ['编码', '工具调用'],
+    description: '面向编程和多轮工具任务，支持 Token Plan / Coding Plan 与按量密钥。',
+    context: '204K', inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.06,
+  },
   // --- Kimi 月之暗面 -------------------------------------------------------
   {
     id: 'kimi-k3',

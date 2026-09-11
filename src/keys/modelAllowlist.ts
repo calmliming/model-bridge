@@ -27,3 +27,8 @@ export function isAllowedModel(model: string, allowedModels: string[] | null | u
       : pattern.toLowerCase() === normalizedModel.toLowerCase()
   })
 }
+
+/** Group policy is independent of key aliases; an explicit empty list denies all. */
+export function isGroupModelAllowed(model: string, allowedModels: string[] | null | undefined): boolean {
+  return allowedModels == null || (allowedModels.length > 0 && isAllowedModel(model, allowedModels))
+}

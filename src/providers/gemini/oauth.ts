@@ -1,3 +1,5 @@
+import { fetchWithConnectTimeout } from '../../http/upstream'
+import { googleErrorMessage } from '../google/errors'
 import { createHash, randomBytes } from 'node:crypto'
 import type { TokenSet } from '../types'
 import { OAuthConfigurationError } from '../oauthErrors'
@@ -73,15 +75,16 @@ export function buildAuthorizeUrl(state: string, challenge: string): string {
 
 interface RawTokenResponse {
   access_token: string
-  refresh_token: string
+  refresh_token?: string
   expires_in?: number
 }
 
 function toTokenSet(data: RawTokenResponse): TokenSet {
+  if (typeof data.access_token !== 'string' || !data.access_token.trim()) throw new Error('Google token endpoint did not return an access token')
   return {
     accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
+    refreshToken: data.refresh_token ?? '',
+    expiresAt: Date.now() + (typeof data.expires_in === 'number' && Number.isFinite(data.expires_in) && data.expires_in > 0 ? data.expires_in : 3600) * 1000,
   }
 }
 
@@ -99,13 +102,14 @@ export async function exchangeCode(
     client_secret: credentials.clientSecret,
     code_verifier: verifier,
   })
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchWithConnectTimeout(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
     body: body.toString(),
   })
   if (!res.ok) {
-    throw new Error(`token exchange failed (${res.status}): ${await res.text()}`)
+    throw new Error(`token exchange failed (${res.status}): ${googleErrorMessage(res.status, await res.text())}`)
   }
   return toTokenSet((await res.json()) as RawTokenResponse)
 }
@@ -118,13 +122,14 @@ export async function refreshToken(refreshTokenValue: string): Promise<TokenSet>
     client_id: credentials.clientId,
     client_secret: credentials.clientSecret,
   })
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchWithConnectTimeout(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
     body: body.toString(),
   })
   if (!res.ok) {
-    throw new Error(`token refresh failed (${res.status}): ${await res.text()}`)
+    throw new Error(`token refresh failed (${res.status}): ${googleErrorMessage(res.status, await res.text())}`)
   }
   // Refresh responses don't always include a new refresh_token — reuse the old one.
   const data = (await res.json()) as RawTokenResponse
@@ -140,12 +145,13 @@ export async function refreshToken(refreshTokenValue: string): Promise<TokenSet>
 export async function fetchAccountMetadata(
   accessToken: string,
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(CODE_ASSIST_LOAD_URL, {
+  const res = await fetchWithConnectTimeout(CODE_ASSIST_LOAD_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
     },
+    signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       cloudaicompanionProject: '',
       metadata: {
@@ -156,11 +162,24 @@ export async function fetchAccountMetadata(
     }),
   })
   if (!res.ok) {
-    throw new Error(`loadCodeAssist failed (${res.status}): ${await res.text()}`)
+    throw new Error(`loadCodeAssist failed (${res.status}): ${googleErrorMessage(res.status, await res.text())}`)
   }
-  const data = (await res.json()) as { cloudaicompanionProject?: string }
-  if (!data.cloudaicompanionProject) {
-    throw new Error('loadCodeAssist did not return a cloudaicompanionProject')
+  const data = (await res.json()) as {
+    cloudaicompanionProject?: string | { id?: string }
+    currentTier?: { id?: string }
+    paidTier?: { id?: string }
+    ineligibleTiers?: Array<{ reasonCode?: string; reasonMessage?: string }>
   }
-  return { project: data.cloudaicompanionProject }
+  const project = typeof data.cloudaicompanionProject === 'string'
+    ? data.cloudaicompanionProject.trim() : data.cloudaicompanionProject?.id?.trim()
+  if (!project) {
+    const reasons = data.ineligibleTiers?.map(tier => [tier.reasonCode, tier.reasonMessage].filter(Boolean).join(': ')).join('; ')
+    if (reasons) throw new Error(googleErrorMessage(403, JSON.stringify({ error: { message: reasons } })))
+    throw new Error('Gemini 未返回项目：请先在官方 Gemini CLI 完成账号开通，或检查该账号的 Code Assist 项目权限')
+  }
+  return {
+    project,
+    ...(typeof data.currentTier?.id === 'string' ? { googleCurrentTier: data.currentTier.id } : {}),
+    ...(typeof data.paidTier?.id === 'string' ? { googlePaidTier: data.paidTier.id } : {}),
+  }
 }

@@ -19,7 +19,7 @@ const isSecureContext = computed(() => {
         <UiCard title="使用流程">
           <UiSteps vertical :current="4">
             <UiStep title="修改管理员密码" description="首次登录后进入设置，立即替换默认密码。" />
-            <UiStep title="添加上游账户" description="在上游账户页面接入 Claude、OpenAI、Gemini、DeepSeek、Xiaomi MiMo、Zhipu GLM 或 Tongyi Qwen。" />
+            <UiStep title="添加上游账户" description="在上游账户页面接入 Claude、OpenAI、Gemini、DeepSeek、Xiaomi MiMo、Zhipu GLM、Tongyi Qwen、Kimi、MiniMax 或 Sub2API。" />
             <UiStep title="创建 API Key" description="在 API Keys 页面创建密钥，并按需设置服务商、分组、限速、并发、成本配额和过期时间。" />
             <UiStep title="配置客户端" description="把客户端 base URL 指向 model-bridge，并使用后台生成的 API Key。" />
           </UiSteps>
@@ -69,6 +69,30 @@ const isSecureContext = computed(() => {
       </UiGi>
     </UiGrid>
 
+    <UiCard title="原生接入 Antigravity（直接连接 Google）">
+      <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+        <li>在服务器配置 Antigravity OAuth 客户端参数；需要指定网络出口时配置 <code class="code-inline">ANTIGRAVITY_PROXY_URL</code>，然后重启服务。</li>
+        <li>在上游账户选择 <strong>Antigravity（反重力）</strong>，生成链接并用符合资格的 Google 账号授权。回调地址为 localhost:8085/callback；远程部署可粘贴完整回调 URL 完成。</li>
+        <li>授权后刷新配额，获取实际模型目录和各模型剩余额度；为这些账号建立独立分组，并创建只允许 antigravity 的本地 Key。</li>
+      </ol>
+      <p class="doc-p mt-3">Claude Code / Messages Base URL：<code class="code-inline">{{ baseOrigin }}/api/antigravity</code>；Gemini SDK 也使用该 Base URL，并请求 <code class="code-inline">/v1beta/models/模型名:generateContent</code> 或流式方法。</p>
+      <p class="doc-p mt-2">客户端填写本项目的 mb-... 密钥。此入口支持 Messages 和 Gemini 原生协议；模型权限由 Google 账号决定。切换原生 Claude、Gemini CLI、Antigravity 时请新开会话，保留原始思考签名。</p>
+      <p class="doc-p mt-2">原生入口由本项目处理 Google OAuth、刷新、模型查询和生成；下方的 Sub2API 方式仍可独立使用。</p>
+    </UiCard>
+
+    <UiCard title="通过 Sub2API 接入 Antigravity（反重力）">
+      <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+        <li>先在上游 Sub2API 完成 Antigravity 授权，确认账号可调用，再创建对应分组的 API Key。</li>
+        <li>在本项目添加 Sub2API 账户，Base URL 填 <code class="code-inline">https://你的上游/antigravity</code>，API Key 填上游密钥。</li>
+        <li>将该账户放入专用分组，本项目发给客户端的 Key 绑定同一分组，服务商限制选择 Sub2API。</li>
+      </ol>
+      <p class="doc-p mt-3">客户端使用本项目的 <code class="code-inline">mb-...</code> 密钥和下列地址：</p>
+      <p class="doc-p">Gemini SDK Base URL：<code class="code-inline">{{ baseOrigin }}/api/sub2api</code>，请求路径为 <code class="code-inline">/v1beta/models/模型名:generateContent</code> 或 <code class="code-inline">:streamGenerateContent</code>。</p>
+      <p class="doc-p">Claude Code 的 ANTHROPIC_BASE_URL：<code class="code-inline">{{ baseOrigin }}/api/sub2api</code>，使用 Messages 协议。</p>
+      <p class="doc-p mt-2">Codex / Chat Completions：上游账户改用 Sub2API 根地址，并在上游将 Key 绑定到 Antigravity 分组；专用 <code class="code-inline">/antigravity</code> 前缀不提供这两种端点。</p>
+      <p class="doc-p mt-2">Google 授权和网络出口由上游 Sub2API 处理。地区拒绝需检查上游出口及账号地区、资格，本项目不能改变 Google 的账号准入结果。</p>
+    </UiCard>
+
     <UiCard title="客户端接入">
       <UiTabs>
         <UiTabPane name="claude" tab="Claude Code">
@@ -81,7 +105,8 @@ claude</code></pre>
             <code class="code-inline">{{ baseOrigin }}/api/xiaomi</code>、
             <code class="code-inline">{{ baseOrigin }}/api/zhipu</code>、
             <code class="code-inline">{{ baseOrigin }}/api/qwen</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/kimi</code>。
+            <code class="code-inline">{{ baseOrigin }}/api/kimi</code>，以及
+            <code class="code-inline">{{ baseOrigin }}/api/minimax</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="codex" tab="Codex CLI">
@@ -106,7 +131,8 @@ codex --profile model-bridge</code></pre>
             <code class="code-inline">{{ baseOrigin }}/api/xiaomi/v1</code>、
             <code class="code-inline">{{ baseOrigin }}/api/zhipu/v1</code>、
             <code class="code-inline">{{ baseOrigin }}/api/qwen/v1</code> 和
-            <code class="code-inline">{{ baseOrigin }}/api/kimi/v1</code>。
+            <code class="code-inline">{{ baseOrigin }}/api/kimi/v1</code>，以及
+            <code class="code-inline">{{ baseOrigin }}/api/minimax/v1</code>。
           </p>
         </UiTabPane>
         <UiTabPane name="cherry" tab="Cherry Studio">

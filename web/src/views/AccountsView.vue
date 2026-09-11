@@ -9,7 +9,7 @@ import { formatTime } from '../utils'
 import ImportAccountsModal from '../components/ImportAccountsModal.vue'
 
 interface AccountQuotaWindow {
-  key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'weekly_fable' | 'primary' | 'secondary'
+  key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'weekly_fable' | 'primary' | 'secondary' | 'model'
   label: string
   usedPercent: number | null
   resetAt: number | null
@@ -17,7 +17,7 @@ interface AccountQuotaWindow {
 }
 
 interface AccountQuotaSnapshot {
-  source: 'claude' | 'openai'
+  source: 'claude' | 'openai' | 'minimax' | 'antigravity'
   updatedAt: number
   windows: AccountQuotaWindow[]
   // OpenAI only: available rate-limit reset credits (null when unknown).
@@ -93,7 +93,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'grok' | 'sub2api'
+type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'sub2api'
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -216,24 +216,28 @@ const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  antigravity: 'Antigravity（反重力）',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
+  minimax: 'MiniMax',
   grok: 'Grok (xAI)',
   sub2api: 'Sub2API',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'grok', 'sub2api']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
   gemini: 'warning',
+  antigravity: 'info',
   deepseek: 'info',
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
   kimi: 'default',
+  minimax: 'error',
   grok: 'default',
   sub2api: 'success',
 }
@@ -241,18 +245,20 @@ const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
   openai: 'auth.openai.com',
   gemini: 'accounts.google.com',
+  antigravity: 'accounts.google.com',
   deepseek: 'platform.deepseek.com',
   xiaomi: 'platform.xiaomimimo.com',
   zhipu: 'open.bigmodel.cn',
   qwen: 'bailian.console.aliyun.com',
   kimi: 'platform.moonshot.cn',
+  minimax: 'platform.minimaxi.com',
   grok: 'auth.x.ai',
   sub2api: 'sub2api',
 }
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'sub2api']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
@@ -261,6 +267,7 @@ const apiKeyConsoleHint: Record<string, string> = {
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
   zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
   qwen: '在 bailian.console.aliyun.com 阿里云百炼控制台「API-KEY」创建后粘贴到上方。',
+  minimax: '在 MiniMax 开放平台创建 API Key；Token Plan / Coding Plan 可通过配额刷新查询用量。Base URL 留空使用国内站，国际站填 https://api.minimax.io。',
   kimi: '在 platform.moonshot.cn 控制台「API Key 管理」创建 API Key 后粘贴到上方。',
   sub2api: '填写 Sub2API 部署地址和它生成的 API Key，例如 https://sub2api.example.com。',
 }
@@ -408,6 +415,7 @@ function quotaLabel(window: AccountQuotaWindow) {
 }
 
 function quotaWindowClass(window: AccountQuotaWindow) {
+  if (window.key === 'model') return 'is-model'
   const label = quotaLabel(window)
   return label.includes('7天') ? 'is-7d' : 'is-5h'
 }
@@ -506,7 +514,7 @@ function renderHealth(row: Account) {
 
 function renderQuotaWindow(window: AccountQuotaWindow) {
   return h('div', { class: 'quota-row' }, [
-    h('span', { class: ['quota-label', quotaWindowClass(window)] }, quotaLabel(window)),
+    h('span', { class: ['quota-label', quotaWindowClass(window)], title: quotaLabel(window) }, quotaLabel(window)),
     h('span', { class: 'quota-bar-track' }, [
       h('span', {
         class: ['quota-bar-fill', `is-${quotaStatus(window)}`],
@@ -681,12 +689,17 @@ function renderQuota(row: Account) {
       renderQuotaRefresh(row, quota?.updatedAt),
     ])
   }
+  const windows = row.provider === 'antigravity'
+    ? [...quota.windows].sort((a, b) => (b.usedPercent ?? 0) - (a.usedPercent ?? 0)) : quota.windows
+  const windowNodes = row.provider === 'antigravity' && windows.length > 3
+    ? [...windows.slice(0, 3).map(renderQuotaWindow), h('details', [h('summary', { class: 'cursor-pointer text-xs text-gray-500' }, `其余 ${windows.length - 3} 个模型`), ...windows.slice(3).map(renderQuotaWindow)])]
+    : windows.map(renderQuotaWindow)
   return h(
     'div',
     { class: 'quota-cell' },
     [
       h('div', { class: 'quota-line' }, [
-        ...quota.windows.map(renderQuotaWindow),
+        ...windowNodes,
         credits,
       ]),
       renderQuotaRefresh(row, quota.updatedAt),
@@ -1196,7 +1209,7 @@ async function finishApiKeyImport() {
       name: form.value.name.trim(),
       accessToken: apiKeyInput.value.trim(),
     }
-    if (provider === 'sub2api') payload.baseUrl = baseUrlInput.value.trim()
+    if (['sub2api', 'minimax'].includes(provider) && baseUrlInput.value.trim()) payload.baseUrl = baseUrlInput.value.trim()
     await api.post('/admin/accounts/import/token', payload)
     message.success(`${label} 账户已添加`)
     showAdd.value = false
@@ -1622,7 +1635,7 @@ const columns = computed<TableColumn<Account>[]>(() => [
   },
 ])
 
-const OAUTH_TOKEN_PROVIDERS = new Set<Provider>(['claude', 'openai', 'gemini'])
+const OAUTH_TOKEN_PROVIDERS = new Set<Provider>(['claude', 'openai', 'gemini', 'antigravity'])
 
 function columnsForProvider(provider: string): TableColumn<Account>[] {
   return columns.value
@@ -1851,11 +1864,13 @@ onBeforeUnmount(() => {
               <UiRadioButton value="claude">Claude</UiRadioButton>
               <UiRadioButton value="openai">OpenAI</UiRadioButton>
               <UiRadioButton value="gemini">Gemini</UiRadioButton>
+              <UiRadioButton value="antigravity">Antigravity（反重力）</UiRadioButton>
               <UiRadioButton value="deepseek">DeepSeek</UiRadioButton>
               <UiRadioButton value="xiaomi">Xiaomi MiMo</UiRadioButton>
               <UiRadioButton value="zhipu">Zhipu GLM</UiRadioButton>
               <UiRadioButton value="qwen">Tongyi Qwen</UiRadioButton>
               <UiRadioButton value="kimi">Kimi (Moonshot)</UiRadioButton>
+              <UiRadioButton value="minimax">MiniMax</UiRadioButton>
               <UiRadioButton value="sub2api">Sub2API</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>
@@ -1874,19 +1889,22 @@ onBeforeUnmount(() => {
             />
           </UiFormItem>
           <UiFormItem
-            v-if="form.provider === 'sub2api'"
+            v-if="['sub2api', 'minimax'].includes(form.provider)"
             label="Base URL"
-            hint="填部署根地址即可，末尾带不带 /v1 都行（会自动归一化后拼 /v1/messages、/v1/chat/completions、/v1/responses）。若上游是 OpenAI 兼容中转且报路径错误，通常是它的实际路径与标准 /v1/* 不一致，需按其文档调整地址结尾。"
+            :hint="form.provider === 'minimax' ? '留空使用国内站；国际站填 https://api.minimax.io。支持根地址、/v1 或 /anthropic 结尾。' : '标准中转填部署根地址；转接反重力可填 https://你的网关/antigravity，支持 Messages 和 Gemini。Google 授权及网络出口由上游管理。'"
           >
             <UiInput
               v-model:value="baseUrlInput"
-              placeholder="https://sub2api.example.com"
+              :placeholder="form.provider === 'minimax' ? 'https://api.minimaxi.com（可留空）' : 'https://sub2api.example.com'"
             />
           </UiFormItem>
         </UiForm>
+        <p v-if="form.provider === 'antigravity'" class="text-sm text-gray-500 mt-3">
+          使用 Google 账号直接授权。服务器需配置 ANTIGRAVITY_OAUTH_CLIENT_SECRET；如需指定网络出口，可配置 ANTIGRAVITY_PROXY_URL。授权后点击配额刷新可获取实际模型及剩余额度。
+        </p>
         <UiText v-if="!isApiKeyProvider(form.provider)" depth="3" style="font-size: 13px">
           下一步会生成 {{ authorizeHost[form.provider] }} 的授权链接；
-          你需要用拥有该订阅的账号登录并授权。
+          {{ form.provider === 'antigravity' ? '请使用已开通 Antigravity 且符合使用资格的 Google 账号授权。' : '你需要用拥有该订阅的账号登录并授权。' }}
         </UiText>
         <UiText v-else depth="3" style="font-size: 13px">
           {{ apiKeyConsoleHint[form.provider] }}
@@ -1895,7 +1913,7 @@ onBeforeUnmount(() => {
 
       <div v-else>
         <UiText strong>第 1 步</UiText>
-        <UiText depth="3">　用拥有 {{ providerLabel[form.provider] }} 订阅的账号打开下面的链接并完成授权：</UiText>
+        <UiText depth="3">　{{ form.provider === 'antigravity' ? '使用符合 Antigravity 使用资格的 Google 账号打开下面的链接并完成授权：' : `用拥有 ${providerLabel[form.provider]} 订阅的账号打开下面的链接并完成授权：` }}</UiText>
         <UiInput
           :value="authorizeUrl"
           readonly
@@ -1918,10 +1936,10 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <UiText depth="3">
-            　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 1455 端口（如本地部署），授权会自动完成。
+            　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 {{ form.provider === 'antigravity' ? '8085' : '1455' }} 端口（如本地部署），授权会自动完成。
           </UiText>
           <UiText depth="3" style="display: block; margin-top: 6px; font-size: 12px">
-            （回调由本机 1455 端口处理；浏览器必须能访问运行 model-bridge 那台机器的 localhost:1455）
+            （Antigravity 回调端口为 8085，其他服务商为 1455；远程或 Docker 部署可复制完整回调 URL 到下方完成授权）
           </UiText>
           <UiDivider style="margin: 18px 0">远程部署 / 手动完成</UiDivider>
 
@@ -1930,7 +1948,7 @@ onBeforeUnmount(() => {
           </UiText>
           <UiInput
             v-model:value="pasteCallbackUrl"
-            placeholder="http://localhost:1455/auth/callback?code=...&state=..."
+            :placeholder="form.provider === 'antigravity' ? 'http://localhost:8085/callback?code=...&amp;state=...' : 'http://localhost:1455/auth/callback?code=...&amp;state=...'"
             style="margin-top: 8px"
           />
           <UiText depth="3" style="display: block; margin-top: 4px; font-size: 12px">
@@ -2496,6 +2514,14 @@ onBeforeUnmount(() => {
   line-height: 1.2;
   text-align: center;
   white-space: nowrap;
+}
+
+:deep(.quota-label.is-model) {
+  max-width: 138px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #7c3aed;
+  background: rgba(237, 233, 254, 0.8);
 }
 
 :deep(.quota-label.is-5h) {

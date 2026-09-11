@@ -12,6 +12,7 @@ interface GroupInfo {
   name: string
   description: string | null
   rateMultiplier: number
+  allowedModels: string[] | null
   accountCount: number
   createdAt: number
 }
@@ -43,11 +44,13 @@ const providerLabel: Record<string, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
+  antigravity: 'Antigravity（反重力）',
   deepseek: 'DeepSeek',
   xiaomi: 'Xiaomi MiMo',
   zhipu: 'Zhipu GLM',
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
+  minimax: 'MiniMax',
   sub2api: 'Sub2API',
 }
 
@@ -55,11 +58,13 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   claude: 'info',
   openai: 'success',
   gemini: 'warning',
+  antigravity: 'info',
   deepseek: 'error',
   xiaomi: 'warning',
   zhipu: 'info',
   qwen: 'info',
   kimi: 'default',
+  minimax: 'error',
   sub2api: 'success',
 }
 
@@ -99,17 +104,17 @@ async function load() {
 const showForm = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
-const form = ref<{ name: string; description: string; rateMultiplier: number | null }>({
+const form = ref<{ name: string; description: string; rateMultiplier: number | null; modelRestriction: boolean; allowedModelsText: string }>({
   name: '',
   description: '',
-  rateMultiplier: 1,
+  rateMultiplier: 1, modelRestriction: false, allowedModelsText: '',
 })
 
 const formTitle = computed(() => (editingId.value ? '编辑分组' : '新建分组'))
 
 function openCreate() {
   editingId.value = null
-  form.value = { name: '', description: '', rateMultiplier: 1 }
+  form.value = { name: '', description: '', rateMultiplier: 1, modelRestriction: false, allowedModelsText: '' }
   showForm.value = true
 }
 
@@ -119,6 +124,8 @@ function openEdit(group: GroupInfo) {
     name: group.name,
     description: group.description ?? '',
     rateMultiplier: group.rateMultiplier,
+    modelRestriction: group.allowedModels != null,
+    allowedModelsText: (group.allowedModels ?? []).join('\n'),
   }
   showForm.value = true
 }
@@ -133,6 +140,12 @@ async function submitForm() {
     message.warning('请填写有效倍率')
     return
   }
+  const allowedModels = form.value.modelRestriction
+    ? [...new Set(form.value.allowedModelsText.split(/[\n,，]/).map(x => x.trim()).filter(Boolean))] : null
+  if (allowedModels && !allowedModels.length) {
+    message.warning('启用模型限制后，至少填写一个允许的模型')
+    return
+  }
   saving.value = true
   try {
     if (editingId.value) {
@@ -140,6 +153,7 @@ async function submitForm() {
         name: form.value.name.trim(),
         description: form.value.description.trim() || null,
         rateMultiplier: multiplier,
+        allowedModels,
       })
       message.success('分组已更新')
     } else {
@@ -147,6 +161,7 @@ async function submitForm() {
         name: form.value.name.trim(),
         description: form.value.description.trim() || undefined,
         rateMultiplier: multiplier,
+        allowedModels,
       })
       message.success('分组已创建')
     }
@@ -395,6 +410,12 @@ onMounted(() => {
             :autosize="{ minRows: 2, maxRows: 4 }"
             placeholder="用于备注分组用途"
           />
+        </UiFormItem>
+        <UiFormItem label="限制可调用模型" hint="同时限制模型列表和实际请求。按客户端填写的模型名匹配，支持 * 通配符。">
+          <UiSwitch v-model:value="form.modelRestriction" />
+        </UiFormItem>
+        <UiFormItem v-if="form.modelRestriction" label="允许的模型" hint="每行一个或用逗号分隔；模型映射的来源名称也须在此允许。">
+          <UiInput v-model:value="form.allowedModelsText" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="MiniMax-*&#10;claude-sonnet-*" />
         </UiFormItem>
         <UiFormItem label="计费倍率（1 = 原价，<1 折扣，>1 溢价）">
           <UiInputNumber

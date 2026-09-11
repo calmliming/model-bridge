@@ -7,12 +7,14 @@ export interface CreateGroupInput {
   name: string
   description?: string | null
   rateMultiplier?: number
+  allowedModels?: string[] | null
 }
 
 export interface UpdateGroupPatch {
   name?: string
   description?: string | null
   rateMultiplier?: number
+  allowedModels?: string[] | null
 }
 
 /** Clamps a billing multiplier to a sane range. Allows discounts (<1). */
@@ -28,6 +30,7 @@ export async function createGroup(input: CreateGroupInput): Promise<{ id: string
     id,
     name: input.name,
     description: input.description ?? null,
+    allowedModels: input.allowedModels ?? null,
     rateMultiplier: normalizeMultiplier(input.rateMultiplier),
   })
   return { id }
@@ -40,6 +43,7 @@ export async function listGroups() {
       id: accountGroups.id,
       name: accountGroups.name,
       description: accountGroups.description,
+      allowedModels: accountGroups.allowedModels,
       rateMultiplier: accountGroups.rateMultiplier,
       createdAt: accountGroups.createdAt,
       accountCount: count(accountGroupMembers.accountId),
@@ -65,6 +69,7 @@ export async function updateGroup(id: string, patch: UpdateGroupPatch): Promise<
   const set: Record<string, unknown> = {}
   if (patch.name !== undefined) set.name = patch.name
   if (patch.description !== undefined) set.description = patch.description
+  if (patch.allowedModels !== undefined) set.allowedModels = patch.allowedModels
   if (patch.rateMultiplier !== undefined) set.rateMultiplier = normalizeMultiplier(patch.rateMultiplier)
   if (Object.keys(set).length === 0) return
   await db.update(accountGroups).set(set).where(eq(accountGroups.id, id))
@@ -161,4 +166,3 @@ export async function setMemberWeight(
     .set({ weight: normalized })
     .where(and(eq(accountGroupMembers.groupId, groupId), eq(accountGroupMembers.accountId, accountId)))
 }
-

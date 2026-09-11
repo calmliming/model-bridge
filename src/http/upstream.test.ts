@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchWithConnectTimeout } from './upstream'
+import { cancelUpstreamResponse, withUpstreamSignal } from './cancellation'
 
 const originalHostAllowlist = process.env.UPSTREAM_HOST_ALLOWLIST
 
@@ -15,6 +16,44 @@ afterEach(() => {
 })
 
 describe('fetchWithConnectTimeout', () => {
+  it('preserves caller and request abort signals after headers arrive', async () => {
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit) => {
+      signal = init.signal as AbortSignal
+      return new Response('ok')
+    }))
+    const client = new AbortController()
+    const caller = new AbortController()
+    await withUpstreamSignal(client.signal, () => fetchWithConnectTimeout('https://upstream.example', { signal: caller.signal }))
+    client.abort()
+    expect(signal.aborted).toBe(true)
+    await fetchWithConnectTimeout('https://upstream.example', { signal: caller.signal })
+    expect(signal.aborted).toBe(false)
+    caller.abort()
+    expect(signal.aborted).toBe(true)
+  })
+
+  it('does not send an already canceled request', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    await expect(fetchWithConnectTimeout('https://upstream.example', { signal: AbortSignal.abort() })).rejects.toThrow()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('aborts transport before canceling an unread cloned response', async () => {
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn(async (_input: string, init: RequestInit) => {
+      signal = init.signal as AbortSignal
+      return new Response(new ReadableStream({ start(controller) {
+        signal.addEventListener('abort', () => controller.error(new Error('aborted')), { once: true })
+      } }))
+    }))
+    const response = await fetchWithConnectTimeout('https://upstream.example')
+    const clone = response.clone()
+    await cancelUpstreamResponse(response)
+    expect(signal.aborted).toBe(true)
+    await expect(clone.text()).rejects.toThrow('aborted')
+  })
   it('passes an abort signal and clears the deadline after headers arrive', async () => {
     vi.useFakeTimers()
     let signal: AbortSignal | undefined

@@ -325,6 +325,13 @@ export function computeSessionInfo(
   // Grok side calls may carry the stable parent session in metadata.user_id
   // while assigning a fresh X-Grok-Conv-Id to each call. Metadata must win over
   // that transient header, and it is safe to strip before the upstream request.
+  if (provider === 'antigravity') {
+    const explicitSession = bodyMetadataSessionKey(body) ?? (typeof body.sessionId === 'string' ? body.sessionId.trim() : '')
+    if (explicitSession) {
+      const key = `${provider}:${apiKeyId}:m:${explicitSession}`
+      return { key, source: 'metadata', hash: hashSessionKey(key) }
+    }
+  }
   if (provider === 'grok') {
     const metadataSession = bodyMetadataSessionKey(body)
     if (metadataSession) {

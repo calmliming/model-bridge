@@ -123,6 +123,7 @@ export async function findApiKeyBySecret(secret: string) {
       userConcurrencyLimit: users.concurrencyLimit,
       userEmail: users.email,
       groupMultiplier: accountGroups.rateMultiplier,
+      groupAllowedModels: accountGroups.allowedModels,
     })
     .from(apiKeys)
     .leftJoin(users, eq(apiKeys.userId, users.id))

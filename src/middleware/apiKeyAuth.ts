@@ -14,6 +14,7 @@ export interface AuthedApiKey {
   modelMappings: Record<string, string> | null
   accountGroupId: string | null
   groupMultiplier: number
+  groupAllowedModels?: string[] | null
   rateLimit: number | null
   concurrencyLimit: number | null
   /** Max simultaneous in-flight requests across ALL of this user's keys; null = unlimited. */
@@ -124,6 +125,7 @@ export async function requireApiKey(
     modelMappings: record.modelMappings ?? null,
     accountGroupId: record.accountGroupId ?? null,
     groupMultiplier: record.groupMultiplier ?? 1,
+    groupAllowedModels: record.groupAllowedModels ?? null,
     rateLimit: record.rateLimit ?? null,
     concurrencyLimit: record.concurrencyLimit ?? null,
     userConcurrencyLimit: record.userConcurrencyLimit ?? null,

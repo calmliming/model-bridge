@@ -123,6 +123,15 @@ const schema = z.object({
   ),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
+  ANTIGRAVITY_OAUTH_CLIENT_ID: z.preprocess(blankToUndefined, z.string().default('1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com')),
+  ANTIGRAVITY_OAUTH_CLIENT_SECRET: z.preprocess(blankToUndefined, z.string().optional()),
+  ANTIGRAVITY_USER_AGENT_VERSION: z.preprocess(blankToUndefined, z.string().regex(/^\d+\.\d+\.\d+$/).default('2.12.2')),
+  ANTIGRAVITY_API_HOST: z.preprocess(blankToUndefined, z.enum(['cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com']).default('daily-cloudcode-pa.googleapis.com')),
+  ANTIGRAVITY_PROXY_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => {
+    const url = new URL(value)
+    return ['http:', 'https:', 'socks5:'].includes(url.protocol)
+      && (!url.pathname || url.pathname === '/') && !url.search && !url.hash
+  }, 'must be an HTTP(S) or SOCKS5 proxy URL without a path/query/fragment').optional()),
   // Payment providers
   ALIPAY_ENV: z.enum(['production', 'sandbox']).default('production'),
   ALIPAY_APP_ID: z.string().optional(),

@@ -3,8 +3,8 @@ import { db } from '../db/index'
 import { accounts } from '../db/schema'
 import { getRedis } from '../store/redis'
 import { getQuotaAutopausePercent } from '../db/settings'
-import { accountQuotaFromMetadata, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
-import { penalizeAccount } from '../accounts/scheduler'
+import { accountQuotaFromMetadata, quotaPauseUntil, quotaWindowPauseUntil, resolveAutopausePercent } from '../accounts/quota'
+import { penalizeAccount, penalizeAccountModel, modelCooldownUntil } from '../accounts/scheduler'
 
 const CHECK_INTERVAL_MS = 60_000
 // 多实例部署时用 Redis 锁，保证每个周期只有一个节点执行扫描。
@@ -50,6 +50,13 @@ async function sweepQuotaAutopause(now = Date.now()): Promise<void> {
     const quota = accountQuotaFromMetadata(account.metadata)
     if (!quota) continue
     const threshold = resolveAutopausePercent(account.metadata, globalPercent)
+    for (const window of quota.windows) {
+      if (window.key !== 'model' || !window.model) continue
+      const until = quotaWindowPauseUntil(window, threshold, now)
+      if (until && (modelCooldownUntil(account.metadata, window.model) ?? 0) < until) {
+        await penalizeAccountModel(account.id, window.model, 'rate_limited', until)
+      }
+    }
     const pauseUntil = quotaPauseUntil(quota, threshold, now)
     if (!pauseUntil) continue
     // 已经因相同（或更晚）的窗口重置而停调，无需每周期重复写库。
