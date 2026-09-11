@@ -644,3 +644,49 @@ describe('native Antigravity relay', () => {
     } finally { await app.close() }
   })
 })
+
+describe('stream first-frame latency', () => {
+  /** Same wiring as withRelay, but hands the unread streamed Response to the test. */
+  async function withStreamingRelay(
+    run: (open: (payload: Record<string, unknown>, url?: string) => Promise<Response>) => Promise<void>,
+  ): Promise<void> {
+    const app = Fastify()
+    registerRelayRoutes(app)
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    try {
+      await run(async (payload, url = '/v1/messages') => fetch(`${origin}${url}`, {
+        method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
+        body: JSON.stringify(payload), signal: AbortSignal.timeout(5_000),
+      }))
+    } finally {
+      await app.close()
+      await waitForPendingUsage()
+    }
+  }
+
+  // Claude Code only resets its live tokens/s counter when `message_start`
+  // reaches it, so anything the gateway awaits between the upstream's first
+  // frame and its own first downstream write keeps the previous turn's rate
+  // frozen on screen for exactly that long. Bookkeeping writes steer future
+  // routing only — they must never sit on that path.
+  it('forwards the first frame before the account bookkeeping write settles', () => withStreamingRelay(async (open) => {
+    mocks.fetch.mockImplementation(async () => claudeResponse())
+    let releaseBookkeeping!: () => void
+    const blocked = new Promise<void>((resolve) => { releaseBookkeeping = resolve })
+    let bookkeepingSettled = false
+    mocks.markAccountUsed.mockImplementation(async () => {
+      await blocked
+      bookkeepingSettled = true
+    })
+
+    const response = await open({ model: 'claude-sonnet-5', messages: [], stream: true })
+    expect(response.status).toBe(200)
+
+    const first = await response.body!.getReader().read()
+    expect(new TextDecoder().decode(first.value)).toContain('message_start')
+    expect(bookkeepingSettled).toBe(false)
+
+    releaseBookkeeping()
+    await vi.waitFor(() => expect(mocks.markAccountUsed).toHaveBeenCalledWith('account-1'))
+  }))
+})

@@ -2003,6 +2003,26 @@ async function runRelayLoop(
     }
     tried.push(account.id)
 
+    // Bookkeeping writes that only steer FUTURE routing (quota snapshot, LRU
+    // timestamp, sticky-session binding). None of them affect this response,
+    // but awaiting them in-line puts a Postgres/Redis round trip between
+    // "upstream's first SSE frame is readable" and "the gateway writes its
+    // first byte downstream". Claude Code resets its tokens/s counter only
+    // when `message_start` arrives, so every millisecond spent here is a
+    // millisecond the previous turn's rate stays frozen on screen. Issue them
+    // concurrently instead and reap them in this attempt's finally, which
+    // runs after the stream is done (success) or right away (retry).
+    const deferredBookkeeping: Promise<unknown>[] = []
+    const defer = (task: Promise<unknown>): void => {
+      deferredBookkeeping.push(
+        task.catch((err: unknown) => {
+          request.log.warn(
+            `bookkeeping write failed for ${account.id}: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }),
+      )
+    }
+
     try {
       let token: string
       try {
@@ -2105,7 +2125,7 @@ async function runRelayLoop(
       }
 
       const quota = extractAccountQuota(provider.id, upstream.headers)
-      if (quota) await updateAccountQuota(account.id, quota)
+      if (quota) defer(updateAccountQuota(account.id, quota))
 
       const failure = provider.classifyUpstreamFailure
         ? await provider.classifyUpstreamFailure(upstream, parsed.model)
@@ -2172,18 +2192,20 @@ async function runRelayLoop(
         // Auto-pause: shift traffic off an account whose 5h/7d usage has reached
         // the configured threshold, until the breaching window resets. Only costs
         // a settings lookup when the upstream actually reported a quota snapshot.
-        let quotaCooldown: number | null = null
-        if (quota) {
-          const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
-          quotaCooldown = quotaPauseUntil(quota, threshold)
-        }
-        if (quotaCooldown) {
-          await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
-        } else {
+        defer((async () => {
+          let quotaCooldown: number | null = null
+          if (quota) {
+            const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+            quotaCooldown = quotaPauseUntil(quota, threshold)
+          }
+          if (quotaCooldown) {
+            await penalizeAccount(account.id, 'rate_limited', quotaCooldown)
+            return
+          }
           await markAccountUsed(account.id)
           // Pin this conversation to the account so its prompt cache stays warm.
           if (sessionKey && !stickyCapacitySpillover) await bindStickyAccount(sessionKey, account.id)
-        }
+        })())
       }
 
 
@@ -2209,6 +2231,11 @@ async function runRelayLoop(
       }
       return
     } finally {
+      // Reaped here rather than left floating: a rejected bookkeeping write must
+      // not surface as an unhandled rejection, and the request must not outlive
+      // its own writes. On the success path the stream has already finished, so
+      // this await costs nothing.
+      if (deferredBookkeeping.length) await Promise.all(deferredBookkeeping)
       if (accountLimit != null) await releaseSlot(accountSlotKey)
     }
   }
