@@ -20,7 +20,12 @@ import {
   type AccountQuotaSnapshot,
 } from './quota'
 import { getQuotaAutopausePercent } from '../db/settings'
-import { markAccountUsed, penalizeAccount, penalizeAccountModel } from './scheduler'
+import {
+  clearAccountCooldown,
+  markAccountUsed,
+  penalizeAccount,
+  penalizeAccountModel,
+} from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
 import {
@@ -367,15 +372,25 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
     if (until) await penalizeAccountModel(account.id, window.model, 'rate_limited', until)
   }
   const cooldownUntil = quotaPauseUntil(result.quota, threshold)
+  let message = result.message
   if (cooldownUntil) {
     await penalizeAccount(account.id, 'rate_limited', cooldownUntil)
   } else {
+    // A manual test that succeeds is an operator vouching for the account, so
+    // clear any leftover rate_limited / error cooldown. markAccountUsed alone
+    // deliberately keeps an unexpired cooldown (a late success must not erase a
+    // concurrent penalty) — correct for relay traffic, but it made the admin
+    // "test" button look like a no-op on a cooling account. The probe itself is
+    // the proof: an upstream still rate-limiting us fails the probe instead.
+    const wasCooling = account.status === 'rate_limited' || account.status === 'error'
+    await clearAccountCooldown(account.id)
     await markAccountUsed(account.id)
+    if (wasCooling) message += '（已解除限流冷却，账号恢复调度）'
   }
   return {
     success: true,
     provider: account.provider,
-    message: result.message,
+    message,
     latencyMs,
     checkedAt: Date.now(),
   }
@@ -397,6 +412,9 @@ export async function refreshAccountQuota(id: string): Promise<AccountTestResult
     const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
     const until = quotaPauseUntil(quota, threshold)
     if (until) await penalizeAccount(id, 'rate_limited', until)
+    // Same rule as the connectivity test: a fresh quota read that shows room
+    // left releases a stale cooldown instead of leaving the account parked.
+    else await clearAccountCooldown(id)
     return { success: true, provider: 'minimax', message: 'MiniMax 套餐额度已更新',
       latencyMs: Date.now() - startedAt, checkedAt: Date.now() }
   }
