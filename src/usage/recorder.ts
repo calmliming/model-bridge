@@ -86,10 +86,10 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
            image_input_tokens, image_output_tokens, image_count, image_size, image_model,
            cost, base_cost, bill_to, status, error_code, error_message, upstream_status,
            attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms, upstream_request_id,
-           service_tier, reasoning_effort, billing_price)
+           service_tier, reasoning_effort, billing_price, image_cache_read_tokens)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-               $27, $28, $29, $30, $31, $32, $33, $34, $35)`,
+               $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)`,
       [
         id,
         record.apiKeyId,
@@ -126,6 +126,7 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         usage.serviceTier?.slice(0, 100) || null,
         usage.reasoningEffort?.slice(0, 100) || null,
         JSON.stringify({ price, imagePrice }),
+        record.usage.imageCacheReadTokens ?? 0,
       ],
     )
     if (record.apiKeyId && cost > 0) {

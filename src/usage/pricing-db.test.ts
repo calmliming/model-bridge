@@ -24,6 +24,11 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('scheduled database price overrides', () => {
+  it('keeps Image 2.5 pricing independent from old broad image rows', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ ...priceRow('gpt-image-2', 1, 2, 0.1, 'openai'), image_input_price: 1, image_output_price: 2 }] })
+    await loadPricing()
+    expect(resolvePrice('openai', 'gpt-image-2.5-flare')).toMatchObject({ input: 5, imageInput: 8, imageCacheRead: 2, imageOutput: 30 })
+  })
   it('updates seeded Flash and Pro prices without freezing new Flash at its seed rate', async () => {
     mocks.query.mockResolvedValue({ rows: [
       priceRow('deepseek-flash', 0.15, 0.6, 0.003),

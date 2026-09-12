@@ -1,6 +1,7 @@
 import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
+import { IMAGE_25_MODELS, isImage25Model } from '../providers/openai/imageModels'
 
 /** USD price per 1M tokens, by model tier. */
 export interface TierPrice {
@@ -12,6 +13,8 @@ export interface TierPrice {
   imageInput?: number
   /** USD per 1M image-output tokens. */
   imageOutput?: number
+  /** USD per 1M cached image-input tokens. */
+  imageCacheRead?: number
 }
 
 // Fixed CNY→USD conversion for providers that only publish CNY list prices.
@@ -101,6 +104,9 @@ const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.12
 const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
 // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
 const OPENAI_ASTRA: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
+// Official Image 2.5 model cards, checked 2026-09-13. Keep independent of Image 2.
+const OPENAI_IMAGE_25: TierPrice = { input: 5, output: 0, cacheWrite: 0, cacheRead: 1.25,
+  imageInput: 8, imageCacheRead: 2, imageOutput: 30 }
 const OPENAI_IMAGE_2: TierPrice = {
   input: 5,
   output: 10,
@@ -137,6 +143,7 @@ const OPENAI_IMAGE_MINI: TierPrice = {
 function openaiPrice(model: string): TierPrice {
   if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
   const m = model.toLowerCase()
+  if (isImage25Model(m)) return OPENAI_IMAGE_25
   if (m.startsWith('gpt-image-2')) return OPENAI_IMAGE_2
   if (m.startsWith('gpt-image-1.5')) return OPENAI_IMAGE_15
   if (m.startsWith('gpt-image-1-mini')) return OPENAI_IMAGE_MINI
@@ -450,6 +457,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
   { provider: 'openai', model: 'gpt-image-2', price: OPENAI_IMAGE_2 },
+  ...IMAGE_25_MODELS.map(model => ({ provider: 'openai', model, price: OPENAI_IMAGE_25 })),
   { provider: 'openai', model: 'gpt-image-1.5', price: OPENAI_IMAGE_15 },
   { provider: 'openai', model: 'gpt-image-1', price: OPENAI_IMAGE_1 },
   { provider: 'openai', model: 'gpt-image-1-mini', price: OPENAI_IMAGE_MINI },
@@ -702,9 +710,10 @@ export async function loadPricing(): Promise<void> {
     cache_read_price: number
     image_input_price: number
     image_output_price: number
+    image_cache_read_price: number | null
   }>(
     `SELECT provider, model, input_price, output_price, cache_write_price, cache_read_price,
-            image_input_price, image_output_price
+            image_input_price, image_output_price, image_cache_read_price
        FROM model_pricing`,
   )
   priceCache.clear()
@@ -716,6 +725,7 @@ export async function loadPricing(): Promise<void> {
       cacheRead: Number(row.cache_read_price),
       imageInput: Number(row.image_input_price),
       imageOutput: Number(row.image_output_price),
+      imageCacheRead: row.image_cache_read_price == null ? (isImage25Model(row.model) ? OPENAI_IMAGE_25.imageCacheRead : undefined) : Number(row.image_cache_read_price),
     })
   }
   loaded = true
@@ -735,8 +745,8 @@ export async function initPricing(): Promise<void> {
     await pool.query(
       `INSERT INTO model_pricing
          (id, provider, model, input_price, output_price, cache_write_price, cache_read_price,
-          image_input_price, image_output_price)
-       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+          image_input_price, image_output_price, image_cache_read_price)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
        WHERE NOT EXISTS (SELECT 1 FROM model_pricing WHERE provider = $2 AND model = $3)`,
       [
         `${row.provider}-${row.model}`,
@@ -748,6 +758,7 @@ export async function initPricing(): Promise<void> {
         row.price.cacheRead,
         row.price.imageInput ?? 0,
         row.price.imageOutput ?? 0,
+        row.price.imageCacheRead ?? null,
       ],
     )
   }
@@ -811,7 +822,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // short-circuited here.
   const normalizedModel = model.toLowerCase()
   if (
-    (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel)) &&
+    (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) || isImage25Model(normalizedModel)) &&
     (provider === 'openai' || provider === 'sub2api')
   ) {
     return builtinPrice(provider, model, atMs)
@@ -851,7 +862,7 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const longContext = override?.longContext !== undefined ? override.longContext
     : astra ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
     : minimaxM3 ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 } : null
-  const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0)
+  const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0) + (usage.imageCacheReadTokens ?? 0)
   const long = longContext && totalInput > longContext.threshold ? longContext : null
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
@@ -878,6 +889,7 @@ export function estimateCost(provider: string, model: string, usage: UsageData, 
       usage.cacheCreateTokens * p.cacheWrite +
       usage.cacheReadTokens * p.cacheRead +
       (usage.imageInputTokens ?? 0) * (imagePrice?.imageInput ?? 0) +
+      (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +
       (usage.imageOutputTokens ?? 0) * (imagePrice?.imageOutput ?? 0)) /
     1_000_000
   return Math.round(cost * 1e6) / 1e6

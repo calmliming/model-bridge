@@ -57,6 +57,7 @@ export interface UserUsageLog {
   cacheCreateTokens: number
   cacheReadTokens: number
   imageInputTokens: number
+  imageCacheReadTokens: number
   imageOutputTokens: number
   imageCount: number
   imageSize: string | null
@@ -128,6 +129,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     cacheCreateTokens: Number(row.cache_create_tokens),
     cacheReadTokens: Number(row.cache_read_tokens),
     imageInputTokens: Number(row.image_input_tokens ?? 0),
+    imageCacheReadTokens: Number(row.image_cache_read_tokens ?? 0),
     imageOutputTokens: Number(row.image_output_tokens ?? 0),
     imageCount: Number(row.image_count ?? 0),
     imageSize: (row.image_size as string | null) ?? null,
@@ -432,6 +434,7 @@ export async function listUserUsage(
               l.upstream_status, l.attempt_count, l.upstream_model, l.model_mismatch, l.latency_ms,
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
+              l.image_cache_read_tokens,
               l.image_count, l.image_size, l.image_model, l.cost, l.request_input,
               k.name AS api_key_name
        FROM usage_logs l
@@ -471,7 +474,7 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
   const since30d = now - 30 * USAGE_MS_PER_DAY
   const tokenSum =
     `input_tokens + output_tokens + cache_create_tokens + cache_read_tokens +
-     image_input_tokens + image_output_tokens`
+     image_input_tokens + image_output_tokens + image_cache_read_tokens`
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS requests24h,

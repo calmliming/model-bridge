@@ -73,6 +73,7 @@ function claudeResponse(): Response {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  mocks.fetch.mockReset()
   await resetLimits()
   mocks.balance = 1_000
   mocks.quota = 0
@@ -242,6 +243,63 @@ describe('Claude Chat Completions response format', () => {
 })
 
 describe('upstream request compatibility', () => {
+  it.each([false, true])('routes Image 2.5 directly and records cache/image buckets for stream=%s', stream => withRelay(async request => {
+    const model = 'gpt-image-2.5-sunburst'
+    const usage = { input_tokens: 1000, output_tokens: 500, input_tokens_details: { image_tokens: 600, cached_tokens: 300, cached_tokens_details: { image_tokens: 200, text_tokens: 100 } } }
+    mocks.accounts[0]!.metadata = { openai: { chatgptAccountId: 'account-image' } }
+    mocks.fetch.mockResolvedValueOnce(stream ? sse([{ type: 'image_generation.partial_image', b64_json: 'AAAA', partial_image_index: 0 },
+      { type: 'image_generation.completed', b64_json: 'BBBB', usage }]) : new Response(JSON.stringify({ created: 1, data: [{ b64_json: 'BBBB' }], usage }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model, prompt: 'Draw a tree', stream, quality: 'max', background: 'transparent', output_format: 'png' }, '/v1/images/generations')
+    expect(response.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://chatgpt.com/backend-api/codex/images/generations')
+    const sent = JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)
+    expect(sent).toMatchObject({ model, prompt: 'Draw a tree', quality: 'max', background: 'transparent' })
+    expect(sent).not.toHaveProperty('tools')
+    expect(response.body).toContain('BBBB')
+    if (stream) expect(response.body).toContain('image_generation.completed')
+    const log = mocks.logs[0]!
+    expect(log.slice(9, 17)).toEqual([300, 0, 0, 0, 100, 400, 500, 1])
+    expect(log[35]).toBe(200)
+    expect(log[22]).toBe('success')
+    expect(mocks.logs).toHaveLength(1)
+  }))
+
+  it('keeps native editing, alias mapping, and group admission consistent', () => withRelay(async request => {
+    mocks.balance = 100_000
+    mocks.key.modelMappings = { 'image-public': 'gpt-image-2.5-flare' }
+    mocks.key.groupAllowedModels = ['image-public']
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ b64_json: 'AAAA' }] }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model: 'image-public', prompt: 'Edit', images: [{ image_url: 'data:image/png;base64,AAAA' }], quality: 'xhigh' }, '/v1/images/edits')
+    expect(response.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://chatgpt.com/backend-api/codex/images/edits')
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model: 'gpt-image-2.5-flare', images: [{ image_url: 'data:image/png;base64,AAAA' }] })
+    expect((await request({ model: 'gpt-image-2.5-flare', prompt: 'Blocked' }, '/v1/images/generations')).status).toBe(404)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  }))
+
+  it('retries an empty native result but does not replay billed failures', () => withRelay(async request => {
+    mocks.balance = 100_000
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null })
+    mocks.fetch.mockResolvedValueOnce(new Response('{"data":[]}', { headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('{"data":[{"b64_json":"AAAA"}]}', { headers: { 'content-type': 'application/json' } }))
+    expect((await request({ model: 'gpt-image-2.5-flare', prompt: 'Draw' }, '/v1/images/generations')).status).toBe(200)
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    mocks.fetch.mockClear()
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'Stopped' }, usage: { input_tokens: 10, output_tokens: 20 } }), { status: 429, headers: { 'content-type': 'application/json' } }))
+    expect((await request({ model: 'gpt-image-2.5-flare', prompt: 'Draw' }, '/v1/images/generations')).status).toBe(429)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.logs.at(-1)?.[15]).toBe(20)
+  }))
+
+  it('reports a native stream without a final image as failure and retains usage', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'image_generation.partial_image', b64_json: 'AAAA', usage: { input_tokens: 10, output_tokens: 20 } }]))
+    const response = await request({ model: 'gpt-image-2.5-flare', prompt: 'Draw', stream: true }, '/v1/images/generations')
+    expect(response.body).toContain('image_generation_no_output')
+    expect(mocks.logs[0]?.[22]).toBe('error')
+    expect(mocks.logs[0]?.[15]).toBe(20)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  }))
+
   it('serves dynamic model details using the same key/group filters as the model list', async () => {
     mocks.key.allowedProviders = ['openai']
     mocks.key.accountGroupId = 'group-a'

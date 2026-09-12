@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { parseOpenAIUsagePayload } from './usage'
 import { relayOpenaiImageResponses } from './relay'
 import { emptyUsage, type UsageData } from '../types'
+import { isImage25Model } from './imageModels'
+import { relayNativeImages } from './directImages'
 
 export type OpenAIImagesEndpoint = 'generations' | 'edits'
 
@@ -212,8 +214,8 @@ export function parseOpenAIImagesRequest(
   if (!source) throw new Error('request body must be a JSON object or multipart form')
 
   const model = stringField(source.model) || DEFAULT_IMAGE_MODEL
-  const prompt = stringField(source.prompt)
-  if (!prompt) throw new Error('prompt is required')
+  const prompt = typeof source.prompt === 'string' ? source.prompt : ''
+  if (!prompt.trim()) throw new Error('prompt is required')
   if (!options.deferModelValidation) validateOpenAIImageModel(model)
 
   const n = optionalInteger(source.n, 'n', 1, 10) ?? 1
@@ -226,6 +228,8 @@ export function parseOpenAIImagesRequest(
   if (!options.deferModelValidation) validateOpenAIImagesRequestModel(source, model)
 
   const images = collectImageReferences(source.images ?? source.image)
+  const rawImages = source.images ?? source.image
+  if (rawImages != null && (Array.isArray(rawImages) ? rawImages.length : 1) !== images.length) throw new Error('invalid image reference')
   if (endpoint === 'edits' && images.length === 0) throw new Error('image input is required')
 
   const normalized: OpenAIImagesRequestBody = {
@@ -239,6 +243,7 @@ export function parseOpenAIImagesRequest(
     __image_endpoint: endpoint,
   }
   const mask = imageReference(source.mask)
+  if (source.mask != null && !mask) throw new Error('invalid mask reference')
   if (mask?.file_id) throw new Error('mask.file_id is not supported; use mask.image_url instead')
   if (mask) normalized.mask = mask
   for (const numericField of ['output_compression', 'partial_images'] as const) {
@@ -254,6 +259,20 @@ export function validateOpenAIImagesRequestModel(
   model: string,
 ): void {
   validateOpenAIImageModel(model)
+  if (model.toLowerCase().startsWith('gpt-image-2.5')) {
+    if (!isImage25Model(model)) throw new Error('unsupported Image 2.5 model; use Flare or Sunburst')
+    if (body.size != null && typeof body.size !== 'string') throw new Error('size must be a string')
+    validateGptImage2Size(stringField(body.size))
+    for (const [field, allowed] of Object.entries({
+      quality: ['low', 'medium', 'high', 'xhigh', 'max', 'auto'],
+      background: ['transparent', 'opaque', 'auto'], output_format: ['png', 'jpeg', 'webp'],
+    })) {
+      if (body[field] != null && !allowed.includes(stringField(body[field]))) throw new Error(`invalid Image 2.5 ${field}`)
+    }
+    if (body.background === 'transparent' && body.output_format === 'jpeg') throw new Error('transparent backgrounds require png or webp')
+    if (collectImageReferences(body.images ?? body.image).some(image => image.file_id)) throw new Error('native images require image_url instead of file_id')
+    return
+  }
   if (!model.toLowerCase().startsWith('gpt-image-2')) return
   validateGptImage2Size(stringField(body.size))
   if (stringField(body.background) === 'transparent') {
@@ -306,7 +325,9 @@ export function buildOpenAIImagesResponsesRequest(body: OpenAIImagesRequestBody)
 export function relayOpenaiImages(
   accessToken: string,
   body: Record<string, unknown>,
+  accountId?: string,
 ): Promise<Response> {
+  if (isImage25Model(String(body.model))) return relayNativeImages(accessToken, body as OpenAIImagesRequestBody, accountId)
   return relayOpenaiImageResponses(
     accessToken,
     buildOpenAIImagesResponsesRequest(body as OpenAIImagesRequestBody),

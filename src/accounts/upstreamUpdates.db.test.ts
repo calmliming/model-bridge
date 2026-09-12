@@ -31,6 +31,10 @@ import { cachedAntigravityModels } from './antigravityModels'
 import { setAccountGroups } from './groups'
 import { cachedAccountCatalogs, catalogSourceKey } from './modelCatalog'
 import { channelHealth, DEFAULT_HEALTH_SETTINGS, saveHealthSettings } from '../usage/channelHealth'
+import { initPricing, reloadPricing, resolvePrice } from '../usage/pricing'
+import { parseNativeImageUsage } from '../providers/openai/directImages'
+import { recordUsage } from '../usage/recorder'
+import { dashboardRecentLogs } from '../usage/stats'
 
 describe.runIf(database)('upstream update database regressions', () => {
   beforeAll(async () => {
@@ -160,5 +164,30 @@ describe.runIf(database)('upstream update database regressions', () => {
     expect((await channelHealth({ hours: 24, groupBy: 'account', groupId: first.id, provider: 'openai' }, now)).rows).toEqual([])
     await saveHealthSettings({ ...DEFAULT_HEALTH_SETTINGS, errorRatePercent: 20 })
     expect((await channelHealth({ hours: 24, groupBy: 'account', groupId: first.id }, now)).alerts).toEqual([])
+  })
+
+  it('replays Image 2.5 migration and persists distinct image cache costs in wallet and history', async () => {
+    const migration = await readFile(new URL('../db/migrations/0013_image25_native.sql', import.meta.url), 'utf8')
+    await pool.query(migration)
+    await pool.query(migration)
+    await initDb()
+    await initPricing()
+    const model = 'gpt-image-2.5-flare', userId = randomUUID()
+    await pool.query("INSERT INTO users (id, name, email, password_hash, balance_micros) VALUES ($1, 'Image QA', $2, 'unused', 1000000)", [userId, `${userId}@example.test`])
+    const key = await createApiKey({ name: 'image-cache-key', userId })
+    const usage = { ...parseNativeImageUsage({ input_tokens: 1000, output_tokens: 500, input_tokens_details: {
+      image_tokens: 600, cached_tokens: 300, cached_tokens_details: { image_tokens: 200, text_tokens: 100 },
+    } }), imageModel: model, imageCount: 1 }
+    expect(await recordUsage({ apiKeyId: key.id, userId, accountId: null, provider: 'openai', model, usage, status: 'success', latencyMs: 1000 })).toBe(true)
+    const row = (await pool.query('SELECT image_cache_read_tokens, cache_read_tokens, cost FROM usage_logs WHERE user_id = $1', [userId])).rows[0]
+    expect(row).toMatchObject({ image_cache_read_tokens: 200, cache_read_tokens: 100, cost: 0.020225 })
+    expect((await pool.query('SELECT balance_micros FROM users WHERE id = $1', [userId])).rows[0].balance_micros).toBe(979775)
+    await pool.query("UPDATE model_pricing SET image_cache_read_price = 99 WHERE provider = 'openai' AND model = $1", [model])
+    await reloadPricing()
+    expect(resolvePrice('openai', model)?.imageCacheRead).toBe(99)
+    await initPricing()
+    expect(resolvePrice('openai', model)?.imageCacheRead).toBe(99)
+    const logs = await dashboardRecentLogs(1, 10, { key: 'image-cache-key' })
+    expect(logs.logs[0]).toMatchObject({ imageCacheReadTokens: 200, imageCacheReadPrice: 2, imageCacheReadCost: 0.0004, cost: 0.020225 })
   })
 })

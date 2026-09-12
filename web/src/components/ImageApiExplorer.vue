@@ -18,7 +18,10 @@ const emit = defineEmits<{ (event: 'requestAuthorization'): void }>()
 const message = useMessage()
 
 const prompt = ref('')
-const model = ref('gpt-image-2')
+const model = ref(props.mode === 'edit' ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare')
+const quality = ref('auto')
+const background = ref('auto')
+const requestedOutputFormat = ref('png')
 const size = ref('1024x1024')
 const responseFormat = ref<'url' | 'b64_json'>('url')
 const imageFile = ref<File | null>(null)
@@ -84,6 +87,9 @@ const generatedCurl = computed(() => {
       `  -F "model=${model.value}" \\`,
       `  -F "prompt=${prompt.value || '把天空替换成极光'}" \\`,
       `  -F "size=${size.value}" \\`,
+      `  -F "quality=${quality.value}" \\`,
+      `  -F "background=${background.value}" \\`,
+      `  -F "output_format=${requestedOutputFormat.value}" \\`,
       `  -F "response_format=${responseFormat.value}" \\`,
       `  -F "image=@./${imageFile.value?.name || 'source.png'}"`,
     ].join('\n')
@@ -96,6 +102,7 @@ const generatedCurl = computed(() => {
       model: model.value,
       prompt: prompt.value || '一只坐在窗边的橘猫',
       size: size.value,
+      quality: quality.value, background: background.value, output_format: requestedOutputFormat.value,
       response_format: responseFormat.value,
     }, null, 2)}'`,
   ].join('\n')
@@ -160,6 +167,9 @@ async function runTest(): Promise<void> {
       form.append('model', model.value)
       form.append('prompt', prompt.value.trim())
       form.append('size', size.value)
+      form.append('quality', quality.value)
+      form.append('background', background.value)
+      form.append('output_format', requestedOutputFormat.value)
       form.append('response_format', responseFormat.value)
       form.append('image', imageFile.value!)
       body = form
@@ -169,6 +179,7 @@ async function runTest(): Promise<void> {
         model: model.value,
         prompt: prompt.value.trim(),
         size: size.value,
+        quality: quality.value, background: background.value, output_format: requestedOutputFormat.value,
         response_format: responseFormat.value,
       })
     }
@@ -312,7 +323,7 @@ onBeforeUnmount(() => {
         <div class="field-row">
           <label class="field-group">
             <span>模型</span>
-            <UiInput v-model:value="model" placeholder="gpt-image-2" />
+            <UiInput v-model:value="model" placeholder="gpt-image-2.5-flare" />
           </label>
           <label class="field-group">
             <span>尺寸</span>
@@ -328,6 +339,11 @@ onBeforeUnmount(() => {
           </label>
         </div>
 
+        <div class="field-row">
+          <label class="field-group"><span>品质</span><UiSelect v-model:value="quality" :options="['auto', 'low', 'medium', 'high', 'xhigh', 'max'].map(value => ({ label: value, value }))" /></label>
+          <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, { label: '透明（PNG/WebP）', value: 'transparent' }]" /></label>
+        </div>
+        <label class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="['png', 'webp', 'jpeg'].map(value => ({ label: value.toUpperCase(), value }))" /></label>
         <label class="field-group">
           <span>响应格式</span>
           <UiSelect

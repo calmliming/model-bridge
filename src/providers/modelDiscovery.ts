@@ -2,6 +2,7 @@ import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
+import { IMAGE_25_MODELS } from './openai/imageModels'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -45,7 +46,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
     'claude-haiku-4-5',
     'claude-fable-5',
   ],
-  openai: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2'],
+  openai: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2', ...IMAGE_25_MODELS],
   gemini: [
     'gemini-3.8-flash',
     'gemini-3.6-flash',

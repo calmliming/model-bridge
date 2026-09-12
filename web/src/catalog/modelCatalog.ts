@@ -26,6 +26,10 @@ export interface CategoryMeta {
 }
 
 export interface PlazaModel {
+  image?: boolean
+  imageInputPrice?: number
+  imageOutputPrice?: number
+  imageCacheReadPrice?: number
   /** Model id used when calling the relay (body.model). */
   id: string
   /** Human-friendly display name. */
@@ -51,6 +55,9 @@ export interface PlazaModel {
 }
 
 export interface ModelTokenPrice {
+  imageInputPrice?: number
+  imageOutputPrice?: number
+  imageCacheReadPrice?: number
   inputPrice: number
   outputPrice: number
   cacheReadPrice?: number
@@ -89,6 +96,9 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
       inputPrice: model.inputPrice,
       outputPrice: model.outputPrice,
       cacheReadPrice: model.cacheReadPrice,
+      imageInputPrice: model.imageInputPrice,
+      imageOutputPrice: model.imageOutputPrice,
+      imageCacheReadPrice: model.imageCacheReadPrice,
       period: null,
     }
   }
@@ -164,6 +174,7 @@ export const CATEGORIES: CategoryMeta[] = [
   { key: 'reasoning', label: '深度推理' },
   { key: 'code', label: '代码开发' },
   { key: 'multimodal', label: '多模态' },
+  { key: 'image', label: '图像生成' },
   { key: 'lightweight', label: '轻量高速' },
 ]
 
@@ -273,6 +284,14 @@ export const MODEL_CATALOG: PlazaModel[] = [
   },
 
   // --- OpenAI --------------------------------------------------------------
+  ...(['flare', 'sunburst'] as const).map(variant => ({
+    id: `gpt-image-2.5-${variant}`, name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'}`,
+    provider: 'openai' as const, image: true, categories: ['image', 'multimodal'],
+    tags: ['原生生图', '图片编辑', '透明背景'],
+    description: variant === 'flare' ? '适合快速日常生图；支持 xhigh、max 品质及自定义尺寸。' : '适合精细图片编辑；支持透明背景、xhigh 与 max 品质。',
+    context: '≤3840 px', inputPrice: 5, outputPrice: 0, cacheReadPrice: 1.25,
+    imageInputPrice: 8, imageCacheReadPrice: 2, imageOutputPrice: 30, badge: 'new' as const,
+  })),
   {
     id: 'gpt-6-astra',
     name: 'GPT-6 Astra',

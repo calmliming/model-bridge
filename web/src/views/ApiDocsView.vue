@@ -125,10 +125,11 @@ const filteredNavigationGroups = computed(() => {
 
 const generationParameters: ParameterRow[] = [
   { name: 'prompt', type: 'string', required: true, defaultValue: '—', description: '用于描述目标图片的提示词。' },
-  { name: 'model', type: 'string', required: false, defaultValue: 'gpt-image-2', description: '图片模型，名称必须以 gpt-image- 开头。' },
+  { name: 'model', type: 'string', required: false, defaultValue: 'gpt-image-2', description: '可选 gpt-image-2.5-flare、gpt-image-2.5-sunburst 及其 2026-09-08 快照；省略时仍使用旧版 Image 2。' },
   { name: 'n', type: 'integer', required: false, defaultValue: '1', description: '生成数量，范围为 1～10，最终受上游模型限制。' },
   { name: 'size', type: 'string', required: false, defaultValue: '模型默认', description: '图片尺寸，例如 1024x1024，或使用 auto。' },
-  { name: 'quality', type: 'string', required: false, defaultValue: '模型默认', description: '输出质量，例如 high；支持值由上游模型决定。' },
+  { name: 'quality', type: 'string', required: false, defaultValue: 'auto', description: 'Image 2.5 支持 low、medium、high、xhigh、max、auto。' },
+  { name: 'background', type: 'string', required: false, defaultValue: 'auto', description: 'Image 2.5 支持 auto、opaque、transparent；透明背景须使用 PNG/WebP。' },
   { name: 'output_format', type: 'string', required: false, defaultValue: '模型默认', description: '输出格式，例如 png、jpeg 或 webp。' },
   { name: 'response_format', type: 'string', required: false, defaultValue: 'b64_json', description: '可选 b64_json 或 url；url 返回可直接展示的 Data URL。' },
   { name: 'stream', type: 'boolean', required: false, defaultValue: 'false', description: '开启后通过 Server-Sent Events 返回进度和结果。' },
@@ -136,10 +137,10 @@ const generationParameters: ParameterRow[] = [
 ]
 
 const editParameters: ParameterRow[] = [
-  { name: 'image', type: 'file | string', required: true, defaultValue: '—', description: '待编辑图片。支持 multipart 文件、图片 URL、Data URL 或 file_id。' },
+  { name: 'image', type: 'file | string', required: true, defaultValue: '—', description: '待编辑图片，支持 multipart 文件、图片 URL 或 Data URL。Image 2.5 原生接口不接受 file_id。' },
   { name: 'prompt', type: 'string', required: true, defaultValue: '—', description: '说明需要进行的图片修改。' },
   { name: 'mask', type: 'file | string', required: false, defaultValue: '—', description: '可选遮罩图；JSON 方式仅支持 mask.image_url。' },
-  { name: 'model', type: 'string', required: false, defaultValue: 'gpt-image-2', description: '图片模型，名称必须以 gpt-image- 开头。' },
+  { name: 'model', type: 'string', required: false, defaultValue: 'gpt-image-2', description: '可选 gpt-image-2.5-flare、gpt-image-2.5-sunburst 及其 2026-09-08 快照；省略时仍使用旧版 Image 2。' },
   { name: 'size', type: 'string', required: false, defaultValue: '模型默认', description: '输出图片尺寸，例如 1024x1024。' },
   { name: 'response_format', type: 'string', required: false, defaultValue: 'b64_json', description: '可选 b64_json 或 url。' },
   { name: 'stream', type: 'boolean', required: false, defaultValue: 'false', description: '是否使用 SSE 流式返回。' },
@@ -410,7 +411,7 @@ onBeforeUnmount(() => {
             <span class="status-dot" />
             <strong>接口已内置</strong>
             <span>JSON · multipart · SSE</span>
-            <code>gpt-image-2</code>
+            <code>Image 2.5 · Flare / Sunburst</code>
           </div>
 
           <section class="article-section">

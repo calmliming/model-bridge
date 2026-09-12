@@ -77,7 +77,7 @@ export async function channelHealth(query: HealthQuery, now = Date.now()) {
       COUNT(*) FILTER (WHERE category = 'canceled') AS canceled,
       COUNT(*) FILTER (WHERE category = 'policy') AS policy,
       COUNT(*) FILTER (WHERE category = 'request') AS request_errors,
-      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_create_tokens), 0) AS tokens,
+      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_create_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0) AS tokens,
       COUNT(first_token_ms) FILTER (WHERE category = 'success' AND first_token_ms >= 0) AS ttft_samples,
       percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE category = 'success' AND first_token_ms >= 0) AS ttft_p95,
       percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (WHERE category = 'success' AND latency_ms >= 0) AS latency_p95

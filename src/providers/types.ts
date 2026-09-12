@@ -43,6 +43,8 @@ export interface UsageData {
   cacheReadTokens: number
   /** Image input tokens billed by a GPT Image tool/model, when reported. */
   imageInputTokens?: number
+  /** Cached image inputs, separate from text cache reads and uncached images. */
+  imageCacheReadTokens?: number
   /** Image output tokens billed by a GPT Image tool/model, when reported. */
   imageOutputTokens?: number
   /** Number of final images produced by the request. */

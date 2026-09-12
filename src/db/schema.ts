@@ -250,6 +250,7 @@ export const usageLogs = pgTable('usage_logs', {
   cacheCreateTokens: bigint('cache_create_tokens', { mode: 'number' }).notNull().default(0),
   cacheReadTokens: bigint('cache_read_tokens', { mode: 'number' }).notNull().default(0),
   imageInputTokens: bigint('image_input_tokens', { mode: 'number' }).notNull().default(0),
+  imageCacheReadTokens: bigint('image_cache_read_tokens', { mode: 'number' }).notNull().default(0),
   imageOutputTokens: bigint('image_output_tokens', { mode: 'number' }).notNull().default(0),
   imageCount: bigint('image_count', { mode: 'number' }).notNull().default(0),
   imageSize: text('image_size'),
@@ -282,6 +283,7 @@ export const modelPricing = pgTable('model_pricing', {
   cacheWritePrice: doublePrecision('cache_write_price').notNull().default(0),
   cacheReadPrice: doublePrecision('cache_read_price').notNull().default(0),
   imageInputPrice: doublePrecision('image_input_price').notNull().default(0),
+  imageCacheReadPrice: doublePrecision('image_cache_read_price'),
   imageOutputPrice: doublePrecision('image_output_price').notNull().default(0),
 })
 

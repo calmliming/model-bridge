@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels } from './modelDiscovery'
+const image25Models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare-2026-09-08', 'gpt-image-2.5-sunburst-2026-09-08']
 
 describe('model discovery', () => {
   it('advertises V4.1 Flash while keeping explicit legacy names discoverable', () => {
@@ -64,6 +65,7 @@ describe('model discovery', () => {
       'gpt-5.3-codex',
       'gpt-5.3-codex-spark',
       'gpt-image-2',
+      ...image25Models,
     ])
   })
 
@@ -80,6 +82,7 @@ describe('model discovery', () => {
       'gpt-5.3-codex',
       'gpt-5.3-codex-spark',
       'gpt-image-2',
+      ...image25Models,
       'deepseek-v4-pro',
     ])
   })
@@ -114,6 +117,7 @@ describe('model discovery', () => {
       'gpt-5.3-codex',
       'gpt-5.3-codex-spark',
       'gpt-image-2',
+      ...image25Models,
       'gpt-public',
     ])
   })

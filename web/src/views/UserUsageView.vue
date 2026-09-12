@@ -20,6 +20,9 @@ interface UsageLog {
   reasoningTokens: number
   cacheCreateTokens: number
   cacheReadTokens: number
+  imageInputTokens: number
+  imageOutputTokens: number
+  imageCacheReadTokens: number
   cost: number
   apiKeyName: string | null
 }
@@ -97,13 +100,16 @@ function formatUsd(value: number): string {
 }
 
 function totalTokens(row: UsageLog) {
-  const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+  const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens + (row.imageInputTokens ?? 0) + (row.imageOutputTokens ?? 0) + (row.imageCacheReadTokens ?? 0)
   const rows: [string, number][] = [
     ['输入', row.inputTokens],
     ['输出', row.outputTokens],
     ...(row.reasoningTokens > 0 ? [['推理', row.reasoningTokens] as [string, number]] : []),
     ['缓存写入', row.cacheCreateTokens],
     ['缓存读取', row.cacheReadTokens],
+    ['图片输入', row.imageInputTokens ?? 0],
+    ['图片输出', row.imageOutputTokens ?? 0],
+    ['图片缓存', row.imageCacheReadTokens ?? 0],
   ]
   return h(
     UiTooltip,

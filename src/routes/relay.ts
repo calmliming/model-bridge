@@ -1,5 +1,7 @@
 import { cachedAntigravityModels } from '../accounts/antigravityModels'
 import { cachedAccountCatalogs } from '../accounts/modelCatalog'
+import { isImage25Model } from '../providers/openai/imageModels'
+import { convertNativeImageResponse, createNativeImagesUsageParser, createNativeImagesStreamTransform, parseNativeImageUsage } from '../providers/openai/directImages'
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
@@ -227,6 +229,7 @@ interface ProviderHandler {
     text: string,
     meta: RelayMeta,
   ) => { body: unknown; usage: UsageData; status?: 'error'; httpStatus?: number }
+  bufferJsonResponse?: ProviderHandler['bufferSseResponse']
   /** The buffered response is an OpenAI Responses SSE transcript. */
   bufferedResponsesProtocol?: boolean
   /** Optional payload transform applied to each SSE event / buffered JSON body. */
@@ -1255,6 +1258,14 @@ export async function classifyOpenAIImageUpstreamFailure(
   model: string,
   cooldownMs = openAIImageUnavailableCooldownMs(),
 ): Promise<UpstreamFailure> {
+  if (isImage25Model(model) && !response.ok) {
+    try {
+      const payload = await response.clone().json() as { usage?: unknown; data?: unknown[] }
+      const usage = parseNativeImageUsage(payload.usage)
+      const hasUsage = Object.values(usage).some(value => typeof value === 'number' && value > 0)
+      if (hasUsage || payload.data?.length) return { penalty: null, retryable: false }
+    } catch { /* Ordinary HTTP errors use the existing policy below. */ }
+  }
   if (response.status === 400) {
     const text = await readErrorText(response)
     if (isOpenAIImageCapabilityLossText(text)) {
@@ -1274,8 +1285,15 @@ export async function classifyBufferedOpenAIImageFailure(
   model: string,
   cooldownMs = openAIImageUnavailableCooldownMs(),
 ): Promise<UpstreamFailure | null> {
-  const converted = convertOpenAIImagesSse(text, request)
+  const converted = isImage25Model(request.model) ? convertNativeImageResponse(text, request) : convertOpenAIImagesSse(text, request)
   if (converted.status !== 'error') return null
+
+  // A native failure can include billable partial work. Return and record it
+  // instead of discarding its usage during failover and paying for a replay.
+  if (isImage25Model(request.model) && Object.entries(converted.usage).some(([key, value]) =>
+    (key.endsWith('Tokens') || key === 'imageCount') && typeof value === 'number' && value > 0)) {
+    return { penalty: null, retryable: false }
+  }
 
   const serialized = JSON.stringify(converted.body)
   const error = parsedErrorObject(serialized)
@@ -1318,7 +1336,7 @@ async function inspectBufferedUpstreamFailure(
   if (
     (!provider.bufferedResponsesProtocol && !provider.classifyBufferedFailure) ||
     !upstream.ok ||
-    !(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
+    (!(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false) && !provider.bufferJsonResponse)
   ) return null
   try {
     const text = await upstream.clone().text()
@@ -1409,6 +1427,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
         ...body,
         model: mapRequestedModel(requestedModel, request.apiKey!.modelMappings),
       }
+      const native = isImage25Model(mappedRequest.model)
       const provider: ProviderHandler = {
         id: 'openai',
         forceStream: false,
@@ -1416,16 +1435,18 @@ export function registerRelayRoutes(app: FastifyInstance): void {
           model: requestedModel,
           action: `images.${endpoint}`,
         }),
-        callUpstream: (token, input) => relayOpenaiImages(token, input),
+        callUpstream: (token, input, ctx) => relayOpenaiImages(token, input,
+          (ctx.account.metadata as { openai?: { chatgptAccountId?: string } } | null)?.openai?.chatgptAccountId),
         classifyUpstreamFailure: (response, model) =>
           classifyOpenAIImageUpstreamFailure(response, model),
         classifyBufferedFailure: (text, model) =>
           classifyBufferedOpenAIImageFailure(text, mappedRequest, model),
-        createStreamParser: () => createOpenAIImagesUsageParser(mappedRequest),
+        createStreamParser: () => native ? createNativeImagesUsageParser(mappedRequest) : createOpenAIImagesUsageParser(mappedRequest),
         parseJsonUsage: () => emptyUsage(),
         parseStreamEventsFrom: 'upstream',
-        bufferSseResponse: (text) => convertOpenAIImagesSse(text, mappedRequest),
-        createStreamTransform: () => createOpenAIImagesStreamTransform(mappedRequest),
+        bufferSseResponse: (text) => native ? convertNativeImageResponse(text, mappedRequest) : convertOpenAIImagesSse(text, mappedRequest),
+        ...(native ? { bufferJsonResponse: (text: string) => convertNativeImageResponse(text, mappedRequest) } : {}),
+        createStreamTransform: () => native ? createNativeImagesStreamTransform(mappedRequest) : createOpenAIImagesStreamTransform(mappedRequest),
         summarizeRequestInput: summarizeOpenAIImagesRequest,
       }
       await executeRelay(request, reply, provider, body)
@@ -2847,7 +2868,8 @@ async function sendBuffered(
   provider: ProviderHandler,
 ): Promise<void> {
   const contentType = upstream.headers.get('content-type') ?? 'application/json'
-  if (provider.bufferSseResponse && contentType.includes('text/event-stream')) {
+  const bufferResponse = contentType.includes('text/event-stream') ? provider.bufferSseResponse : provider.bufferJsonResponse
+  if (bufferResponse) {
     const sseText = await upstream.text()
     let responseText = sseText
     let usage: UsageData = emptyUsage()
@@ -2856,7 +2878,7 @@ async function sendBuffered(
     let convertedHttpStatus: number | undefined
     let errorDetails: { code: string; message: string } | null = null
     if (upstream.ok) {
-      const converted = provider.bufferSseResponse(sseText, meta)
+      const converted = bufferResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
       usage = converted.usage
       responseContentType = 'application/json'
@@ -2876,6 +2898,7 @@ async function sendBuffered(
       }
     } else {
       errorDetails = extractUpstreamError(sseText, upstream.status)
+      if (provider.bufferJsonResponse) usage = bufferResponse(sseText, meta).usage
     }
     const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,

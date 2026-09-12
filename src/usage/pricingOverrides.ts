@@ -5,6 +5,7 @@ const amount = z.number().finite().nonnegative()
 const priceSchema = z.object({
   input: amount, output: amount, cacheWrite: amount, cacheRead: amount,
   imageInput: amount.optional(), imageOutput: amount.optional(),
+  imageCacheRead: amount.optional(),
 }).strict()
 const schema = z.object({
   version: z.literal(1),

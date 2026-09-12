@@ -88,6 +88,7 @@ export interface DashboardRecentLog {
   cacheCreateTokens: number
   cacheReadTokens: number
   imageInputTokens: number
+  imageCacheReadTokens: number
   imageOutputTokens: number
   imageCount: number
   imageSize: string | null
@@ -100,12 +101,14 @@ export interface DashboardRecentLog {
   cacheCreateCost: number
   cacheReadCost: number
   imageInputCost: number
+  imageCacheReadCost: number
   imageOutputCost: number
   inputPrice: number | null
   outputPrice: number | null
   cacheCreatePrice: number | null
   cacheReadPrice: number | null
   imageInputPrice: number | null
+  imageCacheReadPrice: number | null
   imageOutputPrice: number | null
   apiKeyName: string | null
   accountName: string | null
@@ -256,6 +259,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const cacheCreateTokens = toNum(row.cachecreatetokens)
   const cacheReadTokens = toNum(row.cachereadtokens)
   const imageInputTokens = toNum(row.imageinputtokens)
+  const imageCacheReadTokens = toNum(row.imagecachereadtokens)
   const imageOutputTokens = toNum(row.imageoutputtokens)
   const imageModel = (row.imagemodel as string | null) ?? null
   const imagePrice = snapshot?.imagePrice ?? (imageModel ? resolvePrice(provider, imageModel, ts) : price)
@@ -286,6 +290,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     cacheCreateTokens,
     cacheReadTokens,
     imageInputTokens,
+    imageCacheReadTokens,
     imageOutputTokens,
     imageCount: toNum(row.imagecount),
     imageSize: (row.imagesize as string | null) ?? null,
@@ -298,12 +303,14 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     cacheCreateCost: price ? roundUsd((cacheCreateTokens * price.cacheWrite) / 1_000_000) : 0,
     cacheReadCost: price ? roundUsd((cacheReadTokens * price.cacheRead) / 1_000_000) : 0,
     imageInputCost: imagePrice ? roundUsd((imageInputTokens * (imagePrice.imageInput ?? 0)) / 1_000_000) : 0,
+    imageCacheReadCost: imagePrice ? roundUsd((imageCacheReadTokens * (imagePrice.imageCacheRead ?? imagePrice.cacheRead)) / 1_000_000) : 0,
     imageOutputCost: imagePrice ? roundUsd((imageOutputTokens * (imagePrice.imageOutput ?? 0)) / 1_000_000) : 0,
     inputPrice: price?.input ?? null,
     outputPrice: price?.output ?? null,
     cacheCreatePrice: price?.cacheWrite ?? null,
     cacheReadPrice: price?.cacheRead ?? null,
     imageInputPrice: imagePrice?.imageInput ?? null,
+    imageCacheReadPrice: imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? null,
     imageOutputPrice: imagePrice?.imageOutput ?? null,
     apiKeyName: (row.apikeyname as string | null) ?? null,
     accountName: (row.accountname as string | null) ?? null,
@@ -327,7 +334,7 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
             COALESCE(SUM(input_tokens + image_input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens + image_output_tokens), 0) AS outputTokens,
             COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
-            COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
      WHERE ts >= $1
@@ -359,11 +366,11 @@ export async function statsByProvider(days: number): Promise<ProviderStat[]> {
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT provider,
             COUNT(*) AS requests,
-            COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0) AS tokens,
+            COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0) AS tokens,
             COALESCE(SUM(input_tokens + image_input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens + image_output_tokens), 0) AS outputTokens,
             COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
-            COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
      WHERE ts >= $1
@@ -379,11 +386,11 @@ export async function statsByModel(days: number, limit = 10): Promise<ModelStat[
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT COALESCE(model, '(unknown)') AS model,
             COUNT(*) AS requests,
-            COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0) AS tokens,
+            COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0) AS tokens,
             COALESCE(SUM(input_tokens + image_input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens + image_output_tokens), 0) AS outputTokens,
             COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
-            COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
      WHERE ts >= $1
@@ -402,11 +409,11 @@ export async function statsByKey(days: number): Promise<KeyStat[]> {
             api_keys.name AS name,
             api_keys.owner_label AS ownerLabel,
             COUNT(usage_logs.id) AS requests,
-            COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_create_tokens + usage_logs.cache_read_tokens + usage_logs.image_input_tokens + usage_logs.image_output_tokens), 0) AS tokens,
+            COALESCE(SUM(usage_logs.input_tokens + usage_logs.output_tokens + usage_logs.cache_create_tokens + usage_logs.cache_read_tokens + usage_logs.image_input_tokens + usage_logs.image_output_tokens + usage_logs.image_cache_read_tokens), 0) AS tokens,
             COALESCE(SUM(usage_logs.input_tokens + usage_logs.image_input_tokens), 0) AS inputTokens,
             COALESCE(SUM(usage_logs.output_tokens + usage_logs.image_output_tokens), 0) AS outputTokens,
             COALESCE(SUM(usage_logs.cache_create_tokens), 0) AS cacheCreateTokens,
-            COALESCE(SUM(usage_logs.cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(usage_logs.cache_read_tokens + usage_logs.image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(usage_logs.cost), 0) AS cost
      FROM api_keys
      LEFT JOIN usage_logs
@@ -427,7 +434,7 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
             COALESCE(SUM(input_tokens + image_input_tokens), 0) AS inputTokens,
             COALESCE(SUM(output_tokens + image_output_tokens), 0) AS outputTokens,
             COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
-            COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+            COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs WHERE ts >= $1`,
     [since],
@@ -478,20 +485,20 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
        (SELECT COUNT(DISTINCT user_id) FROM usage_logs WHERE ts >= $3 AND user_id IS NOT NULL) AS activeUsers24h,
        (SELECT COUNT(*) FROM users WHERE created_at >= $3) AS newUsers24h,
        (SELECT COUNT(*) FROM usage_logs) AS requestCount,
-       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0)
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0)
           FROM usage_logs) AS totalTokens,
        (SELECT COALESCE(SUM(cost), 0) FROM usage_logs) AS totalCost,
        (SELECT COUNT(*) FROM usage_logs WHERE ts >= $3) AS requests24h,
-       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0)
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0)
           FROM usage_logs WHERE ts >= $3) AS tokens24h,
        (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE ts >= $3) AS cost24h,
        (SELECT COUNT(*) FROM usage_logs WHERE ts >= $3 AND status = 'success') AS success24h,
        (SELECT COALESCE(AVG(latency_ms), 0)
           FROM usage_logs WHERE ts >= $3 AND latency_ms IS NOT NULL) AS avgLatencyMs24h,
        (SELECT COUNT(*) / 5.0 FROM usage_logs WHERE ts >= $4) AS rpm5m,
-       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0) / 5.0
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0) / 5.0
           FROM usage_logs WHERE ts >= $4) AS tpm5m,
-       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens), 0)
+       (SELECT COALESCE(SUM(input_tokens + output_tokens + cache_create_tokens + cache_read_tokens + image_input_tokens + image_output_tokens + image_cache_read_tokens), 0)
           FROM usage_logs WHERE ts >= $5) AS tokens30d,
        (SELECT COALESCE(SUM(cost), 0)
           FROM usage_logs WHERE ts >= $5) AS cost30d`,
@@ -610,6 +617,7 @@ export async function dashboardRecentLogs(
               usage_logs.cache_create_tokens AS cacheCreateTokens,
               usage_logs.cache_read_tokens AS cacheReadTokens,
               usage_logs.image_input_tokens AS imageInputTokens,
+              usage_logs.image_cache_read_tokens AS imageCacheReadTokens,
               usage_logs.image_output_tokens AS imageOutputTokens,
               usage_logs.image_count AS imageCount,
               usage_logs.image_size AS imageSize,

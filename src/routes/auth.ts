@@ -42,7 +42,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const prices = listModelIdsForKey({ allowedProviders: null, allowedModels: null }).flatMap(model => {
       const provider = inferProviderForModel(model)
       const price = provider ? resolvePrice(provider, model, at) : null
-      return price ? [{ model, inputPrice: price.input, outputPrice: price.output, cacheReadPrice: price.cacheRead }] : []
+      return price ? [{ model, inputPrice: price.input, outputPrice: price.output, cacheReadPrice: price.cacheRead,
+        ...(model.startsWith('gpt-image-') ? { imageInputPrice: price.imageInput ?? 0, imageOutputPrice: price.imageOutput ?? 0,
+          imageCacheReadPrice: price.imageCacheRead ?? price.cacheRead } : {}) }] : []
     })
     return { updatedAt: at, prices }
   })

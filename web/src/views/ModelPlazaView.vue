@@ -10,6 +10,7 @@ import {
   type PlazaModel,
   type ResolvedModelPrice,
   type ProviderId,
+  type ModelTokenPrice,
 } from '../catalog/modelCatalog'
 
 const message = useMessage()
@@ -19,14 +20,14 @@ const activeCategory = ref<string>('all')
 const activeProvider = ref<'all' | ProviderId>('all')
 const selected = ref<PlazaModel | null>(null)
 const priceClock = ref(Date.now())
-const livePrices = ref<Record<string, { inputPrice: number; outputPrice: number; cacheReadPrice?: number }>>({})
+const livePrices = ref<Record<string, ModelTokenPrice>>({})
 let priceClockTimer: ReturnType<typeof setInterval> | null = null
 let stopped = false
 async function refreshPrices() {
   try {
     const { data } = await api.get('/auth/model-prices')
     if (stopped) return
-    livePrices.value = Object.fromEntries(data.prices.map((price: { model: string; inputPrice: number; outputPrice: number; cacheReadPrice?: number }) => [price.model, price]))
+    livePrices.value = Object.fromEntries(data.prices.map((price: ModelTokenPrice & { model: string }) => [price.model, price]))
   } catch {
     // Keep the last received catalog; initial offline rendering uses local reference prices.
   }
@@ -92,6 +93,7 @@ function badgeLabel(badge: PlazaModel['badge']): string {
 
 function callExample(model: PlazaModel): string {
   const base = 'https://your-host'
+  if (model.image) return `curl ${base}/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ model: model.id, prompt: '一只在窗边看雨的橘猫', quality: 'high', size: '1024x1024' }, null, 2)}'`
   if (model.provider === 'claude') {
     return [
       `curl ${base}/v1/messages \\`,
@@ -264,13 +266,13 @@ function openDetail(model: PlazaModel) {
 
         <div class="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-dark-800">
           <span class="text-[11px] text-gray-400 dark:text-dark-400">
-            上下文 <strong class="text-gray-600 dark:text-dark-200">{{ model.context }}</strong>
+            {{ model.image ? '输出边长' : '上下文' }} <strong class="text-gray-600 dark:text-dark-200">{{ model.context }}</strong>
           </span>
           <span class="text-[11px] text-gray-400 dark:text-dark-400">
-            输入
+            {{ model.image ? '文本输入' : '输入' }}
             <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(currentPrice(model).inputPrice) }}</strong>
-            / 输出
-            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(currentPrice(model).outputPrice) }}</strong>
+            / {{ model.image ? '图片输出' : '输出' }}
+            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(model.image ? currentPrice(model).imageOutputPrice ?? 30 : currentPrice(model).outputPrice) }}</strong>
             <span class="text-gray-400">/1M</span>
             <span v-if="currentPrice(model).period" class="ml-1 text-primary-500">
               {{ pricePeriodLabel(currentPrice(model).period) }}
@@ -339,24 +341,28 @@ function openDetail(model: PlazaModel) {
           :class="currentPrice(selected).cacheReadPrice == null ? 'sm:grid-cols-3' : 'sm:grid-cols-4'"
         >
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
-            <div class="text-[11px] text-gray-400 dark:text-dark-400">上下文窗口</div>
+            <div class="text-[11px] text-gray-400 dark:text-dark-400">{{ selected.image ? '输出边长' : '上下文窗口' }}</div>
             <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ selected.context }}</div>
           </div>
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
             <div class="text-[11px] text-gray-400 dark:text-dark-400">
-              输入价格 /1M
+              {{ selected.image ? '文本输入' : '输入价格' }} /1M
               <span v-if="currentPrice(selected).period">· {{ pricePeriodLabel(currentPrice(selected).period) }}</span>
             </div>
             <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).inputPrice) }}</div>
           </div>
           <div v-if="currentPrice(selected).cacheReadPrice != null" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
-            <div class="text-[11px] text-gray-400 dark:text-dark-400">缓存命中 /1M</div>
+            <div class="text-[11px] text-gray-400 dark:text-dark-400">{{ selected.image ? '文本缓存' : '缓存命中' }} /1M</div>
             <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).cacheReadPrice ?? 0) }}</div>
           </div>
           <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
-            <div class="text-[11px] text-gray-400 dark:text-dark-400">输出价格 /1M</div>
-            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(currentPrice(selected).outputPrice) }}</div>
+            <div class="text-[11px] text-gray-400 dark:text-dark-400">{{ selected.image ? '图片输出' : '输出价格' }} /1M</div>
+            <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(selected.image ? currentPrice(selected).imageOutputPrice ?? 30 : currentPrice(selected).outputPrice) }}</div>
           </div>
+          <template v-if="selected.image">
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片输入 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageInputPrice ?? 8) }}</div></div>
+            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片缓存 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageCacheReadPrice ?? 2) }}</div></div>
+          </template>
         </div>
 
         <div>

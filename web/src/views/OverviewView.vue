@@ -70,6 +70,12 @@ interface DashboardRecentLog {
   cacheReadTokens: number
   cost: number
   baseCost: number
+  imageInputTokens: number
+  imageOutputTokens: number
+  imageCacheReadTokens: number
+  imageInputCost: number
+  imageOutputCost: number
+  imageCacheReadCost: number
   billTo: string
   inputCost: number
   outputCost: number
@@ -531,11 +537,11 @@ function latencyLabel(ms: number | null): string {
 }
 
 function logTokens(row: DashboardRecentLog): number {
-  return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
+  return row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens + (row.imageInputTokens ?? 0) + (row.imageOutputTokens ?? 0) + (row.imageCacheReadTokens ?? 0)
 }
 
 function logCacheTokens(row: DashboardRecentLog): number {
-  return row.cacheCreateTokens + row.cacheReadTokens
+  return row.cacheCreateTokens + row.cacheReadTokens + (row.imageCacheReadTokens ?? 0)
 }
 
 function hasCacheTokens(row: DashboardRecentLog): boolean {
@@ -569,6 +575,9 @@ function costBreakdown(row: DashboardRecentLog): { label: string; value: string;
   ]
   if (row.cacheCreateCost > 0) rows.push({ label: '缓存写入费用', value: formatLogCost(row.cacheCreateCost) })
   if (row.cacheReadCost > 0) rows.push({ label: '缓存读取费用', value: formatLogCost(row.cacheReadCost) })
+  if (row.imageInputCost > 0) rows.push({ label: '图片输入费用', value: formatLogCost(row.imageInputCost) })
+  if (row.imageOutputCost > 0) rows.push({ label: '图片输出费用', value: formatLogCost(row.imageOutputCost) })
+  if (row.imageCacheReadCost > 0) rows.push({ label: '图片缓存费用', value: formatLogCost(row.imageCacheReadCost) })
   return rows
 }
 
@@ -579,6 +588,9 @@ function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number
   ]
   // Reasoning is a subset of / alongside output; only show when present.
   if (row.reasoningTokens > 0) rows.push({ label: '推理', value: row.reasoningTokens })
+  if (row.imageInputTokens > 0) rows.push({ label: '图片输入', value: row.imageInputTokens })
+  if (row.imageOutputTokens > 0) rows.push({ label: '图片输出', value: row.imageOutputTokens })
+  if (row.imageCacheReadTokens > 0) rows.push({ label: '图片缓存', value: row.imageCacheReadTokens })
   rows.push(
     { label: '缓存创建', value: row.cacheCreateTokens },
     { label: '缓存读取', value: row.cacheReadTokens },
@@ -746,13 +758,13 @@ function openRequestInput(row: DashboardRecentLog) {
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14m0 0 6-6m-6 6-6-6" />
                 </svg>
-                {{ formatNumber(row.inputTokens) }}
+                {{ formatNumber(row.inputTokens + (row.imageInputTokens ?? 0)) }}
               </span>
               <span class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-violet-600">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 19V5m0 0 6 6m-6-6-6 6" />
                 </svg>
-                {{ formatNumber(row.outputTokens) }}
+                {{ formatNumber(row.outputTokens + (row.imageOutputTokens ?? 0)) }}
               </span>
               <UiTooltip trigger="hover" placement="top">
                 <template #trigger>
@@ -777,6 +789,7 @@ function openRequestInput(row: DashboardRecentLog) {
               </UiTooltip>
             </div>
             <div v-if="hasCacheTokens(row)" class="flex flex-wrap items-center gap-2 min-w-0 mt-1">
+              <span v-if="row.imageCacheReadTokens > 0" class="text-xs font-[760] text-sky-600">图片缓存 {{ formatNumber(row.imageCacheReadTokens) }}</span>
               <span v-if="row.cacheReadTokens > 0" class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-sky-600">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M5 8h14M5 8a2 2 0 1 1 0-4h14a2 2 0 1 1 0 4M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4" />
