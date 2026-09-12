@@ -1,6 +1,7 @@
 import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
+import type { CatalogModel } from './modelCatalog'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -8,9 +9,10 @@ export interface ModelDiscoveryKey {
   modelMappings?: Record<string, string> | null
   groupAllowedModels?: string[] | null
   providerModels?: Partial<Record<ProviderId, string[]>>
+  catalogModels?: Partial<Record<ProviderId, Record<string, CatalogModel>>>
 }
 
-export interface ModelItem {
+export interface ModelItem extends CatalogModel {
   id: string
   object: 'model'
   created: number
@@ -182,7 +184,7 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   const providers = providerScope(key, requested)
   const ids: string[] = []
   for (const provider of providers) {
-    for (const model of key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]) {
+    for (const model of [...(key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]), ...Object.keys(key.catalogModels?.[provider] ?? {})]) {
       const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
       if (provider === 'antigravity' && targetProvider && !['gemini', 'claude'].includes(targetProvider)) continue
       if (provider !== 'sub2api' && provider !== 'antigravity' && targetProvider && !providers.includes(targetProvider)) continue
@@ -195,14 +197,21 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
 }
 
 export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: ProviderId): ModelItem[] {
-  return listModelIdsForKey(key, requested).map((id) => ({
-    id,
-    object: 'model',
-    created: CREATED_AT,
-    owned_by: inferProvider(mapRequestedModel(id, key.modelMappings)) ?? requested ?? 'model-bridge',
-    type: 'model',
-    display_name: displayName(id),
-  }))
+  const providers = providerScope(key, requested)
+  return listModelIdsForKey(key, requested).map((id) => {
+    const target = mapRequestedModel(id, key.modelMappings)
+    const routeProvider = requested ?? (providers.length === 1 ? providers[0] : inferProvider(target))
+    const capability = routeProvider ? key.catalogModels?.[routeProvider]?.[target] : undefined
+    return {
+      ...capability,
+      id,
+      object: 'model',
+      created: CREATED_AT,
+      owned_by: inferProvider(target) ?? requested ?? 'model-bridge',
+      type: 'model',
+      display_name: id === target ? capability?.display_name ?? displayName(id) : displayName(id),
+    }
+  })
 }
 
 export function listGeminiModels(key: ModelDiscoveryKey, provider: 'gemini' | 'sub2api' | 'antigravity' = 'gemini'): GeminiModelItem[] {

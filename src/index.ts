@@ -31,6 +31,8 @@ import { TRUSTED_LOCAL_PROXIES } from './http/trustProxy'
 import { warnUnsafeStoredUpstreamUrls } from './accounts/manager'
 import { panelRateLimit } from './middleware/panelRateLimit'
 import { closeUpstreamDispatcher } from './http/upstream'
+import { startModelCatalogJob } from './accounts/modelCatalog'
+import { registerOperationsRoutes } from './routes/operations'
 
 const SHUTDOWN_TIMEOUT_MS = 30_000
 
@@ -64,12 +66,13 @@ async function main(): Promise<void> {
 
   let stopTokenRefreshJob: () => Promise<void> = async () => {}
   let stopQuotaAutopauseJob: () => Promise<void> = async () => {}
+  let stopModelCatalogJob: () => Promise<void> = async () => {}
   let oauthCallbackServer: Server | null = null
   let antigravityCallbackServer: Server | null = null
 
   app.addHook('onClose', async () => {
     await stopPricingOverrideReload()
-    await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob()])
+    await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob(), stopModelCatalogJob()])
     await Promise.all([closeOauthCallbackServer(oauthCallbackServer), closeOauthCallbackServer(antigravityCallbackServer)])
     await waitForPendingUsage()
     await Promise.all([closeUpstreamDispatcher(), closeAntigravityDispatcher()])
@@ -86,6 +89,7 @@ async function main(): Promise<void> {
 
   registerAuthRoutes(app)
   registerAdminRoutes(app)
+  registerOperationsRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
   registerUsageRoutes(app)
@@ -114,6 +118,7 @@ async function main(): Promise<void> {
   app.log.info({ trustedProxies: TRUSTED_LOCAL_PROXIES }, 'local proxy forwarding enabled')
   stopTokenRefreshJob = startTokenRefreshJob()
   stopQuotaAutopauseJob = startQuotaAutopauseJob()
+  stopModelCatalogJob = startModelCatalogJob()
   // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
   // as a redirect URI, so we run a small dedicated listener on 1455.
   oauthCallbackServer = startOauthCallbackServer()

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   pickAccount: vi.fn(), markAccountUsed: vi.fn(), penalizeAccount: vi.fn(), penalizeAccountModel: vi.fn(),
   ensureFreshToken: vi.fn(),
   cachedAntigravityModels: vi.fn(),
+  cachedAccountCatalogs: vi.fn(),
   accounts: [] as Array<{ id: string; concurrencyLimit: number | null; metadata: Record<string, unknown> | null; proxyUrl?: string | null }>,
 }))
 
@@ -21,6 +22,7 @@ vi.mock('../keys/manager', () => ({
   findApiKeyBySecret: async () => ({ ...mocks.key, userBalanceMicros: mocks.balance }),
 }))
 vi.mock('../accounts/antigravityModels', () => ({ cachedAntigravityModels: mocks.cachedAntigravityModels }))
+vi.mock('../accounts/modelCatalog', () => ({ cachedAccountCatalogs: mocks.cachedAccountCatalogs }))
 vi.mock('../accounts/scheduler', () => ({
   pickAccount: mocks.pickAccount,
   markAccountUsed: mocks.markAccountUsed,
@@ -85,6 +87,7 @@ beforeEach(async () => {
   mocks.penalizeAccountModel.mockResolvedValue(undefined)
   mocks.ensureFreshToken.mockResolvedValue('test-upstream-token')
   mocks.cachedAntigravityModels.mockResolvedValue(['gemini-3.8-flash', 'claude-sonnet-5'])
+  mocks.cachedAccountCatalogs.mockResolvedValue({ providerModels: {}, catalogModels: {} })
   mocks.key = {
     id: 'key-1', name: 'Test', enabled: true, expiresAt: null,
     quotaLimit: null, quotaUsed: 0, userId: 'user-1', userStatus: 'active',
@@ -235,6 +238,100 @@ describe('Claude Chat Completions response format', () => {
     expect(response.body).toContain('chat.completion.chunk')
     expect(response.body).toContain('[DONE]')
     expect(mocks.logs).toHaveLength(1)
+  }))
+})
+
+describe('upstream request compatibility', () => {
+  it('serves dynamic model details using the same key/group filters as the model list', async () => {
+    mocks.key.allowedProviders = ['openai']
+    mocks.key.accountGroupId = 'group-a'
+    mocks.key.groupAllowedModels = ['gpt-visible']
+    mocks.cachedAccountCatalogs.mockResolvedValue({ providerModels: { openai: ['gpt-visible', 'gpt-hidden'] },
+      catalogModels: { openai: { 'gpt-visible': { id: 'gpt-visible', context_window: 123456, input_modalities: ['text', 'image'] } } } })
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      const headers = { authorization: 'Bearer mb-test' }
+      const listing = await app.inject({ url: '/v1/models', headers })
+      expect(listing.json().data).toEqual([expect.objectContaining({ id: 'gpt-visible', context_window: 123456 })])
+      const detail = await app.inject({ url: '/v1/models/gpt-visible', headers })
+      expect(detail.json()).toMatchObject({ id: 'gpt-visible', input_modalities: ['text', 'image'] })
+      expect((await app.inject({ url: '/api/openai/v1/models/gpt-hidden', headers })).statusCode).toBe(404)
+      expect(mocks.cachedAccountCatalogs).toHaveBeenCalledWith('group-a', ['openai'])
+      expect(mocks.fetch).not.toHaveBeenCalled()
+    } finally { await app.close() }
+  })
+
+  it.each([
+    { stream: false, payload: { error: { code: 503, status: 'UNAVAILABLE', message: 'Unavailable at https://private.example' } }, code: 'gemini_upstream_UNAVAILABLE' },
+    { stream: true, payload: { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Limit reached' } }, code: 'gemini_upstream_RESOURCE_EXHAUSTED' },
+    { stream: false, payload: { promptFeedback: { blockReason: 'SAFETY' } }, code: 'gemini_policy_SAFETY' },
+    { stream: true, payload: { candidates: [{ finishReason: 'SAFETY' }] }, code: 'gemini_policy_SAFETY' },
+    { stream: false, payload: {}, code: 'gemini_empty_response' },
+    { stream: true, payload: { candidates: [{ finishReason: 'MALFORMED_FUNCTION_CALL' }] }, code: null },
+  ])('records native Gemini $code with stream=$stream while preserving its response', ({ stream, payload, code }) => withRelay(async request => {
+    mocks.accounts[0]!.metadata = { project: 'test-project' }
+    const body = { ...payload, usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
+    mocks.fetch.mockResolvedValueOnce(stream ? sse([{ response: body }])
+      : new Response(JSON.stringify({ response: body }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ contents: [] }, `/api/gemini/v1beta/models/gemini-3.8-flash:${stream ? 'streamGenerateContent' : 'generateContent'}`)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain(JSON.stringify(body))
+    expect(mocks.logs[0]?.[22]).toBe(code ? 'error' : 'success')
+    expect(mocks.logs[0]?.[23]).toBe(code)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([10, 5])
+    expect(mocks.logs[0]?.[24] ?? '').not.toContain('private.example')
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  }))
+
+  it.each([false, true])('forwards Claude message output_config with its required beta for stream=%s', stream => withRelay(async request => {
+    mocks.fetch.mockImplementation(async () => stream ? claudeResponse() : new Response(JSON.stringify({
+      id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-sonnet-5',
+      content: [{ type: 'text', text: 'Hello' }], stop_reason: 'end_turn',
+      usage: { input_tokens: 100, output_tokens: 100 },
+    }), { headers: { 'content-type': 'application/json' } }))
+    const messages = [
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi', output_config: { effort: 'low' } },
+      { role: 'system', content: [], output_config: { effort: 'high' } },
+      { role: 'user', content: 'Continue', output_config: { effort: 'high' } },
+    ]
+    const response = await request({ model: 'claude-sonnet-5', stream, messages,
+      output_config: { effort: 'medium' } }, '/api/claude/v1/messages')
+    expect(response.status).toBe(200)
+    const [url, init] = mocks.fetch.mock.calls[0]!
+    expect(url).toBe('https://api.anthropic.com/v1/messages')
+    expect(new Headers(init.headers).get('anthropic-beta')?.split(','))
+      .toContain('mid-conversation-output-config-2026-07-01')
+    expect(JSON.parse(init.body)).toMatchObject({ messages, output_config: { effort: 'medium' }, stream })
+  }))
+
+  it.each([
+    { provider: 'qwen', model: 'qwen3.8-max', upstream: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' },
+    { provider: 'zhipu', model: 'glm-5.3', upstream: 'https://open.bigmodel.cn/api/paas/v4/chat/completions' },
+    { provider: 'xiaomi', model: 'mimo-v2.5', upstream: 'https://api.xiaomimimo.com/v1/chat/completions' },
+    { provider: 'kimi', model: 'kimi-k2.7-code', upstream: 'https://api.moonshot.cn/v1/chat/completions' },
+  ])('delivers agent task bodies through the $provider Responses route', ({ provider, model, upstream }) => withRelay(async request => {
+    mocks.fetch.mockImplementation(async () => sse([
+      { id: 'chat-task', model, choices: [{ index: 0, delta: { role: 'assistant', content: 'Task received' }, finish_reason: null }] },
+      { id: 'chat-task', model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 } },
+    ]))
+    const response = await request({ model, stream: true, input: [
+      { type: 'agent_message', author: '/root', recipient: '/root/check', content: [
+        { type: 'input_text', text: 'Message Type: NEW_TASK\nPayload:\n' },
+        { type: 'encrypted_content', encrypted_content: 'Check the relay compatibility.' },
+      ] },
+    ] }, `/api/${provider}/v1/responses`)
+    expect(response.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe(upstream)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model, stream: true,
+      messages: [{ role: 'user', content: 'Message Type: NEW_TASK\nPayload:\nCheck the relay compatibility.' }] })
+    expect(response.body).toContain('Task received')
+    expect(response.body).toContain('response.completed')
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([10, 5])
   }))
 })
 

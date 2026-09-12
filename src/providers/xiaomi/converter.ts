@@ -10,6 +10,8 @@
  *   { model, messages: [{role, content, tool_calls?, tool_call_id?}], stream, tools?, ... }
  */
 
+import { agentMessageText } from '../agentMessage'
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content?: string | null
@@ -196,6 +198,13 @@ function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState
       tool_call_id: String(it.call_id ?? ''),
       content: typeof output === 'string' ? output : JSON.stringify(output ?? ''),
     })
+    state.pendingReasoning = ''
+    return
+  }
+
+  if (type === 'agent_message') {
+    const content = agentMessageText(it.content)
+    if (content) out.push({ role: 'user', content })
     state.pendingReasoning = ''
     return
   }

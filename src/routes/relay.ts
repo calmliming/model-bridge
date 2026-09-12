@@ -1,4 +1,5 @@
 import { cachedAntigravityModels } from '../accounts/antigravityModels'
+import { cachedAccountCatalogs } from '../accounts/modelCatalog'
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
@@ -213,7 +214,7 @@ interface ProviderHandler {
   classifyUpstreamFailure?: (response: Response, model: string) => Promise<UpstreamFailure>
   /** Optional semantic failure policy for a buffered HTTP-200 SSE transcript. */
   classifyBufferedFailure?: (text: string, model: string) => Promise<UpstreamFailure | null>
-  createStreamParser(): { feed(event: unknown): void; result(): UsageData }
+  createStreamParser(): { feed(event: unknown): void; result(): UsageData; failure?(): { code: string; message: string } | null }
   parseJsonUsage(body: unknown): UsageData
   /**
    * Stream transforms usually parse usage from their downstream event shape.
@@ -1577,6 +1578,11 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.get('/api/sub2api/v1beta/models/*', { preHandler: requireApiKey }, sendGeminiModel)
 
 
+  for (const provider of ['claude', 'openai', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api', 'antigravity'] as ProviderId[]) {
+    app.get(`/api/${provider}/v1/models/:model`, { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, provider))
+  }
+  app.get('/v1/models/:model', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply))
+  app.get('/models/:model', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply))
   // ── Model discovery (GET /v1/models) ───────────────────
   app.get('/api/claude/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'claude'),
@@ -1716,9 +1722,16 @@ async function sendOpenAIStyleModelList(
     void reply.code(403).send({ error: `this API key may not use ${provider}` })
     return
   }
+  const models = listOpenAIStyleModels(await modelDiscoveryKey(request, provider), provider)
+  const modelId = (request.params as { model?: string })?.model
+  if (modelId) {
+    const model = models.find(item => item.id === modelId)
+    void (model ? reply.send(model) : reply.code(404).send({ error: { code: 'model_not_found', message: 'Model not found.' } }))
+    return
+  }
   void reply.send({
     object: 'list',
-    data: listOpenAIStyleModels(await modelDiscoveryKey(request, provider), provider),
+    data: models,
   })
 }
 
@@ -2352,6 +2365,9 @@ async function sendStreaming(
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
+  if (provider.createStreamParser().failure && isNonStreamContentType(upstream.headers.get('content-type'))) {
+    return sendBuffered(reply, upstream, meta, provider)
+  }
   reply.hijack()
   const raw = reply.raw
   const responsesProtocol = provider.responsesProtocol === true
@@ -2637,9 +2653,10 @@ async function sendStreaming(
   }
 
   const clientCanceled = upstreamSignal()?.aborted && !streamState.sawTerminal
+  const providerFailure = upstream.ok ? parser.failure?.() : null
   const streamStatus = streamReadFailed || clientCanceled
     ? 'error'
-    : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)
+    : providerFailure ? 'error' : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)
   await recordUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
@@ -2655,12 +2672,12 @@ async function sendStreaming(
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
     status: streamStatus,
     errorCode: streamStatus === 'error'
-      ? clientCanceled ? 'client_disconnected' : streamState.errorCode ?? (!upstream.ok
+      ? clientCanceled ? 'client_disconnected' : providerFailure?.code ?? streamState.errorCode ?? (!upstream.ok
         ? `upstream_${upstream.status}`
         : streamState.sawTerminal ? 'upstream_stream_failed' : 'upstream_stream_closed')
       : null,
     errorMessage: streamStatus === 'error'
-      ? clientCanceled ? 'Client disconnected during upstream generation; recorded usage may be partial.' : streamState.errorMessage ?? (!upstream.ok
+      ? clientCanceled ? 'Client disconnected during upstream generation; recorded usage may be partial.' : providerFailure ? redactUpstreamError(providerFailure.message) : streamState.errorMessage ?? (!upstream.ok
         ? `Upstream returned HTTP ${upstream.status}.`
         : streamState.sawTerminal
           ? 'Upstream stream reported an unsuccessful terminal event.'
@@ -2899,6 +2916,7 @@ async function sendBuffered(
   let upstreamModel: string | null = null
   let semanticFailure = false
   let convertedFailure: ReturnType<typeof streamFailureDetails> = null
+  const responseParser = provider.createStreamParser()
   try {
     let json = JSON.parse(text) as unknown
     upstreamModel = extractDeclaredModel(json)
@@ -2907,6 +2925,7 @@ async function sendBuffered(
       text = JSON.stringify(json)
     }
     usage = provider.parseJsonUsage(json)
+    responseParser.feed(json)
     if (provider.id === 'antigravity' && jsonRecord(json)?.error) {
       semanticFailure = true
       convertedFailure = streamFailureDetails(json)
@@ -2917,6 +2936,10 @@ async function sendBuffered(
     }
   } catch {
     // Error responses aren't valid JSON — leave usage empty.
+  }
+  if (upstream.ok && responseParser.failure) {
+    convertedFailure = responseParser.failure()
+    semanticFailure = !!convertedFailure
   }
   const errorDetails = convertedFailure ?? (semanticFailure
     ? { code: 'upstream_response_failed', message: 'Upstream returned an unsuccessful Responses result.' }
@@ -2951,7 +2974,7 @@ async function sendBuffered(
     return
   }
   await reply
-    .code(provider.id === 'antigravity' && semanticFailure ? 502 : upstream.status)
+    .code(provider.id === 'antigravity' && provider.bufferSseResponse && semanticFailure ? 502 : upstream.status)
     .header('content-type', contentType)
     .send(text)
 }
@@ -3202,9 +3225,13 @@ function callAntigravity(token: string, body: Record<string, unknown>, ctx: Upst
 
 async function modelDiscoveryKey(request: FastifyRequest, provider?: ProviderId) {
   const key = request.apiKey!
-  if (provider !== 'antigravity' && !(provider == null && key.allowedProviders?.length === 1 && key.allowedProviders[0] === 'antigravity')) return key
-  const models = await cachedAntigravityModels(key.accountGroupId)
-  return models == null ? key : { ...key, providerModels: { antigravity: models } }
+  const providers = provider ? [provider] : key.allowedProviders ?? ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok', 'sub2api']
+  const catalog = await cachedAccountCatalogs(key.accountGroupId, providers)
+  if (providers.includes('antigravity')) {
+    const models = await cachedAntigravityModels(key.accountGroupId)
+    if (models != null) catalog.providerModels.antigravity = models
+  }
+  return { ...key, ...catalog }
 }
 
 function sendAntigravityInputTokens(request: FastifyRequest, reply: FastifyReply): void {

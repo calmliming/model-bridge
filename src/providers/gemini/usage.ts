@@ -1,4 +1,5 @@
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
+import { createGeminiResponseTracker } from './responseSignal'
 
 interface GeminiUsageMetadata {
   promptTokenCount?: number
@@ -29,13 +30,16 @@ export function parseJsonUsage(body: unknown): UsageData {
  */
 export function createStreamParser() {
   const usage = emptyUsage()
+  const tracker = createGeminiResponseTracker()
   return {
     feed(event: unknown): void {
+      tracker.feed(event)
       const u = (event as { usageMetadata?: GeminiUsageMetadata } | null | undefined)?.usageMetadata
       if (u) Object.assign(usage, mapUsage(u))
     },
     result(): UsageData {
       return { ...usage }
     },
+    failure: tracker.failure,
   }
 }

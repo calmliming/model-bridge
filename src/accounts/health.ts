@@ -75,6 +75,7 @@ export async function accountHealth(
      FROM usage_logs
      WHERE account_id = ANY($1) AND ts >= $2
        AND error_code IS DISTINCT FROM 'client_disconnected'
+       AND COALESCE(error_code, '') NOT LIKE 'gemini_policy_%'
      GROUP BY account_id`,
     [accountIds, since],
   )

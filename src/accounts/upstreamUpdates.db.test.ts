@@ -29,6 +29,8 @@ import { accountHealth } from './health'
 import { createApiKey, findApiKeyBySecret } from '../keys/manager'
 import { cachedAntigravityModels } from './antigravityModels'
 import { setAccountGroups } from './groups'
+import { cachedAccountCatalogs, catalogSourceKey } from './modelCatalog'
+import { channelHealth, DEFAULT_HEALTH_SETTINGS, saveHealthSettings } from '../usage/channelHealth'
 
 describe.runIf(database)('upstream update database regressions', () => {
   beforeAll(async () => {
@@ -113,5 +115,50 @@ describe.runIf(database)('upstream update database regressions', () => {
     expect(await cachedAntigravityModels(first.id)).toContain('gemini-private-test')
     expect(await cachedAntigravityModels(second.id)).toEqual([])
     expect((await cachedAntigravityModels(null)) ?? []).not.toContain('gemini-private-test')
+  })
+
+  it('isolates dynamic catalogs by current pool and excludes disabled or reconfigured accounts', async () => {
+    const first = await createGroup({ name: 'catalog-first' })
+    const second = await createGroup({ name: 'catalog-second' })
+    const id = randomUUID()
+    await db.insert(accounts).values({ id, name: 'dynamic', provider: 'openai', metadata: { modelCatalog: {
+      version: 1, sourceKey: catalogSourceKey('openai', null), syncedAt: Date.now(), models: [{ id: 'gpt-private-model', context_window: 100000 }],
+    } } })
+    await setAccountGroups(id, [first.id])
+    expect((await cachedAccountCatalogs(first.id, ['openai'])).providerModels.openai).toEqual(['gpt-private-model'])
+    expect((await cachedAccountCatalogs(second.id, ['openai'])).providerModels.openai).toEqual([])
+    expect((await cachedAccountCatalogs(null, ['openai'])).providerModels.openai).not.toContain('gpt-private-model')
+    await disableAccount(id)
+    expect((await cachedAccountCatalogs(first.id, ['openai'])).providerModels.openai).toEqual([])
+    await pool.query("UPDATE accounts SET status = 'active', proxy_url = 'https://example.com' WHERE id = $1", [id])
+    expect((await cachedAccountCatalogs(first.id, ['openai'])).catalogModels.openai).toBeUndefined()
+  })
+
+  it('aggregates SQL percentiles and excludes client/policy outcomes without duplicating group memberships', async () => {
+    const first = await createGroup({ name: 'health-first' })
+    const second = await createGroup({ name: 'health-second' })
+    const id = randomUUID(), now = Date.now()
+    await db.insert(accounts).values({ id, name: 'Health account', provider: 'gemini' })
+    await setAccountGroups(id, [first.id, second.id])
+    await saveHealthSettings(DEFAULT_HEALTH_SETTINGS)
+    await pool.query(`INSERT INTO usage_logs (id, ts, api_key_id, account_id, provider, model, status, first_token_ms, latency_ms, error_code, upstream_status)
+      SELECT $1 || '-' || i, $2::bigint - 1000, 'test-key', $1, 'gemini', 'gemini-health-test',
+        CASE WHEN i <= 24 THEN 'success' ELSE 'error' END,
+        CASE WHEN i <= 24 THEN 1000 ELSE NULL END, 5000,
+        CASE WHEN i <= 24 THEN NULL WHEN i <= 27 THEN 'gemini_upstream_UNAVAILABLE'
+          WHEN i <= 29 THEN 'gemini_policy_SAFETY' WHEN i <= 31 THEN 'client_disconnected' ELSE 'invalid_request_error' END,
+        CASE WHEN i >= 32 THEN 400 ELSE 200 END
+      FROM generate_series(1,33) i`, [id, now])
+    for (const groupBy of ['account', 'provider', 'model'] as const) {
+      const result = await channelHealth({ hours: 24, groupBy, groupId: first.id }, now)
+      expect(result.rows).toHaveLength(1)
+      expect(result.rows[0]).toMatchObject({ requests: 33, eligible: 27, failures: 3, success: 24,
+        excluded: 6, canceled: 2, policy: 2, requestErrors: 2, ttftP95Ms: 1000, latencyP95Ms: 5000, ttftSamples: 24, state: 'warning' })
+      expect(result.alerts).toHaveLength(1)
+      expect(result.trend[0]).toMatchObject({ requests: 33, failures: 3, excluded: 6 })
+    }
+    expect((await channelHealth({ hours: 24, groupBy: 'account', groupId: first.id, provider: 'openai' }, now)).rows).toEqual([])
+    await saveHealthSettings({ ...DEFAULT_HEALTH_SETTINGS, errorRatePercent: 20 })
+    expect((await channelHealth({ hours: 24, groupBy: 'account', groupId: first.id }, now)).alerts).toEqual([])
   })
 })

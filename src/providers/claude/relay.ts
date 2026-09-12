@@ -19,6 +19,8 @@ const ANTHROPIC_BETAS = [
   'prompt-caching-scope-2026-01-05',
   'effort-2025-11-24',
   'context-management-2025-06-27',
+  // Messages may include system control entries with their own output_config.
+  'mid-conversation-output-config-2026-07-01',
   'extended-cache-ttl-2025-04-11',
 ] as const
 const ANTHROPIC_BETA = ANTHROPIC_BETAS.join(',')

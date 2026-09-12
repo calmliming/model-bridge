@@ -59,6 +59,8 @@ type MenuIcon = keyof typeof menuIconPaths
 const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = [
   { to: '/overview', key: 'overview', label: '仪表盘', icon: 'overview' },
   { to: '/models', key: 'models', label: '模型广场', icon: 'models' },
+  { to: '/model-catalog', key: 'model-catalog', label: '动态模型', icon: 'models' },
+  { to: '/channel-health', key: 'channel-health', label: '渠道健康', icon: 'stats' },
   { to: '/accounts', key: 'accounts', label: '上游账户', icon: 'accounts' },
   { to: '/account-groups', key: 'account-groups', label: '分组管理', icon: 'account-groups' },
   { to: '/keys', key: 'keys', label: 'API Keys', icon: 'keys' },
@@ -75,6 +77,8 @@ const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = 
 const titleMap: Record<string, string> = {
   overview: '仪表盘',
   models: '模型广场',
+  'model-catalog': '动态模型目录',
+  'channel-health': '渠道健康',
   accounts: '上游账户',
   'account-groups': '分组管理',
   keys: 'API Keys',
@@ -91,6 +95,8 @@ const titleMap: Record<string, string> = {
 const subtitleMap: Record<string, string> = {
   overview: '欢迎回来！这里是系统运行概览。',
   models: '浏览各服务商可用模型、能力分类与计费价格。',
+  'model-catalog': '同步账号模型目录，查看上游报告的能力。',
+  'channel-health': '观察上游错误率、延迟和当前告警。',
   accounts: '管理上游服务账号、可用状态和调度能力。',
   'account-groups': '维护账号分组、计费倍率和组内成员权重。',
   keys: '管理中转入口、额度和访问范围。',
