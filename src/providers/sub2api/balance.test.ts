@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchSub2ApiBalance,
   parseSub2ApiBalanceResponse,
-  sub2ApiBalanceFromMetadata,
 } from './balance'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -183,53 +182,5 @@ describe('fetchSub2ApiBalance', () => {
     await expect(fetchSub2ApiBalance('secret-key', 'https://upstream.example')).rejects.toThrow(
       'Sub2API 余额查询失败：/v1/usage 网络请求失败（ECONNREFUSED）',
     )
-  })
-})
-
-describe('sub2ApiBalanceFromMetadata', () => {
-  it('keeps only validated snapshot fields and preserves zero', () => {
-    expect(sub2ApiBalanceFromMetadata({
-      sub2apiBalance: {
-        updatedAt: '1700000000123',
-        totalBalance: '100',
-        used: '40',
-        remaining: 0,
-        resetAt: '1700001000000',
-        expiresAt: '1700002000000',
-        hasSubscription: true,
-        planName: 'Pro',
-        currency: 'USD',
-        mode: 'quota_limited',
-        endpoint: '/v1/usage',
-        ignored: 'secret',
-      },
-    })).toEqual({
-      updatedAt: 1_700_000_000_123,
-      totalBalance: 100,
-      used: 40,
-      remaining: 0,
-      resetAt: 1_700_001_000_000,
-      expiresAt: 1_700_002_000_000,
-      hasSubscription: true,
-      planName: 'Pro',
-      currency: 'USD',
-      mode: 'quota_limited',
-      endpoint: '/v1/usage',
-    })
-  })
-
-  it('accepts a persisted official mode without a monetary amount', () => {
-    expect(sub2ApiBalanceFromMetadata({
-      sub2apiBalance: { updatedAt: 1_700_000_000_000, mode: 'quota_limited' },
-    })).toEqual({ updatedAt: 1_700_000_000_000, mode: 'quota_limited' })
-  })
-
-  it.each([
-    {},
-    { sub2apiBalance: { updatedAt: 0, remaining: 1 } },
-    { sub2apiBalance: { updatedAt: Number.POSITIVE_INFINITY, remaining: 1 } },
-    { sub2apiBalance: { updatedAt: 1_700_000_000_000, mode: 'unknown' } },
-  ])('rejects invalid metadata snapshots', (metadata) => {
-    expect(sub2ApiBalanceFromMetadata(metadata)).toBeNull()
   })
 })

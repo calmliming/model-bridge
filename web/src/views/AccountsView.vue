@@ -24,18 +24,28 @@ interface AccountQuotaSnapshot {
   resetCredits?: number | null
 }
 
-interface Sub2ApiBalanceSnapshot {
+/**
+ * Monetary balance reported by a balance provider (Sub2API gateway or DeepSeek
+ * platform wallet). Providers without such an endpoint report `quota` windows
+ * instead.
+ */
+interface AccountBalanceSnapshot {
   totalBalance?: number
   used?: number
   remaining?: number
+  /** Granted (promotional) credit still available, DeepSeek only. */
+  granted?: number
   resetAt?: number
   expiresAt?: number
   unlimited?: boolean
   hasSubscription?: boolean
+  /** False when the upstream wallet is exhausted (DeepSeek `is_available`). */
+  available?: boolean
   planName?: string
   currency?: string
   mode?: string
   endpoint?: string
+  provider?: string
   updatedAt: number
 }
 
@@ -68,7 +78,7 @@ interface Account {
   notes: string | null
   createdAt: number
   quota: AccountQuotaSnapshot | null
-  sub2apiBalance: Sub2ApiBalanceSnapshot | null
+  balance: AccountBalanceSnapshot | null
   // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
   autopausePercent: number | null
   // Set when the refresh token permanently failed and the account was auto-disabled.
@@ -94,6 +104,11 @@ interface GroupInfo {
 }
 
 type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'sub2api'
+// Providers whose credential can query a monetary balance, so the "余额 / 配额"
+// column shows the wallet cell instead of quota windows. Mirrors
+// `BALANCE_PROVIDERS` in src/providers/balance.ts (asserted by web/balance.test.ts).
+const BALANCE_PROVIDER_IDS = ['sub2api', 'deepseek'] as const
+type BalanceProvider = (typeof BALANCE_PROVIDER_IDS)[number]
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 
 interface AccountGroup {
@@ -127,8 +142,8 @@ const loading = ref(true)
 const searchQuery = ref('')
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
-const sub2ApiBalanceRefreshingIds = ref<Set<string>>(new Set())
-const sub2ApiBalanceErrors = ref<Record<string, string>>({})
+const balanceRefreshingIds = ref<Set<string>>(new Set())
+const balanceErrors = ref<Record<string, string>>({})
 const resettingQuotaId = ref<string | null>(null)
 const savingWeightId = ref<string | null>(null)
 const savingConcurrencyId = ref<string | null>(null)
@@ -186,10 +201,10 @@ const apiKeyInput = ref('')
 const baseUrlInput = ref('')
 const busy = ref(false)
 let refreshTimer: number | null = null
-const sub2ApiBalanceLastAttemptAt = new Map<string, number>()
-const SUB2API_BALANCE_MAX_AGE_MS = 5 * 60_000
-const SUB2API_BALANCE_RETRY_DELAY_MS = 5 * 60_000
-let sub2ApiBalanceRefreshRunning = false
+const balanceLastAttemptAt = new Map<string, number>()
+const BALANCE_MAX_AGE_MS = 5 * 60_000
+const BALANCE_RETRY_DELAY_MS = 5 * 60_000
+let balanceRefreshRunning = false
 let viewUnmounted = false
 
 // Batch import modal state.
@@ -348,7 +363,12 @@ function isFiniteBalance(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function formatSub2ApiAmount(value: number | null | undefined, currency?: string): string {
+/** True when this provider's credential can query a monetary balance. */
+function usesBalanceProvider(provider: string): provider is BalanceProvider {
+  return (BALANCE_PROVIDER_IDS as readonly string[]).includes(provider)
+}
+
+function formatBalanceAmount(value: number | null | undefined, currency?: string): string {
   if (!isFiniteBalance(value)) return '—'
   const unit = currency?.trim().toUpperCase() || 'USD'
   try {
@@ -364,7 +384,7 @@ function formatSub2ApiAmount(value: number | null | undefined, currency?: string
   }
 }
 
-function sub2ApiBalanceStatus(snapshot: Sub2ApiBalanceSnapshot): TagType {
+function balanceStatus(snapshot: AccountBalanceSnapshot): TagType {
   if (snapshot.unlimited) return 'success'
   if (!isFiniteBalance(snapshot.remaining)) return 'default'
   if (snapshot.remaining <= 0) return 'error'
@@ -378,7 +398,7 @@ function sub2ApiBalanceStatus(snapshot: Sub2ApiBalanceSnapshot): TagType {
   return 'success'
 }
 
-function sub2ApiModeLabel(snapshot: Sub2ApiBalanceSnapshot): string | null {
+function balanceModeLabel(snapshot: AccountBalanceSnapshot): string | null {
   if (snapshot.hasSubscription) return '订阅'
   if (snapshot.mode === 'unrestricted') return '钱包'
   if (snapshot.mode === 'quota_limited') return 'Key 限额'
@@ -526,35 +546,36 @@ function renderQuotaWindow(window: AccountQuotaWindow) {
   ])
 }
 
-function sub2ApiBalanceRefreshError(row: Account): string | null {
-  return row.provider === 'sub2api' ? sub2ApiBalanceErrors.value[row.id] ?? null : null
+function balanceRefreshError(row: Account): string | null {
+  return usesBalanceProvider(row.provider) ? balanceErrors.value[row.id] ?? null : null
 }
 
-function isSub2ApiBalanceRefreshing(row: Account): boolean {
-  return row.provider === 'sub2api' && sub2ApiBalanceRefreshingIds.value.has(row.id)
+function isBalanceRefreshing(row: Account): boolean {
+  return usesBalanceProvider(row.provider) && balanceRefreshingIds.value.has(row.id)
 }
 
-function setSub2ApiBalanceError(id: string, error: string | null) {
-  const next = { ...sub2ApiBalanceErrors.value }
+function setBalanceError(id: string, error: string | null) {
+  const next = { ...balanceErrors.value }
   if (error) next[id] = error
   else delete next[id]
-  sub2ApiBalanceErrors.value = next
+  balanceErrors.value = next
 }
 
-function applySub2ApiBalanceRefreshResults(ids: string[], results: BatchQuotaRefreshResult[]) {
+function applyBalanceRefreshResults(ids: string[], results: BatchQuotaRefreshResult[]) {
   const resultsById = new Map(results.map((result) => [result.id, result]))
   for (const id of ids) {
     const result = resultsById.get(id)
-    setSub2ApiBalanceError(
+    setBalanceError(
       id,
-      result?.success ? null : result?.error || result?.message || '第三方站点未返回余额查询结果',
+      result?.success ? null : result?.error || result?.message || '上游未返回余额查询结果',
     )
   }
 }
 
 function renderQuotaRefresh(row: Account, updatedAt?: number | null, showError = true) {
-  const refreshing = refreshingQuotaId.value === row.id || isSub2ApiBalanceRefreshing(row)
-  const refreshError = sub2ApiBalanceRefreshError(row)
+  const refreshing = refreshingQuotaId.value === row.id || isBalanceRefreshing(row)
+  const refreshError = balanceRefreshError(row)
+  const actionLabel = usesBalanceProvider(row.provider) ? '刷新余额' : '刷新配额'
   return h(
     'div',
     { class: 'quota-refresh-wrap' },
@@ -569,8 +590,8 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null, showError =
           size: 'tiny',
           quaternary: true,
           circle: true,
-          title: row.provider === 'sub2api' ? '刷新余额' : '刷新配额',
-          'aria-label': row.provider === 'sub2api' ? '刷新余额' : '刷新配额',
+          title: actionLabel,
+          'aria-label': actionLabel,
           // Don't use `loading`: UiButton renders its own generic spinner *next
           // to* the slot icon. Instead spin the ↻ glyph itself and just disable
           // the button while the request is in flight.
@@ -609,18 +630,34 @@ function renderQuotaRefresh(row: Account, updatedAt?: number | null, showError =
   )
 }
 
-function renderSub2ApiBalance(row: Account) {
-  const balance = row.sub2apiBalance
+/** Maps a provider id to the balance endpoint label shown in the cell. */
+function balanceProviderLabel(provider: string): string {
+  if (provider === 'deepseek') return 'DeepSeek'
+  if (provider === 'sub2api') return 'Sub2API'
+  return provider
+}
+
+/**
+ * Renders the monetary wallet of a balance provider (Sub2API gateway credit or
+ * DeepSeek platform balance). Providers without such an endpoint fall back to
+ * the quota-window cell, so no account is left without a refresh action.
+ */
+function renderAccountBalance(row: Account) {
+  const balance = row.balance
   if (!balance) {
-    const refreshError = sub2ApiBalanceRefreshError(row)
-    const refreshing = refreshingQuotaId.value === row.id || isSub2ApiBalanceRefreshing(row)
-    const label = refreshing ? '正在查询第三方余额...' : refreshError ? '查询失败' : '等待查询'
+    const refreshError = balanceRefreshError(row)
+    const refreshing = refreshingQuotaId.value === row.id || isBalanceRefreshing(row)
+    const label = refreshing
+      ? '正在查询上游余额...'
+      : refreshError
+        ? '查询失败'
+        : `等待查询${balanceProviderLabel(row.provider)}余额`
     return h('div', { class: 'quota-cell' }, [
       h('div', { class: 'quota-line' }, [
         h(
           'span',
           {
-            class: ['sub2api-balance-state', { 'is-error': Boolean(refreshError) }],
+            class: ['upstream-balance-state', { 'is-error': Boolean(refreshError) }],
             title: refreshError ?? undefined,
           },
           label,
@@ -630,36 +667,44 @@ function renderSub2ApiBalance(row: Account) {
     ])
   }
 
-  const status = sub2ApiBalanceStatus(balance)
+  const status = balanceStatus(balance)
   const hasRemaining = isFiniteBalance(balance.remaining)
+  // An exhausted wallet keeps its amount visible, but the label makes it clear
+  // that the upstream reports the account as unavailable.
   const primaryText = balance.unlimited
     ? '不限额'
     : hasRemaining
-      ? `剩余 ${formatSub2ApiAmount(balance.remaining, balance.currency)}`
+      ? `剩余 ${formatBalanceAmount(balance.remaining, balance.currency)}`
       : '上游未返回金额'
+  const displayText = balance.available === false ? `余额不足 · ${primaryText}` : primaryText
   const details: string[] = []
-  const modeLabel = sub2ApiModeLabel(balance)
+  const modeLabel = balanceModeLabel(balance)
   if (modeLabel) details.push(modeLabel)
-  if (balance.planName && balance.planName !== '钱包余额') details.push(balance.planName)
+  if (balance.planName && !['钱包余额', 'DeepSeek 钱包余额'].includes(balance.planName)) {
+    details.push(balance.planName)
+  }
   if (isFiniteBalance(balance.totalBalance)) {
-    details.push(`总额 ${formatSub2ApiAmount(balance.totalBalance, balance.currency)}`)
+    details.push(`总额 ${formatBalanceAmount(balance.totalBalance, balance.currency)}`)
+  }
+  if (isFiniteBalance(balance.granted)) {
+    details.push(`赠送 ${formatBalanceAmount(balance.granted, balance.currency)}`)
   }
   if (isFiniteBalance(balance.used)) {
-    details.push(`已用 ${formatSub2ApiAmount(balance.used, balance.currency)}`)
+    details.push(`已用 ${formatBalanceAmount(balance.used, balance.currency)}`)
   }
   if (isFiniteBalance(balance.resetAt)) details.push(`重置 ${formatShortTime(balance.resetAt)}`)
   if (isFiniteBalance(balance.expiresAt)) details.push(`到期 ${formatShortTime(balance.expiresAt)}`)
   const detailText = details.join(' · ')
 
-  return h('div', { class: 'quota-cell sub2api-balance-cell' }, [
+  return h('div', { class: 'quota-cell upstream-balance-cell' }, [
     h('div', { class: 'quota-line' }, [
       h(
         'span',
-        { class: ['sub2api-balance-remaining', `is-${status}`] },
-        primaryText,
+        { class: ['upstream-balance-remaining', `is-${status}`] },
+        displayText,
       ),
       detailText
-        ? h('span', { class: 'sub2api-balance-detail', title: detailText }, detailText)
+        ? h('span', { class: 'upstream-balance-detail', title: detailText }, detailText)
         : null,
     ]),
     renderQuotaRefresh(row, balance.updatedAt),
@@ -680,7 +725,7 @@ function renderResetCredits(row: Account) {
 }
 
 function renderQuota(row: Account) {
-  if (row.provider === 'sub2api') return renderSub2ApiBalance(row)
+  if (usesBalanceProvider(row.provider)) return renderAccountBalance(row)
   const quota = row.quota
   const credits = renderResetCredits(row)
   if (!quota || !quota.windows.length) {
@@ -800,26 +845,26 @@ function renderGroupCell(row: Account) {
   })
 }
 
-function shouldRefreshSub2ApiBalance(account: Account, now: number): boolean {
-  if (account.provider !== 'sub2api') return false
-  const updatedAt = account.sub2apiBalance?.updatedAt
-  if (updatedAt && now - updatedAt < SUB2API_BALANCE_MAX_AGE_MS) return false
-  const lastAttemptAt = sub2ApiBalanceLastAttemptAt.get(account.id)
-  return lastAttemptAt == null || now - lastAttemptAt >= SUB2API_BALANCE_RETRY_DELAY_MS
+function shouldRefreshAccountBalance(account: Account, now: number): boolean {
+  if (!usesBalanceProvider(account.provider)) return false
+  const updatedAt = account.balance?.updatedAt
+  if (updatedAt && now - updatedAt < BALANCE_MAX_AGE_MS) return false
+  const lastAttemptAt = balanceLastAttemptAt.get(account.id)
+  return lastAttemptAt == null || now - lastAttemptAt >= BALANCE_RETRY_DELAY_MS
 }
 
-async function refreshStaleSub2ApiBalances(loadedAccounts: Account[]) {
-  if (sub2ApiBalanceRefreshRunning || viewUnmounted) return
+async function refreshStaleAccountBalances(loadedAccounts: Account[]) {
+  if (balanceRefreshRunning || viewUnmounted) return
 
   const now = Date.now()
-  const targets = loadedAccounts.filter((account) => shouldRefreshSub2ApiBalance(account, now))
+  const targets = loadedAccounts.filter((account) => shouldRefreshAccountBalance(account, now))
   if (!targets.length) return
 
-  sub2ApiBalanceRefreshRunning = true
-  sub2ApiBalanceRefreshingIds.value = new Set(targets.map((account) => account.id))
+  balanceRefreshRunning = true
+  balanceRefreshingIds.value = new Set(targets.map((account) => account.id))
   for (const account of targets) {
-    sub2ApiBalanceLastAttemptAt.set(account.id, now)
-    setSub2ApiBalanceError(account.id, null)
+    balanceLastAttemptAt.set(account.id, now)
+    setBalanceError(account.id, null)
   }
 
   try {
@@ -827,14 +872,14 @@ async function refreshStaleSub2ApiBalances(loadedAccounts: Account[]) {
       ids: targets.map((account) => account.id),
     })
     const results: BatchQuotaRefreshResult[] = Array.isArray(data?.results) ? data.results : []
-    applySub2ApiBalanceRefreshResults(targets.map((account) => account.id), results)
+    applyBalanceRefreshResults(targets.map((account) => account.id), results)
     if (!viewUnmounted) await load()
   } catch (e) {
-    const error = errMsg(e, '查询第三方余额失败')
-    for (const account of targets) setSub2ApiBalanceError(account.id, error)
+    const error = errMsg(e, '查询上游余额失败')
+    for (const account of targets) setBalanceError(account.id, error)
   } finally {
-    sub2ApiBalanceRefreshingIds.value = new Set()
-    sub2ApiBalanceRefreshRunning = false
+    balanceRefreshingIds.value = new Set()
+    balanceRefreshRunning = false
   }
 }
 
@@ -844,7 +889,7 @@ async function load() {
     const { data } = await api.get('/admin/accounts')
     accounts.value = data.accounts
     pruneSelectedAccounts()
-    void refreshStaleSub2ApiBalances(accounts.value)
+    void refreshStaleAccountBalances(accounts.value)
   } catch (e) {
     message.error(errMsg(e))
   } finally {
@@ -1124,24 +1169,24 @@ async function batchTestSelected() {
 async function batchRefreshQuotaSelected() {
   const ids = requireSelectedIds()
   if (!ids) return
-  const sub2ApiIds = selectedAccounts.value
-    .filter((account) => account.provider === 'sub2api')
+  const balanceIds = selectedAccounts.value
+    .filter((account) => usesBalanceProvider(account.provider))
     .map((account) => account.id)
   const attemptedAt = Date.now()
-  for (const id of sub2ApiIds) {
-    sub2ApiBalanceLastAttemptAt.set(id, attemptedAt)
-    setSub2ApiBalanceError(id, null)
+  for (const id of balanceIds) {
+    balanceLastAttemptAt.set(id, attemptedAt)
+    setBalanceError(id, null)
   }
   bulkBusy.value = true
   try {
     const { data } = await api.post('/admin/accounts/batch-quota-refresh', { ids })
     const results: BatchQuotaRefreshResult[] = Array.isArray(data?.results) ? data.results : []
-    applySub2ApiBalanceRefreshResults(sub2ApiIds, results)
+    applyBalanceRefreshResults(balanceIds, results)
     notifyBatchResult('批量刷新余额/配额', data)
     await load()
   } catch (e) {
     const error = errMsg(e, '批量刷新余额/配额失败')
-    for (const id of sub2ApiIds) setSub2ApiBalanceError(id, error)
+    for (const id of balanceIds) setBalanceError(id, error)
     message.error(error)
   } finally {
     bulkBusy.value = false
@@ -1439,14 +1484,18 @@ async function testConnectivity(row: Account) {
 
 async function refreshQuota(row: Account) {
   refreshingQuotaId.value = row.id
-  const isSub2Api = row.provider === 'sub2api'
-  if (isSub2Api) {
-    sub2ApiBalanceLastAttemptAt.set(row.id, Date.now())
-    setSub2ApiBalanceError(row.id, null)
+  const isBalanceAccount = usesBalanceProvider(row.provider)
+  // Balance providers answer with a wallet instead of quota windows, so the
+  // progress/error text and the refresh state differ from the quota providers.
+  const label = isBalanceAccount ? '余额' : '配额'
+  if (isBalanceAccount) {
+    balanceLastAttemptAt.set(row.id, Date.now())
+    setBalanceError(row.id, null)
   }
   try {
     // OpenAI OAuth accounts have a dedicated endpoint that also returns the
-    // reset-credit balance. Sub2API uses the generic route backed by /v1/usage.
+    // reset-credit balance. Balance providers use the generic route, which is
+    // backed by /v1/usage for Sub2API and /user/balance for DeepSeek.
     if (row.provider === 'openai') {
       const { data } = await api.get(`/admin/accounts/${row.id}/openai/quota`)
       if (data.success) {
@@ -1458,25 +1507,18 @@ async function refreshQuota(row: Account) {
       return
     }
     const { data } = await api.post(`/admin/accounts/${row.id}/quota/refresh`)
-    if (data.success && isSub2Api) {
-      setSub2ApiBalanceError(row.id, null)
-      message.success('余额已更新')
-      await load()
-      return
-    }
     if (data.success) {
-      message.success('配额已刷新')
+      if (isBalanceAccount) setBalanceError(row.id, null)
+      message.success(`${label}已更新`)
       await load()
       return
     }
-    const label = row.provider === 'sub2api' ? '余额' : '配额'
     const error = data.message || `刷新${label}失败`
-    if (isSub2Api) setSub2ApiBalanceError(row.id, error)
+    if (isBalanceAccount) setBalanceError(row.id, error)
     message.error(error)
   } catch (e) {
-    const label = row.provider === 'sub2api' ? '余额' : '配额'
     const error = errMsg(e, `刷新${label}失败`)
-    if (isSub2Api) setSub2ApiBalanceError(row.id, error)
+    if (isBalanceAccount) setBalanceError(row.id, error)
     message.error(error)
   } finally {
     refreshingQuotaId.value = null
@@ -1641,14 +1683,16 @@ function columnsForProvider(provider: string): TableColumn<Account>[] {
   return columns.value
     .filter((column) => column.key !== 'tokenExpiresAt' || OAUTH_TOKEN_PROVIDERS.has(provider as Provider))
     .map((column) =>
-      provider === 'sub2api' && column.key === 'quota'
+      // The wallet cell is a short summary line, so it needs less room than the
+      // quota-window cell it replaces.
+      usesBalanceProvider(provider) && column.key === 'quota'
         ? { ...column, minWidth: 190 }
         : column,
     )
 }
 
 function tableScrollWidth(provider: string): number {
-  if (provider === 'sub2api') return 1780
+  if (usesBalanceProvider(provider)) return 1780
   return OAUTH_TOKEN_PROVIDERS.has(provider as Provider) ? 2070 : 1920
 }
 
@@ -2458,7 +2502,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-:deep(.sub2api-balance-remaining) {
+:deep(.upstream-balance-remaining) {
   color: #18a058;
   font-size: 13px;
   font-weight: 700;
@@ -2466,19 +2510,19 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:deep(.sub2api-balance-remaining.is-error) {
+:deep(.upstream-balance-remaining.is-error) {
   color: #d03050;
 }
 
-:deep(.sub2api-balance-remaining.is-warning) {
+:deep(.upstream-balance-remaining.is-warning) {
   color: #d97706;
 }
 
-:deep(.sub2api-balance-remaining.is-default) {
+:deep(.upstream-balance-remaining.is-default) {
   color: #64748b;
 }
 
-:deep(.sub2api-balance-detail) {
+:deep(.upstream-balance-detail) {
   overflow: hidden;
   color: rgba(15, 23, 42, 0.56);
   font-size: 11px;
@@ -2487,7 +2531,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .sub2api-balance-detail {
+:global(.dark) .upstream-balance-detail {
   color: rgba(226, 232, 240, 0.62);
 }
 
@@ -2598,12 +2642,12 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-:deep(.sub2api-balance-state) {
+:deep(.upstream-balance-state) {
   color: rgba(15, 23, 42, 0.52);
   font-size: 12px;
 }
 
-:deep(.sub2api-balance-state.is-error),
+:deep(.upstream-balance-state.is-error),
 :deep(.quota-refresh-error) {
   color: #d03050;
 }
@@ -2616,11 +2660,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .sub2api-balance-state {
+:global(.dark) .upstream-balance-state {
   color: rgba(226, 232, 240, 0.62);
 }
 
-:global(.dark) .sub2api-balance-state.is-error,
+:global(.dark) .upstream-balance-state.is-error,
 :global(.dark) .quota-refresh-error {
   color: #f87171;
 }

@@ -1,6 +1,17 @@
 import { normalizeSub2ApiBaseUrl } from './relay'
 import { fetchWithConnectTimeout } from '../../http/upstream'
-import { UnsafeUpstreamUrlError } from '../../http/urlGuard'
+import {
+  balanceQueryFailureMessage,
+  balanceRequestHeaders,
+  finiteNumber,
+  firstNumber,
+  formatBalanceInfo,
+  objectValue,
+  parseTimestamp,
+  reconcileBalanceAmounts,
+  type AccountBalanceInfo,
+  type AccountBalanceSnapshot,
+} from '../balance'
 
 const BALANCE_TIMEOUT_MS = 15_000
 
@@ -18,67 +29,8 @@ export const SUB2API_BALANCE_ENDPOINTS = [
   '/v1/balance',
 ] as const
 
-export interface Sub2ApiBalanceInfo {
-  /** Total credit/limit in the upstream billing currency. */
-  totalBalance?: number
-  /** Amount already used, when the upstream reports it. */
-  used?: number
-  /** Remaining credit/limit. */
-  remaining?: number
-  /** Optional quota reset timestamp (epoch milliseconds). */
-  resetAt?: number
-  /** Optional key/subscription expiration timestamp (epoch milliseconds). */
-  expiresAt?: number
-  /** True when the upstream subscription explicitly reports no monetary limit. */
-  unlimited?: boolean
-  /** Whether the upstream reports an active subscription. */
-  hasSubscription?: boolean
-  /** Human-readable upstream plan name. */
-  planName?: string
-  /** Currency returned by the upstream (normally USD). */
-  currency?: string
-  /** Upstream response mode, for example `quota_limited`. */
-  mode?: string
-  /** Endpoint that returned the snapshot (never contains credentials). */
-  endpoint?: string
-}
-
-export interface Sub2ApiBalanceSnapshot extends Sub2ApiBalanceInfo {
-  updatedAt: number
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
-  if (typeof value !== 'string' || value.trim() === '') return undefined
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-function objectValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function firstNumber(...values: unknown[]): number | undefined {
-  for (const value of values) {
-    const parsed = finiteNumber(value)
-    if (parsed !== undefined) return parsed
-  }
-  return undefined
-}
-
-function parseTimestamp(value: unknown): number | undefined {
-  const numeric = finiteNumber(value)
-  if (numeric !== undefined && numeric > 0) {
-    return numeric < 10_000_000_000 ? Math.trunc(numeric * 1000) : Math.trunc(numeric)
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return undefined
-}
+export type Sub2ApiBalanceInfo = AccountBalanceInfo
+export type Sub2ApiBalanceSnapshot = AccountBalanceSnapshot
 
 function parseSubscriptionBalance(subscription: Record<string, unknown>): {
   remaining?: number
@@ -233,15 +185,7 @@ export function parseSub2ApiBalanceResponse(
     parseTimestamp(data.expires_at) ??
     parseTimestamp(subscription?.expires_at)
 
-  if (result.totalBalance !== undefined && result.remaining !== undefined && result.used === undefined) {
-    result.used = result.totalBalance - result.remaining
-  }
-  if (result.totalBalance !== undefined && result.used !== undefined && result.remaining === undefined) {
-    result.remaining = result.totalBalance - result.used
-  }
-  if (result.used !== undefined && result.remaining !== undefined && result.totalBalance === undefined) {
-    result.totalBalance = result.used + result.remaining
-  }
+  reconcileBalanceAmounts(result)
 
   if (
     result.remaining === undefined &&
@@ -258,33 +202,6 @@ export function parseSub2ApiBalanceResponse(
   return result
 }
 
-function balanceHeaders(apiKey: string): Record<string, string> {
-  return {
-    authorization: `Bearer ${apiKey}`,
-    'x-api-key': apiKey,
-    accept: 'application/json',
-  }
-}
-
-function queryFailureMessage(error: unknown, endpoint: string): string {
-  if (error instanceof UnsafeUpstreamUrlError) {
-    return `${endpoint} 被上游地址安全策略拦截：${error.message}`
-  }
-  if (error instanceof Error && error.name === 'AbortError') {
-    return `${endpoint} 请求超时（${BALANCE_TIMEOUT_MS / 1000}s）`
-  }
-  const cause = error instanceof Error
-    ? (error as Error & { cause?: { code?: unknown; message?: unknown } }).cause
-    : undefined
-  if (cause?.message === 'unexpected redirect') {
-    return `${endpoint} 返回重定向，请将 Base URL 改为最终 HTTPS 地址`
-  }
-  if (typeof cause?.code === 'string' && /^[A-Z0-9_]+$/.test(cause.code)) {
-    return `${endpoint} 网络请求失败（${cause.code}）`
-  }
-  return `${endpoint} 网络请求失败`
-}
-
 /** Queries the upstream account balance without exposing the API key or raw body. */
 export async function fetchSub2ApiBalance(
   apiKey: string,
@@ -296,7 +213,7 @@ export async function fetchSub2ApiBalance(
     try {
       const response = await fetchWithConnectTimeout(`${normalizedBase}${path}`, {
         method: 'GET',
-        headers: balanceHeaders(apiKey),
+        headers: balanceRequestHeaders(apiKey),
         // Never forward either credential header to a redirect target. A
         // canonical Base URL is required for this administrative query.
         redirect: 'error',
@@ -311,7 +228,7 @@ export async function fetchSub2ApiBalance(
       if (parsed) return parsed
       if (path === '/v1/usage') primaryFailure = `${path} 返回了无法识别的余额响应`
     } catch (error) {
-      if (path === '/v1/usage') primaryFailure = queryFailureMessage(error, path)
+      if (path === '/v1/usage') primaryFailure = balanceQueryFailureMessage(error, path, BALANCE_TIMEOUT_MS)
       // A deployment may not expose every compatibility endpoint. Continue
       // without logging response bodies or credentials.
     }
@@ -319,51 +236,4 @@ export async function fetchSub2ApiBalance(
   throw new Error(`Sub2API 余额查询失败：${primaryFailure ?? '上游没有可用的余额接口'}`)
 }
 
-/** Validates the sanitized balance snapshot persisted under account metadata. */
-export function sub2ApiBalanceFromMetadata(metadata: unknown): Sub2ApiBalanceSnapshot | null {
-  const object = objectValue(metadata)
-  const value = objectValue(object?.sub2apiBalance)
-  if (!value) return null
-  const updatedAt = finiteNumber(value.updatedAt)
-  if (updatedAt === undefined || updatedAt <= 0) return null
-  const snapshot: Sub2ApiBalanceSnapshot = { updatedAt: Math.trunc(updatedAt) }
-  for (const key of ['totalBalance', 'used', 'remaining'] as const) {
-    const parsed = finiteNumber(value[key])
-    if (parsed !== undefined) snapshot[key] = parsed
-  }
-  const resetAt = finiteNumber(value.resetAt)
-  if (resetAt !== undefined) snapshot.resetAt = resetAt
-  const expiresAt = finiteNumber(value.expiresAt)
-  if (expiresAt !== undefined) snapshot.expiresAt = expiresAt
-  if (value.unlimited === true) snapshot.unlimited = true
-  if (typeof value.hasSubscription === 'boolean') snapshot.hasSubscription = value.hasSubscription
-  if (typeof value.planName === 'string') snapshot.planName = value.planName
-  if (typeof value.currency === 'string') snapshot.currency = value.currency
-  if (typeof value.mode === 'string') snapshot.mode = value.mode
-  if (typeof value.endpoint === 'string') snapshot.endpoint = value.endpoint
-  if (
-    snapshot.remaining === undefined &&
-    snapshot.totalBalance === undefined &&
-    snapshot.used === undefined &&
-    snapshot.unlimited !== true &&
-    snapshot.mode !== 'unrestricted' &&
-    snapshot.mode !== 'quota_limited'
-  ) {
-    return null
-  }
-  return snapshot
-}
-
-export function formatBalanceInfo(info: Sub2ApiBalanceInfo | null): string {
-  if (!info) return '无法获取余额信息'
-  const parts: string[] = []
-  if (info.unlimited) parts.push('不限额')
-  if (info.remaining !== undefined) parts.push(`剩余: $${info.remaining.toFixed(2)}`)
-  if (info.totalBalance !== undefined) parts.push(`总额: $${info.totalBalance.toFixed(2)}`)
-  if (info.used !== undefined) parts.push(`已用: $${info.used.toFixed(2)}`)
-  if (info.hasSubscription) parts.push('有订阅')
-  if (info.planName) parts.push(`计划: ${info.planName}`)
-  if (info.resetAt) parts.push(`重置: ${new Date(info.resetAt).toLocaleDateString('zh-CN')}`)
-  if (info.expiresAt) parts.push(`到期: ${new Date(info.expiresAt).toLocaleDateString('zh-CN')}`)
-  return parts.length ? parts.join(' | ') : '无余额信息'
-}
+export { formatBalanceInfo }

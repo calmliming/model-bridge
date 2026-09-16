@@ -28,10 +28,13 @@ import {
 } from './scheduler'
 import { PermanentRefreshError } from './refreshErrors'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
+import { fetchSub2ApiBalance } from '../providers/sub2api/balance'
+import { fetchDeepSeekBalance } from '../providers/deepseek/balance'
 import {
-  fetchSub2ApiBalance,
-  type Sub2ApiBalanceSnapshot,
-} from '../providers/sub2api/balance'
+  usesUpstreamBalance,
+  type AccountBalanceInfo,
+  type AccountBalanceSnapshot,
+} from '../providers/balance'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
 import { GROK_MODELS_URL, GROK_USER_AGENT } from '../providers/grok/constants'
 import { fetchWithConnectTimeout } from '../http/upstream'
@@ -61,7 +64,8 @@ export interface AccountTestResult {
   message: string
   latencyMs: number
   checkedAt: number
-  balance?: Sub2ApiBalanceSnapshot
+  /** Monetary balance, for providers that expose one (Sub2API / DeepSeek). */
+  balance?: AccountBalanceSnapshot
 }
 
 export class AccountTestError extends Error {
@@ -206,6 +210,37 @@ async function testDeepSeek(apiKey: string): Promise<ProviderTestOutcome> {
   })
   await assertOk(response)
   return { message: 'DeepSeek Anthropic 端点可访问' }
+}
+
+/**
+ * Reads the wallet of a balance provider. DeepSeek keys are plain API keys, so
+ * its official platform endpoint is queried directly; Sub2API needs the relay's
+ * Base URL on top of the key.
+ */
+function fetchAccountBalance(
+  provider: string,
+  apiKey: string,
+  baseUrl: string | null,
+): Promise<AccountBalanceInfo> {
+  return provider === 'deepseek'
+    ? fetchDeepSeekBalance(apiKey)
+    : fetchSub2ApiBalance(apiKey, baseUrl)
+}
+
+/**
+ * Best-effort balance read used by the connectivity probe. A provider that
+ * cannot report its wallet must not turn a successful probe into a failure.
+ */
+async function fetchAccountBalanceSnapshot(
+  account: AccountRow,
+  accessToken: string,
+): Promise<AccountBalanceSnapshot | null> {
+  try {
+    const info = await fetchAccountBalance(account.provider, accessToken, account.proxyUrl)
+    return { ...info, updatedAt: Date.now(), provider: account.provider }
+  } catch {
+    return null
+  }
 }
 
 async function testXiaomi(apiKey: string): Promise<ProviderTestOutcome> {
@@ -363,6 +398,12 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
     throw err
   }
   const result = await runProviderTest(account, accessToken)
+  // Balance providers store their wallet next to the probe result, so the
+  // column fills in even when the operator only pressed "测试".
+  const snapshot = usesUpstreamBalance(account.provider)
+    ? await fetchAccountBalanceSnapshot(account, accessToken)
+    : null
+  if (snapshot) await updateAccountMetadata(account.id, { upstreamBalance: snapshot })
   const latencyMs = Date.now() - startedAt
 
   const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
@@ -393,33 +434,40 @@ export async function testAccountConnectivity(id: string): Promise<AccountTestRe
     message,
     latencyMs,
     checkedAt: Date.now(),
+    ...(snapshot ? { balance: snapshot } : {}),
   }
 }
 
 /**
  * Refreshes the provider-specific quota shown in the accounts table.  Most
  * providers expose rate-limit headers through their connectivity probe; the
- * official Sub2API gateway instead exposes a separate `/v1/usage` endpoint,
- * so its monetary balance is queried and persisted independently.
+ * official Sub2API gateway and DeepSeek expose a dedicated monetary-balance
+ * endpoint instead, so their wallet is queried and persisted independently.
  */
 export async function refreshAccountQuota(id: string): Promise<AccountTestResult> {
   const account = await getAccount(id)
   if (!account) throw new AccountTestError('account not found', 404)
-  if (account.provider === 'minimax') {
-    const startedAt = Date.now()
-    const quota = await fetchMiniMaxQuota(await ensureFreshToken(account), account.proxyUrl)
-    await updateAccountQuota(id, quota)
-    const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
-    const until = quotaPauseUntil(quota, threshold)
-    if (until) await penalizeAccount(id, 'rate_limited', until)
-    // Same rule as the connectivity test: a fresh quota read that shows room
-    // left releases a stale cooldown instead of leaving the account parked.
-    else await clearAccountCooldown(id)
-    return { success: true, provider: 'minimax', message: 'MiniMax 套餐额度已更新',
-      latencyMs: Date.now() - startedAt, checkedAt: Date.now() }
-  }
-  if (account.provider !== 'sub2api') return testAccountConnectivity(id)
+  // Balance providers read a read-only wallet endpoint: no probe request is
+  // needed, and an exhausted-but-valid key still reports its balance instead of
+  // failing the connectivity probe.
+  if (usesUpstreamBalance(account.provider)) return refreshAccountBalance(account)
+  if (account.provider !== 'minimax') return testAccountConnectivity(id)
 
+  const startedAt = Date.now()
+  const quota = await fetchMiniMaxQuota(await ensureFreshToken(account), account.proxyUrl)
+  await updateAccountQuota(id, quota)
+  const threshold = resolveAutopausePercent(account.metadata, await getQuotaAutopausePercent())
+  const until = quotaPauseUntil(quota, threshold)
+  if (until) await penalizeAccount(id, 'rate_limited', until)
+  // Same rule as the connectivity test: a fresh quota read that shows room
+  // left releases a stale cooldown instead of leaving the account parked.
+  else await clearAccountCooldown(id)
+  return { success: true, provider: 'minimax', message: 'MiniMax 套餐额度已更新',
+    latencyMs: Date.now() - startedAt, checkedAt: Date.now() }
+}
+
+/** Queries and persists the wallet of a balance provider for the accounts table. */
+async function refreshAccountBalance(account: AccountRow): Promise<AccountTestResult> {
   const startedAt = Date.now()
   let accessToken: string
   try {
@@ -433,18 +481,18 @@ export async function refreshAccountQuota(id: string): Promise<AccountTestResult
     throw err
   }
 
-  const balance = await fetchSub2ApiBalance(accessToken, account.proxyUrl)
-
+  const balance = await fetchAccountBalance(account.provider, accessToken, account.proxyUrl)
   const checkedAt = Date.now()
-  const snapshot: Sub2ApiBalanceSnapshot = {
+  const snapshot: AccountBalanceSnapshot = {
     ...balance,
     updatedAt: checkedAt,
+    provider: account.provider,
   }
-  await updateAccountMetadata(id, { sub2apiBalance: snapshot })
+  await updateAccountMetadata(account.id, { upstreamBalance: snapshot })
   return {
     success: true,
     provider: account.provider,
-    message: 'Sub2API 余额已更新',
+    message: account.provider === 'deepseek' ? 'DeepSeek 余额已更新' : 'Sub2API 余额已更新',
     latencyMs: checkedAt - startedAt,
     checkedAt,
     balance: snapshot,

@@ -84,4 +84,43 @@ describe('testAccountConnectivity', () => {
     expect(scheduler.clearAccountCooldown).not.toHaveBeenCalled()
     expect(scheduler.markAccountUsed).not.toHaveBeenCalled()
   })
+
+  it('persists the DeepSeek wallet alongside a successful probe', async () => {
+    manager.getAccount.mockResolvedValue(deepseekAccount('active', null))
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        is_available: true,
+        balance_infos: [
+          { currency: 'CNY', total_balance: '88.80', granted_balance: '8.80', topped_up_balance: '80.00' },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+    const result = await testAccountConnectivity('acct-ds')
+
+    expect(upstream.fetchWithConnectTimeout.mock.calls[1]?.[0]).toBe('https://api.deepseek.com/user/balance')
+    expect(manager.updateAccountMetadata).toHaveBeenCalledWith('acct-ds', {
+      upstreamBalance: expect.objectContaining({
+        provider: 'deepseek',
+        currency: 'CNY',
+        totalBalance: 88.8,
+        granted: 8.8,
+        remaining: 88.8,
+      }),
+    })
+    expect(result.balance).toMatchObject({ totalBalance: 88.8, granted: 8.8 })
+  })
+
+  it('still succeeds when the balance endpoint is unavailable', async () => {
+    manager.getAccount.mockResolvedValue(deepseekAccount('active', null))
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"error":"boom"}', { status: 500 }))
+
+    const result = await testAccountConnectivity('acct-ds')
+
+    expect(result.success).toBe(true)
+    expect(result.balance).toBeUndefined()
+    expect(manager.updateAccountMetadata).not.toHaveBeenCalled()
+  })
 })

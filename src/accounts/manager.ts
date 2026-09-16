@@ -10,7 +10,7 @@ import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSna
 import { accountHealth, emptyHealth } from './health'
 import { clearExpiredAccountCooldowns, disableAccount } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
-import { sub2ApiBalanceFromMetadata } from '../providers/sub2api/balance'
+import { upstreamBalanceFromMetadata } from '../providers/balance'
 import {
   matchPermanentRefreshSignal,
   PermanentRefreshError,
@@ -177,7 +177,7 @@ export async function listAccounts() {
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),
-    sub2apiBalance: sub2ApiBalanceFromMetadata(metadata),
+    balance: upstreamBalanceFromMetadata(metadata),
     autopausePercent: accountAutopausePercent(metadata),
     reauth: reauthStateFromMetadata(metadata),
     health: health.get(account.id) ?? emptyHealth(),
