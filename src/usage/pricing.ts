@@ -2,6 +2,7 @@ import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
 import { IMAGE_25_MODELS, isImage25Model } from '../providers/openai/imageModels'
+import { roundUsd } from '../wallet/money'
 
 /** USD price per 1M tokens, by model tier. */
 export interface TierPrice {
@@ -21,7 +22,7 @@ export interface TierPrice {
 // Editable in the model_pricing table once an admin updates a row.
 const CNY_TO_USD = 0.14
 
-const cny = (yuan: number) => Math.round(yuan * CNY_TO_USD * 1e6) / 1e6
+const cny = (yuan: number) => roundUsd(yuan * CNY_TO_USD)
 
 // ---------------------------------------------------------------------------
 // Anthropic (Claude) list prices (as of 2026-09-03).
@@ -34,20 +35,55 @@ const cny = (yuan: number) => Math.round(yuan * CNY_TO_USD * 1e6) / 1e6
 // 1-hour at 2x write). We use the 5-min rate (1.25x) as the default, which
 // matches most usage patterns. Cache reads are 0.1x input across all models.
 // ---------------------------------------------------------------------------
-const CLAUDE_OPUS_REDUCED: TierPrice = { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 }
-const CLAUDE_OPUS_LEGACY: TierPrice = { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 }
-const CLAUDE_SONNET: TierPrice = { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 }
+const CLAUDE_OPUS_REDUCED: TierPrice = {
+  input: 5,
+  output: 25,
+  cacheWrite: 6.25,
+  cacheRead: 0.5
+}
+const CLAUDE_OPUS_LEGACY: TierPrice = {
+  input: 15,
+  output: 75,
+  cacheWrite: 18.75,
+  cacheRead: 1.5
+}
+const CLAUDE_SONNET: TierPrice = {
+  input: 3,
+  output: 15,
+  cacheWrite: 3.75,
+  cacheRead: 0.3
+}
 // Anthropic made Sonnet 5's original $2/$10 introductory rate permanent on
 // 2026-08-10. Older Sonnet generations remain on the generic $3/$15 tier.
-const CLAUDE_SONNET_5: TierPrice = { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 }
-const CLAUDE_HAIKU: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
+const CLAUDE_SONNET_5: TierPrice = {
+  input: 2,
+  output: 10,
+  cacheWrite: 2.5,
+  cacheRead: 0.2
+}
+const CLAUDE_HAIKU: TierPrice = {
+  input: 1,
+  output: 5,
+  cacheWrite: 1.25,
+  cacheRead: 0.1
+}
 // Fable 5 (Mythos-class flagship) — Anthropic's most capable widely released
 // model, priced above the Opus tier at 10 / 50. Claude Mythos 5 shares the
 // same list price. Official pricing confirmed 2026-07-25.
-const CLAUDE_FABLE: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
+const CLAUDE_FABLE: TierPrice = {
+  input: 10,
+  output: 50,
+  cacheWrite: 12.5,
+  cacheRead: 1
+}
 // Fable/Mythos 5.1 keeps the same base and cache-write prices, while cutting
 // cache reads from 0.1x to 0.025x input ($0.25/MTok).
-const CLAUDE_FABLE_51: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 0.25 }
+const CLAUDE_FABLE_51: TierPrice = {
+  input: 10,
+  output: 50,
+  cacheWrite: 12.5,
+  cacheRead: 0.25
+}
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
 function isLegacyOpus(model: string): boolean {
@@ -84,36 +120,93 @@ function claudePrice(model: string): TierPrice {
 // cache writes and 0.1× input for cache reads. Earlier models (5.5, 5.4, 5.1)
 // have cacheWrite: 0 (no separate write fee) but support cacheRead discounts.
 // ---------------------------------------------------------------------------
-const OPENAI_GPT55: TierPrice = { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 }
-const OPENAI_GPT54: TierPrice = { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 }
-const OPENAI_CODEX: TierPrice = { input: 1.5, output: 12, cacheWrite: 0, cacheRead: 0.15 }
+const OPENAI_GPT55: TierPrice = {
+  input: 5,
+  output: 30,
+  cacheWrite: 0,
+  cacheRead: 0.5
+}
+const OPENAI_GPT54: TierPrice = {
+  input: 2.5,
+  output: 15,
+  cacheWrite: 0,
+  cacheRead: 0.25
+}
+const OPENAI_CODEX: TierPrice = {
+  input: 1.5,
+  output: 12,
+  cacheWrite: 0,
+  cacheRead: 0.15
+}
 // Codex Spark has its own official card (1.75 / 14 / 0.175), distinct from
 // the regular Codex card; keep the check before the generic codex fallback.
-const OPENAI_CODEX_SPARK: TierPrice = { input: 1.75, output: 14, cacheWrite: 0, cacheRead: 0.175 }
-const OPENAI_MINI: TierPrice = { input: 0.25, output: 2, cacheWrite: 0, cacheRead: 0.025 }
+const OPENAI_CODEX_SPARK: TierPrice = {
+  input: 1.75,
+  output: 14,
+  cacheWrite: 0,
+  cacheRead: 0.175
+}
+const OPENAI_MINI: TierPrice = {
+  input: 0.25,
+  output: 2,
+  cacheWrite: 0,
+  cacheRead: 0.025
+}
 // gpt-5 / gpt-5.1 base tier; also the fallback for unrecognised gpt-* / o* models.
-const OPENAI_GPT5: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
+const OPENAI_GPT5: TierPrice = {
+  input: 1.25,
+  output: 10,
+  cacheWrite: 0,
+  cacheRead: 0.125
+}
 // gpt-5.6 family (public 2026-07-09): Sol flagship, Terra workhorse, Luna
 // budget. Sol/Terra carry the same input/output list prices as gpt-5.5 / gpt-5.4
 // ("more capability at the same price"); Luna is a new low-cost 1/6 production
 // tier. Output is 6× input across all three; cacheRead is the standard 0.1×
 // input. gpt-5.6 bills cache writes at 1.25× the input rate (first OpenAI
 // tier to charge for cache writes explicitly).
-const OPENAI_GPT56_SOL: TierPrice = { input: 5, output: 30, cacheWrite: 6.25, cacheRead: 0.5 }
-const OPENAI_GPT56_TERRA: TierPrice = { input: 2.5, output: 15, cacheWrite: 3.125, cacheRead: 0.25 }
-const OPENAI_GPT56_LUNA: TierPrice = { input: 1, output: 6, cacheWrite: 1.25, cacheRead: 0.1 }
+const OPENAI_GPT56_SOL: TierPrice = {
+  input: 5,
+  output: 30,
+  cacheWrite: 6.25,
+  cacheRead: 0.5
+}
+const OPENAI_GPT56_TERRA: TierPrice = {
+  input: 2.5,
+  output: 15,
+  cacheWrite: 3.125,
+  cacheRead: 0.25
+}
+const OPENAI_GPT56_LUNA: TierPrice = {
+  input: 1,
+  output: 6,
+  cacheWrite: 1.25,
+  cacheRead: 0.1
+}
 // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
-const OPENAI_ASTRA: TierPrice = { input: 10, output: 50, cacheWrite: 12.5, cacheRead: 1 }
+const OPENAI_ASTRA: TierPrice = {
+  input: 10,
+  output: 50,
+  cacheWrite: 12.5,
+  cacheRead: 1
+}
 // Official Image 2.5 model cards, checked 2026-09-13. Keep independent of Image 2.
-const OPENAI_IMAGE_25: TierPrice = { input: 5, output: 0, cacheWrite: 0, cacheRead: 1.25,
-  imageInput: 8, imageCacheRead: 2, imageOutput: 30 }
+const OPENAI_IMAGE_25: TierPrice = {
+  input: 5,
+  output: 0,
+  cacheWrite: 0,
+  cacheRead: 1.25,
+  imageInput: 8,
+  imageCacheRead: 2,
+  imageOutput: 30
+}
 const OPENAI_IMAGE_2: TierPrice = {
   input: 5,
   output: 10,
   cacheWrite: 0,
   cacheRead: 1.25,
   imageInput: 8,
-  imageOutput: 30,
+  imageOutput: 30
 }
 const OPENAI_IMAGE_15: TierPrice = {
   input: 5,
@@ -121,7 +214,7 @@ const OPENAI_IMAGE_15: TierPrice = {
   cacheWrite: 0,
   cacheRead: 1.25,
   imageInput: 8,
-  imageOutput: 32,
+  imageOutput: 32
 }
 const OPENAI_IMAGE_1: TierPrice = {
   input: 5,
@@ -129,7 +222,7 @@ const OPENAI_IMAGE_1: TierPrice = {
   cacheWrite: 0,
   cacheRead: 1.25,
   imageInput: 10,
-  imageOutput: 40,
+  imageOutput: 40
 }
 const OPENAI_IMAGE_MINI: TierPrice = {
   input: 2,
@@ -137,7 +230,7 @@ const OPENAI_IMAGE_MINI: TierPrice = {
   cacheWrite: 0,
   cacheRead: 0.2,
   imageInput: 2.5,
-  imageOutput: 8,
+  imageOutput: 8
 }
 
 function openaiPrice(model: string): TierPrice {
@@ -168,16 +261,61 @@ function openaiPrice(model: string): TierPrice {
 // page on 2026-09-03). Gemini 3.8/3.7/3.6 Flash share introductory pricing
 // through 2026-12-31, then move to the published standard rate.
 // ---------------------------------------------------------------------------
-const GEMINI_31_PRO: TierPrice = { input: 2, output: 12, cacheWrite: 0, cacheRead: 0.2 }
-const GEMINI_FRONTIER_FLASH_PROMO: TierPrice = { input: 0.75, output: 3.75, cacheWrite: 0, cacheRead: 0.075 }
-const GEMINI_FRONTIER_FLASH_STANDARD: TierPrice = { input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.15 }
+const GEMINI_31_PRO: TierPrice = {
+  input: 2,
+  output: 12,
+  cacheWrite: 0,
+  cacheRead: 0.2
+}
+const GEMINI_FRONTIER_FLASH_PROMO: TierPrice = {
+  input: 0.75,
+  output: 3.75,
+  cacheWrite: 0,
+  cacheRead: 0.075
+}
+const GEMINI_FRONTIER_FLASH_STANDARD: TierPrice = {
+  input: 1.5,
+  output: 7.5,
+  cacheWrite: 0,
+  cacheRead: 0.15
+}
 const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
-const GEMINI_35_FLASH: TierPrice = { input: 1.5, output: 9, cacheWrite: 0, cacheRead: 0.15 }
-const GEMINI_35_FLASH_LITE: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.03 }
-const GEMINI_25_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.125 }
-const GEMINI_25_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.03 }
-const GEMINI_STALE_PRO: TierPrice = { input: 1.25, output: 10, cacheWrite: 0, cacheRead: 0.31 }
-const GEMINI_STALE_FLASH: TierPrice = { input: 0.3, output: 2.5, cacheWrite: 0, cacheRead: 0.075 }
+const GEMINI_35_FLASH: TierPrice = {
+  input: 1.5,
+  output: 9,
+  cacheWrite: 0,
+  cacheRead: 0.15
+}
+const GEMINI_35_FLASH_LITE: TierPrice = {
+  input: 0.3,
+  output: 2.5,
+  cacheWrite: 0,
+  cacheRead: 0.03
+}
+const GEMINI_25_PRO: TierPrice = {
+  input: 1.25,
+  output: 10,
+  cacheWrite: 0,
+  cacheRead: 0.125
+}
+const GEMINI_25_FLASH: TierPrice = {
+  input: 0.3,
+  output: 2.5,
+  cacheWrite: 0,
+  cacheRead: 0.03
+}
+const GEMINI_STALE_PRO: TierPrice = {
+  input: 1.25,
+  output: 10,
+  cacheWrite: 0,
+  cacheRead: 0.31
+}
+const GEMINI_STALE_FLASH: TierPrice = {
+  input: 0.3,
+  output: 2.5,
+  cacheWrite: 0,
+  cacheRead: 0.075
+}
 
 function geminiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
@@ -186,15 +324,14 @@ function geminiPrice(model: string, atMs: number): TierPrice {
   if (m.includes('3.5-flash-lite')) return GEMINI_35_FLASH_LITE
   if (m.includes('3.5-flash')) return GEMINI_35_FLASH
   if (m.includes('flash')) {
-    return atMs < GEMINI_FRONTIER_FLASH_STANDARD_AT
-      ? GEMINI_FRONTIER_FLASH_PROMO
-      : GEMINI_FRONTIER_FLASH_STANDARD
+    return atMs < GEMINI_FRONTIER_FLASH_STANDARD_AT ? GEMINI_FRONTIER_FLASH_PROMO : GEMINI_FRONTIER_FLASH_STANDARD
   }
   return GEMINI_31_PRO
 }
 
 // DeepSeek USD list prices per 1M tokens, including the 2026-09-10 Flash
-// reduction and 2026-09-14 Pro routing change. Peak windows are 01:00-04:00 and
+// reduction. V4 Pro remains available at its own prices after 2026-09-14;
+// DeepSeek canceled the announced retirement. Peak windows are 01:00-04:00 and
 // 06:00-10:00 UTC on weekdays only; Beijing Saturday/Sunday is always
 // off-peak. There is no separate cache-write fee.
 type DeepseekTier = 'flash' | 'pro'
@@ -207,40 +344,39 @@ const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
 // Historical cutoff assumption: the current public changelog gives only the
 // release date. Keep the noon boundary explicit for later reconciliation.
 const DEEPSEEK_V41_FLASH_EFFECTIVE_AT = Date.parse('2026-09-10T12:00:00+08:00')
-const DEEPSEEK_V4_PRO_RETIRE_AT = Date.parse('2026-09-14T12:00:00+08:00')
 const BEIJING_OFFSET_MS = 8 * 60 * 60_000
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
-  [6, 10],
+  [6, 10]
 ]
 
 const DEEPSEEK_PRE_SCHEDULE_TIERS: Record<DeepseekTier, TierPrice> = {
   flash: { input: cny(1), output: cny(2), cacheWrite: 0, cacheRead: cny(0.02) },
-  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.003625 },
+  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.003625 }
 }
 const DEEPSEEK_STALE_PRO_PRICE: TierPrice = {
   input: 0.42,
   output: 0.84,
   cacheWrite: 0,
-  cacheRead: 0.0035,
+  cacheRead: 0.0035
 }
 
 const DEEPSEEK_SCHEDULED_TIERS: Record<Exclude<DeepseekPricePeriod, 'pre-schedule'>, Record<DeepseekTier, TierPrice>> = {
   'off-peak': {
     flash: { input: 0.22, output: 0.66, cacheWrite: 0, cacheRead: 0.007 },
-    pro: { input: 0.66, output: 1.98, cacheWrite: 0, cacheRead: 0.022 },
+    pro: { input: 0.66, output: 1.98, cacheWrite: 0, cacheRead: 0.022 }
   },
   peak: {
     flash: { input: 0.44, output: 1.32, cacheWrite: 0, cacheRead: 0.014 },
-    pro: { input: 1.32, output: 3.96, cacheWrite: 0, cacheRead: 0.044 },
-  },
+    pro: { input: 1.32, output: 3.96, cacheWrite: 0, cacheRead: 0.044 }
+  }
 }
 
 // https://api-docs.deepseek.com/quick_start/pricing/ — official USD prices,
 // not a conversion of the separately published CNY prices.
 const DEEPSEEK_V41_FLASH_PRICES = {
   'off-peak': { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.003 },
-  peak: { input: 0.3, output: 1.2, cacheWrite: 0, cacheRead: 0.006 },
+  peak: { input: 0.3, output: 1.2, cacheWrite: 0, cacheRead: 0.006 }
 } satisfies Record<'off-peak' | 'peak', TierPrice>
 
 function deepseekTier(model: string): DeepseekTier {
@@ -258,21 +394,15 @@ function deepseekPricePeriod(atMs: number): DeepseekPricePeriod {
   const beijingDay = new Date(atMs + BEIJING_OFFSET_MS).getUTCDay()
   if (beijingDay === 0 || beijingDay === 6) return 'off-peak'
   const hour = new Date(atMs).getUTCHours()
-  return DEEPSEEK_PEAK_WINDOWS_UTC.some(([start, end]) => hour >= start && hour < end)
-    ? 'peak'
-    : 'off-peak'
+  return DEEPSEEK_PEAK_WINDOWS_UTC.some(([start, end]) => hour >= start && hour < end) ? 'peak' : 'off-peak'
 }
 
 function deepseekPrice(model: string, atMs: number): TierPrice {
   const tier = deepseekTier(model)
   const period = deepseekPricePeriod(atMs)
-  if (period !== 'pre-schedule' && (
-    (tier === 'flash' && atMs >= DEEPSEEK_V41_FLASH_EFFECTIVE_AT) ||
-    (/^deepseek-v4-pro(?:$|-)/i.test(model) && atMs >= DEEPSEEK_V4_PRO_RETIRE_AT)
-  )) return DEEPSEEK_V41_FLASH_PRICES[period]
-  return period === 'pre-schedule'
-    ? DEEPSEEK_PRE_SCHEDULE_TIERS[tier]
-    : DEEPSEEK_SCHEDULED_TIERS[period][tier]
+  if (period !== 'pre-schedule' && tier === 'flash' && atMs >= DEEPSEEK_V41_FLASH_EFFECTIVE_AT)
+    return DEEPSEEK_V41_FLASH_PRICES[period]
+  return period === 'pre-schedule' ? DEEPSEEK_PRE_SCHEDULE_TIERS[tier] : DEEPSEEK_SCHEDULED_TIERS[period][tier]
 }
 
 // Xiaomi MiMo V2.5 overseas list prices (per 1M tokens, 2026-08-06). MiMo has
@@ -280,12 +410,12 @@ function deepseekPrice(model: string, atMs: number): TierPrice {
 // cached-input price.
 const XIAOMI_TIERS: Record<'standard' | 'pro', TierPrice> = {
   standard: { input: 0.14, output: 0.28, cacheWrite: 0, cacheRead: 0.0028 },
-  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.0036 },
+  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.0036 }
 }
 
 const XIAOMI_STALE_TIERS: Record<'standard' | 'pro', TierPrice> = {
   standard: { input: 1, output: 3, cacheWrite: 0, cacheRead: 0.2 },
-  pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) },
+  pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) }
 }
 
 function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
@@ -299,11 +429,31 @@ function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
 // flagship; GLM-5.3-Flash is the low-cost native-multimodal tier. Older tiers
 // remain available for callers that explicitly request their model IDs.
 const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flagship', TierPrice> = {
-  balanced: { input: cny(2), output: cny(8), cacheWrite: 0, cacheRead: cny(0.4) },
-  legacy: { input: cny(6), output: cny(24), cacheWrite: 0, cacheRead: cny(1.5) },
+  balanced: {
+    input: cny(2),
+    output: cny(8),
+    cacheWrite: 0,
+    cacheRead: cny(0.4)
+  },
+  legacy: {
+    input: cny(6),
+    output: cny(24),
+    cacheWrite: 0,
+    cacheRead: cny(1.5)
+  },
   turbo: { input: cny(5), output: cny(22), cacheWrite: 0, cacheRead: cny(1.2) },
-  flash53: { input: cny(0.8), output: cny(2.8), cacheWrite: 0, cacheRead: cny(0.23) },
-  flagship: { input: cny(8), output: cny(28), cacheWrite: 0, cacheRead: cny(2) },
+  flash53: {
+    input: cny(0.8),
+    output: cny(2.8),
+    cacheWrite: 0,
+    cacheRead: cny(0.23)
+  },
+  flagship: {
+    input: cny(8),
+    output: cny(28),
+    cacheWrite: 0,
+    cacheRead: cny(2)
+  }
 }
 
 function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
@@ -320,16 +470,38 @@ function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
 // cacheWrite 0; cacheRead is the published cache-hit input rate. Qwen 3.8 Max
 // is the current flagship, Qwen 3.7 Plus the balanced Agent tier, and Qwen 3.7
 // Flash the low-cost tier. Legacy rows stay available for explicit old IDs.
-const QWEN_TIERS: Record<
-  'max38' | 'plus37' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus',
-  TierPrice
-> = {
-  max38: { input: cny(12), output: cny(36), cacheWrite: 0, cacheRead: cny(1.5) },
+const QWEN_TIERS: Record<'max38' | 'plus37' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus', TierPrice> = {
+  max38: {
+    input: cny(12),
+    output: cny(36),
+    cacheWrite: 0,
+    cacheRead: cny(1.5)
+  },
   plus37: { input: cny(2), output: cny(8), cacheWrite: 0, cacheRead: cny(0.4) },
-  flash37: { input: cny(0.2), output: cny(0.8), cacheWrite: 0, cacheRead: cny(0.04) },
-  legacyCoder: { input: cny(7.34), output: cny(36.7), cacheWrite: 0, cacheRead: cny(1.47) },
-  legacyMax: { input: cny(2.4), output: cny(9.6), cacheWrite: 0, cacheRead: cny(0.48) },
-  legacyPlus: { input: cny(0.8), output: cny(2), cacheWrite: 0, cacheRead: cny(0.16) },
+  flash37: {
+    input: cny(0.2),
+    output: cny(0.8),
+    cacheWrite: 0,
+    cacheRead: cny(0.04)
+  },
+  legacyCoder: {
+    input: cny(7.34),
+    output: cny(36.7),
+    cacheWrite: 0,
+    cacheRead: cny(1.47)
+  },
+  legacyMax: {
+    input: cny(2.4),
+    output: cny(9.6),
+    cacheWrite: 0,
+    cacheRead: cny(0.48)
+  },
+  legacyPlus: {
+    input: cny(0.8),
+    output: cny(2),
+    cacheWrite: 0,
+    cacheRead: cny(0.16)
+  }
 }
 
 function qwenTier(model: string): keyof typeof QWEN_TIERS {
@@ -350,7 +522,7 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
 // (¥6.5 / ¥27, cache-hit ~¥1.3).
 const KIMI_TIERS: Record<'k3' | 'k2', TierPrice> = {
   k3: { input: cny(20), output: cny(100), cacheWrite: 0, cacheRead: cny(2) },
-  k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) },
+  k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) }
 }
 
 function kimiTier(model: string): keyof typeof KIMI_TIERS {
@@ -361,10 +533,30 @@ function kimiTier(model: string): keyof typeof KIMI_TIERS {
 
 // xAI (Grok) list prices per 1M tokens. No separate cache-write fee —
 // cacheWrite is 0; cacheRead is the cached-input rate.
-const GROK_46: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 }
-const GROK_45: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.3 }
-const GROK_43: TierPrice = { input: 1.25, output: 2.5, cacheWrite: 0, cacheRead: 0.2 }
-const GROK_BUILD: TierPrice = { input: 1, output: 2, cacheWrite: 0, cacheRead: 0.2 }
+const GROK_46: TierPrice = {
+  input: 2,
+  output: 6,
+  cacheWrite: 0,
+  cacheRead: 0.5
+}
+const GROK_45: TierPrice = {
+  input: 2,
+  output: 6,
+  cacheWrite: 0,
+  cacheRead: 0.3
+}
+const GROK_43: TierPrice = {
+  input: 1.25,
+  output: 2.5,
+  cacheWrite: 0,
+  cacheRead: 0.2
+}
+const GROK_BUILD: TierPrice = {
+  input: 1,
+  output: 2,
+  cacheWrite: 0,
+  cacheRead: 0.2
+}
 
 function grokPrice(model: string): TierPrice {
   const m = model.toLowerCase()
@@ -380,10 +572,11 @@ function minimaxPrice(model: string): TierPrice {
   const m = model.toLowerCase()
   const highspeed = m.endsWith('-highspeed')
   return {
-    input: highspeed ? 0.6 : 0.3, output: highspeed ? 2.4 : 1.2,
+    input: highspeed ? 0.6 : 0.3,
+    output: highspeed ? 2.4 : 1.2,
     cacheRead: /^minimax-m(?:3|2\.7)(?:$|-)/.test(m) ? 0.06 : 0.03,
     // M3 has automatic read caching and no separately listed cache-write fee.
-    cacheWrite: /^minimax-m3(?:$|-)/.test(m) ? 0 : 0.375,
+    cacheWrite: /^minimax-m3(?:$|-)/.test(m) ? 0 : 0.375
   }
 }
 
@@ -399,13 +592,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
   // Sub2API v0.1.182 accepts Kimi Code's bare Composite aliases. They are
   // still K3-tier requests and must not fall through to the Claude default
   // price when the relay preserves the original model name for auditing.
-  if (
-    m.startsWith('kimi') ||
-    m.startsWith('moonshot') ||
-    m === 'k3' ||
-    m === 'k3-256k' ||
-    m === 'kimi-code/k3'
-  ) return KIMI_TIERS.k3
+  if (m.startsWith('kimi') || m.startsWith('moonshot') || m === 'k3' || m === 'k3-256k' || m === 'kimi-code/k3') return KIMI_TIERS.k3
   if (m.startsWith('minimax-')) return minimaxPrice(model)
   if (m.startsWith('grok')) return grokPrice(model)
   return CLAUDE_SONNET
@@ -457,7 +644,11 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
   { provider: 'openai', model: 'gpt-image-2', price: OPENAI_IMAGE_2 },
-  ...IMAGE_25_MODELS.map(model => ({ provider: 'openai', model, price: OPENAI_IMAGE_25 })),
+  ...IMAGE_25_MODELS.map((model) => ({
+    provider: 'openai',
+    model,
+    price: OPENAI_IMAGE_25
+  })),
   { provider: 'openai', model: 'gpt-image-1.5', price: OPENAI_IMAGE_15 },
   { provider: 'openai', model: 'gpt-image-1', price: OPENAI_IMAGE_1 },
   { provider: 'openai', model: 'gpt-image-1-mini', price: OPENAI_IMAGE_MINI },
@@ -465,15 +656,36 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.4', price: OPENAI_GPT54 },
   { provider: 'openai', model: 'gpt-5.4-mini', price: OPENAI_MINI },
   { provider: 'openai', model: 'gpt-5.3-codex', price: OPENAI_CODEX },
-  { provider: 'openai', model: 'gpt-5.3-codex-spark', price: OPENAI_CODEX_SPARK },
+  {
+    provider: 'openai',
+    model: 'gpt-5.3-codex-spark',
+    price: OPENAI_CODEX_SPARK
+  },
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
-  { provider: 'gemini', model: 'gemini-3.8-flash', price: GEMINI_FRONTIER_FLASH_PROMO },
-  { provider: 'gemini', model: 'gemini-3.6-flash', price: GEMINI_FRONTIER_FLASH_PROMO },
+  {
+    provider: 'gemini',
+    model: 'gemini-3.8-flash',
+    price: GEMINI_FRONTIER_FLASH_PROMO
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-3.7-flash',
+    price: GEMINI_FRONTIER_FLASH_PROMO
+  },
+  {
+    provider: 'gemini',
+    model: 'gemini-3.6-flash',
+    price: GEMINI_FRONTIER_FLASH_PROMO
+  },
   { provider: 'gemini', model: 'gemini-3.1-pro-preview', price: GEMINI_31_PRO },
   { provider: 'gemini', model: 'gemini-3.5-flash', price: GEMINI_35_FLASH },
-  { provider: 'gemini', model: 'gemini-3.5-flash-lite', price: GEMINI_35_FLASH_LITE },
+  {
+    provider: 'gemini',
+    model: 'gemini-3.5-flash-lite',
+    price: GEMINI_35_FLASH_LITE
+  },
   { provider: 'gemini', model: 'gemini-2.5-pro', price: GEMINI_25_PRO },
   { provider: 'gemini', model: 'gemini-2.5-flash', price: GEMINI_25_FLASH },
   { provider: 'gemini', model: 'pro', price: GEMINI_31_PRO },
@@ -483,12 +695,36 @@ const SEED_ROWS: SeedRow[] = [
   // uses its launch off-peak price as the marker. resolvePrice()
   // recognises these exact values as managed defaults and applies the current
   // scheduled rate; any administrator-edited value still wins.
-  { provider: 'deepseek', model: 'deepseek-flash', price: DEEPSEEK_V41_FLASH_PRICES['off-peak'] },
-  { provider: 'deepseek', model: 'deepseek-v4-flash', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-v4-flash-vision-exp', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-v4-pro', price: DEEPSEEK_PRE_SCHEDULE_TIERS.pro },
-  { provider: 'deepseek', model: 'deepseek-chat', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
-  { provider: 'deepseek', model: 'deepseek-reasoner', price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-flash',
+    price: DEEPSEEK_V41_FLASH_PRICES['off-peak']
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash-vision-exp',
+    price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-v4-pro',
+    price: DEEPSEEK_PRE_SCHEDULE_TIERS.pro
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
+  },
+  {
+    provider: 'deepseek',
+    model: 'deepseek-reasoner',
+    price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
+  },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
   { provider: 'zhipu', model: 'glm-5.3', price: ZHIPU_TIERS.flagship },
@@ -505,12 +741,20 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'qwen', model: 'qwen3.8-max', price: QWEN_TIERS.max38 },
   { provider: 'qwen', model: 'qwen3.7-plus', price: QWEN_TIERS.plus37 },
   { provider: 'qwen', model: 'qwen3.7-flash', price: QWEN_TIERS.flash37 },
-  { provider: 'qwen', model: 'qwen3-coder-plus', price: QWEN_TIERS.legacyCoder },
+  {
+    provider: 'qwen',
+    model: 'qwen3-coder-plus',
+    price: QWEN_TIERS.legacyCoder
+  },
   { provider: 'qwen', model: 'qwen-max', price: QWEN_TIERS.legacyMax },
   { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.legacyPlus },
   // Kimi — exact rows for the discoverable models; kimiTier() covers other
   // kimi-* / moonshot-* variants via substring tiers.
-  ...['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'].map(model => ({ provider: 'minimax', model, price: minimaxPrice(model) })),
+  ...['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'].map((model) => ({
+    provider: 'minimax',
+    model,
+    price: minimaxPrice(model)
+  })),
   { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
   { provider: 'kimi', model: 'kimi-k2.7-code', price: KIMI_TIERS.k2 },
   { provider: 'kimi', model: 'kimi-k2.6', price: KIMI_TIERS.k2 },
@@ -519,7 +763,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'grok', model: 'grok-4.6', price: GROK_46 },
   { provider: 'grok', model: 'grok-4.5', price: GROK_45 },
   { provider: 'grok', model: 'grok-4.3', price: GROK_43 },
-  { provider: 'grok', model: 'grok-build-0.1', price: GROK_BUILD },
+  { provider: 'grok', model: 'grok-build-0.1', price: GROK_BUILD }
 ]
 
 /**
@@ -542,27 +786,27 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'grok',
     model: 'grok-4.5',
     from: { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5 },
-    to: GROK_45,
+    to: GROK_45
   },
   // Opus 4.5 dropped list prices; the generic "opus" tier was seeded at 15/75.
   {
     provider: 'claude',
     model: 'opus',
     from: { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
-    to: CLAUDE_OPUS_REDUCED,
+    to: CLAUDE_OPUS_REDUCED
   },
   // OpenAI moved off the GPT-4o-era flat rate to the gpt-5.x list prices.
   {
     provider: 'openai',
     model: 'gpt',
     from: { input: 2.5, output: 10, cacheWrite: 0, cacheRead: 0.3 },
-    to: OPENAI_GPT5,
+    to: OPENAI_GPT5
   },
   {
     provider: 'openai',
     model: 'mini',
     from: { input: 0.15, output: 0.6, cacheWrite: 0, cacheRead: 0.075 },
-    to: OPENAI_MINI,
+    to: OPENAI_MINI
   },
   // Move generic Gemini tiers to the current 3.x defaults and correct the
   // retained 2.5 rows' old cache-read rates. Older databases may still carry
@@ -571,31 +815,31 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'gemini',
     model: 'flash',
     from: { input: 0.075, output: 0.3, cacheWrite: 0, cacheRead: 0.019 },
-    to: GEMINI_FRONTIER_FLASH_PROMO,
+    to: GEMINI_FRONTIER_FLASH_PROMO
   },
   {
     provider: 'gemini',
     model: 'flash',
     from: GEMINI_STALE_FLASH,
-    to: GEMINI_FRONTIER_FLASH_PROMO,
+    to: GEMINI_FRONTIER_FLASH_PROMO
   },
   {
     provider: 'gemini',
     model: 'pro',
     from: GEMINI_STALE_PRO,
-    to: GEMINI_31_PRO,
+    to: GEMINI_31_PRO
   },
   {
     provider: 'gemini',
     model: 'gemini-2.5-flash',
     from: GEMINI_STALE_FLASH,
-    to: GEMINI_25_FLASH,
+    to: GEMINI_25_FLASH
   },
   {
     provider: 'gemini',
     model: 'gemini-2.5-pro',
     from: GEMINI_STALE_PRO,
-    to: GEMINI_25_PRO,
+    to: GEMINI_25_PRO
   },
   // Fable 5 now has a published list price (10/50); it was seeded at the Opus
   // reduced rate (5/25) while unpriced.
@@ -603,7 +847,7 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'claude',
     model: 'fable',
     from: { input: 5, output: 25, cacheWrite: 6.25, cacheRead: 0.5 },
-    to: CLAUDE_FABLE,
+    to: CLAUDE_FABLE
   },
   // gpt-5.6 introduced billed cache writes (1.25× input); the tiers were seeded
   // with cacheWrite=0 before that. Only rows still at the zero-write default are
@@ -612,31 +856,31 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'openai',
     model: 'gpt-5.6-sol',
     from: { input: 5, output: 30, cacheWrite: 0, cacheRead: 0.5 },
-    to: OPENAI_GPT56_SOL,
+    to: OPENAI_GPT56_SOL
   },
   {
     provider: 'openai',
     model: 'gpt-5.6-terra',
     from: { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 },
-    to: OPENAI_GPT56_TERRA,
+    to: OPENAI_GPT56_TERRA
   },
   {
     provider: 'openai',
     model: 'gpt-5.6-luna',
     from: { input: 1, output: 6, cacheWrite: 0, cacheRead: 0.1 },
-    to: OPENAI_GPT56_LUNA,
+    to: OPENAI_GPT56_LUNA
   },
   {
     provider: 'deepseek',
     model: 'deepseek-v4-pro',
     from: DEEPSEEK_STALE_PRO_PRICE,
-    to: DEEPSEEK_PRE_SCHEDULE_TIERS.pro,
+    to: DEEPSEEK_PRE_SCHEDULE_TIERS.pro
   },
   {
     provider: 'deepseek',
     model: 'deepseek-reasoner',
     from: DEEPSEEK_STALE_PRO_PRICE,
-    to: DEEPSEEK_PRE_SCHEDULE_TIERS.flash,
+    to: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
   },
   // MiMo V2.5 prices were seeded from stale pre-reduction / mixed-region
   // values. Correct only rows that still contain those exact built-in values.
@@ -644,14 +888,14 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     provider: 'xiaomi',
     model: 'mimo-v2.5-pro',
     from: XIAOMI_STALE_TIERS.pro,
-    to: XIAOMI_TIERS.pro,
+    to: XIAOMI_TIERS.pro
   },
   {
     provider: 'xiaomi',
     model: 'mimo-v2.5',
     from: XIAOMI_STALE_TIERS.standard,
-    to: XIAOMI_TIERS.standard,
-  },
+    to: XIAOMI_TIERS.standard
+  }
 ]
 
 /** In-memory cache: "provider:model" → TierPrice (DB-loaded). */
@@ -680,17 +924,13 @@ function isManagedScheduledDefault(provider: string, model: string, price: TierP
     const tier = deepseekTier(model)
     if (model === 'deepseek-flash' && sameTokenPrice(price, DEEPSEEK_V41_FLASH_PRICES['off-peak'])) return true
     if (sameTokenPrice(price, DEEPSEEK_PRE_SCHEDULE_TIERS[tier])) return true
-    return (tier === 'pro' || model.toLowerCase().includes('reasoner')) &&
-      sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
+    return (tier === 'pro' || model.toLowerCase().includes('reasoner')) && sameTokenPrice(price, DEEPSEEK_STALE_PRO_PRICE)
   }
 
   if (provider === 'gemini') {
     const m = model.toLowerCase()
     const isManagedFlash = m === 'flash' || /gemini-3\.(?:6|7|8)-flash/.test(m)
-    return isManagedFlash && (
-      sameTokenPrice(price, GEMINI_FRONTIER_FLASH_PROMO) ||
-      sameTokenPrice(price, GEMINI_FRONTIER_FLASH_STANDARD)
-    )
+    return isManagedFlash && (sameTokenPrice(price, GEMINI_FRONTIER_FLASH_PROMO) || sameTokenPrice(price, GEMINI_FRONTIER_FLASH_STANDARD))
   }
 
   return false
@@ -714,7 +954,7 @@ export async function loadPricing(): Promise<void> {
   }>(
     `SELECT provider, model, input_price, output_price, cache_write_price, cache_read_price,
             image_input_price, image_output_price, image_cache_read_price
-       FROM model_pricing`,
+       FROM model_pricing`
   )
   priceCache.clear()
   for (const row of res.rows) {
@@ -725,7 +965,12 @@ export async function loadPricing(): Promise<void> {
       cacheRead: Number(row.cache_read_price),
       imageInput: Number(row.image_input_price),
       imageOutput: Number(row.image_output_price),
-      imageCacheRead: row.image_cache_read_price == null ? (isImage25Model(row.model) ? OPENAI_IMAGE_25.imageCacheRead : undefined) : Number(row.image_cache_read_price),
+      imageCacheRead:
+        row.image_cache_read_price == null
+          ? isImage25Model(row.model)
+            ? OPENAI_IMAGE_25.imageCacheRead
+            : undefined
+          : Number(row.image_cache_read_price)
     })
   }
   loaded = true
@@ -758,15 +1003,13 @@ export async function initPricing(): Promise<void> {
         row.price.cacheRead,
         row.price.imageInput ?? 0,
         row.price.imageOutput ?? 0,
-        row.price.imageCacheRead ?? null,
-      ],
+        row.price.imageCacheRead ?? null
+      ]
     )
   }
 
   // Correct stale defaults exactly once (preserves admin customisations).
-  const corrected = await pool.query<{ value: string }>(
-    `SELECT value FROM settings WHERE key = 'pricing_seed_v8'`,
-  )
+  const corrected = await pool.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'pricing_seed_v8'`)
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
       await pool.query(
@@ -787,13 +1030,13 @@ export async function initPricing(): Promise<void> {
           fix.from.input,
           fix.from.output,
           fix.from.cacheWrite,
-          fix.from.cacheRead,
-        ],
+          fix.from.cacheRead
+        ]
       )
     }
     await pool.query(
       `INSERT INTO settings (key, value) VALUES ('pricing_seed_v8', '1')
-       ON CONFLICT (key) DO UPDATE SET value = '1'`,
+       ON CONFLICT (key) DO UPDATE SET value = '1'`
     )
   }
 
@@ -859,22 +1102,33 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   if (!base) return null
   const astra = (provider === 'openai' || provider === 'sub2api') && /^gpt-6-astra(?:$|-)/i.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
-  const longContext = override?.longContext !== undefined ? override.longContext
-    : astra ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
-    : minimaxM3 ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 } : null
-  const totalInput = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0) + (usage.imageCacheReadTokens ?? 0)
+  const longContext =
+    override?.longContext !== undefined
+      ? override.longContext
+      : astra
+        ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
+        : minimaxM3
+          ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 }
+          : null
+  const totalInput =
+    usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0) + (usage.imageCacheReadTokens ?? 0)
   const long = longContext && totalInput > longContext.threshold ? longContext : null
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
   const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
   // Astra and MiniMax M3 have verified default factors. Other models retain
   // the gateway's base-price policy unless the operator supplies a tier rule.
-  const tierMultiplier = configuredMultiplier ?? (minimaxM3 && tier === 'priority' ? 1.5 : astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
+  const tierMultiplier =
+    configuredMultiplier ??
+    (minimaxM3 && tier === 'priority' ? 1.5 : astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
   const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
   const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
   return {
-    ...base, input: base.input * inputMultiplier, output: base.output * outputMultiplier,
-    cacheWrite: base.cacheWrite * inputMultiplier, cacheRead: base.cacheRead * inputMultiplier,
+    ...base,
+    input: base.input * inputMultiplier,
+    output: base.output * outputMultiplier,
+    cacheWrite: base.cacheWrite * inputMultiplier,
+    cacheRead: base.cacheRead * inputMultiplier
   }
 }
 
@@ -892,5 +1146,5 @@ export function estimateCost(provider: string, model: string, usage: UsageData, 
       (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +
       (usage.imageOutputTokens ?? 0) * (imagePrice?.imageOutput ?? 0)) /
     1_000_000
-  return Math.round(cost * 1e6) / 1e6
+  return roundUsd(cost)
 }

@@ -4,7 +4,7 @@ import { UiTag, UiTooltip } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 
 interface UsageLog {
   id: string
@@ -15,6 +15,7 @@ interface UsageLog {
   errorCategory: string | null
   modelMismatch: boolean
   latencyMs: number | null
+  firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
@@ -54,7 +55,7 @@ const datePresets = [
   { label: '全部', value: null as null | [string, string] },
   { label: '今天', value: [todayStr(), todayStr()] as [string, string] },
   { label: '近7天', value: [daysAgoStr(6), todayStr()] as [string, string] },
-  { label: '近30天', value: [daysAgoStr(29), todayStr()] as [string, string] },
+  { label: '近30天', value: [daysAgoStr(29), todayStr()] as [string, string] }
 ]
 
 function todayStr(): string {
@@ -95,10 +96,6 @@ watch([dateFrom, dateEnd, failureOnly], () => {
   loadUsage()
 })
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
-}
-
 function totalTokens(row: UsageLog) {
   const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens + (row.imageInputTokens ?? 0) + (row.imageOutputTokens ?? 0) + (row.imageCacheReadTokens ?? 0)
   const rows: [string, number][] = [
@@ -109,7 +106,7 @@ function totalTokens(row: UsageLog) {
     ['缓存读取', row.cacheReadTokens],
     ['图片输入', row.imageInputTokens ?? 0],
     ['图片输出', row.imageOutputTokens ?? 0],
-    ['图片缓存', row.imageCacheReadTokens ?? 0],
+    ['图片缓存', row.imageCacheReadTokens ?? 0]
   ]
   return h(
     UiTooltip,
@@ -120,14 +117,9 @@ function totalTokens(row: UsageLog) {
         h(
           'div',
           { class: 'token-breakdown' },
-          rows.map(([label, value]) =>
-            h('div', { class: 'token-breakdown-row' }, [
-              h('span', { class: 'token-breakdown-label' }, label),
-              h('span', { class: 'token-breakdown-value' }, value.toLocaleString('en-US')),
-            ]),
-          ),
-        ),
-    },
+          rows.map(([label, value]) => h('div', { class: 'token-breakdown-row' }, [h('span', { class: 'token-breakdown-label' }, label), h('span', { class: 'token-breakdown-value' }, value.toLocaleString('en-US'))]))
+        )
+    }
   )
 }
 
@@ -151,9 +143,7 @@ async function load() {
   usageLoading.value = true
   walletLoading.value = true
   try {
-    const [walletRes] = await Promise.all([
-      api.get('/users/wallet/transactions', { params: { pageSize: 100 } }),
-    ])
+    const [walletRes] = await Promise.all([api.get('/users/wallet/transactions', { params: { pageSize: 100 } })])
     walletRows.value = walletRes.data.transactions
   } catch (e) {
     message.error(errMsg(e))
@@ -164,31 +154,91 @@ async function load() {
 }
 
 const usageColumns: TableColumn<UsageLog>[] = [
-  { title: '时间', key: 'ts', minWidth: 150, render: (row) => formatTime(row.ts) },
-  { title: 'Key', key: 'apiKeyName', minWidth: 130, render: (row) => row.apiKeyName || '—' },
+  {
+    title: '时间',
+    key: 'ts',
+    minWidth: 150,
+    render: (row) => formatTime(row.ts)
+  },
+  {
+    title: 'Key',
+    key: 'apiKeyName',
+    minWidth: 130,
+    render: (row) => row.apiKeyName || '—'
+  },
   { title: '服务商', key: 'provider', width: 90 },
-  { title: '模型', key: 'model', minWidth: 180, render: (row) => row.model || '—' },
+  {
+    title: '模型',
+    key: 'model',
+    minWidth: 180,
+    render: (row) => row.model || '—'
+  },
   { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
-  { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
-  { title: '延迟', key: 'latencyMs', width: 90, render: (row) => row.latencyMs == null ? '—' : `${row.latencyMs}ms` },
+  {
+    title: '成本',
+    key: 'cost',
+    width: 100,
+    render: (row) => formatUsd(row.cost)
+  },
+  {
+    title: '首字',
+    key: 'firstTokenMs',
+    width: 90,
+    render: (row) => (row.firstTokenMs == null ? '—' : `${row.firstTokenMs}ms`)
+  },
+  {
+    title: '延迟',
+    key: 'latencyMs',
+    width: 90,
+    render: (row) => (row.latencyMs == null ? '—' : `${row.latencyMs}ms`)
+  },
   {
     title: '状态',
     key: 'status',
     minWidth: 130,
-    render: (row) => h('div', { class: 'status-cell' }, [
-      h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }),
-      row.errorCategory ? h('span', null, row.errorCategory) : null,
-      row.modelMismatch ? h(UiTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '模型异常' }) : null,
-    ]),
-  },
+    render: (row) =>
+      h('div', { class: 'status-cell' }, [
+        h(
+          UiTag,
+          {
+            size: 'small',
+            bordered: false,
+            type: row.status === 'success' ? 'success' : 'error'
+          },
+          { default: () => row.status }
+        ),
+        row.errorCategory ? h('span', null, row.errorCategory) : null,
+        row.modelMismatch ? h(UiTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '模型异常' }) : null
+      ])
+  }
 ]
 
 const walletColumns: TableColumn<WalletTransaction>[] = [
-  { title: '时间', key: 'createdAt', minWidth: 150, render: (row) => formatTime(row.createdAt) },
+  {
+    title: '时间',
+    key: 'createdAt',
+    minWidth: 150,
+    render: (row) => formatTime(row.createdAt)
+  },
   { title: '类型', key: 'type', width: 90 },
-  { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
-  { title: '余额', key: 'balanceAfter', width: 110, render: (row) => formatUsd(row.balanceAfter) },
-  { title: '备注', key: 'note', minWidth: 180, render: (row) => row.note || '—' },
+  {
+    title: '金额',
+    key: 'amount',
+    width: 110,
+    render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount))
+  },
+  {
+    title: '余额',
+    key: 'balanceAfter',
+    width: 110,
+    render: (row) => formatUsd(row.balanceAfter)
+  },
+  {
+    title: '备注',
+    key: 'note',
+    minWidth: 180,
+    render: (row) => row.note || '—'
+  }
 ]
 
 onMounted(load)
@@ -204,7 +254,9 @@ onMounted(load)
             :key="preset.label"
             type="button"
             class="preset-btn"
-            :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
+            :class="{
+              active: preset.value ? dateFrom === preset.value[0] && dateEnd === preset.value[1] : !dateFrom && !dateEnd
+            }"
             @click="applyPreset(preset)"
           >
             {{ preset.label }}

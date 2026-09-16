@@ -100,7 +100,7 @@ function sanitizeSchema(value: unknown): unknown {
 /**
  * Cleans tool/function-declaration JSON schemas in a Gemini request body so
  * fields the Code Assist backend rejects (e.g. `$schema`, `additionalProperties`)
- * don't 400 the request. Gemini 3.8-specific generation settings are also
+ * don't 400 the request. Gemini 3.7/3.8-specific generation settings are also
  * normalized when a model is supplied. The original body is not mutated.
  */
 export function sanitizeGeminiBody(
@@ -133,11 +133,15 @@ export function sanitizeGeminiBody(
     cleaned = { ...body, tools }
   }
 
-  // Gemini 3.8 Flash rejects the legacy sampling/candidate fields and the
-  // numeric thinking budget. Omit them so older clients use the model's
-  // supported default (`thinkingLevel: medium`) instead of receiving a 400.
+  // Gemini 3.7 and 3.8 Flash reject the legacy sampling/candidate fields and
+  // the numeric thinking budget; 3.6 and earlier accept them. Omit the fields
+  // so older clients use the model's supported default (`thinkingLevel:
+  // medium`) instead of receiving a 400. 3.7 shipped with the same breaking
+  // change as 3.8, so leaving it out here means every antigravity request with
+  // thinking enabled 400s — that path synthesizes a numeric thinkingBudget
+  // (antigravity/converter.ts) that only this strip removes.
   const normalizedModel = model.toLowerCase().replace(/^models\//, '')
-  if (!normalizedModel.startsWith('gemini-3.8-flash')) return cleaned
+  if (!/^gemini-3\.[78]-flash/.test(normalizedModel)) return cleaned
   const generationConfig = cleaned.generationConfig
   if (!generationConfig || typeof generationConfig !== 'object' || Array.isArray(generationConfig)) {
     return cleaned

@@ -2,6 +2,7 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { UiButton, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
+import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
@@ -61,8 +62,8 @@ const adminUserId = computed(() => users.value.find((u) => u.isAdmin)?.id ?? nul
 const groupSelectOptions = computed(() =>
   groups.value.map((g) => ({
     label: g.rateMultiplier === 1 ? g.name : `${g.name} ×${g.rateMultiplier}`,
-    value: g.id,
-  })),
+    value: g.id
+  }))
 )
 
 const userSelectOptions = computed(() =>
@@ -70,8 +71,8 @@ const userSelectOptions = computed(() =>
     .filter((u) => u.status === 'active')
     .map((u) => ({
       label: `${u.name}${u.isAdmin ? ' (Admin)' : ''} · ${u.email}`,
-      value: u.id,
-    })),
+      value: u.id
+    }))
 )
 
 function groupName(id: string | null): string {
@@ -97,7 +98,7 @@ const form = ref({
   allowedProviders: [] as string[],
   allowedModels: [] as string[],
   modelMappings: [] as string[],
-  accountGroupId: null as string | null,
+  accountGroupId: null as string | null
 })
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
@@ -137,7 +138,7 @@ const editForm = ref<{
   rateLimit: null,
   concurrencyLimit: null,
   quotaLimit: null,
-  expiresAt: null,
+  expiresAt: null
 })
 
 const providerOptions = [
@@ -151,7 +152,7 @@ const providerOptions = [
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'MiniMax', value: 'minimax' },
-  { label: 'Sub2API', value: 'sub2api' },
+  { label: 'Sub2API', value: 'sub2api' }
 ]
 
 const providerLabel: Record<string, string> = {
@@ -165,7 +166,7 @@ const providerLabel: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
-  sub2api: 'Sub2API',
+  sub2api: 'Sub2API'
 }
 
 const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default' | 'error'> = {
@@ -179,7 +180,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   qwen: 'info',
   kimi: 'default',
   minimax: 'error',
-  sub2api: 'success',
+  sub2api: 'success'
 }
 
 const commonModelOptions = [
@@ -188,6 +189,7 @@ const commonModelOptions = [
   'gpt-*',
   'gemini-*',
   'gemini-3.8-flash',
+  'gemini-3.7-flash',
   'gemini-3.6-flash',
   'gemini-3.1-pro-preview',
   'gemini-3.5-flash',
@@ -211,7 +213,7 @@ const commonModelOptions = [
   'kimi-*',
   'kimi-k3',
   'kimi-k2.7-code',
-  'sub2api-*',
+  'sub2api-*'
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [
@@ -223,7 +225,7 @@ const commonMappingOptions = [
   'glm-fast=glm-5.3-flash',
   'qwen-pro=qwen3.8-max',
   'qwen-fast=qwen3.7-flash',
-  'kimi-pro=kimi-k3',
+  'kimi-pro=kimi-k3'
 ].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {
@@ -247,8 +249,10 @@ function mappingEntriesFromObject(value: Record<string, string> | null): string[
 async function load() {
   loading.value = true
   try {
-    const { data } = await api.get('/admin/keys')
+    // Batch completion waits for this refresh before releasing bulkBusy.
+    const { data } = await api.get('/admin/keys', { timeout: 20_000 })
     keys.value = data.keys
+    pruneSelectedKeys()
   } catch (e) {
     message.error(errMsg(e))
   } finally {
@@ -291,14 +295,10 @@ async function create() {
       userId: form.value.userId,
       name: form.value.name.trim(),
       ownerLabel: form.value.ownerLabel.trim() || undefined,
-      allowedProviders: form.value.allowedProviders.length
-        ? form.value.allowedProviders
-        : undefined,
-      allowedModels: form.value.allowedModels.length
-        ? form.value.allowedModels
-        : undefined,
+      allowedProviders: form.value.allowedProviders.length ? form.value.allowedProviders : undefined,
+      allowedModels: form.value.allowedModels.length ? form.value.allowedModels : undefined,
       modelMappings: modelMappings ?? undefined,
-      accountGroupId: form.value.accountGroupId ?? undefined,
+      accountGroupId: form.value.accountGroupId ?? undefined
     })
     showCreate.value = false
     newKey.value = data.key
@@ -309,7 +309,7 @@ async function create() {
       allowedProviders: [],
       allowedModels: [],
       modelMappings: [],
-      accountGroupId: null,
+      accountGroupId: null
     }
     await load()
   } catch (e) {
@@ -342,7 +342,7 @@ function openEdit(row: ApiKey) {
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
     quotaLimit: row.quotaLimit,
-    expiresAt: row.expiresAt,
+    expiresAt: row.expiresAt
   }
   showEdit.value = true
 }
@@ -365,18 +365,14 @@ async function saveEdit() {
       name: editForm.value.name.trim(),
       ownerLabel: editForm.value.ownerLabel.trim() || null,
       enabled: editForm.value.enabled,
-      allowedProviders: editForm.value.allowedProviders.length
-        ? editForm.value.allowedProviders
-        : null,
-      allowedModels: editForm.value.allowedModels.length
-        ? editForm.value.allowedModels
-        : null,
+      allowedProviders: editForm.value.allowedProviders.length ? editForm.value.allowedProviders : null,
+      allowedModels: editForm.value.allowedModels.length ? editForm.value.allowedModels : null,
       modelMappings,
       accountGroupId: editForm.value.accountGroupId,
       rateLimit: editForm.value.rateLimit,
       concurrencyLimit: editForm.value.concurrencyLimit,
       quotaLimit: editForm.value.quotaLimit,
-      expiresAt: editForm.value.expiresAt,
+      expiresAt: editForm.value.expiresAt
     })
     message.success('已保存')
     showEdit.value = false
@@ -386,6 +382,78 @@ async function saveEdit() {
   } finally {
     editing.value = false
   }
+}
+
+function keyRowKey(row: ApiKey) {
+  return row.id
+}
+
+const {
+  selectedIds: selectedKeyIds,
+  busy: bulkBusy,
+  selectedCount: selectedKeyCount,
+  prune: pruneSelectedKeys,
+  retainFailures: retainFailedKeys,
+  rowCheckable: keyRowCheckable,
+  runBatch
+} = useBulkSelection(keys, keyRowKey)
+
+function notifyBatchResult(action: string, results: BatchOutcome[]) {
+  const { success, failed, firstError } = summarizeBatch(results)
+  if (failed > 0) {
+    message.warning(`${action}完成：成功 ${success} 个，失败 ${failed} 个${firstError ? `（${firstError}）` : ''}。失败项已保留选中，可重试。`)
+  } else {
+    message.success(`${action}完成：${success} 个 Key`)
+  }
+}
+
+async function bulkSetEnabled(enabled: boolean) {
+  if (!selectedKeyCount.value) {
+    message.warning('请先选择 API Key')
+    return
+  }
+  bulkBusy.value = true
+  const action = enabled ? '批量启用' : '批量禁用'
+  const ids = [...selectedKeyIds.value]
+  try {
+    const results = await runBatch(ids, (id, timeout) => api.patch(`/admin/keys/${id}`, { enabled }, { timeout }))
+    notifyBatchResult(action, results)
+    retainFailedKeys(results)
+    await load()
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+function confirmBulkDeleteKeys() {
+  if (!selectedKeyCount.value) {
+    message.warning('请先选择 API Key')
+    return
+  }
+  const names = keys.value
+    .filter((row) => selectedKeyIds.value.includes(row.id))
+    .slice(0, 5)
+    .map((row) => `「${row.name}」`)
+    .join('、')
+  const suffix = selectedKeyCount.value > 5 ? ` 等 ${selectedKeyCount.value} 个 Key` : ''
+  dialog.warning({
+    title: '批量删除 API Key',
+    content: `确定删除 ${names}${suffix}？此操作不可撤销。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      bulkBusy.value = true
+      const ids = [...selectedKeyIds.value]
+      try {
+        const results = await runBatch(ids, (id, timeout) => api.delete(`/admin/keys/${id}`, { timeout }))
+        notifyBatchResult('批量删除', results)
+        retainFailedKeys(results)
+        await load()
+      } finally {
+        bulkBusy.value = false
+      }
+    }
+  })
 }
 
 function confirmDelete(row: ApiKey) {
@@ -402,7 +470,7 @@ function confirmDelete(row: ApiKey) {
       } catch (e) {
         message.error(errMsg(e))
       }
-    },
+    }
   })
 }
 
@@ -480,18 +548,14 @@ async function copyApiKey(row: ApiKey) {
   }
   // 在 secure context 下用 ClipboardItem 包装异步 Promise，
   // 这样浏览器认可的“用户手势”不会因 await 网络请求而失效。
-  const canUseAsyncClipboard =
-    typeof window !== 'undefined' &&
-    window.isSecureContext &&
-    typeof window.ClipboardItem === 'function' &&
-    !!navigator.clipboard?.write
+  const canUseAsyncClipboard = typeof window !== 'undefined' && window.isSecureContext && typeof window.ClipboardItem === 'function' && !!navigator.clipboard?.write
   if (canUseAsyncClipboard) {
     try {
       const item = new ClipboardItem({
         'text/plain': fetchFullKey(row).then((key) => {
           if (!key) throw new Error('no key')
           return new Blob([key], { type: 'text/plain' })
-        }),
+        })
       })
       await navigator.clipboard.write([item])
       message.success('已复制到剪贴板')
@@ -683,7 +747,7 @@ API Key:  ${key}
 POST ${baseOrigin.value}/api/kimi/v1/chat/completions
 
 # Model list:
-GET ${baseOrigin.value}/api/kimi/v1/models`,
+GET ${baseOrigin.value}/api/kimi/v1/models`
   }
 })
 
@@ -707,7 +771,7 @@ async function triggerCcSwitch(target: CcSwitchTarget) {
   const url = buildCcSwitchUrl(target, {
     origin: baseOrigin.value,
     apiKey: ccSwitchSecret.value,
-    name: ccSwitchProviderName(target),
+    name: ccSwitchProviderName(target)
   })
   const launched = await launchCcSwitch(url)
   if (launched) message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
@@ -738,20 +802,22 @@ function renderOwner(row: ApiKey) {
   if (!row.userId) {
     return h(UiTag, { size: 'small', type: 'error', bordered: false }, { default: () => '未绑定' })
   }
-  return h('div', { class: 'owner-cell' }, [
-    h('span', { class: 'plain-cell' }, row.userName || row.ownerLabel || row.userEmail || row.userId),
-    row.userEmail ? h('span', { class: 'muted-cell' }, row.userEmail) : null,
-  ])
+  return h('div', { class: 'owner-cell' }, [h('span', { class: 'plain-cell' }, row.userName || row.ownerLabel || row.userEmail || row.userId), row.userEmail ? h('span', { class: 'muted-cell' }, row.userEmail) : null])
 }
 
 function renderKeyPrefix(row: ApiKey) {
   return h('div', { class: 'key-prefix-cell' }, [
-      h('code', null, `${row.keyPrefix}…`),
-      h(
-        UiButton,
-        { size: 'tiny', quaternary: true, class: 'inline-action', onClick: () => copyApiKey(row) },
-        { default: () => '复制' },
-      ),
+    h('code', null, `${row.keyPrefix}…`),
+    h(
+      UiButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        class: 'inline-action',
+        onClick: () => copyApiKey(row)
+      },
+      { default: () => '复制' }
+    )
   ])
 }
 
@@ -768,11 +834,15 @@ function renderProviders(row: ApiKey) {
         list.map((p) =>
           h(
             UiTag,
-            { size: 'small', type: providerTagType[p] ?? 'default', bordered: false },
-            { default: () => providerLabel[p] ?? p },
-          ),
-        ),
-    },
+            {
+              size: 'small',
+              type: providerTagType[p] ?? 'default',
+              bordered: false
+            },
+            { default: () => providerLabel[p] ?? p }
+          )
+        )
+    }
   )
 }
 
@@ -782,19 +852,13 @@ function renderModels(row: ApiKey) {
     return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
   }
   const visible = list.slice(0, 2)
-  const tags = visible.map((model) =>
-    h(UiTag, { size: 'small', bordered: false }, { default: () => model }),
-  )
+  const tags = visible.map((model) => h(UiTag, { size: 'small', bordered: false }, { default: () => model }))
   if (list.length > visible.length) {
     tags.push(
-      h(
-        UiTooltip,
-        null,
-        {
-          trigger: () => h(UiTag, { size: 'small', bordered: false }, { default: () => `+${list.length - visible.length}` }),
-          default: () => list.slice(visible.length).join(', '),
-        },
-      ),
+      h(UiTooltip, null, {
+        trigger: () => h(UiTag, { size: 'small', bordered: false }, { default: () => `+${list.length - visible.length}` }),
+        default: () => list.slice(visible.length).join(', ')
+      })
     )
   }
   return h(UiSpace, { size: 4 }, { default: () => tags })
@@ -806,24 +870,24 @@ function renderMappings(row: ApiKey) {
     return h('span', { class: 'muted-cell' }, '—')
   }
   const visible = entries.slice(0, 1)
-  const tags = visible.map(([from, to]) =>
-    h(UiTag, { size: 'small', bordered: false }, { default: () => `${from}→${to}` }),
-  )
+  const tags = visible.map(([from, to]) => h(UiTag, { size: 'small', bordered: false }, { default: () => `${from}→${to}` }))
   if (entries.length > visible.length) {
     tags.push(
       h(UiTooltip, null, {
         trigger: () => h(UiTag, { size: 'small', bordered: false }, { default: () => `+${entries.length - visible.length}` }),
-        default: () => entries.slice(visible.length).map(([from, to]) => `${from}→${to}`).join(', '),
-      }),
+        default: () =>
+          entries
+            .slice(visible.length)
+            .map(([from, to]) => `${from}→${to}`)
+            .join(', ')
+      })
     )
   }
   return h(UiSpace, { size: 4 }, { default: () => tags })
 }
 
 function renderGroup(row: ApiKey) {
-  return row.accountGroupId
-    ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) })
-    : h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' })
+  return row.accountGroupId ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => groupName(row.accountGroupId) }) : h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '默认池' })
 }
 
 // Fixed USD→CNY rate for DeepSeek cost tooltip.
@@ -836,14 +900,12 @@ function renderUsage(row: ApiKey) {
   const cny = (row.quotaUsed * USD_TO_CNY).toFixed(4)
   return h(UiTooltip, null, {
     trigger: () => span,
-    default: () => `≈ ¥${cny}`,
+    default: () => `≈ ¥${cny}`
   })
 }
 
 function renderQuotaLimit(row: ApiKey) {
-  return row.quotaLimit == null
-    ? h('span', { class: 'muted-cell' }, '不限')
-    : h('span', { class: 'plain-cell' }, `$${row.quotaLimit.toFixed(2)}`)
+  return row.quotaLimit == null ? h('span', { class: 'muted-cell' }, '不限') : h('span', { class: 'plain-cell' }, `$${row.quotaLimit.toFixed(2)}`)
 }
 
 function renderRateLimit(row: ApiKey) {
@@ -851,9 +913,7 @@ function renderRateLimit(row: ApiKey) {
 }
 
 function renderConcurrency(row: ApiKey) {
-  return row.concurrencyLimit == null
-    ? h('span', { class: 'muted-cell' }, '不限')
-    : h('span', { class: 'plain-cell' }, `${row.concurrencyLimit}`)
+  return row.concurrencyLimit == null ? h('span', { class: 'muted-cell' }, '不限') : h('span', { class: 'plain-cell' }, `${row.concurrencyLimit}`)
 }
 
 function renderTime(value: number | null) {
@@ -861,60 +921,86 @@ function renderTime(value: number | null) {
 }
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [
-  { title: '名称', key: 'name', minWidth: 140, fixed: 'left', render: renderKeyInfo },
+  {
+    title: '名称',
+    key: 'name',
+    minWidth: 140,
+    fixed: 'left',
+    render: renderKeyInfo
+  },
   { title: '归属用户', key: 'owner', minWidth: 190, render: renderOwner },
   {
     title: '密钥',
     key: 'keyPrefix',
     minWidth: 150,
-    render: renderKeyPrefix,
+    render: renderKeyPrefix
   },
   {
     title: '服务商',
     key: 'allowedProviders',
     minWidth: 120,
-    render: renderProviders,
+    render: renderProviders
   },
   {
     title: '模型',
     key: 'allowedModels',
     minWidth: 140,
-    render: renderModels,
+    render: renderModels
   },
   {
     title: '映射',
     key: 'modelMappings',
     minWidth: 170,
-    render: renderMappings,
+    render: renderMappings
   },
   {
     title: '账号分组',
     key: 'accountGroupId',
     minWidth: 110,
-    render: renderGroup,
+    render: renderGroup
   },
   {
     title: '已用',
     key: 'quota',
     minWidth: 100,
-    render: renderUsage,
+    render: renderUsage
   },
   { title: '上限', key: 'quotaLimit', minWidth: 88, render: renderQuotaLimit },
   { title: '限速', key: 'rateLimit', minWidth: 88, render: renderRateLimit },
-  { title: '并发', key: 'concurrencyLimit', minWidth: 72, render: renderConcurrency },
-  { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => renderTime(row.expiresAt) },
-  { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => renderTime(row.lastUsedAt) },
+  {
+    title: '并发',
+    key: 'concurrencyLimit',
+    minWidth: 72,
+    render: renderConcurrency
+  },
+  {
+    title: '过期',
+    key: 'expiresAt',
+    minWidth: 140,
+    render: (row) => renderTime(row.expiresAt)
+  },
+  {
+    title: '最后使用',
+    key: 'lastUsedAt',
+    minWidth: 140,
+    render: (row) => renderTime(row.lastUsedAt)
+  },
   {
     title: '创建时间',
     key: 'createdAt',
     minWidth: 140,
-    render: (row) => renderTime(row.createdAt),
+    render: (row) => renderTime(row.createdAt)
   },
   {
     title: '状态',
     key: 'enabled',
     width: 76,
-    render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }),
+    render: (row) =>
+      h(UiSwitch, {
+        value: row.enabled,
+        size: 'small',
+        onUpdateValue: () => toggle(row)
+      })
   },
   {
     title: '操作',
@@ -927,30 +1013,32 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
         { size: 4, wrap: false },
         {
           default: () => [
+            h(UiButton, { size: 'small', quaternary: true, onClick: () => openUse(row) }, { default: () => '使用' }),
             h(
               UiButton,
-              { size: 'small', quaternary: true, onClick: () => openUse(row) },
-              { default: () => '使用' },
+              {
+                size: 'small',
+                quaternary: true,
+                disabled: !row.canReveal,
+                onClick: () => openCcSwitch(row)
+              },
+              { default: () => 'CC Switch' }
             ),
+            h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
             h(
               UiButton,
-              { size: 'small', quaternary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) },
-              { default: () => 'CC Switch' },
-            ),
-            h(
-              UiButton,
-              { size: 'small', quaternary: true, onClick: () => openEdit(row) },
-              { default: () => '编辑' },
-            ),
-            h(
-              UiButton,
-              { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) },
-              { default: () => '删除' },
-            ),
-          ],
-        },
-      ),
-  },
+              {
+                size: 'small',
+                type: 'error',
+                quaternary: true,
+                onClick: () => confirmDelete(row)
+              },
+              { default: () => '删除' }
+            )
+          ]
+        }
+      )
+  }
 ])
 
 onMounted(() => {
@@ -966,8 +1054,27 @@ onMounted(() => {
       <UiButton type="primary" @click="openCreate">新建 Key</UiButton>
     </div>
 
+    <Transition name="fade">
+      <div v-if="selectedKeyCount" class="bulk-actions">
+        <div class="bulk-summary">
+          <span class="bulk-count">{{ selectedKeyCount }}</span>
+          <strong>已选中 API Key</strong>
+          <UiButton size="tiny" quaternary :disabled="bulkBusy" @click="selectedKeyIds = []">取消选择</UiButton>
+        </div>
+        <div class="bulk-buttons">
+          <UiButton size="small" type="success" secondary :disabled="bulkBusy" @click="bulkSetEnabled(true)">启用</UiButton>
+          <UiButton size="small" type="warning" secondary :disabled="bulkBusy" @click="bulkSetEnabled(false)">禁用</UiButton>
+          <UiButton size="small" type="error" secondary :disabled="bulkBusy" @click="confirmBulkDeleteKeys">删除</UiButton>
+        </div>
+      </div>
+    </Transition>
+
     <UiCard class="table-card" :bordered="false">
       <UiDataTable
+        selectable
+        v-model:checked-row-keys="selectedKeyIds"
+        :row-key="keyRowKey"
+        :row-checkable="keyRowCheckable"
         :columns="columns"
         :data="keys"
         :loading="loading"
@@ -977,19 +1084,10 @@ onMounted(() => {
     </UiCard>
 
     <!-- create -->
-    <UiModal
-      v-model:show="showCreate"
-      title="新建 API Key"
-      :width="520"
-    >
+    <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">
       <UiForm label-placement="top" @submit="create">
         <UiFormItem label="归属用户">
-          <UiSelect
-            v-model:value="form.userId"
-            filterable
-            :options="userSelectOptions"
-            placeholder="选择扣费用户"
-          />
+          <UiSelect v-model:value="form.userId" filterable :options="userSelectOptions" placeholder="选择扣费用户" />
         </UiFormItem>
         <UiFormItem label="名称">
           <UiInput v-model:value="form.name" placeholder="例如：我的笔记本" />
@@ -998,40 +1096,16 @@ onMounted(() => {
           <UiInput v-model:value="form.ownerLabel" placeholder="默认使用归属用户名称" />
         </UiFormItem>
         <UiFormItem label="允许的服务商（留空 = 不限）">
-          <UiSelect
-            v-model:value="form.allowedProviders"
-            multiple
-            :options="providerOptions"
-            placeholder="不限"
-          />
+          <UiSelect v-model:value="form.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
         </UiFormItem>
         <UiFormItem label="允许的模型（留空 = 不限）">
-          <UiSelect
-            v-model:value="form.allowedModels"
-            multiple
-            filterable
-            tag
-            :options="commonModelOptions"
-            placeholder="例如：gpt-*、claude-sonnet-*"
-          />
+          <UiSelect v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
         </UiFormItem>
         <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect
-            v-model:value="form.modelMappings"
-            multiple
-            filterable
-            tag
-            :options="commonMappingOptions"
-            placeholder="例如：gpt-public=gpt-5.4"
-          />
+          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-5.4" />
         </UiFormItem>
         <UiFormItem label="账号分组（留空 = 默认池）">
-          <UiSelect
-            v-model:value="form.accountGroupId"
-            clearable
-            :options="groupSelectOptions"
-            placeholder="默认池（仅调度未分组账号）"
-          />
+          <UiSelect v-model:value="form.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />
         </UiFormItem>
       </UiForm>
       <template #footer>
@@ -1043,15 +1117,8 @@ onMounted(() => {
     </UiModal>
 
     <!-- new-key reveal -->
-    <UiModal
-      :show="!!newKey"
-      title="API Key 已创建"
-      :width="480"
-      @update:show="closeNewKeyModal"
-    >
-      <UiAlert type="warning" style="margin-bottom: 12px">
-        请立即复制并妥善保存，此密钥只会显示这一次。
-      </UiAlert>
+    <UiModal :show="!!newKey" title="API Key 已创建" :width="480" @update:show="closeNewKeyModal">
+      <UiAlert type="warning" style="margin-bottom: 12px"> 请立即复制并妥善保存，此密钥只会显示这一次。 </UiAlert>
       <UiInput :value="newKey ?? ''" readonly />
       <template #footer>
         <UiSpace justify="end">
@@ -1065,17 +1132,14 @@ onMounted(() => {
       :show="!!manualCopy"
       title="请手动复制"
       :width="480"
-      @update:show="(shown: boolean) => { if (!shown) manualCopy = null }"
+      @update:show="
+        (shown: boolean) => {
+          if (!shown) manualCopy = null
+        }
+      "
     >
-      <UiAlert type="info" style="margin-bottom: 12px">
-        当前页面不在安全上下文（HTTPS 或 localhost），浏览器禁止自动写入剪贴板。请手动选中下方内容复制。
-      </UiAlert>
-      <UiInput
-        :value="manualCopy?.text ?? ''"
-        type="textarea"
-        readonly
-        :autosize="{ minRows: 2, maxRows: 4 }"
-      />
+      <UiAlert type="info" style="margin-bottom: 12px"> 当前页面不在安全上下文（HTTPS 或 localhost），浏览器禁止自动写入剪贴板。请手动选中下方内容复制。 </UiAlert>
+      <UiInput :value="manualCopy?.text ?? ''" type="textarea" readonly :autosize="{ minRows: 2, maxRows: 4 }" />
       <template #footer>
         <UiSpace justify="end">
           <UiButton type="primary" @click="manualCopy = null">关闭</UiButton>
@@ -1150,9 +1214,7 @@ onMounted(() => {
           <UiButton size="small" secondary @click="copyKey(snippets.kimiOpenai)">复制</UiButton>
         </UiTabPane>
       </UiTabs>
-      <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px">
-        已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。
-      </UiAlert>
+      <UiAlert v-if="useKeySecret.endsWith('...')" type="info" style="margin-top: 14px"> 已存在的 Key 只保存哈希，后台无法再次显示完整密钥。请把示例里的前缀替换为你保存的完整 Key。 </UiAlert>
     </UiModal>
 
     <!-- CC Switch one-click import -->
@@ -1162,13 +1224,7 @@ onMounted(() => {
         <a href="https://ccswitch.io" target="_blank" rel="noopener">CC Switch</a>。
       </UiAlert>
       <UiSpace vertical size="small" style="width: 100%">
-        <UiButton
-          v-for="target in ccSwitchTargets"
-          :key="target.id"
-          block
-          secondary
-          @click="triggerCcSwitch(target)"
-        >
+        <UiButton v-for="target in ccSwitchTargets" :key="target.id" block secondary @click="triggerCcSwitch(target)">
           {{ target.label }}
         </UiButton>
       </UiSpace>
@@ -1183,12 +1239,7 @@ onMounted(() => {
     <UiModal v-model:show="showEdit" title="编辑 API Key" :width="520">
       <UiForm label-placement="top" @submit="saveEdit">
         <UiFormItem label="归属用户">
-          <UiSelect
-            v-model:value="editForm.userId"
-            filterable
-            :options="userSelectOptions"
-            placeholder="选择扣费用户"
-          />
+          <UiSelect v-model:value="editForm.userId" filterable :options="userSelectOptions" placeholder="选择扣费用户" />
         </UiFormItem>
         <UiFormItem label="名称">
           <UiInput v-model:value="editForm.name" />
@@ -1197,67 +1248,25 @@ onMounted(() => {
           <UiInput v-model:value="editForm.ownerLabel" placeholder="默认使用归属用户名称" />
         </UiFormItem>
         <UiFormItem label="允许的服务商（留空 = 不限）">
-          <UiSelect
-            v-model:value="editForm.allowedProviders"
-            multiple
-            :options="providerOptions"
-            placeholder="不限"
-          />
+          <UiSelect v-model:value="editForm.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
         </UiFormItem>
         <UiFormItem label="允许的模型（留空 = 不限）">
-          <UiSelect
-            v-model:value="editForm.allowedModels"
-            multiple
-            filterable
-            tag
-            :options="commonModelOptions"
-            placeholder="例如：gpt-*、claude-sonnet-*"
-          />
+          <UiSelect v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
         </UiFormItem>
         <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect
-            v-model:value="editForm.modelMappings"
-            multiple
-            filterable
-            tag
-            :options="commonMappingOptions"
-            placeholder="例如：gpt-public=gpt-5.4"
-          />
+          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-5.4" />
         </UiFormItem>
         <UiFormItem label="账号分组（留空 = 默认池）">
-          <UiSelect
-            v-model:value="editForm.accountGroupId"
-            clearable
-            :options="groupSelectOptions"
-            placeholder="默认池（仅调度未分组账号）"
-          />
+          <UiSelect v-model:value="editForm.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />
         </UiFormItem>
         <UiFormItem label="成本上限（USD，留空 = 不限）">
-          <UiInputNumber
-            v-model:value="editForm.quotaLimit"
-            :min="0"
-            :step="1"
-            placeholder="例如：10"
-            style="width: 100%"
-          />
+          <UiInputNumber v-model:value="editForm.quotaLimit" :min="0" :step="1" placeholder="例如：10" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="速率上限（次/分钟，留空 = 不限）">
-          <UiInputNumber
-            v-model:value="editForm.rateLimit"
-            :min="1"
-            :step="10"
-            placeholder="例如：60"
-            style="width: 100%"
-          />
+          <UiInputNumber v-model:value="editForm.rateLimit" :min="1" :step="10" placeholder="例如：60" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="并发上限（同时进行的请求数，留空 = 不限）">
-          <UiInputNumber
-            v-model:value="editForm.concurrencyLimit"
-            :min="1"
-            :step="1"
-            placeholder="例如：5"
-            style="width: 100%"
-          />
+          <UiInputNumber v-model:value="editForm.concurrencyLimit" :min="1" :step="1" placeholder="例如：5" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="过期时间（留空 = 永久）">
           <UiDatePicker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
@@ -1277,6 +1286,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 批量操作条与 fade 过渡已提升为 web/src/styles.css 的全局类。 */
 pre {
   margin: 0 0 12px;
   overflow-x: auto;
@@ -1359,5 +1369,4 @@ pre code {
 :deep(.usage-value.is-error) {
   color: #d03050;
 }
-
 </style>

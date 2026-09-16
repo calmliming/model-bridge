@@ -4,7 +4,7 @@ import { UiButton, UiSpace, UiTag, UiTooltip } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 
 interface UserRow {
   id: string
@@ -39,6 +39,7 @@ interface UsageLog {
   provider: string
   model: string | null
   status: string
+  firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
   cacheCreateTokens: number
@@ -53,7 +54,11 @@ const loading = ref(true)
 const showInvite = ref(false)
 const inviting = ref(false)
 const inviteForm = ref({ email: '', name: '' })
-const inviteResult = ref<{ token: string; inviteUrl: string; expiresAt: number } | null>(null)
+const inviteResult = ref<{
+  token: string
+  inviteUrl: string
+  expiresAt: number
+} | null>(null)
 
 const showAdjust = ref(false)
 const adjusting = ref(false)
@@ -74,18 +79,23 @@ const usageRows = ref<UsageLog[]>([])
 
 const showSubs = ref(false)
 const subsLoading = ref(false)
-const subsRows = ref<Array<{
-  id: string
-  planName: string | null
-  groupName: string | null
-  status: string
-  expiresAt: number
-}>>([])
+const subsRows = ref<
+  Array<{
+    id: string
+    planName: string | null
+    groupName: string | null
+    status: string
+    expiresAt: number
+  }>
+>([])
 const subPlans = ref<Array<{ id: string; name: string; groupName: string | null }>>([])
 const assignPlanId = ref<string | null>(null)
 const assigning = ref(false)
 const subPlanOptions = computed(() =>
-  subPlans.value.map((p) => ({ label: p.groupName ? `${p.name}（${p.groupName}）` : p.name, value: p.id })),
+  subPlans.value.map((p) => ({
+    label: p.groupName ? `${p.name}（${p.groupName}）` : p.name,
+    value: p.id
+  }))
 )
 
 async function openSubscriptions(row: UserRow) {
@@ -94,10 +104,7 @@ async function openSubscriptions(row: UserRow) {
   subsLoading.value = true
   assignPlanId.value = null
   try {
-    const [subsRes, plansRes] = await Promise.all([
-      api.get(`/admin/users/${row.id}/subscriptions`),
-      api.get('/admin/subscription-plans'),
-    ])
+    const [subsRes, plansRes] = await Promise.all([api.get(`/admin/users/${row.id}/subscriptions`), api.get('/admin/subscription-plans')])
     subsRows.value = subsRes.data.subscriptions
     subPlans.value = plansRes.data.plans
     assignPlanId.value = subPlans.value[0]?.id ?? null
@@ -115,7 +122,9 @@ async function assignSubscription() {
   }
   assigning.value = true
   try {
-    await api.post(`/admin/users/${selectedUser.value.id}/subscriptions`, { planId: assignPlanId.value })
+    await api.post(`/admin/users/${selectedUser.value.id}/subscriptions`, {
+      planId: assignPlanId.value
+    })
     message.success('已分配订阅')
     const { data } = await api.get(`/admin/users/${selectedUser.value.id}/subscriptions`)
     subsRows.value = data.subscriptions
@@ -126,17 +135,13 @@ async function assignSubscription() {
   }
 }
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
-}
-
 function formatTokens(row: UsageLog) {
   const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens
   const rows: [string, number][] = [
     ['输入', row.inputTokens],
     ['输出', row.outputTokens],
     ['缓存写入', row.cacheCreateTokens],
-    ['缓存读取', row.cacheReadTokens],
+    ['缓存读取', row.cacheReadTokens]
   ]
   return h(
     UiTooltip,
@@ -147,14 +152,9 @@ function formatTokens(row: UsageLog) {
         h(
           'div',
           { class: 'token-breakdown' },
-          rows.map(([label, value]) =>
-            h('div', { class: 'token-breakdown-row' }, [
-              h('span', { class: 'token-breakdown-label' }, label),
-              h('span', { class: 'token-breakdown-value' }, value.toLocaleString('en-US')),
-            ]),
-          ),
-        ),
-    },
+          rows.map(([label, value]) => h('div', { class: 'token-breakdown-row' }, [h('span', { class: 'token-breakdown-label' }, label), h('span', { class: 'token-breakdown-value' }, value.toLocaleString('en-US'))]))
+        )
+    }
   )
 }
 
@@ -179,12 +179,12 @@ async function invite() {
   try {
     const { data } = await api.post('/admin/users/invite', {
       email: inviteForm.value.email.trim(),
-      name: inviteForm.value.name.trim() || undefined,
+      name: inviteForm.value.name.trim() || undefined
     })
     inviteResult.value = {
       token: data.token,
       inviteUrl: data.inviteUrl,
-      expiresAt: data.expiresAt,
+      expiresAt: data.expiresAt
     }
     inviteForm.value = { email: '', name: '' }
     showInvite.value = false
@@ -200,12 +200,12 @@ async function resetInvite(row: UserRow) {
   try {
     const { data } = await api.post('/admin/users/invite', {
       email: row.email,
-      name: row.name,
+      name: row.name
     })
     inviteResult.value = {
       token: data.token,
       inviteUrl: data.inviteUrl,
-      expiresAt: data.expiresAt,
+      expiresAt: data.expiresAt
     }
     message.success('已生成重置链接')
     await load()
@@ -217,7 +217,7 @@ async function resetInvite(row: UserRow) {
 async function updateStatus(row: UserRow) {
   try {
     await api.patch(`/admin/users/${row.id}`, {
-      status: row.status === 'active' ? 'disabled' : 'active',
+      status: row.status === 'active' ? 'disabled' : 'active'
     })
     await load()
   } catch (e) {
@@ -244,7 +244,9 @@ async function saveConcurrency() {
   const limit = raw != null && raw > 0 ? Math.floor(raw) : null
   savingConcurrency.value = true
   try {
-    await api.patch(`/admin/users/${selectedUser.value.id}`, { concurrencyLimit: limit })
+    await api.patch(`/admin/users/${selectedUser.value.id}`, {
+      concurrencyLimit: limit
+    })
     message.success('已更新并发上限')
     showConcurrency.value = false
     await load()
@@ -261,7 +263,7 @@ async function adjustWallet() {
   try {
     await api.post(`/admin/users/${selectedUser.value.id}/wallet`, {
       amount: adjustForm.value.amount,
-      note: adjustForm.value.note.trim() || undefined,
+      note: adjustForm.value.note.trim() || undefined
     })
     message.success('已更新余额')
     showAdjust.value = false
@@ -278,7 +280,9 @@ async function openWallet(row: UserRow) {
   showWallet.value = true
   walletLoading.value = true
   try {
-    const { data } = await api.get(`/admin/users/${row.id}/wallet`, { params: { pageSize: 50 } })
+    const { data } = await api.get(`/admin/users/${row.id}/wallet`, {
+      params: { pageSize: 50 }
+    })
     walletRows.value = data.transactions
   } catch (e) {
     message.error(errMsg(e))
@@ -292,7 +296,9 @@ async function openUsage(row: UserRow) {
   showUsage.value = true
   usageLoading.value = true
   try {
-    const { data } = await api.get(`/admin/users/${row.id}/usage`, { params: { pageSize: 50 } })
+    const { data } = await api.get(`/admin/users/${row.id}/usage`, {
+      params: { pageSize: 50 }
+    })
     usageRows.value = data.logs
   } catch (e) {
     message.error(errMsg(e))
@@ -313,8 +319,12 @@ function renderStatus(row: UserRow) {
   }
   return h(
     UiTag,
-    { size: 'small', bordered: false, type: row.status === 'active' ? 'success' : 'error' },
-    { default: () => (row.status === 'active' ? '启用' : '禁用') },
+    {
+      size: 'small',
+      bordered: false,
+      type: row.status === 'active' ? 'success' : 'error'
+    },
+    { default: () => (row.status === 'active' ? '启用' : '禁用') }
   )
 }
 
@@ -323,59 +333,198 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
     title: '用户',
     key: 'user',
     minWidth: 210,
-    render: (row) => h('div', [
-      h('div', { class: 'user-title' }, [
-        h('strong', row.name),
-        row.isAdmin
-          ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => 'Admin' })
-          : null,
-      ]),
-      h('span', { class: 'subtext' }, row.email),
-    ]),
+    render: (row) =>
+      h('div', [h('div', { class: 'user-title' }, [h('strong', row.name), row.isAdmin ? h(UiTag, { size: 'small', type: 'info', bordered: false }, { default: () => 'Admin' }) : null]), h('span', { class: 'subtext' }, row.email)])
   },
-  { title: '余额', key: 'balance', minWidth: 96, render: (row) => h('span', { class: row.balance <= 0 ? 'danger' : 'amount' }, formatUsd(row.balance)) },
-  { title: '并发', key: 'concurrencyLimit', width: 72, render: (row) => (row.concurrencyLimit == null ? h('span', { class: 'subtext' }, '不限') : row.concurrencyLimit) },
+  {
+    title: '余额',
+    key: 'balance',
+    minWidth: 96,
+    render: (row) => h('span', { class: row.balance <= 0 ? 'danger' : 'amount' }, formatUsd(row.balance))
+  },
+  {
+    title: '并发',
+    key: 'concurrencyLimit',
+    width: 72,
+    render: (row) => (row.concurrencyLimit == null ? h('span', { class: 'subtext' }, '不限') : row.concurrencyLimit)
+  },
   { title: 'Keys', key: 'keyCount', width: 72 },
-  { title: '请求', key: 'requestCount', width: 80, render: (row) => row.requestCount.toLocaleString('en-US') },
-  { title: '成本', key: 'totalCost', width: 96, render: (row) => formatUsd(row.totalCost) },
+  {
+    title: '请求',
+    key: 'requestCount',
+    width: 80,
+    render: (row) => row.requestCount.toLocaleString('en-US')
+  },
+  {
+    title: '成本',
+    key: 'totalCost',
+    width: 96,
+    render: (row) => formatUsd(row.totalCost)
+  },
   { title: '状态', key: 'status', width: 92, render: renderStatus },
-  { title: '最后登录', key: 'lastLoginAt', minWidth: 140, render: (row) => formatTime(row.lastLoginAt) },
-  { title: '创建', key: 'createdAt', minWidth: 140, render: (row) => formatTime(row.createdAt) },
+  {
+    title: '最后登录',
+    key: 'lastLoginAt',
+    minWidth: 140,
+    render: (row) => formatTime(row.lastLoginAt)
+  },
+  {
+    title: '创建',
+    key: 'createdAt',
+    minWidth: 140,
+    render: (row) => formatTime(row.createdAt)
+  },
   {
     title: '操作',
     key: 'actions',
     width: 450,
-    render: (row) => h(UiSpace, { size: 4, wrap: false }, {
-      default: () => [
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, 1) }, { default: () => '充值' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openAdjust(row, -1) }, { default: () => '扣款' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openConcurrency(row) }, { default: () => '并发' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openWallet(row) }, { default: () => '流水' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openUsage(row) }, { default: () => '用量' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => openSubscriptions(row) }, { default: () => '订阅' }),
-        h(UiButton, { size: 'small', quaternary: true, onClick: () => resetInvite(row) }, { default: () => '重置密码' }),
-        h(UiButton, { size: 'small', type: row.status === 'active' ? 'error' : 'success', quaternary: true, onClick: () => updateStatus(row) }, { default: () => (row.status === 'active' ? '禁用' : '启用') }),
-      ],
-    }),
-  },
+    render: (row) =>
+      h(
+        UiSpace,
+        { size: 4, wrap: false },
+        {
+          default: () => [
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openAdjust(row, 1)
+              },
+              { default: () => '充值' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openAdjust(row, -1)
+              },
+              { default: () => '扣款' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openConcurrency(row)
+              },
+              { default: () => '并发' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openWallet(row)
+              },
+              { default: () => '流水' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openUsage(row)
+              },
+              { default: () => '用量' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => openSubscriptions(row)
+              },
+              { default: () => '订阅' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                quaternary: true,
+                onClick: () => resetInvite(row)
+              },
+              { default: () => '重置密码' }
+            ),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                type: row.status === 'active' ? 'error' : 'success',
+                quaternary: true,
+                onClick: () => updateStatus(row)
+              },
+              { default: () => (row.status === 'active' ? '禁用' : '启用') }
+            )
+          ]
+        }
+      )
+  }
 ])
 
 const walletColumns: TableColumn<WalletTransaction>[] = [
-  { title: '时间', key: 'createdAt', minWidth: 150, render: (row) => formatTime(row.createdAt) },
+  {
+    title: '时间',
+    key: 'createdAt',
+    minWidth: 150,
+    render: (row) => formatTime(row.createdAt)
+  },
   { title: '类型', key: 'type', width: 90 },
-  { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
-  { title: '余额', key: 'balanceAfter', width: 110, render: (row) => formatUsd(row.balanceAfter) },
-  { title: '备注', key: 'note', minWidth: 180, render: (row) => row.note || '—' },
+  {
+    title: '金额',
+    key: 'amount',
+    width: 110,
+    render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount))
+  },
+  {
+    title: '余额',
+    key: 'balanceAfter',
+    width: 110,
+    render: (row) => formatUsd(row.balanceAfter)
+  },
+  {
+    title: '备注',
+    key: 'note',
+    minWidth: 180,
+    render: (row) => row.note || '—'
+  }
 ]
 
 const usageColumns: TableColumn<UsageLog>[] = [
-  { title: '时间', key: 'ts', minWidth: 150, render: (row) => formatTime(row.ts) },
-  { title: 'Key', key: 'apiKeyName', minWidth: 120, render: (row) => row.apiKeyName || '—' },
+  {
+    title: '时间',
+    key: 'ts',
+    minWidth: 150,
+    render: (row) => formatTime(row.ts)
+  },
+  {
+    title: 'Key',
+    key: 'apiKeyName',
+    minWidth: 120,
+    render: (row) => row.apiKeyName || '—'
+  },
   { title: '服务商', key: 'provider', width: 90 },
-  { title: '模型', key: 'model', minWidth: 160, render: (row) => row.model || '—' },
+  {
+    title: '模型',
+    key: 'model',
+    minWidth: 160,
+    render: (row) => row.model || '—'
+  },
   { title: 'Tokens', key: 'tokens', width: 100, render: formatTokens },
-  { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
-  { title: '状态', key: 'status', width: 90 },
+  {
+    title: '成本',
+    key: 'cost',
+    width: 100,
+    render: (row) => formatUsd(row.cost)
+  },
+  {
+    title: '首字',
+    key: 'firstTokenMs',
+    width: 90,
+    render: (row) => (row.firstTokenMs == null ? '—' : `${row.firstTokenMs}ms`)
+  },
+  { title: '状态', key: 'status', width: 90 }
 ]
 
 onMounted(load)
@@ -408,7 +557,16 @@ onMounted(load)
       </template>
     </UiModal>
 
-    <UiModal :show="!!inviteResult" title="邀请 / 重置链接" :width="560" @update:show="(shown: boolean) => { if (!shown) inviteResult = null }">
+    <UiModal
+      :show="!!inviteResult"
+      title="邀请 / 重置链接"
+      :width="560"
+      @update:show="
+        (shown: boolean) => {
+          if (!shown) inviteResult = null
+        }
+      "
+    >
       <UiAlert type="warning" style="margin-bottom: 12px">链接只在这里显示一次，用户打开后可设置新密码。</UiAlert>
       <UiInput :value="inviteResult?.inviteUrl ?? ''" readonly />
       <div class="subline">过期时间：{{ formatTime(inviteResult?.expiresAt) }}</div>
@@ -461,12 +619,7 @@ onMounted(load)
 
     <UiModal v-model:show="showSubs" :title="`订阅：${selectedUser?.name ?? ''}`" :width="560">
       <div class="assign-row">
-        <UiSelect
-          v-model:value="assignPlanId"
-          :options="subPlanOptions"
-          placeholder="选择套餐分配"
-          style="flex: 1"
-        />
+        <UiSelect v-model:value="assignPlanId" :options="subPlanOptions" placeholder="选择套餐分配" style="flex: 1" />
         <UiButton type="primary" :loading="assigning" @click="assignSubscription">分配</UiButton>
       </div>
       <UiSpin :show="subsLoading">

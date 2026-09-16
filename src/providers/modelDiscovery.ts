@@ -3,6 +3,7 @@ import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
 import { IMAGE_25_MODELS } from './openai/imageModels'
+import { isForwardableDeepseekModel } from './deepseek/converter'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -38,23 +39,29 @@ const CREATED_AT = 1_704_067_200
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, string[]> = {
-  claude: [
-    'claude-fable-5-1',
-    'claude-opus-5',
-    'claude-opus-4-8',
-    'claude-sonnet-5',
-    'claude-haiku-4-5',
-    'claude-fable-5',
+  claude: ['claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
+  openai: [
+    'gpt-6-astra',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.3-codex',
+    'gpt-5.3-codex-spark',
+    'gpt-image-2',
+    ...IMAGE_25_MODELS
   ],
-  openai: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-image-2', ...IMAGE_25_MODELS],
   gemini: [
     'gemini-3.8-flash',
+    'gemini-3.7-flash',
     'gemini-3.6-flash',
     'gemini-3.1-pro-preview',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
     'gemini-2.5-pro',
-    'gemini-2.5-flash',
+    'gemini-2.5-flash'
   ],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
   xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
@@ -65,7 +72,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
   // can route the same identifiers that Sub2API v0.1.183 accepts.
   kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
-  grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1'],
+  grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
 }
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
@@ -74,10 +81,23 @@ const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   // Sub2API is an aggregator upstream that forwards model names verbatim and
   // has access to every model, so its discovery list is the union of all
   // native providers' lists — no separate list to keep in sync.
-  sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())],
+  sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())]
 }
 
-const PROVIDERS: ProviderId[] = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api']
+const PROVIDERS: ProviderId[] = [
+  'claude',
+  'openai',
+  'gemini',
+  'antigravity',
+  'deepseek',
+  'xiaomi',
+  'zhipu',
+  'qwen',
+  'kimi',
+  'minimax',
+  'grok',
+  'sub2api'
+]
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
@@ -88,13 +108,8 @@ function inferProvider(model: string): ProviderId | null {
   if (lower.startsWith('mimo-')) return 'xiaomi'
   if (lower.startsWith('glm-')) return 'zhipu'
   if (lower.startsWith('qwen')) return 'qwen'
-  if (
-    lower.startsWith('kimi') ||
-    lower.startsWith('moonshot') ||
-    lower === 'k3' ||
-    lower === 'k3-256k' ||
-    lower === 'kimi-code/k3'
-  ) return 'kimi'
+  if (lower.startsWith('kimi') || lower.startsWith('moonshot') || lower === 'k3' || lower === 'k3-256k' || lower === 'kimi-code/k3')
+    return 'kimi'
   if (lower.startsWith('minimax-')) return 'minimax'
   if (lower.startsWith('grok')) return 'grok'
   return null
@@ -115,7 +130,7 @@ function displayName(model: string): string {
 
 function providerScope(key: ModelDiscoveryKey, requested?: ProviderId): ProviderId[] {
   const allowed = (key.allowedProviders ?? PROVIDERS).filter((provider): provider is ProviderId =>
-    PROVIDERS.includes(provider as ProviderId),
+    PROVIDERS.includes(provider as ProviderId)
   )
   if (!requested) return allowed
   return allowed.includes(requested) ? [requested] : []
@@ -133,16 +148,14 @@ function exactMappingSources(key: ModelDiscoveryKey): Array<{ from: string; to: 
     .filter((entry) => entry.from && entry.to && !entry.from.includes('*'))
 }
 
-function includeCustomAllowedModels(
-  ids: string[],
-  key: ModelDiscoveryKey,
-  providers: ProviderId[],
-  requested?: ProviderId,
-): void {
+function includeCustomAllowedModels(ids: string[], key: ModelDiscoveryKey, providers: ProviderId[], requested?: ProviderId): void {
   for (const model of exactAllowedModelEntries(key)) {
     if (!isAllowedModel(model, key.allowedModels)) continue
     if (ids.includes(model)) continue
-    if (providers.includes('sub2api') || (providers.includes('antigravity') && ['gemini', 'claude'].includes(inferProvider(mapRequestedModel(model, key.modelMappings)) ?? ''))) {
+    if (
+      providers.includes('sub2api') ||
+      (providers.includes('antigravity') && ['gemini', 'claude'].includes(inferProvider(mapRequestedModel(model, key.modelMappings)) ?? ''))
+    ) {
       ids.push(model)
       continue
     }
@@ -155,12 +168,7 @@ function includeCustomAllowedModels(
   }
 }
 
-function includeMappedModels(
-  ids: string[],
-  key: ModelDiscoveryKey,
-  providers: ProviderId[],
-  requested?: ProviderId,
-): void {
+function includeMappedModels(ids: string[], key: ModelDiscoveryKey, providers: ProviderId[], requested?: ProviderId): void {
   for (const { from, to } of exactMappingSources(key)) {
     if (ids.includes(from)) continue
     if (!isAllowedModel(from, key.allowedModels) && !isAllowedModel(to, key.allowedModels)) continue
@@ -181,11 +189,23 @@ export function isProviderAllowed(provider: ProviderId, key: ModelDiscoveryKey):
   return providerScope(key, provider).length > 0
 }
 
+/**
+ * Providers whose relay rejects names the upstream catalog may still list.
+ * Applied after mappings and custom entries, using the provider that handles
+ * the request. Aggregator and explicit non-DeepSeek routes keep their own rules.
+ */
+const CATALOG_MODEL_FILTERS: Partial<Record<ProviderId, (model: string) => boolean>> = {
+  deepseek: isForwardableDeepseekModel
+}
+
 export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderId): string[] {
   const providers = providerScope(key, requested)
   const ids: string[] = []
   for (const provider of providers) {
-    for (const model of [...(key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]), ...Object.keys(key.catalogModels?.[provider] ?? {})]) {
+    for (const model of [
+      ...(key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]),
+      ...Object.keys(key.catalogModels?.[provider] ?? {})
+    ]) {
       const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
       if (provider === 'antigravity' && targetProvider && !['gemini', 'claude'].includes(targetProvider)) continue
       if (provider !== 'sub2api' && provider !== 'antigravity' && targetProvider && !providers.includes(targetProvider)) continue
@@ -194,7 +214,16 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   }
   includeMappedModels(ids, key, providers, requested)
   includeCustomAllowedModels(ids, key, providers, requested)
-  return ids.filter((model) => isGroupModelAllowed(model, key.groupAllowedModels))
+  return ids.filter((model) => {
+    if (!isGroupModelAllowed(model, key.groupAllowedModels)) return false
+    const target = mapRequestedModel(model, key.modelMappings)
+    const aggregator = providers.length === 1 && ['sub2api', 'antigravity'].includes(providers[0]!)
+      ? providers[0]
+      : undefined
+    const routeProvider = requested ?? aggregator ?? inferProvider(target)
+    const filter = routeProvider ? CATALOG_MODEL_FILTERS[routeProvider] : undefined
+    return !filter || filter(target)
+  })
 }
 
 export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: ProviderId): ModelItem[] {
@@ -210,18 +239,20 @@ export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: Provid
       created: CREATED_AT,
       owned_by: inferProvider(target) ?? requested ?? 'model-bridge',
       type: 'model',
-      display_name: id === target ? capability?.display_name ?? displayName(id) : displayName(id),
+      display_name: id === target ? (capability?.display_name ?? displayName(id)) : displayName(id)
     }
   })
 }
 
 export function listGeminiModels(key: ModelDiscoveryKey, provider: 'gemini' | 'sub2api' | 'antigravity' = 'gemini'): GeminiModelItem[] {
   return listModelIdsForKey(key, provider)
-    .filter(id => (provider === 'gemini' || provider === 'antigravity') || inferProvider(mapRequestedModel(id, key.modelMappings)) === 'gemini')
+    .filter(
+      (id) => provider === 'gemini' || provider === 'antigravity' || inferProvider(mapRequestedModel(id, key.modelMappings)) === 'gemini'
+    )
     .map((id) => ({
-    name: `models/${id}`,
-    version: '001',
-    displayName: displayName(id),
-    supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
-  }))
+      name: `models/${id}`,
+      version: '001',
+      displayName: displayName(id),
+      supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+    }))
 }

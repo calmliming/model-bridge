@@ -5,7 +5,7 @@ import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 
 interface RedeemCode {
   id: string
@@ -40,10 +40,6 @@ const statusLabel: Record<RedeemCode['status'], string> = {
   unused: '未使用',
   used: '已使用',
   disabled: '已禁用',
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
 
 async function load() {

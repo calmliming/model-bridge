@@ -11,6 +11,28 @@ export function formatTokens(n: number): string {
   return Math.round(value).toLocaleString('en-US')
 }
 
+/**
+ * Formats a USD amount at a precision that keeps the value the server actually
+ * recorded visible. Costs are rounded to 8 decimals server-side, and cheap
+ * requests routinely land below a micro-dollar; a fixed 4- or 6-decimal format
+ * renders those as $0.0000 — which reads as "free" even though the request's
+ * own line items and the usage totals still count it.
+ *
+ * Replaces the per-view copies this used to be duplicated into (several views
+ * had drifted to a hard-coded 2/4 split).
+ */
+export function formatUsd(n: number): string {
+  const value = Number.isFinite(n) ? n : 0
+  const abs = Math.abs(value)
+  if (abs >= 1) return `$${value.toFixed(2)}`
+  if (abs === 0) return '$0.00'
+  if (abs >= 0.01) return `$${value.toFixed(4)}`
+  // Sub-cent: keep two significant digits so a small charge stays legible
+  // instead of collapsing into $0.0000. Capped at the server's 8 decimals.
+  const decimals = Math.min(8, Math.max(4, Math.ceil(-Math.log10(abs)) + 2))
+  return `$${value.toFixed(decimals)}`
+}
+
 // Server-side stats timezone (STATS_TIMEZONE), fetched once at startup. When
 // set, timestamps render in this zone so a row's date always matches the day
 // bucket / "today" card it was counted into; until it loads (or if the server

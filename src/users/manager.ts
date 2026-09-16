@@ -10,7 +10,7 @@ const BCRYPT_ROUNDS = 10
 export class UserManagerError extends Error {
   constructor(
     message: string,
-    public readonly statusCode = 400,
+    public readonly statusCode = 400
   ) {
     super(message)
   }
@@ -51,6 +51,7 @@ export interface UserUsageLog {
   errorCategory: string | null
   modelMismatch: boolean
   latencyMs: number | null
+  firstTokenMs: number | null
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
@@ -99,7 +100,7 @@ function asUser(row: Record<string, unknown>): UserView {
     balance: microsToUsd(balanceMicros),
     acceptedAt: row.accepted_at == null ? null : Number(row.accepted_at),
     lastLoginAt: row.last_login_at == null ? null : Number(row.last_login_at),
-    createdAt: Number(row.created_at),
+    createdAt: Number(row.created_at)
   }
 }
 
@@ -109,7 +110,7 @@ function asUserListRow(row: Record<string, unknown>): UserListRow {
     keyCount: Number(row.key_count ?? 0),
     requestCount: Number(row.request_count ?? 0),
     totalCost: Number(row.total_cost ?? 0),
-    isAdmin: row.is_admin === true,
+    isAdmin: row.is_admin === true
   }
 }
 
@@ -123,6 +124,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     errorCategory: normalizeUserErrorCategory(row.error_code, row.upstream_status),
     modelMismatch: row.model_mismatch === true,
     latencyMs: row.latency_ms == null ? null : Number(row.latency_ms),
+    firstTokenMs: row.first_token_ms == null ? null : Number(row.first_token_ms),
     inputTokens: Number(row.input_tokens),
     outputTokens: Number(row.output_tokens),
     reasoningTokens: Number(row.reasoning_tokens ?? 0),
@@ -136,7 +138,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     imageModel: (row.image_model as string | null) ?? null,
     cost: Number(row.cost),
     apiKeyName: (row.api_key_name as string | null) ?? null,
-    requestInput: (row.request_input as string | null) ?? null,
+    requestInput: (row.request_input as string | null) ?? null
   }
 }
 
@@ -155,7 +157,7 @@ export async function getUserById(id: string): Promise<UserView | null> {
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at
      FROM users WHERE id = $1`,
-    [id],
+    [id]
   )
   return rows[0] ? asUser(rows[0]) : null
 }
@@ -169,16 +171,12 @@ export async function listUsers(): Promise<UserListRow[]> {
             (SELECT COUNT(*) FROM usage_logs l WHERE l.user_id = u.id) AS request_count,
             (SELECT COALESCE(SUM(l.cost), 0) FROM usage_logs l WHERE l.user_id = u.id) AS total_cost
      FROM users u
-     ORDER BY u.created_at DESC, u.email`,
+     ORDER BY u.created_at DESC, u.email`
   )
   return rows.map(asUserListRow)
 }
 
-export async function createUserInvite(input: {
-  email: string
-  name?: string | null
-  createdBy?: string | null
-}): Promise<InviteResult> {
+export async function createUserInvite(input: { email: string; name?: string | null; createdBy?: string | null }): Promise<InviteResult> {
   const email = normalizeEmail(input.email)
   if (!email) throw new UserManagerError('email is required')
   const name = input.name?.trim() || defaultName(email)
@@ -188,10 +186,7 @@ export async function createUserInvite(input: {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    const existing = await client.query<Record<string, unknown>>(
-      'SELECT id, password_hash FROM users WHERE email = $1 FOR UPDATE',
-      [email],
-    )
+    const existing = await client.query<Record<string, unknown>>('SELECT id, password_hash FROM users WHERE email = $1 FOR UPDATE', [email])
     let userId = existing.rows[0]?.id as string | undefined
     if (userId) {
       await client.query('UPDATE users SET name = $1 WHERE id = $2', [name, userId])
@@ -200,22 +195,19 @@ export async function createUserInvite(input: {
       await client.query(
         `INSERT INTO users (id, email, name, status, balance_micros)
          VALUES ($1, $2, $3, 'active', 0)`,
-        [userId, email, name],
+        [userId, email, name]
       )
     }
-    await client.query(
-      'UPDATE user_invites SET accepted_at = $1 WHERE user_id = $2 AND accepted_at IS NULL',
-      [Date.now(), userId],
-    )
+    await client.query('UPDATE user_invites SET accepted_at = $1 WHERE user_id = $2 AND accepted_at IS NULL', [Date.now(), userId])
     await client.query(
       `INSERT INTO user_invites (id, user_id, token_hash, expires_at, created_by)
        VALUES ($1, $2, $3, $4, $5)`,
-      [generateId(), userId, tokenHash, expiresAt, input.createdBy ?? null],
+      [generateId(), userId, tokenHash, expiresAt, input.createdBy ?? null]
     )
     const userRow = await client.query<Record<string, unknown>>(
       `SELECT id, email, name, status, balance_micros, accepted_at, last_login_at, created_at
        FROM users WHERE id = $1`,
-      [userId],
+      [userId]
     )
     await client.query('COMMIT')
     return { user: asUser(userRow.rows[0]!), token, expiresAt }
@@ -227,11 +219,7 @@ export async function createUserInvite(input: {
   }
 }
 
-export async function acceptInvite(input: {
-  token: string
-  password: string
-  name?: string | null
-}): Promise<UserView> {
+export async function acceptInvite(input: { token: string; password: string; name?: string | null }): Promise<UserView> {
   const tokenHash = hashToken(input.token.trim())
   const client = await pool.connect()
   try {
@@ -243,7 +231,7 @@ export async function acceptInvite(input: {
        JOIN users u ON u.id = i.user_id
        WHERE i.token_hash = $1
        FOR UPDATE`,
-      [tokenHash],
+      [tokenHash]
     )
     const row = invite.rows[0]
     if (!row) throw new UserManagerError('invalid invite token', 400)
@@ -259,16 +247,13 @@ export async function acceptInvite(input: {
       `UPDATE users
        SET name = $1, password_hash = $2, accepted_at = COALESCE(accepted_at, $3)
        WHERE id = $4`,
-      [name, passwordHash, now, userId],
+      [name, passwordHash, now, userId]
     )
-    await client.query('UPDATE user_invites SET accepted_at = $1 WHERE id = $2', [
-      now,
-      row.invite_id,
-    ])
+    await client.query('UPDATE user_invites SET accepted_at = $1 WHERE id = $2', [now, row.invite_id])
     const updated = await client.query<Record<string, unknown>>(
       `SELECT id, email, name, status, balance_micros, accepted_at, last_login_at, created_at
        FROM users WHERE id = $1`,
-      [userId],
+      [userId]
     )
     await client.query('COMMIT')
     return asUser(updated.rows[0]!)
@@ -286,11 +271,7 @@ export async function acceptInvite(input: {
  * email that already has a password or Google identity. The `FOR UPDATE` row lock makes
  * concurrent registrations of the same email safe.
  */
-export async function registerUser(input: {
-  email: string
-  password: string
-  name?: string | null
-}): Promise<UserView> {
+export async function registerUser(input: { email: string; password: string; name?: string | null }): Promise<UserView> {
   const email = normalizeEmail(input.email)
   if (!email) throw new UserManagerError('email is required')
   const name = input.name?.trim() || defaultName(email)
@@ -300,7 +281,7 @@ export async function registerUser(input: {
     await client.query('BEGIN')
     const existing = await client.query<Record<string, unknown>>(
       'SELECT id, password_hash, status, google_sub FROM users WHERE email = $1 FOR UPDATE',
-      [email],
+      [email]
     )
     const found = existing.rows[0]
     if (found?.password_hash || found?.google_sub) {
@@ -314,20 +295,20 @@ export async function registerUser(input: {
       await client.query(
         `UPDATE users SET name = $1, password_hash = $2, accepted_at = COALESCE(accepted_at, $3)
          WHERE id = $4`,
-        [name, passwordHash, now, userId],
+        [name, passwordHash, now, userId]
       )
     } else {
       userId = generateId()
       await client.query(
         `INSERT INTO users (id, email, name, password_hash, status, balance_micros, accepted_at)
          VALUES ($1, $2, $3, $4, 'active', 0, $5)`,
-        [userId, email, name, passwordHash, now],
+        [userId, email, name, passwordHash, now]
       )
     }
     const userRow = await client.query<Record<string, unknown>>(
       `SELECT id, email, name, status, balance_micros, accepted_at, last_login_at, created_at
        FROM users WHERE id = $1`,
-      [userId],
+      [userId]
     )
     await client.query('COMMIT')
     return asUser(userRow.rows[0]!)
@@ -339,16 +320,13 @@ export async function registerUser(input: {
   }
 }
 
-export async function verifyUserCredentials(
-  emailInput: string,
-  password: string,
-): Promise<UserView | null> {
+export async function verifyUserCredentials(emailInput: string, password: string): Promise<UserView | null> {
   const email = normalizeEmail(emailInput)
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT id, email, name, password_hash, status, balance_micros,
             accepted_at, last_login_at, created_at
      FROM users WHERE email = $1`,
-    [email],
+    [email]
   )
   const row = rows[0]
   if (!row?.password_hash || row.status !== 'active') return null
@@ -386,7 +364,7 @@ export async function updateUser(input: {
     `UPDATE users SET ${patches.join(', ')}
      WHERE id = $${values.length}
      RETURNING id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at`,
-    values,
+    values
   )
   return rows[0] ? asUser(rows[0]) : null
 }
@@ -395,8 +373,13 @@ export async function listUserUsage(
   userId: string,
   page = 1,
   pageSize = 20,
-  opts?: { startDate?: number; endDate?: number; status?: 'success' | 'error' },
-): Promise<{ page: number; pageSize: number; total: number; logs: UserUsageLog[] }> {
+  opts?: { startDate?: number; endDate?: number; status?: 'success' | 'error' }
+): Promise<{
+  page: number
+  pageSize: number
+  total: number
+  logs: UserUsageLog[]
+}> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
   const safePageSize = Math.max(1, Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 20)))
   const offset = (safePage - 1) * safePageSize
@@ -425,13 +408,11 @@ export async function listUserUsage(
   const dataValues = [...baseValues, safePageSize, offset]
 
   const [total, logs] = await Promise.all([
-    pool.query<Record<string, unknown>>(
-      `SELECT COUNT(*) AS total FROM usage_logs l WHERE l.user_id = $1 ${dateClause}`,
-      countValues,
-    ),
+    pool.query<Record<string, unknown>>(`SELECT COUNT(*) AS total FROM usage_logs l WHERE l.user_id = $1 ${dateClause}`, countValues),
     pool.query<Record<string, unknown>>(
       `SELECT l.id, l.ts, l.provider, l.model, l.status, l.error_code,
-              l.upstream_status, l.attempt_count, l.upstream_model, l.model_mismatch, l.latency_ms,
+              l.upstream_status, l.attempt_count, l.upstream_model, l.model_mismatch,
+              l.latency_ms, l.first_token_ms,
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
               l.image_cache_read_tokens,
@@ -442,14 +423,14 @@ export async function listUserUsage(
        WHERE l.user_id = $1 ${dateClause}
        ORDER BY l.ts DESC, l.id DESC
        LIMIT $${dataValues.length - 1} OFFSET $${dataValues.length}`,
-      dataValues,
-    ),
+      dataValues
+    )
   ])
   return {
     page: safePage,
     pageSize: safePageSize,
     total: Number(total.rows[0]?.total ?? 0),
-    logs: logs.rows.map(asUsageLog),
+    logs: logs.rows.map(asUsageLog)
   }
 }
 
@@ -472,8 +453,7 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
   // the *24h fields are kept for compatibility but now carry calendar-today figures.
   const since24h = startOfTodayMs()
   const since30d = now - 30 * USAGE_MS_PER_DAY
-  const tokenSum =
-    `input_tokens + output_tokens + cache_create_tokens + cache_read_tokens +
+  const tokenSum = `input_tokens + output_tokens + cache_create_tokens + cache_read_tokens +
      image_input_tokens + image_output_tokens + image_cache_read_tokens`
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT
@@ -485,7 +465,7 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
        (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS cost30d,
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1) AS requestsTotal,
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $3 AND status = 'success') AS success30d`,
-    [userId, since24h, since30d],
+    [userId, since24h, since30d]
   )
   const r = rows[0] ?? {}
   const num = (v: unknown): number => {
@@ -500,6 +480,6 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
     tokens30d: num(r.tokens30d),
     cost30d: num(r.cost30d),
     requestsTotal: num(r.requeststotal),
-    success30d: num(r.success30d),
+    success30d: num(r.success30d)
   }
 }

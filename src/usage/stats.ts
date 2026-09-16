@@ -3,6 +3,7 @@ import { config } from '../config'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
 import { resolvePrice, type TierPrice } from './pricing'
 import { dayKeyInTz, startOfTodayMs } from '../time'
+import { roundUsd } from '../wallet/money'
 
 export interface DailyStat {
   day: string // YYYY-MM-DD (STATS_TIMEZONE, matches the dashboard "today" window)
@@ -198,7 +199,7 @@ function asDaily(row: Record<string, unknown>): DailyStat {
     outputTokens: toNum(row.outputtokens),
     cacheCreateTokens: toNum(row.cachecreatetokens),
     cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
+    cost: toNum(row.cost)
   }
 }
 
@@ -211,7 +212,7 @@ function asProvider(row: Record<string, unknown>): ProviderStat {
     outputTokens: toNum(row.outputtokens),
     cacheCreateTokens: toNum(row.cachecreatetokens),
     cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
+    cost: toNum(row.cost)
   }
 }
 
@@ -224,7 +225,7 @@ function asModel(row: Record<string, unknown>): ModelStat {
     outputTokens: toNum(row.outputtokens),
     cacheCreateTokens: toNum(row.cachecreatetokens),
     cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
+    cost: toNum(row.cost)
   }
 }
 
@@ -239,19 +240,18 @@ function asKey(row: Record<string, unknown>): KeyStat {
     outputTokens: toNum(row.outputtokens),
     cacheCreateTokens: toNum(row.cachecreatetokens),
     cacheReadTokens: toNum(row.cachereadtokens),
-    cost: toNum(row.cost),
+    cost: toNum(row.cost)
   }
-}
-
-function roundUsd(n: number): number {
-  return Math.round(n * 1e6) / 1e6
 }
 
 function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog {
   const provider = row.provider as string
   const model = (row.model as string | null) ?? null
   const ts = toNum(row.ts)
-  const snapshot = row.billingprice as { price?: TierPrice | null; imagePrice?: TierPrice | null } | null
+  const snapshot = row.billingprice as {
+    price?: TierPrice | null
+    imagePrice?: TierPrice | null
+  } | null
   const price = snapshot?.price ?? resolvePrice(provider, model ?? '', ts)
   const inputTokens = toNum(row.inputtokens)
   const outputTokens = toNum(row.outputtokens)
@@ -317,7 +317,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     accountId: (row.accountid as string | null) ?? null,
     requestInput: (row.requestinput as string | null) ?? null,
     sessionKeyHash: (row.sessionkeyhash as string | null) ?? null,
-    sessionSource: (row.sessionsource as string | null) ?? null,
+    sessionSource: (row.sessionsource as string | null) ?? null
   }
 }
 
@@ -340,7 +340,7 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
      WHERE ts >= $1
      GROUP BY day
      ORDER BY day`,
-    [since, STATS_TZ],
+    [since, STATS_TZ]
   )
   const byDay = new Map(rows.map((r) => [r.day as string, asDaily(r)]))
   const out: DailyStat[] = []
@@ -354,8 +354,8 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
         outputTokens: 0,
         cacheCreateTokens: 0,
         cacheReadTokens: 0,
-        cost: 0,
-      },
+        cost: 0
+      }
     )
   }
   return out
@@ -376,7 +376,7 @@ export async function statsByProvider(days: number): Promise<ProviderStat[]> {
      WHERE ts >= $1
      GROUP BY provider
      ORDER BY tokens DESC`,
-    [since],
+    [since]
   )
   return rows.map(asProvider)
 }
@@ -397,7 +397,7 @@ export async function statsByModel(days: number, limit = 10): Promise<ModelStat[
      GROUP BY model
      ORDER BY tokens DESC
      LIMIT $2`,
-    [since, limit],
+    [since, limit]
   )
   return rows.map(asModel)
 }
@@ -421,7 +421,7 @@ export async function statsByKey(days: number): Promise<KeyStat[]> {
            AND usage_logs.ts >= $1
      GROUP BY api_keys.id
      ORDER BY tokens DESC, name`,
-    [since],
+    [since]
   )
   return rows.map(asKey)
 }
@@ -437,7 +437,7 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
             COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs WHERE ts >= $1`,
-    [since],
+    [since]
   )
   const r = rows[0] ?? {}
   const totals = {
@@ -446,13 +446,13 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
     outputTokens: toNum(r.outputtokens),
     cacheCreateTokens: toNum(r.cachecreatetokens),
     cacheReadTokens: toNum(r.cachereadtokens),
-    cost: toNum(r.cost),
+    cost: toNum(r.cost)
   }
   const [daily, byProvider, byModel, byKey] = await Promise.all([
     dailyStats(range),
     statsByProvider(range),
     statsByModel(range),
-    statsByKey(range),
+    statsByKey(range)
   ])
   return { rangeDays: range, totals, daily, byProvider, byModel, byKey }
 }
@@ -502,7 +502,7 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
           FROM usage_logs WHERE ts >= $5) AS tokens30d,
        (SELECT COALESCE(SUM(cost), 0)
           FROM usage_logs WHERE ts >= $5) AS cost30d`,
-    [now, now, sinceToday, since5m, since30d],
+    [now, now, sinceToday, since5m, since30d]
   )
   const t = totalsRes.rows[0] ?? {}
   const totals: DashboardOverview['totals'] = {
@@ -527,13 +527,10 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
     rpm5m: toNum(t.rpm5m),
     tpm5m: toNum(t.tpm5m),
     tokens30d: toNum(t.tokens30d),
-    cost30d: toNum(t.cost30d),
+    cost30d: toNum(t.cost30d)
   }
 
-  const [daily, byProvider] = await Promise.all([
-    dailyStats(14),
-    statsByProvider(30),
-  ])
+  const [daily, byProvider] = await Promise.all([dailyStats(14), statsByProvider(30)])
 
   return { totals, daily, byProvider }
 }
@@ -541,13 +538,10 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
 export async function dashboardRecentLogs(
   page = 1,
   pageSize = 10,
-  filters: DashboardRecentLogsFilter = {},
+  filters: DashboardRecentLogsFilter = {}
 ): Promise<DashboardRecentLogsPage> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1))
-  const safePageSize = Math.max(
-    1,
-    Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 10)),
-  )
+  const safePageSize = Math.max(1, Math.min(100, Math.floor(Number.isFinite(pageSize) ? pageSize : 10)))
   const offset = (safePage - 1) * safePageSize
   const where: string[] = []
   const params: unknown[] = []
@@ -590,7 +584,7 @@ export async function dashboardRecentLogs(
        FROM usage_logs
        LEFT JOIN api_keys ON api_keys.id = usage_logs.api_key_id
        ${whereSql}`,
-      params,
+      params
     ),
     pool.query<Record<string, unknown>>(
       `SELECT usage_logs.id AS id,
@@ -636,15 +630,15 @@ export async function dashboardRecentLogs(
        ${whereSql}
        ORDER BY usage_logs.ts DESC, usage_logs.id DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      logsParams,
-    ),
+      logsParams
+    )
   ])
 
   return {
     page: safePage,
     pageSize: safePageSize,
     total: toNum(totalRes.rows[0]?.total),
-    logs: logsRes.rows.map(asDashboardRecentLog),
+    logs: logsRes.rows.map(asDashboardRecentLog)
   }
 }
 
@@ -652,7 +646,7 @@ export async function dashboardRecentLogs(
 export async function listFailedRequests(
   page = 1,
   pageSize = 20,
-  filters: Omit<DashboardRecentLogsFilter, 'status'> = {},
+  filters: Omit<DashboardRecentLogsFilter, 'status'> = {}
 ): Promise<DashboardRecentLogsPage> {
   return dashboardRecentLogs(page, pageSize, { ...filters, status: 'error' })
 }

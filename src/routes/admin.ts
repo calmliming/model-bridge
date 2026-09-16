@@ -914,8 +914,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   app.delete<{ Params: { id: string } }>(
     '/api/admin/keys/:id',
     { preHandler: requireAdmin },
-    async (request) => {
-      await deleteApiKey(request.params.id)
+    async (request, reply) => {
+      const deleted = await deleteApiKey(request.params.id)
+      if (deleted === 0) return reply.code(404).send({ error: 'API key not found' })
       return { ok: true }
     },
   )

@@ -5,7 +5,7 @@ import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 import {
   buildCcSwitchUrl,
   ccSwitchProviderName,
@@ -138,10 +138,6 @@ function parseMappingEntries(entries: string[]): Record<string, string> | null {
 
 function mappingEntriesFromObject(value: Record<string, string> | null): string[] {
   return Object.entries(value ?? {}).map(([from, to]) => `${from}=${to}`)
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(value < 1 ? 4 : 2)}`
 }
 
 async function load() {

@@ -394,6 +394,39 @@ describe('upstream request compatibility', () => {
 })
 
 describe('mapped provider dispatch', () => {
+  it.each([
+    '/v1/responses', '/api/deepseek/v1/responses',
+    '/v1/chat/completions', '/api/deepseek/v1/chat/completions',
+    '/v1/messages', '/api/deepseek/v1/messages',
+  ])('normalizes DeepSeek long-context selectors before forwarding and billing at %s', (url) => withRelay(async request => {
+    mocks.key.allowedProviders = ['deepseek']
+    if (url.endsWith('/messages')) {
+      mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'msg_deepseek', type: 'message', role: 'assistant', model: 'deepseek-flash',
+        content: [{ type: 'text', text: 'Hello' }], stop_reason: 'end_turn',
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { headers: { 'content-type': 'application/json' } }))
+    }
+    const response = await request({
+      model: 'DeepSeek-FLASH[1M][1m]', stream: false, max_tokens: 100,
+      ...(url.endsWith('/responses') ? { input: 'Hello' } : { messages: [{ role: 'user', content: 'Hello' }] }),
+    }, url)
+    expect(response.status).toBe(200)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body).model).toBe('deepseek-flash')
+    expect(mocks.logs[0]?.slice(4, 6)).toEqual(['deepseek', 'deepseek-flash'])
+  }))
+
+  it.each(['/v1/messages', '/v1/chat/completions', '/v1/responses'])(
+    'rejects normalized unknown DeepSeek models without forwarding at %s', url => withRelay(async request => {
+      mocks.key.allowedProviders = ['deepseek']
+      const response = await request({ model: 'DEEPSEEK-TYPO[1m]', input: 'Hello', messages: [], max_tokens: 100 }, url)
+      expect(response.status).toBe(400)
+      expect(JSON.parse(response.body)).toMatchObject({ error: { type: 'invalid_request_error', code: 'invalid_deepseek_model' } })
+      expect(mocks.fetch).not.toHaveBeenCalled()
+      expect(mocks.pickAccount).not.toHaveBeenCalled()
+    })
+  )
+
   it.each(['/v1/responses', '/api/deepseek/v1/responses', '/v1/chat/completions', '/api/deepseek/v1/chat/completions'])(
     'routes V4.1 Flash images and tools through %s', (url) => withRelay(async (request) => {
       const chat = url.endsWith('/chat/completions')

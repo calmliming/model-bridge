@@ -6,6 +6,7 @@ import BrandLogo from '../components/BrandLogo.vue'
 import { api } from '../api/client'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
+import { formatUsd } from '../utils'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,10 +122,6 @@ const avatarInitials = computed(() => {
 
 const balance = ref<number | null>(null)
 const consoleStatus = ref<'checking' | 'online' | 'offline'>('checking')
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
-}
 
 async function loadBalance() {
   try {

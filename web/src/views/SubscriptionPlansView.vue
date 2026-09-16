@@ -5,6 +5,8 @@ import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
+import { formatUsd } from '../utils'
+import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 
 interface Plan {
   id: string
@@ -45,21 +47,24 @@ const form = ref({
   weeklyLimitUsd: null as number | null,
   monthlyLimitUsd: null as number | null,
   validityDays: 30,
-  forSale: false,
+  forSale: false
 })
 
-function formatUsd(value: number | null): string {
-  return value == null ? '不限' : `$${value.toFixed(2)}`
+/** Plan limits are optional: an unset limit means the plan does not cap it. */
+function formatLimitUsd(value: number | null): string {
+  return value == null ? '不限' : formatUsd(value)
 }
 
 async function load() {
   loading.value = true
   try {
+    // Bound both requests: batch completion waits here before releasing bulkBusy.
     const [planRes, groupRes] = await Promise.all([
-      api.get('/admin/subscription-plans'),
-      api.get('/admin/account-groups'),
+      api.get('/admin/subscription-plans', { timeout: 20_000 }),
+      api.get('/admin/account-groups', { timeout: 20_000 })
     ])
     plans.value = planRes.data.plans
+    pruneSelectedPlans()
     groups.value = groupRes.data.groups
   } catch (e) {
     message.error(errMsg(e))
@@ -71,8 +76,15 @@ async function load() {
 function openCreate() {
   editing.value = null
   form.value = {
-    name: '', description: '', groupId: groups.value[0]?.id ?? null, price: 0,
-    dailyLimitUsd: null, weeklyLimitUsd: null, monthlyLimitUsd: null, validityDays: 30, forSale: false,
+    name: '',
+    description: '',
+    groupId: groups.value[0]?.id ?? null,
+    price: 0,
+    dailyLimitUsd: null,
+    weeklyLimitUsd: null,
+    monthlyLimitUsd: null,
+    validityDays: 30,
+    forSale: false
   }
   showEdit.value = true
 }
@@ -88,7 +100,7 @@ function openEdit(plan: Plan) {
     weeklyLimitUsd: plan.weeklyLimitUsd,
     monthlyLimitUsd: plan.monthlyLimitUsd,
     validityDays: plan.validityDays,
-    forSale: plan.forSale,
+    forSale: plan.forSale
   }
   showEdit.value = true
 }
@@ -112,7 +124,7 @@ async function save() {
     weeklyLimitUsd: form.value.weeklyLimitUsd,
     monthlyLimitUsd: form.value.monthlyLimitUsd,
     validityDays: form.value.validityDays,
-    forSale: form.value.forSale,
+    forSale: form.value.forSale
   }
   try {
     if (editing.value) {
@@ -133,7 +145,7 @@ async function save() {
 function confirmDelete(plan: Plan) {
   dialog.warning({
     title: '删除套餐',
-    content: `确定删除套餐「${plan.name}」？已分配给用户的订阅不受影响。`,
+    content: `确定删除套餐「${plan.name}」？已生效订阅会因套餐缺失而改走余额扣费，建议先改为下架。`,
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -144,32 +156,166 @@ function confirmDelete(plan: Plan) {
       } catch (e) {
         message.error(errMsg(e, '删除失败'))
       }
-    },
+    }
+  })
+}
+
+function planRowKey(row: Plan) {
+  return row.id
+}
+
+const {
+  selectedIds: selectedPlanIds,
+  busy: bulkBusy,
+  selectedCount: selectedPlanCount,
+  prune: pruneSelectedPlans,
+  retainFailures: retainFailedPlans,
+  rowCheckable: planRowCheckable,
+  runBatch
+} = useBulkSelection(plans, planRowKey)
+
+function notifyBatchResult(action: string, results: BatchOutcome[]) {
+  const { success, failed, firstError } = summarizeBatch(results)
+  if (failed > 0) {
+    message.warning(`${action}完成：成功 ${success} 个，失败 ${failed} 个${firstError ? `（${firstError}）` : ''}。失败项已保留选中，可重试。`)
+  } else {
+    message.success(`${action}完成：${success} 个套餐`)
+  }
+}
+
+async function bulkSetForSale(forSale: boolean) {
+  if (!selectedPlanCount.value) {
+    message.warning('请先选择套餐')
+    return
+  }
+  bulkBusy.value = true
+  const action = forSale ? '批量上架' : '批量下架'
+  const ids = [...selectedPlanIds.value]
+  try {
+    const results = await runBatch(ids, (id, timeout) => api.patch(`/admin/subscription-plans/${id}`, { forSale }, { timeout }))
+    notifyBatchResult(action, results)
+    retainFailedPlans(results)
+    await load()
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+function confirmBulkDeletePlans() {
+  if (!selectedPlanCount.value) {
+    message.warning('请先选择套餐')
+    return
+  }
+  const names = plans.value
+    .filter((row) => selectedPlanIds.value.includes(row.id))
+    .slice(0, 5)
+    .map((row) => `「${row.name}」`)
+    .join('、')
+  const suffix = selectedPlanCount.value > 5 ? ` 等 ${selectedPlanCount.value} 个套餐` : ''
+  dialog.warning({
+    title: '批量删除套餐',
+    content: `确定删除 ${names}${suffix}？已生效订阅会因套餐缺失而改走余额扣费，建议先改为下架。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      bulkBusy.value = true
+      const ids = [...selectedPlanIds.value]
+      try {
+        const results = await runBatch(ids, (id, timeout) => api.delete(`/admin/subscription-plans/${id}`, { timeout }))
+        notifyBatchResult('批量删除', results)
+        retainFailedPlans(results)
+        await load()
+      } finally {
+        bulkBusy.value = false
+      }
+    }
   })
 }
 
 // SUB_PLANS_COLUMNS_MARKER
 const columns: TableColumn<Plan>[] = [
-  { title: '名称', key: 'name', minWidth: 140, render: (row) => h('div', [h('strong', row.name), row.description ? h('div', { class: 'subtext' }, row.description) : null]) },
-  { title: '分组', key: 'groupName', width: 120, render: (row) => row.groupName || '(已删除)' },
-  { title: '售价', key: 'price', width: 90, render: (row) => (row.price > 0 ? `$${row.price.toFixed(2)}` : '免费') },
-  { title: '日限额', key: 'dailyLimitUsd', width: 90, render: (row) => formatUsd(row.dailyLimitUsd) },
-  { title: '周限额', key: 'weeklyLimitUsd', width: 90, render: (row) => formatUsd(row.weeklyLimitUsd) },
-  { title: '月限额', key: 'monthlyLimitUsd', width: 90, render: (row) => formatUsd(row.monthlyLimitUsd) },
-  { title: '有效期', key: 'validityDays', width: 90, render: (row) => `${row.validityDays} 天` },
-  { title: '上架', key: 'forSale', width: 80, render: (row) => h(UiTag, { size: 'small', type: row.forSale ? 'success' : 'default', bordered: false }, { default: () => (row.forSale ? '售卖中' : '未上架') }) },
+  {
+    title: '名称',
+    key: 'name',
+    minWidth: 140,
+    render: (row) => h('div', [h('strong', row.name), row.description ? h('div', { class: 'subtext' }, row.description) : null])
+  },
+  {
+    title: '分组',
+    key: 'groupName',
+    width: 120,
+    render: (row) => row.groupName || '(已删除)'
+  },
+  {
+    title: '售价',
+    key: 'price',
+    width: 90,
+    render: (row) => (row.price > 0 ? `$${row.price.toFixed(2)}` : '免费')
+  },
+  {
+    title: '日限额',
+    key: 'dailyLimitUsd',
+    width: 90,
+    render: (row) => formatLimitUsd(row.dailyLimitUsd)
+  },
+  {
+    title: '周限额',
+    key: 'weeklyLimitUsd',
+    width: 90,
+    render: (row) => formatLimitUsd(row.weeklyLimitUsd)
+  },
+  {
+    title: '月限额',
+    key: 'monthlyLimitUsd',
+    width: 90,
+    render: (row) => formatLimitUsd(row.monthlyLimitUsd)
+  },
+  {
+    title: '有效期',
+    key: 'validityDays',
+    width: 90,
+    render: (row) => `${row.validityDays} 天`
+  },
+  {
+    title: '上架',
+    key: 'forSale',
+    width: 80,
+    render: (row) =>
+      h(
+        UiTag,
+        {
+          size: 'small',
+          type: row.forSale ? 'success' : 'default',
+          bordered: false
+        },
+        { default: () => (row.forSale ? '售卖中' : '未上架') }
+      )
+  },
   {
     title: '操作',
     key: 'actions',
     width: 130,
     render: (row) =>
-      h(UiSpace, { size: 4, wrap: false }, {
-        default: () => [
-          h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
-        ],
-      }),
-  },
+      h(
+        UiSpace,
+        { size: 4, wrap: false },
+        {
+          default: () => [
+            h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
+            h(
+              UiButton,
+              {
+                size: 'small',
+                type: 'error',
+                quaternary: true,
+                onClick: () => confirmDelete(row)
+              },
+              { default: () => '删除' }
+            )
+          ]
+        }
+      )
+  }
 ]
 
 onMounted(load)
@@ -181,8 +327,33 @@ onMounted(load)
       <UiButton type="primary" @click="openCreate">新建套餐</UiButton>
       <UiButton secondary :loading="loading" @click="load">刷新</UiButton>
     </div>
+    <Transition name="fade">
+      <div v-if="selectedPlanCount" class="bulk-actions">
+        <div class="bulk-summary">
+          <span class="bulk-count">{{ selectedPlanCount }}</span>
+          <strong>已选中套餐</strong>
+          <UiButton size="tiny" quaternary :disabled="bulkBusy" @click="selectedPlanIds = []">取消选择</UiButton>
+        </div>
+        <div class="bulk-buttons">
+          <UiButton size="small" type="success" secondary :disabled="bulkBusy" @click="bulkSetForSale(true)">上架</UiButton>
+          <UiButton size="small" type="warning" secondary :disabled="bulkBusy" @click="bulkSetForSale(false)">下架</UiButton>
+          <UiButton size="small" type="error" secondary :disabled="bulkBusy" @click="confirmBulkDeletePlans">删除</UiButton>
+        </div>
+      </div>
+    </Transition>
+
     <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="plans" :loading="loading" :bordered="false" :scroll-x="1000" />
+      <UiDataTable
+      selectable
+      v-model:checked-row-keys="selectedPlanIds"
+      :row-key="planRowKey"
+      :row-checkable="planRowCheckable"
+      :columns="columns"
+      :data="plans"
+      :loading="loading"
+      :bordered="false"
+      :scroll-x="1000"
+    />
     </UiCard>
 
     <UiModal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">

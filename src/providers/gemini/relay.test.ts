@@ -208,8 +208,36 @@ describe('sanitizeGeminiBody', () => {
     expect(generationConfig.thinkingConfig).toHaveProperty('thinkingBudget', 4096)
   })
 
+  it('strips the same settings on Gemini 3.7 Flash, which shipped the same breaking change', () => {
+    const body = {
+      generationConfig: {
+        temperature: 0.2,
+        topP: 0.9,
+        topK: 20,
+        candidateCount: 2,
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingBudget: 4096, thinkingLevel: 'high' },
+      },
+    }
+    // The antigravity path synthesizes a numeric thinkingBudget, so a miss here
+    // 400s every request that enables thinking rather than a rare edge case.
+    expect(sanitizeGeminiBody(body, 'gemini-3.7-flash')).toEqual({
+      generationConfig: {
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingLevel: 'high' },
+      },
+    })
+    expect(sanitizeGeminiBody({ ...body, generationConfig: { ...body.generationConfig } }, 'models/gemini-3.7-flash')).toEqual({
+      generationConfig: {
+        maxOutputTokens: 8192,
+        thinkingConfig: { thinkingLevel: 'high' },
+      },
+    })
+  })
+
   it('keeps legacy generation settings on older Gemini models', () => {
     const body = { generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 1024 } } }
     expect(sanitizeGeminiBody(body, 'gemini-3.6-flash')).toBe(body)
+    expect(sanitizeGeminiBody(body, 'gemini-3.5-flash')).toBe(body)
   })
 })

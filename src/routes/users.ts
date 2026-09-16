@@ -360,7 +360,8 @@ export function registerUserRoutes(app: FastifyInstance): void {
       if (!params.success) {
         return reply.code(400).send({ error: 'invalid key id' })
       }
-      await deleteApiKey(params.data.id, request.currentUser!.id)
+      const deleted = await deleteApiKey(params.data.id, request.currentUser!.id)
+      if (deleted === 0) return reply.code(404).send({ error: 'API key not found' })
       return { ok: true }
     },
   )

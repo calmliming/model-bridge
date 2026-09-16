@@ -29,6 +29,20 @@ describe('scheduled database price overrides', () => {
     await loadPricing()
     expect(resolvePrice('openai', 'gpt-image-2.5-flare')).toMatchObject({ input: 5, imageInput: 8, imageCacheRead: 2, imageOutput: 30 })
   })
+  it('bills gemini-3.7-flash at the promo rate and switches over in 2027', async () => {
+    // The seeded row holds the promo tuple, which isManagedScheduledDefault
+    // recognises, so resolvePrice discards it and falls through to the built-in
+    // tier. The assertions in pricing.test.ts run without a database and so
+    // cover only that built-in tier — this is the path that proves the row is
+    // seeded and skipped rather than honoured.
+    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-3.7-flash', 0.75, 3.75, 0.075, 'gemini')] })
+    await loadPricing()
+    expect(resolvePrice('gemini', 'gemini-3.7-flash', Date.parse('2026-09-14T14:00:00+08:00')))
+      .toMatchObject({ input: 0.75, output: 3.75, cacheRead: 0.075 })
+    expect(resolvePrice('gemini', 'gemini-3.7-flash', Date.parse('2027-06-01T00:00:00+08:00')))
+      .toMatchObject({ input: 1.5, output: 7.5, cacheRead: 0.15 })
+  })
+
   it('updates seeded Flash and Pro prices without freezing new Flash at its seed rate', async () => {
     mocks.query.mockResolvedValue({ rows: [
       priceRow('deepseek-flash', 0.15, 0.6, 0.003),
@@ -36,15 +50,19 @@ describe('scheduled database price overrides', () => {
       priceRow('deepseek-v4-pro', 0.435, 0.87, 0.003625),
     ] })
     await loadPricing()
-    for (const model of ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro']) {
+    for (const model of ['deepseek-flash', 'deepseek-v4-flash']) {
       expect(resolvePrice('deepseek', model, Date.parse('2026-09-14T14:00:00+08:00')))
         .toMatchObject({ input: 0.3, output: 1.2, cacheRead: 0.006 })
     }
     expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-09-14T11:59:59+08:00')))
       .toMatchObject({ input: 1.32, output: 3.96 })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-09-16T14:00:00+08:00')))
+      .toMatchObject({ input: 1.32, output: 3.96, cacheRead: 0.044 })
+    expect(resolvePrice('deepseek', 'deepseek-v4-pro', Date.parse('2026-09-16T12:30:00+08:00')))
+      .toMatchObject({ input: 0.66, output: 1.98, cacheRead: 0.022 })
   })
 
-  it('preserves custom prices through the Flash launch and Pro retirement', async () => {
+  it('preserves custom prices through the Flash launch and canceled Pro retirement', async () => {
     mocks.query.mockResolvedValue({ rows: [
       priceRow('deepseek-flash', 0.5, 2, 0.05),
       priceRow('deepseek-v4-pro', 2, 4, 0.2),

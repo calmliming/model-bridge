@@ -5,7 +5,7 @@ import { UiTag } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 import BrandLogo from '../components/BrandLogo.vue'
 
 interface UserMe {
@@ -213,10 +213,6 @@ const providerLabels: Record<string, string> = {
   alipay: '支付宝',
   alipay_web: '支付宝网页支付',
   wechat: '微信支付',
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
 
 async function loadUsage() {

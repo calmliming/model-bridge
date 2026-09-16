@@ -4,6 +4,7 @@ import { pool } from '../db/index'
 import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
+import { roundUsd } from '../wallet/money'
 import { consumeSubscriptionUsage } from '../subscriptions/manager'
 
 export interface UsageRecord {
@@ -54,9 +55,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const baseCost = estimateCost(record.provider, record.model, usage, pricedAt)
     const price = resolveUsagePrice(record.provider, record.model, usage, pricedAt)
     const imagePrice = usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price
-    const multiplier =
-      Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
-    const cost = Math.round(baseCost * multiplier * 1e6) / 1e6
+    const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
+    // Rounded to the wallet's unit, not finer: `cost` is also added to
+    // quota_used and passed to debitWalletForUsage, so recording it at a
+    // precision the wallet cannot debit would let the ledgers disagree.
+    const cost = roundUsd(baseCost * multiplier)
     // The auth gate makes an optimistic subscription choice. Re-check the
     // exact request cost under the subscription row lock below, then fall back
     // to the wallet when this request would cross any configured window.
@@ -66,9 +69,7 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const errorCode = record.errorCode?.trim().slice(0, 200) || null
     const errorMessage = record.errorMessage?.trim().slice(0, 2_000) || null
     const upstreamStatus = Number.isInteger(record.upstreamStatus) ? record.upstreamStatus! : null
-    const attemptCount = Number.isFinite(record.attemptCount)
-      ? Math.max(1, Math.trunc(record.attemptCount!))
-      : 1
+    const attemptCount = Number.isFinite(record.attemptCount) ? Math.max(1, Math.trunc(record.attemptCount!)) : 1
     const upstreamModel = record.upstreamModel?.trim().slice(0, 300) || null
     client = await pool.connect()
     await client.query('BEGIN')
@@ -126,14 +127,15 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         usage.serviceTier?.slice(0, 100) || null,
         usage.reasoningEffort?.slice(0, 100) || null,
         JSON.stringify({ price, imagePrice }),
-        record.usage.imageCacheReadTokens ?? 0,
-      ],
+        record.usage.imageCacheReadTokens ?? 0
+      ]
     )
     if (record.apiKeyId && cost > 0) {
-      await client.query(
-        'UPDATE api_keys SET quota_used = quota_used + $1, last_used_at = $2 WHERE id = $3',
-        [cost, Date.now(), record.apiKeyId],
-      )
+      await client.query('UPDATE api_keys SET quota_used = quota_used + $1, last_used_at = $2 WHERE id = $3', [
+        cost,
+        Date.now(),
+        record.apiKeyId
+      ])
     }
     if (cost > 0 && !subscriptionCharged && record.userId) {
       if (billTo === 'balance') {
@@ -156,7 +158,7 @@ export function recordUsage(record: UsageRecord): Promise<boolean> {
   pendingUsageWrites.add(write)
   void write.then(
     () => pendingUsageWrites.delete(write),
-    () => pendingUsageWrites.delete(write),
+    () => pendingUsageWrites.delete(write)
   )
   return write
 }

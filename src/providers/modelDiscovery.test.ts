@@ -1,53 +1,150 @@
 import { describe, expect, it } from 'vitest'
-import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels } from './modelDiscovery'
-const image25Models = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare-2026-09-08', 'gpt-image-2.5-sunburst-2026-09-08']
+import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels, type ModelDiscoveryKey } from './modelDiscovery'
+const image25Models = [
+  'gpt-image-2.5-flare',
+  'gpt-image-2.5-sunburst',
+  'gpt-image-2.5-flare-2026-09-08',
+  'gpt-image-2.5-sunburst-2026-09-08'
+]
 
 describe('model discovery', () => {
-  it('advertises V4.1 Flash while keeping explicit legacy names discoverable', () => {
-    expect(listModelIdsForKey({ allowedProviders: ['deepseek'], allowedModels: null }))
-      .toEqual(['deepseek-flash', 'deepseek-v4-pro'])
-    const legacy = ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
-    expect(listModelIdsForKey({ allowedProviders: ['deepseek'], allowedModels: legacy })).toEqual(legacy)
+  it.each<{ key: ModelDiscoveryKey; expected: string[] }>([
+    { key: { allowedProviders: ['deepseek'], allowedModels: ['deepseek-typo'] }, expected: [] },
+    { key: { allowedProviders: ['deepseek'], allowedModels: null, groupAllowedModels: ['deepseek-typo'] }, expected: [] },
+    { key: { allowedProviders: ['deepseek'], allowedModels: null, modelMappings: { alias: 'deepseek-typo' } }, expected: ['deepseek-flash', 'deepseek-v4-pro'] },
+    { key: { allowedProviders: ['deepseek'], allowedModels: null, modelMappings: { 'deepseek-v4-pro': 'deepseek-typo' } }, expected: ['deepseek-flash'] },
+    { key: { allowedProviders: ['deepseek'], allowedModels: null, modelMappings: { 'deepseek-*': 'deepseek-typo' } }, expected: [] },
+  ])('filters rejected targets from catalogs, mappings and explicit allowlists: %j', ({ key, expected }) => {
+    for (const provider of [undefined, 'deepseek'] as const) {
+      expect(listModelIdsForKey(key, provider)).toEqual(expected)
+    }
   })
+
+  it('checks mapped targets instead of rejecting valid aliases in the source catalog', () => {
+    const key = {
+      allowedProviders: ['deepseek'], allowedModels: null,
+      providerModels: { deepseek: ['deepseek-custom'] },
+      modelMappings: { 'deepseek-*': 'DeepSeek-FLASH[1M][1m]' },
+    }
+    expect(listModelIdsForKey(key)).toEqual(['deepseek-custom'])
+    expect(listModelIdsForKey(key, 'deepseek')).toEqual(['deepseek-custom'])
+  })
+
+  it('keeps normalized long-context model names visible', () => {
+    expect(listModelIdsForKey({
+      allowedProviders: ['deepseek'], allowedModels: ['DeepSeek-FLASH[1M]'],
+    })).toEqual(['DeepSeek-FLASH[1M]'])
+  })
+
+  it('applies native validation to mixed-provider keys but preserves aggregator passthrough', () => {
+    const key = { allowedProviders: ['deepseek', 'sub2api'], allowedModels: ['deepseek-custom'] }
+    expect(listModelIdsForKey(key)).toEqual([])
+    expect(listModelIdsForKey(key, 'deepseek')).toEqual([])
+    expect(listModelIdsForKey(key, 'sub2api')).toEqual(['deepseek-custom'])
+    expect(listModelIdsForKey({ ...key, allowedProviders: ['sub2api'] })).toEqual(['deepseek-custom'])
+  })
+
+  it('preserves DeepSeek-looking names mapped to an allowed non-DeepSeek provider', () => {
+    const key = {
+      allowedProviders: ['deepseek', 'openai'], allowedModels: ['deepseek-custom'],
+      providerModels: { deepseek: ['deepseek-custom'] },
+      modelMappings: { 'deepseek-*': 'gpt-5.4' },
+    }
+    expect(listModelIdsForKey(key)).toEqual(['deepseek-custom'])
+    expect(listModelIdsForKey(key, 'openai')).toEqual(['deepseek-custom'])
+  })
+
+  it('advertises V4.1 Flash while keeping explicit legacy names discoverable', () => {
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['deepseek'],
+        allowedModels: null
+      })
+    ).toEqual(['deepseek-flash', 'deepseek-v4-pro'])
+    const legacy = ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['deepseek'],
+        allowedModels: legacy
+      })
+    ).toEqual(legacy)
+  })
+  it('never advertises a deepseek name the relay would reject', () => {
+    // The account catalog syncs upstream /models wholesale, so names outside
+    // the forwardable set can land here — listing them makes the gateway
+    // advertise models it answers with a 400.
+    const key = {
+      allowedProviders: ['deepseek'],
+      allowedModels: null,
+      catalogModels: {
+        deepseek: {
+          'deepseek-v4.1-pro': { id: 'deepseek-v4.1-pro' },
+          'deepseek-v4-flash-thinking': { id: 'deepseek-v4-flash-thinking' },
+          'deepseek-v4-flash': { id: 'deepseek-v4-flash' },
+          'deepseek-chat': { id: 'deepseek-chat' }
+        }
+      }
+    }
+    // Whitelisted names and the legacy aliases mapModel still resolves survive.
+    expect(listModelIdsForKey(key)).toContain('deepseek-v4-flash')
+    expect(listModelIdsForKey(key)).toContain('deepseek-chat')
+    expect(listModelIdsForKey(key)).not.toContain('deepseek-v4.1-pro')
+    expect(listModelIdsForKey(key)).not.toContain('deepseek-v4-flash-thinking')
+  })
+
   it('discovers cross-provider aliases under the mapped provider', () => {
     const key = {
-      allowedProviders: ['openai'], allowedModels: ['deepseek-v4-pro'],
-      modelMappings: { 'deepseek-v4-pro': 'gpt-5.4' },
+      allowedProviders: ['openai'],
+      allowedModels: ['deepseek-v4-pro'],
+      modelMappings: { 'deepseek-v4-pro': 'gpt-5.4' }
     }
     expect(listModelIdsForKey(key, 'openai')).toEqual(['deepseek-v4-pro'])
-    expect(listOpenAIStyleModels(key)[0]).toMatchObject({ id: 'deepseek-v4-pro', owned_by: 'openai' })
+    expect(listOpenAIStyleModels(key)[0]).toMatchObject({
+      id: 'deepseek-v4-pro',
+      owned_by: 'openai'
+    })
   })
 
   it('hides both curated and custom aliases whose mapped provider is forbidden', () => {
     const key = {
-      allowedProviders: ['deepseek'], allowedModels: ['deepseek-v4-pro', 'deepseek-custom'],
-      modelMappings: { 'deepseek-v4-pro': 'gpt-5.4', 'deepseek-custom': 'gpt-5.4' },
+      allowedProviders: ['deepseek'],
+      allowedModels: ['deepseek-v4-pro', 'deepseek-custom'],
+      modelMappings: {
+        'deepseek-v4-pro': 'gpt-5.4',
+        'deepseek-custom': 'gpt-5.4'
+      }
     }
     expect(listModelIdsForKey(key)).toEqual([])
   })
   it('returns all default models for unrestricted keys', () => {
-    const models = listModelIdsForKey({ allowedProviders: null, allowedModels: null })
+    const models = listModelIdsForKey({
+      allowedProviders: null,
+      allowedModels: null
+    })
     expect(models).toEqual(
       expect.arrayContaining([
         'gpt-5.5',
         'claude-fable-5-1',
         'claude-sonnet-5',
         'gemini-3.8-flash',
+        'gemini-3.7-flash',
         'gemini-3.6-flash',
         'mimo-v2.5-pro',
         'glm-5.3',
         'qwen3.8-max',
-        'deepseek-v4-pro',
-      ]),
+        'deepseek-v4-pro'
+      ])
     )
-    expect(models).not.toEqual(expect.arrayContaining([
-      'claude-mythos-5-1',
-      'gemini-3-pro-preview',
-      'glm-5.1',
-      'qwen3-coder-plus',
-      'deepseek-chat',
-      'deepseek-reasoner',
-    ]))
+    expect(models).not.toEqual(
+      expect.arrayContaining([
+        'claude-mythos-5-1',
+        'gemini-3-pro-preview',
+        'glm-5.1',
+        'qwen3-coder-plus',
+        'deepseek-chat',
+        'deepseek-reasoner'
+      ])
+    )
   })
 
   it('honors provider restrictions', () => {
@@ -65,12 +162,15 @@ describe('model discovery', () => {
       'gpt-5.3-codex',
       'gpt-5.3-codex-spark',
       'gpt-image-2',
-      ...image25Models,
+      ...image25Models
     ])
   })
 
   it('honors exact and wildcard model restrictions', () => {
-    const key = { allowedProviders: null, allowedModels: ['gpt-*', 'deepseek-v4-pro'] }
+    const key = {
+      allowedProviders: null,
+      allowedModels: ['gpt-*', 'deepseek-v4-pro']
+    }
     expect(listModelIdsForKey(key)).toEqual([
       'gpt-6-astra',
       'gpt-5.6-sol',
@@ -83,7 +183,7 @@ describe('model discovery', () => {
       'gpt-5.3-codex-spark',
       'gpt-image-2',
       ...image25Models,
-      'deepseek-v4-pro',
+      'deepseek-v4-pro'
     ])
   })
 
@@ -95,7 +195,7 @@ describe('model discovery', () => {
   it('only exposes limited-access Claude models when explicitly allowed', () => {
     const key = {
       allowedProviders: ['claude'] as const,
-      allowedModels: ['claude-mythos-5-1'],
+      allowedModels: ['claude-mythos-5-1']
     }
     expect(listModelIdsForKey(key)).toEqual(['claude-mythos-5-1'])
   })
@@ -104,7 +204,7 @@ describe('model discovery', () => {
     const key = {
       allowedProviders: ['openai'] as const,
       allowedModels: null,
-      modelMappings: { 'gpt-public': 'gpt-5.4' },
+      modelMappings: { 'gpt-public': 'gpt-5.4' }
     }
     expect(listModelIdsForKey(key)).toEqual([
       'gpt-6-astra',
@@ -118,93 +218,131 @@ describe('model discovery', () => {
       'gpt-5.3-codex-spark',
       'gpt-image-2',
       ...image25Models,
-      'gpt-public',
+      'gpt-public'
     ])
   })
 
   it('discovers Kimi Code K3 aliases for Kimi-scoped keys', () => {
     const key = { allowedProviders: ['kimi'] as const, allowedModels: null }
-    expect(listModelIdsForKey(key)).toEqual([
-      'kimi-k3',
-      'kimi-k2.7-code',
-      'kimi-k2.6',
-      'k3',
-      'k3-256k',
-      'kimi-code/k3',
-    ])
+    expect(listModelIdsForKey(key)).toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'])
   })
 
   it('returns Gemini API model objects', () => {
-    const key = { allowedProviders: ['gemini'] as const, allowedModels: ['gemini-*'] }
+    const key = {
+      allowedProviders: ['gemini'] as const,
+      allowedModels: ['gemini-*']
+    }
     expect(listGeminiModels(key)).toEqual([
       {
         name: 'models/gemini-3.8-flash',
         version: '001',
         displayName: 'Gemini 3.8 Flash',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+      },
+      {
+        name: 'models/gemini-3.7-flash',
+        version: '001',
+        displayName: 'Gemini 3.7 Flash',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-3.6-flash',
         version: '001',
         displayName: 'Gemini 3.6 Flash',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-3.1-pro-preview',
         version: '001',
         displayName: 'Gemini 3.1 Pro Preview',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-3.5-flash',
         version: '001',
         displayName: 'Gemini 3.5 Flash',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-3.5-flash-lite',
         version: '001',
         displayName: 'Gemini 3.5 Flash Lite',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-2.5-pro',
         version: '001',
         displayName: 'Gemini 2.5 Pro',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
         name: 'models/gemini-2.5-flash',
         version: '001',
         displayName: 'Gemini 2.5 Flash',
-        supportedGenerationMethods: ['generateContent', 'streamGenerateContent'],
-      },
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+      }
     ])
   })
 })
 
-
 describe('group model restrictions', () => {
   it('intersects group policy with key policy and filters aliases by their requested name', () => {
-    const key = { allowedProviders: ['minimax'], allowedModels: ['MiniMax-M3', 'alias'],
-      groupAllowedModels: ['minimax-*'], modelMappings: { alias: 'MiniMax-M3' } }
+    const key = {
+      allowedProviders: ['minimax'],
+      allowedModels: ['MiniMax-M3', 'alias'],
+      groupAllowedModels: ['minimax-*'],
+      modelMappings: { alias: 'MiniMax-M3' }
+    }
     expect(listModelIdsForKey(key)).toEqual(['MiniMax-M3'])
     expect(listModelIdsForKey({ ...key, groupAllowedModels: ['alias'] })).toEqual(['alias'])
     expect(listModelIdsForKey({ ...key, groupAllowedModels: [] })).toEqual([])
   })
   it('includes custom exact group entries without widening key restrictions', () => {
-    expect(listModelIdsForKey({ allowedProviders: ['minimax'], allowedModels: null, groupAllowedModels: ['MiniMax-custom'] })).toEqual(['MiniMax-custom'])
-    expect(listModelIdsForKey({ allowedProviders: ['minimax'], allowedModels: ['MiniMax-M3'], groupAllowedModels: ['MiniMax-custom'] })).toEqual([])
-    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null })).toContain('MiniMax-M3')
-    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['MiniMax-custom'] })).toEqual(['MiniMax-custom'])
-    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['alias'], modelMappings: { alias: 'MiniMax-custom' } })).toEqual(['alias'])
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['minimax'],
+        allowedModels: null,
+        groupAllowedModels: ['MiniMax-custom']
+      })
+    ).toEqual(['MiniMax-custom'])
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['minimax'],
+        allowedModels: ['MiniMax-M3'],
+        groupAllowedModels: ['MiniMax-custom']
+      })
+    ).toEqual([])
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['sub2api'],
+        allowedModels: null
+      })
+    ).toContain('MiniMax-M3')
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['sub2api'],
+        allowedModels: null,
+        groupAllowedModels: ['MiniMax-custom']
+      })
+    ).toEqual(['MiniMax-custom'])
+    expect(
+      listModelIdsForKey({
+        allowedProviders: ['sub2api'],
+        allowedModels: null,
+        groupAllowedModels: ['alias'],
+        modelMappings: { alias: 'MiniMax-custom' }
+      })
+    ).toEqual(['alias'])
   })
 })
 
-
 it('lists Gemini models through Sub2API while retaining group restrictions', () => {
-  const key = { allowedProviders: ['sub2api'], allowedModels: null, groupAllowedModels: ['gemini-3.8-*'] }
+  const key = {
+    allowedProviders: ['sub2api'],
+    allowedModels: null,
+    groupAllowedModels: ['gemini-3.8-*']
+  }
   const models = listGeminiModels(key, 'sub2api')
-  expect(models.map(x => x.name)).toEqual(['models/gemini-3.8-flash'])
+  expect(models.map((x) => x.name)).toEqual(['models/gemini-3.8-flash'])
   expect(listGeminiModels(key)).toEqual([])
 })

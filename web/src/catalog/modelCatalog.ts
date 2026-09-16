@@ -99,7 +99,7 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
       imageInputPrice: model.imageInputPrice,
       imageOutputPrice: model.imageOutputPrice,
       imageCacheReadPrice: model.imageCacheReadPrice,
-      period: null,
+      period: null
     }
   }
 
@@ -110,9 +110,7 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
     }
   }
   const hour = new Date(atMs).getUTCHours()
-  const period = schedule.peakUtcHours.some(([start, end]) => hour >= start && hour < end)
-    ? 'peak'
-    : 'off-peak'
+  const period = schedule.peakUtcHours.some(([start, end]) => hour >= start && hour < end) ? 'peak' : 'off-peak'
   return { ...schedule[period === 'peak' ? 'peak' : 'offPeak'], period }
 }
 
@@ -121,51 +119,56 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     id: 'claude',
     label: 'Anthropic',
     initials: 'A',
-    chipClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300',
+    chipClass: 'bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-300'
   },
   openai: {
     id: 'openai',
     label: 'OpenAI',
     initials: 'AI',
-    chipClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300',
+    chipClass: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300'
   },
   gemini: {
     id: 'gemini',
     label: 'Google',
     initials: 'G',
-    chipClass: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300',
+    chipClass: 'bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-300'
   },
   deepseek: {
     id: 'deepseek',
     label: 'DeepSeek',
     initials: 'DS',
-    chipClass: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300',
+    chipClass: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300'
   },
   xiaomi: {
     id: 'xiaomi',
     label: '小米 MiMo',
     initials: 'Mi',
-    chipClass: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
+    chipClass: 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300'
   },
   zhipu: {
     id: 'zhipu',
     label: '智谱 GLM',
     initials: '智',
-    chipClass: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300',
+    chipClass: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300'
   },
   qwen: {
     id: 'qwen',
     label: '通义 Qwen',
     initials: '通',
-    chipClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300',
+    chipClass: 'bg-cyan-100 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300'
   },
-  minimax: { id: 'minimax', label: 'MiniMax', initials: 'M', chipClass: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300' },
+  minimax: {
+    id: 'minimax',
+    label: 'MiniMax',
+    initials: 'M',
+    chipClass: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300'
+  },
   kimi: {
     id: 'kimi',
     label: 'Kimi 月之暗面',
     initials: 'K',
-    chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200',
-  },
+    chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200'
+  }
 }
 
 /** Capability categories used by the top filter. "all" is rendered separately. */
@@ -175,36 +178,39 @@ export const CATEGORIES: CategoryMeta[] = [
   { key: 'code', label: '代码开发' },
   { key: 'multimodal', label: '多模态' },
   { key: 'image', label: '图像生成' },
-  { key: 'lightweight', label: '轻量高速' },
+  { key: 'lightweight', label: '轻量高速' }
 ]
 
 const DEEPSEEK_SCHEDULE_EFFECTIVE_AT = Date.parse('2026-08-23T00:00:00+08:00')
 const DEEPSEEK_V41_FLASH_EFFECTIVE_AT = Date.parse('2026-09-10T12:00:00+08:00')
-const DEEPSEEK_V4_PRO_RETIRE_AT = Date.parse('2026-09-14T12:00:00+08:00')
-const DEEPSEEK_V41_FLASH_OFF_PEAK: ModelTokenPrice = { inputPrice: 0.15, outputPrice: 0.6, cacheReadPrice: 0.003 }
-const DEEPSEEK_V41_FLASH_PEAK: ModelTokenPrice = { inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.006 }
+const DEEPSEEK_V41_FLASH_OFF_PEAK: ModelTokenPrice = {
+  inputPrice: 0.15,
+  outputPrice: 0.6,
+  cacheReadPrice: 0.003
+}
+const DEEPSEEK_V41_FLASH_PEAK: ModelTokenPrice = {
+  inputPrice: 0.3,
+  outputPrice: 1.2,
+  cacheReadPrice: 0.006
+}
 const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
 const GEMINI_FRONTIER_FLASH_STANDARD: ModelTokenPrice = {
   inputPrice: 1.5,
   outputPrice: 7.5,
-  cacheReadPrice: 0.15,
+  cacheReadPrice: 0.15
 }
 const DEEPSEEK_PEAK_WINDOWS_UTC: ReadonlyArray<readonly [number, number]> = [
   [1, 4],
-  [6, 10],
+  [6, 10]
 ]
 
-function deepseekPriceSchedule(
-  offPeak: ModelTokenPrice,
-  peak: ModelTokenPrice,
-  effectiveAt = DEEPSEEK_SCHEDULE_EFFECTIVE_AT,
-): ModelPriceSchedule {
+function deepseekPriceSchedule(offPeak: ModelTokenPrice, peak: ModelTokenPrice, effectiveAt = DEEPSEEK_SCHEDULE_EFFECTIVE_AT): ModelPriceSchedule {
   return {
     effectiveAt,
     peakUtcHours: DEEPSEEK_PEAK_WINDOWS_UTC,
     weekendBeijingOffPeak: true,
     offPeak,
-    peak,
+    peak
   }
 }
 
@@ -221,7 +227,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 10,
     outputPrice: 50,
     cacheReadPrice: 0.25,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'claude-opus-5',
@@ -233,7 +239,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 5,
     outputPrice: 25,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'claude-opus-4-8',
@@ -244,7 +250,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: 'Anthropic 上一代旗舰模型，擅长复杂推理、长上下文理解与高质量代码生成。',
     context: '1M',
     inputPrice: 5,
-    outputPrice: 25,
+    outputPrice: 25
   },
   {
     id: 'claude-sonnet-5',
@@ -257,7 +263,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 2,
     outputPrice: 10,
     cacheReadPrice: 0.2,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'claude-haiku-4-5',
@@ -268,7 +274,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '轻量高速模型，适合高并发、低延迟与成本敏感的对话场景。',
     context: '200K',
     inputPrice: 1,
-    outputPrice: 5,
+    outputPrice: 5
   },
   {
     id: 'claude-fable-5',
@@ -280,17 +286,26 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 10,
     outputPrice: 50,
-    cacheReadPrice: 1,
+    cacheReadPrice: 1
   },
 
   // --- OpenAI --------------------------------------------------------------
-  ...(['flare', 'sunburst'] as const).map(variant => ({
-    id: `gpt-image-2.5-${variant}`, name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'}`,
-    provider: 'openai' as const, image: true, categories: ['image', 'multimodal'],
+  ...(['flare', 'sunburst'] as const).map((variant) => ({
+    id: `gpt-image-2.5-${variant}`,
+    name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'}`,
+    provider: 'openai' as const,
+    image: true,
+    categories: ['image', 'multimodal'],
     tags: ['原生生图', '图片编辑', '透明背景'],
     description: variant === 'flare' ? '适合快速日常生图；支持 xhigh、max 品质及自定义尺寸。' : '适合精细图片编辑；支持透明背景、xhigh 与 max 品质。',
-    context: '≤3840 px', inputPrice: 5, outputPrice: 0, cacheReadPrice: 1.25,
-    imageInputPrice: 8, imageCacheReadPrice: 2, imageOutputPrice: 30, badge: 'new' as const,
+    context: '≤3840 px',
+    inputPrice: 5,
+    outputPrice: 0,
+    cacheReadPrice: 1.25,
+    imageInputPrice: 8,
+    imageCacheReadPrice: 2,
+    imageOutputPrice: 30,
+    badge: 'new' as const
   })),
   {
     id: 'gpt-6-astra',
@@ -303,7 +318,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 10,
     outputPrice: 50,
     cacheReadPrice: 1,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'gpt-5.6-sol',
@@ -315,7 +330,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '256K',
     inputPrice: 5,
     outputPrice: 30,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'gpt-5.6-terra',
@@ -326,7 +341,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '日常主力模型，性能对标上一代旗舰而价格减半，适合大多数生产负载。',
     context: '256K',
     inputPrice: 2.5,
-    outputPrice: 15,
+    outputPrice: 15
   },
   {
     id: 'gpt-5.6-luna',
@@ -338,7 +353,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '256K',
     inputPrice: 1,
     outputPrice: 6,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'gpt-5.5',
@@ -349,7 +364,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: 'OpenAI 上一代旗舰多模态模型，综合推理、文本与图像理解能力领先。',
     context: '256K',
     inputPrice: 5,
-    outputPrice: 30,
+    outputPrice: 30
   },
   {
     id: 'gpt-5.4',
@@ -360,7 +375,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '通用主力模型，覆盖大多数对话与推理任务，稳定可靠。',
     context: '256K',
     inputPrice: 2.5,
-    outputPrice: 15,
+    outputPrice: 15
   },
   {
     id: 'gpt-5.4-mini',
@@ -371,7 +386,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '小尺寸高速模型，适合大批量、低成本的对话与分类任务。',
     context: '128K',
     inputPrice: 0.25,
-    outputPrice: 2,
+    outputPrice: 2
   },
   {
     id: 'gpt-5.3-codex',
@@ -382,7 +397,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '面向编程与 Agent 的专用模型，深度适配 Codex CLI 工作流。',
     context: '256K',
     inputPrice: 1.5,
-    outputPrice: 12,
+    outputPrice: 12
   },
   {
     id: 'gpt-5.3-codex-spark',
@@ -394,7 +409,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '272K',
     inputPrice: 1.75,
     outputPrice: 14,
-    cacheReadPrice: 0.175,
+    cacheReadPrice: 0.175
   },
 
   // --- Google / Gemini -----------------------------------------------------
@@ -411,14 +426,16 @@ export const MODEL_CATALOG: PlazaModel[] = [
     cacheReadPrice: 0.075,
     priceChange: {
       effectiveAt: GEMINI_FRONTIER_FLASH_STANDARD_AT,
-      price: GEMINI_FRONTIER_FLASH_STANDARD,
+      price: GEMINI_FRONTIER_FLASH_STANDARD
     },
-    badge: 'recommended',
+    badge: 'recommended'
   },
-  {
-    id: 'gemini-3.6-flash',
-    name: 'Gemini 3.6 Flash',
-    provider: 'gemini',
+  // 3.6 / 3.7 只差 id 与名称，由同一份定义派生：推广价与 2027 年的标准价切换
+  // 写在一处，避免逐卡手抄时改漏一张（3.8 的文案与 badge 不同，故单列）。
+  ...(['3.7', '3.6'] as const).map((version) => ({
+    id: `gemini-${version}-flash`,
+    name: `Gemini ${version} Flash`,
+    provider: 'gemini' as const,
     categories: ['chat', 'reasoning', 'code', 'multimodal'],
     tags: ['稳定版', 'Agent', '多模态'],
     description: '成熟稳定的 Flash 模型，在速度与智能之间取得平衡，适合 Agent 和多模态任务。当前显示年末前优惠价。',
@@ -428,9 +445,9 @@ export const MODEL_CATALOG: PlazaModel[] = [
     cacheReadPrice: 0.075,
     priceChange: {
       effectiveAt: GEMINI_FRONTIER_FLASH_STANDARD_AT,
-      price: GEMINI_FRONTIER_FLASH_STANDARD,
-    },
-  },
+      price: GEMINI_FRONTIER_FLASH_STANDARD
+    }
+  })),
   {
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro Preview',
@@ -442,7 +459,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 2,
     outputPrice: 12,
     cacheReadPrice: 0.2,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'gemini-3.5-flash',
@@ -454,7 +471,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 1.5,
     outputPrice: 9,
-    cacheReadPrice: 0.15,
+    cacheReadPrice: 0.15
   },
   {
     id: 'gemini-3.5-flash-lite',
@@ -466,7 +483,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.3,
     outputPrice: 2.5,
-    cacheReadPrice: 0.03,
+    cacheReadPrice: 0.03
   },
   {
     id: 'gemini-2.5-pro',
@@ -478,7 +495,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 1.25,
     outputPrice: 10,
-    cacheReadPrice: 0.125,
+    cacheReadPrice: 0.125
   },
   {
     id: 'gemini-2.5-flash',
@@ -490,7 +507,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.3,
     outputPrice: 2.5,
-    cacheReadPrice: 0.03,
+    cacheReadPrice: 0.03
   },
 
   // --- DeepSeek ------------------------------------------------------------
@@ -499,21 +516,13 @@ export const MODEL_CATALOG: PlazaModel[] = [
     name: 'DeepSeek V4 Pro',
     provider: 'deepseek',
     categories: ['chat', 'reasoning', 'code'],
-    tags: ['过渡模型', '兼容名称', '代码'],
-    description: '北京时间 2026 年 9 月 14 日 12:00 起，至 V4.1 Pro 上线前，此名称由 V4.1 Flash 提供服务并按 Flash 价格计费。建议使用 deepseek-flash。',
+    tags: ['深度推理', '代码'],
+    description: 'DeepSeek V4 Pro 持续提供 API 服务，保留独立的 Pro 价格，支持深度推理与代码任务。',
     context: '1M',
     inputPrice: 0.435,
     outputPrice: 0.87,
     cacheReadPrice: 0.003625,
-    priceSchedule: deepseekPriceSchedule(
-      { inputPrice: 0.66, outputPrice: 1.98, cacheReadPrice: 0.022 },
-      { inputPrice: 1.32, outputPrice: 3.96, cacheReadPrice: 0.044 },
-    ),
-    priceSchedules: [deepseekPriceSchedule(
-      DEEPSEEK_V41_FLASH_OFF_PEAK,
-      DEEPSEEK_V41_FLASH_PEAK,
-      DEEPSEEK_V4_PRO_RETIRE_AT,
-    )],
+    priceSchedule: deepseekPriceSchedule({ inputPrice: 0.66, outputPrice: 1.98, cacheReadPrice: 0.022 }, { inputPrice: 1.32, outputPrice: 3.96, cacheReadPrice: 0.044 })
   },
   {
     id: 'deepseek-flash',
@@ -524,12 +533,8 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: 'DeepSeek 新架构 Flash 模型，原生支持视觉理解、思考模式和工具调用。旧 V4 Flash 与视觉实验版名称暂时兼容，均由此模型提供服务。',
     context: '1M',
     ...DEEPSEEK_V41_FLASH_OFF_PEAK,
-    priceSchedule: deepseekPriceSchedule(
-      DEEPSEEK_V41_FLASH_OFF_PEAK,
-      DEEPSEEK_V41_FLASH_PEAK,
-      DEEPSEEK_V41_FLASH_EFFECTIVE_AT,
-    ),
-    badge: 'recommended',
+    priceSchedule: deepseekPriceSchedule(DEEPSEEK_V41_FLASH_OFF_PEAK, DEEPSEEK_V41_FLASH_PEAK, DEEPSEEK_V41_FLASH_EFFECTIVE_AT),
+    badge: 'recommended'
   },
   // --- 小米 MiMo -----------------------------------------------------------
   {
@@ -543,7 +548,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 0.435,
     outputPrice: 0.87,
     cacheReadPrice: 0.0036,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'mimo-v2.5',
@@ -555,7 +560,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.14,
     outputPrice: 0.28,
-    cacheReadPrice: 0.0028,
+    cacheReadPrice: 0.0028
   },
 
   // --- 智谱 GLM ------------------------------------------------------------
@@ -570,7 +575,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 1.12,
     outputPrice: 3.92,
     cacheReadPrice: 0.28,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'glm-5.3-flash',
@@ -583,7 +588,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 0.112,
     outputPrice: 0.392,
     cacheReadPrice: 0.0322,
-    badge: 'new',
+    badge: 'new'
   },
   {
     id: 'glm-5.2',
@@ -595,7 +600,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 1.12,
     outputPrice: 3.92,
-    cacheReadPrice: 0.28,
+    cacheReadPrice: 0.28
   },
 
   // --- 通义 Qwen -----------------------------------------------------------
@@ -610,7 +615,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 1.68,
     outputPrice: 5.04,
     cacheReadPrice: 0.21,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'qwen3.7-plus',
@@ -622,7 +627,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.28,
     outputPrice: 1.12,
-    cacheReadPrice: 0.056,
+    cacheReadPrice: 0.056
   },
   {
     id: 'qwen3.7-flash',
@@ -634,21 +639,33 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 0.028,
     outputPrice: 0.112,
-    cacheReadPrice: 0.0056,
+    cacheReadPrice: 0.0056
   },
 
   {
-    id: 'MiniMax-M3', name: 'MiniMax M3', provider: 'minimax',
+    id: 'MiniMax-M3',
+    name: 'MiniMax M3',
+    provider: 'minimax',
     categories: ['chat', 'reasoning', 'code', 'multimodal'],
     tags: ['工具调用', '可选思考', '1M 上下文'],
     description: '支持图像与视频输入、工具调用和原生 Responses。输入超过 512K 时计价翻倍，Priority 按标准价的 1.5 倍计费。',
-    context: '1M', inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.06, badge: 'new',
+    context: '1M',
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    cacheReadPrice: 0.06,
+    badge: 'new'
   },
   {
-    id: 'MiniMax-M2.7', name: 'MiniMax M2.7', provider: 'minimax',
-    categories: ['chat', 'reasoning', 'code'], tags: ['编码', '工具调用'],
+    id: 'MiniMax-M2.7',
+    name: 'MiniMax M2.7',
+    provider: 'minimax',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['编码', '工具调用'],
     description: '面向编程和多轮工具任务，支持 Token Plan / Coding Plan 与按量密钥。',
-    context: '204K', inputPrice: 0.3, outputPrice: 1.2, cacheReadPrice: 0.06,
+    context: '204K',
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    cacheReadPrice: 0.06
   },
   // --- Kimi 月之暗面 -------------------------------------------------------
   {
@@ -661,7 +678,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '1M',
     inputPrice: 2.8,
     outputPrice: 14.0,
-    badge: 'recommended',
+    badge: 'recommended'
   },
   {
     id: 'kimi-k2.7-code',
@@ -672,7 +689,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '面向编码与 Agent 场景的模型，写码、Debug、工具调用表现稳定，性价比高。',
     context: '256K',
     inputPrice: 0.91,
-    outputPrice: 3.78,
+    outputPrice: 3.78
   },
   {
     id: 'kimi-k2.6',
@@ -683,6 +700,6 @@ export const MODEL_CATALOG: PlazaModel[] = [
     description: '支持文本与视觉输入的通用模型，日常对话与多模态任务的高性价比之选。',
     context: '256K',
     inputPrice: 0.91,
-    outputPrice: 3.78,
-  },
+    outputPrice: 3.78
+  }
 ]

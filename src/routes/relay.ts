@@ -1821,6 +1821,19 @@ function sendResponsesInputTokens(request: FastifyRequest, reply: FastifyReply):
 }
 
 /**
+ * Providers signal a bad client-supplied model by throwing an error carrying an
+ * HTTP status and a machine-readable code (DeepseekRequestError,
+ * AntigravityRequestError, ...). Matched structurally so a provider that adds
+ * its own error class is handled without another `instanceof` here — the bug
+ * this guards against is exactly one of these escaping unhandled.
+ */
+function isClientModelError(err: unknown): err is Error & { statusCode: number; code: string } {
+  if (!(err instanceof Error)) return false
+  const candidate = err as { statusCode?: unknown; code?: unknown }
+  return typeof candidate.statusCode === 'number' && typeof candidate.code === 'string'
+}
+
+/**
  * Entry point: enforces per-key provider allow-list, rate limit and
  * concurrency gate, then runs the relay loop while holding a concurrency slot.
  */
@@ -1835,10 +1848,26 @@ async function executeRelay(
   const route = provider.parseRoute(request, body)
   if (!enforceGroupModel(route.model, request, reply)) return
   const mappedModel = mapRequestedModel(route.model, apiKey.modelMappings)
-  const parsed: ParsedRoute = {
-    ...route,
-    model: provider.normalizeModel ? provider.normalizeModel(mappedModel) : mappedModel,
+  // normalizeModel can reject a model outright (a provider whitelist, an
+  // explicit-name requirement). Catch it here: thrown from inside the object
+  // literal below it would escape this function entirely — past the
+  // concurrency gate and the try block — and reach Fastify's default error
+  // handler, which neither shapes the body like the other relay errors nor
+  // records which model was refused.
+  let normalizedModel: string
+  try {
+    normalizedModel = provider.normalizeModel ? provider.normalizeModel(mappedModel) : mappedModel
+  } catch (err) {
+    if (isClientModelError(err)) {
+      request.log.warn(`rejected model ${mappedModel} for provider ${provider.id}: ${err.message}`)
+      void reply.code(err.statusCode).send({
+        error: { type: 'invalid_request_error', code: err.code, message: err.message },
+      })
+      return
+    }
+    throw err
   }
+  const parsed: ParsedRoute = { ...route, model: normalizedModel }
   if (provider === PROVIDERS['kimi-responses'] && supportsNativeKimiResponses(parsed.model)) {
     provider = {
       ...provider,

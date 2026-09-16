@@ -5,7 +5,7 @@ import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 
 interface PaymentOrder {
   id: string
@@ -32,10 +32,6 @@ const statusType: Record<PaymentOrder['status'], 'success' | 'warning' | 'error'
   paid: 'success',
   canceled: 'default',
   expired: 'error',
-}
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
 }
 
 async function load() {

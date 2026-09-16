@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
-import { formatTime, formatTokens } from '../utils'
+import { formatTime, formatTokens, formatUsd } from '../utils'
 import LazyEChart from '../components/LazyEChart.vue'
 
 interface DailyStat {
@@ -548,8 +548,10 @@ function hasCacheTokens(row: DashboardRecentLog): boolean {
   return logCacheTokens(row) > 0
 }
 
+/** Cost line items run well below a cent, so delegate to the adaptive formatter
+ * rather than a fixed 6 decimals (which renders them all as $0.000000). */
 function formatLogCost(cost: number): string {
-  return `$${cost.toFixed(6)}`
+  return formatUsd(cost)
 }
 
 function formatTokenPrice(price: number | null): string {

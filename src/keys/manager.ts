@@ -185,11 +185,19 @@ export async function updateApiKey(
   await db.update(apiKeys).set(changes).where(where)
 }
 
-export async function deleteApiKey(id: string, userId?: string): Promise<void> {
+/**
+ * Deletes an API key, returning how many rows were removed.
+ *
+ * Callers need the count to tell "deleted" from "was never there": a batch
+ * delete that treats every 200 as success over-reports when another admin has
+ * already removed a key, hiding the real failures next to it.
+ */
+export async function deleteApiKey(id: string, userId?: string): Promise<number> {
   const where = userId
     ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
     : eq(apiKeys.id, id)
-  await db.delete(apiKeys).where(where)
+  const deleted = await db.delete(apiKeys).where(where).returning({ id: apiKeys.id })
+  return deleted.length
 }
 
 export async function listApiKeysForUser(userId: string) {

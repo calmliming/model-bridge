@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useAuthStore } from '../stores/auth'
 import BrandLogo from '../components/BrandLogo.vue'
+import { formatUsd } from '../utils'
 
 interface HeaderUser {
   email: string
@@ -74,10 +75,6 @@ watch(() => route.fullPath, () => {
 })
 
 onMounted(loadHeaderUser)
-
-function formatUsd(value: number): string {
-  return `$${value.toFixed(Math.abs(value) < 1 ? 4 : 2)}`
-}
 
 async function loadHeaderUser() {
   try {
