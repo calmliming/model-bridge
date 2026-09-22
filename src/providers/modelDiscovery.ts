@@ -39,7 +39,7 @@ const CREATED_AT = 1_704_067_200
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, string[]> = {
-  claude: ['claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
+  claude: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
     'gpt-6-astra',
     'gpt-6-sol',

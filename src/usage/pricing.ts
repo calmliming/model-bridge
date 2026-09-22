@@ -41,6 +41,17 @@ const CLAUDE_OPUS_REDUCED: TierPrice = {
   cacheWrite: 6.25,
   cacheRead: 0.5
 }
+// Claude Opus 5.5 (public 2026-09-22) — first model of the 5.5 family. Same
+// capability band as Fable 5.1 at a lower price: 20% under Opus 5 on
+// input/output, and cache reads drop from 0.1x to 0.05x input ($0.20/MTok),
+// a 60% cut. Cheaper on every axis, so it must NOT inherit CLAUDE_OPUS_REDUCED.
+// https://www.anthropic.com/claude-opus-5-5
+const CLAUDE_OPUS_55: TierPrice = {
+  input: 4,
+  output: 20,
+  cacheWrite: 5,
+  cacheRead: 0.2
+}
 const CLAUDE_OPUS_LEGACY: TierPrice = {
   input: 15,
   output: 75,
@@ -105,6 +116,11 @@ function claudePrice(model: string): TierPrice {
     return /(?:fable|mythos)-5(?:-1|\.1)(?:$|-)/.test(m) ? CLAUDE_FABLE_51 : CLAUDE_FABLE
   }
   if (m.includes('haiku')) return CLAUDE_HAIKU
+  // Opus 5.5 must be checked before the generic opus branch below, which would
+  // otherwise return the Opus 5 rate (5/25 vs the correct 4/20). isLegacyOpus
+  // already excludes 5.5 (major 5 >= 4), so ordering here is purely about the
+  // reduced tier.
+  if (m.includes('opus') && /opus-5(?:-5|\.5)(?:$|-)/.test(m)) return CLAUDE_OPUS_55
   if (m.includes('opus')) return isLegacyOpus(m) ? CLAUDE_OPUS_LEGACY : CLAUDE_OPUS_REDUCED
   if (m.includes('sonnet-5')) return CLAUDE_SONNET_5
   return CLAUDE_SONNET
@@ -663,6 +679,14 @@ interface SeedRow {
 const SEED_ROWS: SeedRow[] = [
   // Claude — generic tiers + the legacy Opus 4.1 exception.
   { provider: 'claude', model: 'opus', price: CLAUDE_OPUS_REDUCED },
+  // Exact rows for the discoverable Opus models. Without them they rely on the
+  // generic "opus" row through resolvePrice's substring pass, which matches
+  // bidirectionally and prefers the longest key — so the more specific
+  // "claude-opus-5-5" row would capture a plain "claude-opus-5" request and
+  // under-bill it 5 → 4. An exact row wins before that pass runs.
+  { provider: 'claude', model: 'claude-opus-5', price: CLAUDE_OPUS_REDUCED },
+  { provider: 'claude', model: 'claude-opus-4-8', price: CLAUDE_OPUS_REDUCED },
+  { provider: 'claude', model: 'claude-opus-5-5', price: CLAUDE_OPUS_55 },
   { provider: 'claude', model: 'claude-opus-4-1', price: CLAUDE_OPUS_LEGACY },
   { provider: 'claude', model: 'sonnet', price: CLAUDE_SONNET },
   { provider: 'claude', model: 'claude-sonnet-5', price: CLAUDE_SONNET_5 },

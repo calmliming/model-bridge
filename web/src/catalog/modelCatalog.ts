@@ -236,16 +236,28 @@ export const MODEL_CATALOG: PlazaModel[] = [
     badge: 'new'
   },
   {
+    id: 'claude-opus-5-5',
+    name: 'Claude Opus 5.5',
+    provider: 'claude',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['新旗舰档', '能力接近 Fable 5.1', '缓存极便宜'],
+    description: '首款 Claude 5.5 家族模型，能力接近 Fable 5.1 而成本显著更低；缓存读取仅 $0.20/百万，适合长程 Agent 与整库迁移类任务。',
+    context: '1M',
+    inputPrice: 4,
+    outputPrice: 20,
+    cacheReadPrice: 0.2,
+    badge: 'new'
+  },
+  {
     id: 'claude-opus-5',
     name: 'Claude Opus 5',
     provider: 'claude',
     categories: ['chat', 'reasoning', 'code'],
     tags: ['旗舰', '复杂推理', 'Agent'],
-    description: 'Anthropic 最新旗舰模型，擅长复杂 Agent 编码与企业级任务，长上下文理解与推理能力出色。',
+    description: 'Anthropic 上一代 Opus 旗舰，擅长复杂 Agent 编码与企业级任务；如需更低成本可换 Opus 5.5。',
     context: '1M',
     inputPrice: 5,
-    outputPrice: 25,
-    badge: 'recommended'
+    outputPrice: 25
   },
   {
     id: 'claude-opus-4-8',

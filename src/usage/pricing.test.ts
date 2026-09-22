@@ -266,6 +266,29 @@ describe('Kimi Code pricing', () => {
 })
 
 describe('current Claude pricing', () => {
+  it('prices Opus 5.5 on its own tier, cheaper than Opus 5 on every axis', () => {
+    expect(resolvePrice('claude', 'claude-opus-5-5')).toMatchObject({
+      input: 4,
+      output: 20,
+      cacheWrite: 5,
+      cacheRead: 0.2
+    })
+  })
+
+  it('keeps Opus 5, Opus 4.8 and legacy Opus on their existing tiers', () => {
+    // Opus 5.5 must not leak into these: the generic opus branch is the default
+    // for everything that is not explicitly 5.5.
+    for (const model of ['claude-opus-5', 'claude-opus-4-8']) {
+      expect(resolvePrice('claude', model)).toMatchObject({ input: 5, output: 25, cacheRead: 0.5 })
+    }
+    // 4.1 and earlier stay on the legacy 15/75 rate.
+    expect(resolvePrice('claude', 'claude-opus-4-1')).toMatchObject({ input: 15, output: 75 })
+  })
+
+  it('routes Opus 5.5 through sub2api at the same rate', () => {
+    expect(resolvePrice('sub2api', 'claude-opus-5-5')).toMatchObject({ input: 4, output: 20 })
+  })
+
   it('uses Fable 5.1 cache-read pricing without changing Fable 5', () => {
     expect(resolvePrice('claude', 'claude-fable-5-1')).toMatchObject({
       input: 10,

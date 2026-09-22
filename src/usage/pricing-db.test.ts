@@ -158,4 +158,34 @@ describe('scheduled database price overrides', () => {
     expect(resolvePrice('gemini', 'gemini-3.8-flash', Date.parse('2026-09-03T00:00:00Z')))
       .toMatchObject({ input: 2, output: 8, cacheRead: 0.2 })
   })
+
+  it('does not let the Opus 5.5 row capture the shorter Opus 5 name', async () => {
+    // Regression: resolvePrice's substring pass matches bidirectionally
+    // (dbModel.includes(model)) and prefers the longest key, so a seeded
+    // "claude-opus-5-5" row also matches a plain "claude-opus-5" request and
+    // silently under-bills it 5 → 4. The fix is an exact `claude-opus-5` seed
+    // row, which wins in the exact-match pass before the substring pass runs.
+    // This row set is what a freshly seeded database actually contains.
+    mocks.query.mockResolvedValue({
+      rows: [
+        priceRow('opus', 5, 25, 0.5, 'claude'),
+        priceRow('claude-opus-5', 5, 25, 0.5, 'claude'),
+        priceRow('claude-opus-5-5', 4, 20, 0.2, 'claude'),
+      ],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('claude', 'claude-opus-5')).toMatchObject({
+      input: 5,
+      output: 25,
+      cacheRead: 0.5,
+    })
+    expect(resolvePrice('claude', 'claude-opus-5-5')).toMatchObject({
+      input: 4,
+      output: 20,
+      cacheRead: 0.2,
+    })
+    // A sibling we did not seed keeps resolving through the generic "opus" row.
+    expect(resolvePrice('claude', 'claude-opus-4-8')).toMatchObject({ input: 5, output: 25 })
+  })
 })
