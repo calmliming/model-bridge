@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,6 +9,33 @@ const npmCli = process.platform === 'win32' ? process.env.npm_execpath : undefin
 const npmCommand = npmCli ? process.execPath : process.platform === 'win32' ? 'cmd.exe' : 'npm'
 const npmArgsPrefix = npmCli ? [npmCli] : process.platform === 'win32' ? ['/d', '/s', '/c', 'npm'] : []
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined
+
+/**
+ * 读取本地开发用的环境文件，只为了拿到后端端口。
+ *
+ * 为什么需要这一步：后端走 .env.local（src/config.ts 里的 APP_ENV=local），
+ * 但 Vite 只从 web/ 目录加载自己的 .env 文件，读不到仓库根目录的 .env.local。
+ * 把 PORT 透传给前端进程后，web/vite.config.ts 就能用它拼出正确的代理目标。
+ * （已确认 Vite 不使用 process.env.PORT 决定自身端口，故不会与 5173 冲突。）
+ */
+function readLocalPort() {
+  const candidates = ['.env.local', '.env']
+  for (const name of candidates) {
+    let raw
+    try {
+      raw = readFileSync(resolve(rootDir, name), 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of raw.split(/\r?\n/u)) {
+      const match = /^\s*PORT\s*=\s*(\d+)\s*$/u.exec(line)
+      if (match) return match[1]
+    }
+  }
+  return null
+}
+
+const backendPort = readLocalPort()
 
 const ansi = {
   reset: '\x1b[0m',
@@ -31,7 +59,9 @@ const services = [
     // Frontend only starts once the API logs that it is listening.
     readyPattern: /Server listening at/iu,
     // Fallback so the frontend still boots if the ready log never appears.
-    readyTimeoutMs: 20000,
+    // 60s 而不是 20s：后端冷启动实测约 15s，内存紧张（本机 16GB 常被
+    // Docker/其它进程占满）时会明显更久，20s 会误报"未就绪"。
+    readyTimeoutMs: 60000,
   },
   {
     name: 'frontend',
@@ -40,6 +70,9 @@ const services = [
     cwd: resolve(rootDir, 'web'),
     command: npmCommand,
     args: [...npmArgsPrefix, 'run', '--silent', 'dev'],
+    // Vite 读不到根目录的 .env.local，这里把后端端口显式传下去，
+    // 供 web/vite.config.ts 决定 /api 与 /health 的代理目标。
+    env: backendPort ? { PORT: backendPort } : {},
   },
 ]
 
@@ -147,17 +180,18 @@ function stopAll(signal = 'SIGTERM') {
   }
 }
 
-function startService(service) {
-  // Resolves once the service signals readiness (or immediately when no
-  // readyPattern is configured). Lets us start dependents in order.
-  let resolveReady
-  const ready = new Promise((resolve) => {
-    resolveReady = resolve
-  })
+async function startService(service) {
+  // 就绪用显式状态位 + 轮询表达，而不是 Promise.race：
+  // race 的语义（哪一支先 settle）在调试时很难看清，之前出现过
+  // 明明日志里有 "Server listening at" 却仍走超时分支的情况。
+  let ready = false
+  let exited = false
+  const startedAt = Date.now()
 
   const onLine = service.readyPattern
     ? (line) => {
-        if (service.readyPattern.test(line)) resolveReady()
+        if (ready) return
+        if (service.readyPattern.test(line)) ready = true
       }
     : null
 
@@ -165,6 +199,7 @@ function startService(service) {
     cwd: service.cwd,
     env: {
       ...process.env,
+      ...(service.env ?? {}),
       ...(useColor ? { FORCE_COLOR: '1' } : {}),
     },
     stdio: ['inherit', 'pipe', 'pipe'],
@@ -175,9 +210,8 @@ function startService(service) {
   pipeLines(service, child.stderr, process.stderr, onLine)
 
   child.on('exit', (code, signal) => {
+    exited = true
     children.delete(service.name)
-    // Unblock the startup chain if the service dies before becoming ready.
-    resolveReady()
 
     const reason = signal ? `signal=${signal}` : `code=${code ?? 0}`
     const line = formatLine(service, color(`process exited (${reason})`, code ? ansi.red : ansi.dim))
@@ -189,22 +223,20 @@ function startService(service) {
     }
   })
 
-  if (service.readyPattern) {
-    const timeout = new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        const line = formatLine(
-          service,
-          color(`ready signal not seen in ${service.readyTimeoutMs}ms — starting next service anyway`, ansi.yellow),
-        )
-        if (line) process.stdout.write(`${line}\n`)
-        resolve()
-      }, service.readyTimeoutMs ?? 20000)
-      timer.unref?.()
-    })
-    return Promise.race([ready, timeout])
+  if (!service.readyPattern) return
+
+  const timeoutMs = service.readyTimeoutMs ?? 60000
+  while (!ready && !exited && !shuttingDown && Date.now() - startedAt < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 100))
   }
 
-  return ready
+  if (!ready && !exited) {
+    const line = formatLine(
+      service,
+      color(`ready signal not seen in ${timeoutMs}ms — starting next service anyway`, ansi.yellow),
+    )
+    if (line) process.stdout.write(`${line}\n`)
+  }
 }
 
 // Start services sequentially: each waits for the previous one to be ready.

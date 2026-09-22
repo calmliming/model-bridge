@@ -46,6 +46,9 @@ services:
     environment:
       PORT: 3000
       HOST: 0.0.0.0
+      # 显式声明生产模式。容器里 NODE_ENV=production（见 Dockerfile），
+      # 所以即便 .env.local 被误带进来也不会按本地模式加载。
+      APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgres://${PG_USER:-model_bridge}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_bridge}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}

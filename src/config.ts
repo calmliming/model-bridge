@@ -1,9 +1,22 @@
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { config as loadDotenv } from 'dotenv'
+import { parse as parseDotenv } from 'dotenv'
 import { z } from 'zod'
 
-const ENV_PATH = '.env'
+/**
+ * 本地开发与线上生产的环境文件是分开的，避免"本地一跑就写生产库"。
+ *
+ *   本地：.env.local  （被 .gitignore 的 `*.local` 忽略，永不进版本库）
+ *   线上：.env        （docker-compose.yml 通过 environment 注入，文件仅在服务器上）
+ *
+ * 关键设计：模式判定的依据是"仓库根目录是否存在 .env.local"，而不是某个
+ * 环境变量。早期版本用 APP_ENV=local 做开关，结果任何继承来的同名环境变量
+ * （父进程、CI、容器 environment）都能把它盖掉，导致本地进程静默连上生产库——
+ * 这正是本机制要防的事故。改看文件后，开关只由开发者自己放在磁盘上的文件决定。
+ *
+ * 容器内 NODE_ENV=production（见 Dockerfile），且 .dockerignore 排除了
+ * `.env.*`，所以线上永远走不到 .env.local 分支。
+ */
 const blankToUndefined = (value: unknown) =>
   typeof value === 'string' && value.trim() === '' ? undefined : value
 const envBoolean = (value: unknown) => {
@@ -15,13 +28,47 @@ const envBoolean = (value: unknown) => {
   return normalized
 }
 
-// Load an existing .env file (if any) into process.env.
-loadDotenv()
+/** 本地模式：存在 .env.local，且不是在容器里跑（NODE_ENV=production）。 */
+const LOCAL_ENV_PATH = '.env.local'
+const isLocalDevelopment =
+  process.env.NODE_ENV !== 'production' && existsSync(LOCAL_ENV_PATH)
+
+/** 当前实例实际使用的环境文件，供启动日志与自动生成密钥时写回。 */
+export const ENV_PATH = isLocalDevelopment ? LOCAL_ENV_PATH : '.env'
+
+/** 运行模式，供启动横幅与远端库保护使用。 */
+export const APP_ENV: 'local' | 'production' = isLocalDevelopment ? 'local' : 'production'
+
+/**
+ * 读入环境文件。这里刻意自己解析而不用 dotenv 的 override：
+ * dotenv 默认"已存在的环境变量优先"，在本地模式下会让继承来的
+ * DATABASE_URL / PORT 等盖掉 .env.local，等于隔离失效。
+ * 本地模式下 .env.local 必须是权威来源，因此显式写入覆盖。
+ */
+function loadEnvFile(path: string): void {
+  if (!existsSync(path)) return
+  const parsed = parseDotenv(readFileSync(path, 'utf8'))
+  for (const [key, value] of Object.entries(parsed)) {
+    process.env[key] = value
+  }
+}
+
+// 测试环境不加载任何 env 文件：vitest 在 vitest.config.ts 里注入了专用的
+// 假凭据（DATABASE_URL 指向端口 1，fail-closed）。若在这里覆盖，测试会
+// 打到真实数据库上。
+const isTestEnvironment = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true'
+if (!isTestEnvironment) loadEnvFile(ENV_PATH)
+
+if (isLocalDevelopment && blankToUndefined(process.env.APP_ENV) !== 'local') {
+  // 不是错误，只是提醒：模式由 .env.local 决定，环境变量说了不算。
+  console.warn(`[config] 本地模式（已加载 ${ENV_PATH}）；环境变量 APP_ENV=${process.env.APP_ENV ?? '(未设置)'} 已被忽略`)
+}
 
 /**
  * Ensures a persistent secret exists. On first run the value is
- * generated and appended to .env so it survives restarts — critical
- * because ENCRYPTION_KEY must stay stable to decrypt stored tokens.
+ * generated and appended to the active env file so it survives restarts —
+ * critical because ENCRYPTION_KEY must stay stable to decrypt stored tokens.
+ * 本地写入 .env.local，线上写入 .env，两者不会互相污染。
  */
 function ensureSecret(key: string, generate: () => string): void {
   const current = process.env[key]
@@ -57,10 +104,17 @@ const schema = z.object({
       message: 'must be a redis:// or rediss:// URL',
     }).optional(),
   ),
+  // AES-256 key for encrypting OAuth tokens at rest — 64 hex chars.
+  // 本地与线上必须使用各自独立的密钥：本地库即使被清空/泄露，
+  // 也解不开生产库里的任何密文。
   ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'must be 64 hex characters (32 bytes)'),
   JWT_SECRET: z.string().min(16, 'must be at least 16 characters'),
+  // 本地开发误连远端库时的显式闸门。见 src/db/index.ts：
+  // 本地模式下 DATABASE_URL 指向非回环主机会直接拒绝启动，
+  // 必须显式设为 true 才能放行（用于"确实要本地连远端库"的少数场景）。
+  ALLOW_REMOTE_DB: z.preprocess(envBoolean, z.boolean().default(false)),
   ADMIN_USERNAME: z.string().min(1).default('admin'),
   ADMIN_PASSWORD: z.string().min(1).default('admin'),
   CLAUDE_CLI_VERSION: z.preprocess(blankToUndefined, z.string().max(30).regex(/^\d+\.\d+\.\d+$/)

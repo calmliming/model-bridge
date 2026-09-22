@@ -1,0 +1,38 @@
+# ── 本地开发专用：只跑一个 PostgreSQL ────────────────────────
+#
+# 用法：
+#   npm run dev:db          # 起库（后台）
+#   npm run dev:db:down     # 停库（保留数据）
+#   npm run dev:db:reset    # 停库并删除数据卷（彻底重来）
+#
+# 与线上 docker-compose.yml 的关键区别：
+#   * 项目名 model-bridge-dev —— 容器/网络/卷与线上完全隔离，不会互相顶掉
+#   * 端口 5433 —— 线上是 5432，避免 SSH 隧道或本机 PG 冲突
+#   * 数据卷 ./data/dev-pg —— 与线上 ./data/pg 分开，删了也不影响线上
+#   * 密文写死为 devpassword —— 刻意不读 .env/.env.local，
+#     这样即使生产密码误填进环境变量，也绝不会被这个库采用
+#
+# 注意：这里不定义 model-bridge 应用容器。本地开发跑的是宿主机的
+# npm run dev（tsx watch + Vite），见 README 的「本地开发」一节。
+
+name: model-bridge-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: model-bridge-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: model_bridge
+      POSTGRES_USER: model_bridge
+      POSTGRES_PASSWORD: devpassword
+    volumes:
+      - ./data/dev-pg:/var/lib/postgresql/data
+    ports:
+      # 只绑回环：本机的开发进程能连，局域网里别人连不上
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U model_bridge -d model_bridge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

@@ -26,28 +26,97 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek �
 
 需要 Node.js 24.19.0 LTS（或更新的 LTS 版本）。
 
+本地开发**连本地数据库**，与线上完全隔离（见下面的「本地环境与生产环境」）。
+首次准备好本地配置和数据库：
+
 ```bash
-# 同时启动前后端，并用 API / WEB 标签区分格式化日志。
+# 1. 建本地配置（连本地库、本地专用密钥）
+cp .env.example .env.local
+#    然后编辑 .env.local，确认这三项：
+#      APP_ENV=local
+#      PORT=3003
+#      DATABASE_URL=postgresql://model_bridge:devpassword@127.0.0.1:5433/model_bridge
+
+# 2. 起本地 PostgreSQL 容器（需要 Docker Desktop 已启动）
+npm run dev:db
+
+# 3. 同时启动前后端，并用 API / WEB 标签区分格式化日志
 npm install
 cd web && npm install && cd ..
 npm run dev:all
 ```
 
+打开 <http://localhost:5173>，用 `.env.local` 里的 **admin / admin** 登录，然后立刻在
+**设置**页面修改密码。数据库表结构由后端启动时自动创建（幂等），无需手动跑迁移。
+
 也可以分别启动：
 
 ```bash
-# 后端 —— 端口 3000。会安装依赖；密钥在首次运行时自动生成到 .env。
+# 后端 —— 端口 3003（读 .env.local）。密钥缺失时会自动生成到 .env.local。
 npm install
 npm run dev
 
-# 前端开发服务器 —— 端口 5173，会把 /api 代理到后端。
+# 前端开发服务器 —— 端口 5173，会把 /api、/health 代理到后端。
 cd web
 npm install
 npm run dev
 ```
 
-打开 <http://localhost:5173>，用 **admin / admin** 登录，然后立刻在**设置**
-页面修改密码。
+### 本地数据库管理
+
+```bash
+npm run dev:db         # 起库（127.0.0.1:5433，幂等）
+npm run dev:db:down    # 停库，保留数据
+npm run dev:db:reset   # 停库并删除数据卷，下次 up 是全新的空库
+```
+
+数据落在 `./data/dev-pg`，与线上的 `./data/pg` 互不影响。
+
+**没必要用容器**：本地已有 PostgreSQL 时，把 `.env.local` 的 `DATABASE_URL`
+指向它即可（后端不强制 5433 端口）。
+
+## 本地环境与生产环境
+
+两套环境用**不同的配置文件 + 不同的数据库 + 不同的密钥**隔离：
+
+| | 本地开发 | 线上生产 |
+| --- | --- | --- |
+| 配置文件 | `.env.local`（`*.local` 已被 git 忽略） | `.env`（仅存在于服务器） |
+| 模式开关 | `APP_ENV=local` | `APP_ENV=production`（或不写） |
+| 数据库 | 本地容器 `127.0.0.1:5433`，数据在 `./data/dev-pg` | 服务器 PG 容器，数据在 `./data/pg` |
+| 后端端口 | 3003 | 容器内 3000，对外 3001 |
+| 密钥 | 本地专用随机值 | 线上专用随机值 |
+| 起法 | `npm run dev:db` + `npm run dev:all` | `docker compose up -d --build` |
+
+`ENCRYPTION_KEY` 两边必须各用一套：它是加密库内 OAuth token 的密钥，
+本地库即使被清空或泄露，也解不开线上库里的任何密文。
+
+### 模式判定规则
+
+判定逻辑在 [src/config.ts](src/config.ts)：**只有** `APP_ENV=local` 且
+`NODE_ENV != production` 时才算本地模式，读 `.env.local`；其余情况一律按线上
+处理，读 `.env`。也就是说"忘记配置"的后果是读到线上 `.env`，而不会把开发配置
+带上生产。容器里 `NODE_ENV=production`（见 [Dockerfile](Dockerfile)），
+所以即使 `.env.local` 被误带进镜像也不会被加载。
+
+### 防误连线上库
+
+本地模式下，如果 `DATABASE_URL` 指向非回环主机，[src/db/index.ts](src/db/index.ts)
+会**直接拒绝启动**并打印醒目提示：
+
+```
+╔════════════════════════════════════════════════════════════════════╗
+║  已阻止启动：本地模式检测到远端数据库                                ║
+║  DATABASE_URL host : your.prod.host                                ║
+║    npm run dev:db     # 起本地 PostgreSQL（127.0.0.1:5433）         ║
+║  若确实需要本地连远端库，请在配置里显式设置：                        ║
+║    ALLOW_REMOTE_DB=true                                            ║
+╚════════════════════════════════════════════════════════════════════╝
+```
+
+确实要让本地进程连线上库调试时，在 `.env.local` 里设 `ALLOW_REMOTE_DB=true`
+显式放行；此时所有写操作都会真实作用在线上数据上，且建议先把线上应用停掉，
+避免两个实例同时跑 token 刷新任务把上游 refresh token 打废。
 
 ## 部署
 
@@ -109,9 +178,13 @@ npm start
 
 ### 修改端口
 
-- **后端**：在 `.env` 里设置 `PORT=<端口号>`（默认 3000）。
+- **后端**：在 `.env.local`（本地）或 `.env`（线上）里设置 `PORT=<端口号>`。
+  本地默认 3003、线上默认 3000。
 - **前端开发服务器**：修改 [web/vite.config.ts](web/vite.config.ts) 的 `server.port`（默认 5173）。
-- **前端开发代理目标**：如果改了后端端口，必须同步修改 [web/vite.config.ts](web/vite.config.ts) 里 `/api`、`/health` 两条代理的目标，否则 `npm run dev:all` 前端调不到后端。
+- **前端开发代理目标**：[web/vite.config.ts](web/vite.config.ts) 的 `/api`、`/health`
+  代理目标取自 `process.env.PORT`（默认 3003）；`npm run dev:all` 会自动把
+  `.env.local` 里的 `PORT` 透传给 Vite，所以改一处即可。单独 `cd web && npm run dev`
+  时没有这个透传，需要先 `set PORT=3003`（Windows）或 `export PORT=3003`。
 - **Docker**：修改 `docker-compose.yml` 里的端口映射（格式是 `3001:3000`，左侧才是对外暴露的端口）。
 
 ## 接入客户端
@@ -347,10 +420,13 @@ git pull
 `migrate-to-pg.sh` 全程有进度提示，行数对不上会直接报错退出。原 SQLite
 文件会备份为 `./data/model-bridge.db.bak-<时间戳>`，确认无误前不要删。
 
-### 本地开发与生产共用数据
+### 本地开发与生产共用数据（可选，不推荐）
 
-数据库改为独立的 PostgreSQL 服务后，本地开发进程可以通过 SSH 隧道直连生产
-数据库——不再需要手动导出/导入。在 `~/.ssh/config` 里加：
+默认行为是**本地连本地库、与线上隔离**（见前面的「本地环境与生产环境」）。
+只有在确实需要拿线上真实数据调试时，才走下面的隧道方式，并显式打开闸门。
+
+生产服务器的 PostgreSQL 端口只绑在 `127.0.0.1`，不暴露到公网，所以要先建隧道。
+在 `~/.ssh/config` 里加：
 
 ```sshconfig
 Host model-bridge-prod
@@ -359,11 +435,16 @@ Host model-bridge-prod
   LocalForward 5432 127.0.0.1:5432
 ```
 
-然后 `ssh model-bridge-prod` 启动隧道，本地 `.env` 里把 `DATABASE_URL`
-设成 `postgres://model_bridge:PASSWORD@127.0.0.1:5432/model_bridge`。
-后端启动时若 `NODE_ENV != production` 且数据库 host 不是 `localhost`，
-会打印醒目警告横幅,提示当前正在写生产库。生产服务器上 PostgreSQL 端口
-只绑在 `127.0.0.1`，不暴露到公网。
+然后：
+
+1. `ssh model-bridge-prod` 启动隧道；
+2. `.env.local` 里把 `DATABASE_URL` 改成 `postgres://model_bridge:PASSWORD@127.0.0.1:5432/model_bridge`；
+3. **同时**设置 `ALLOW_REMOTE_DB=true` —— 否则后端会拒绝启动（`127.0.0.1`
+   属于回环地址，这一条其实不会拦，但把开关写上能提醒自己当前在写线上库）；
+4. 强烈建议先停掉线上应用容器，避免两个实例同时跑 token 刷新任务，
+   把上游 refresh token 打废。
+
+用完记得把 `DATABASE_URL` 改回本地库、并清掉 `ALLOW_REMOTE_DB`。
 
 ## 远程部署
 
