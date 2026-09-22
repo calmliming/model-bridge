@@ -24,7 +24,12 @@ export function parseModelCatalog(payload: unknown): CatalogModel[] {
     if (!row || row.supported_in_api === false || row.visibility === 'hide') continue
     const id = typeof row.slug === 'string' ? row.slug : row.id
     if (typeof id !== 'string' || !MODEL_ID.test(id)) continue
-    const model: CatalogModel = { id }
+    // Google 系（Gemini / Antigravity / Code Assist）把模型名写成
+    // `models/gemini-2.5-pro`，而 relay 与客户端用的是不带前缀的 id。
+    // 不剥离的话目录里会存成带前缀的名字，调用 `/v1/models` 时对不上。
+    const normalizedId = id.replace(/^models\//, '')
+    if (!normalizedId || !MODEL_ID.test(normalizedId)) continue
+    const model: CatalogModel = { id: normalizedId }
     if (typeof row.display_name === 'string') model.display_name = row.display_name.slice(0, 200)
     for (const field of ['context_window', 'max_context_window'] as const) {
       const value = row[field]
@@ -43,7 +48,7 @@ export function parseModelCatalog(payload: unknown): CatalogModel[] {
       }
       model.supported_reasoning_levels = [...levels.values()]
     }
-    if (!models.has(id)) models.set(id, model)
+    if (!models.has(normalizedId)) models.set(normalizedId, model)
   }
   if (list.length && !models.size && list.some(raw => {
     const row = object(raw)

@@ -83,6 +83,16 @@ function ensureSecret(key: string, generate: () => string): void {
 ensureSecret('ENCRYPTION_KEY', () => randomBytes(32).toString('hex'))
 ensureSecret('JWT_SECRET', () => randomBytes(32).toString('hex'))
 
+/**
+ * 出站 HTTP(S)/SOCKS5 代理 URL 校验，供各处的代理配置共用。
+ * 只允许纯代理地址：不能带路径、查询串或片段，避免被当成业务 URL 使用。
+ */
+const proxyUrlSchema = z.string().url().refine(value => {
+  const url = new URL(value)
+  return ['http:', 'https:', 'socks5:'].includes(url.protocol)
+    && (!url.pathname || url.pathname === '/') && !url.search && !url.hash
+}, 'must be an HTTP(S) or SOCKS5 proxy URL without a path/query/fragment')
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
@@ -181,7 +191,16 @@ const schema = z.object({
   ANTIGRAVITY_OAUTH_CLIENT_SECRET: z.preprocess(blankToUndefined, z.string().optional()),
   ANTIGRAVITY_USER_AGENT_VERSION: z.preprocess(blankToUndefined, z.string().regex(/^\d+\.\d+\.\d+$/).default('2.12.2')),
   ANTIGRAVITY_API_HOST: z.preprocess(blankToUndefined, z.enum(['cloudcode-pa.googleapis.com', 'daily-cloudcode-pa.googleapis.com']).default('daily-cloudcode-pa.googleapis.com')),
-  ANTIGRAVITY_PROXY_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => {
+  ANTIGRAVITY_PROXY_URL: z.preprocess(blankToUndefined, proxyUrlSchema.optional()),
+  /**
+   * 普通上游（relay、目录同步、余额查询）的出站代理。
+   *
+   * 为什么需要独立一项：容器/服务端的 Node 进程不使用系统代理，
+   * 在只能经代理出网的环境里，所有上游请求都会直接超时。
+   * 留空则走直连（默认）。也可以用标准的 HTTPS_PROXY/HTTP_PROXY
+   * 环境变量，两者等价——参见 src/http/upstream.ts 的解析顺序。
+   */
+  UPSTREAM_PROXY_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => {
     const url = new URL(value)
     return ['http:', 'https:', 'socks5:'].includes(url.protocol)
       && (!url.pathname || url.pathname === '/') && !url.search && !url.hash

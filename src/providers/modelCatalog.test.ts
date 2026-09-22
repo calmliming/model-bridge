@@ -24,6 +24,15 @@ describe('model catalog capability normalization', () => {
       { id: 'gpt-new', context_window: 100000, input_modalities: ['text'] })).toMatchObject({ context_window: 100000, input_modalities: ['text'] })
     expect(mergeCatalogModels({ id: 'gpt-new', context_window: 200000 }, { id: 'gpt-new' })).not.toHaveProperty('context_window')
   })
+  it('normalizes Google-style models/ prefixes without touching namespaces', () => {
+    // Gemini / Antigravity 的 Code Assist 列表用 `models/xxx` 命名，relay 侧
+    // 使用不带前缀的 id，目录必须归一化，否则调用 /v1/models 时对不上。
+    expect(parseModelCatalog({ models: [{ name: 'models/gemini-2.5-pro', id: 'models/gemini-2.5-pro' }] }))
+      .toEqual([{ id: 'gemini-2.5-pro' }])
+    // `models/` 以外的斜杠是真实命名空间，必须原样保留。
+    expect(parseModelCatalog({ data: [{ id: 'kimi-code/k3' }, { id: 'namespace/model' }] }))
+      .toEqual([{ id: 'kimi-code/k3' }, { id: 'namespace/model' }])
+  })
   it('applies key/group restrictions to dynamic models, aliases and capabilities', () => {
     const key = { allowedProviders: ['openai'], allowedModels: ['public'], groupAllowedModels: ['public'],
       modelMappings: { public: 'gpt-private' }, providerModels: { openai: ['gpt-private', 'gpt-other'] },

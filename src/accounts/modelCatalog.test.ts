@@ -40,4 +40,35 @@ describe('account catalog synchronization', () => {
     expect(result.catalogModels.openai?.['gpt-new']).toEqual({ id: 'gpt-new' })
     expect(mocks.query.mock.calls[0][1]).toEqual([['openai'], 'group-a'])
   })
+  it('syncs Claude from the Anthropic model list with Bearer + version header', async () => {
+    mocks.account.mockResolvedValue({ id: 'c', provider: 'claude', status: 'active', proxyUrl: null, metadata: null })
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ data: [
+      { id: 'claude-opus-5', display_name: 'Claude Opus 5', type: 'model' },
+    ] })))
+    await syncAccountCatalog('c')
+    const [url, init] = mocks.fetch.mock.calls[0] as [string, { headers: Record<string, string> }]
+    expect(url).toBe('https://api.anthropic.com/v1/models')
+    expect(init.headers).toMatchObject({ authorization: 'Bearer fake-token', 'anthropic-version': '2023-06-01' })
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({
+      modelCatalog: { models: [{ id: 'claude-opus-5', display_name: 'Claude Opus 5' }] },
+      modelCatalogError: null,
+    })
+  })
+  it('uses the provider-specific endpoint for every syncable provider', async () => {
+    const cases: Array<[string, string]> = [
+      ['claude', 'https://api.anthropic.com/v1/models'],
+      ['deepseek', 'https://api.deepseek.com/models'],
+      ['grok', 'https://api.x.ai/v1/models'],
+      ['kimi', 'https://api.moonshot.cn/v1/models'],
+    ]
+    for (const [provider, expected] of cases) {
+      vi.clearAllMocks()
+      mocks.token.mockResolvedValue('fake-token')
+      mocks.update.mockResolvedValue(undefined)
+      mocks.account.mockResolvedValue({ id: provider, provider, status: 'active', proxyUrl: null, metadata: null })
+      mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ id: `${provider}-model` }] })))
+      await syncAccountCatalog(provider)
+      expect((mocks.fetch.mock.calls[0] as [string])[0]).toBe(expected)
+    }
+  })
 })

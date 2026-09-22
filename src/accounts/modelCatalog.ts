@@ -8,8 +8,10 @@ import { minimaxBaseUrl } from '../providers/minimax/relay'
 import { mergeCatalogModels, parseModelCatalog, readCatalogSnapshot, type CatalogModel } from '../providers/modelCatalog'
 import type { ProviderId } from '../providers/types'
 
-export const CATALOG_PROVIDERS = ['openai', 'sub2api', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok'] as const
+export const CATALOG_PROVIDERS = ['openai', 'sub2api', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok', 'claude'] as const
 export const CATALOG_REFRESH_MS = 6 * 60 * 60_000
+/** Anthropic 的 /v1/models 与中转共用同一个版本头。 */
+const ANTHROPIC_VERSION = '2023-06-01'
 export function catalogSourceKey(provider: string, proxyUrl: string | null): string {
   return createHash('sha256').update(`${provider}:${proxyUrl ?? ''}`).digest('hex')
 }
@@ -18,6 +20,8 @@ function catalogEndpoint(provider: string, proxyUrl: string | null): string {
   if (provider === 'minimax') return `${minimaxBaseUrl(proxyUrl)}/v1/models`
   const urls: Record<string, string> = {
     openai: `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_USER_AGENT.split('/')[1]}`,
+    // Anthropic 的模型列表端点与 /v1/messages 同域同 token，OAuth 账户可直接调用。
+    claude: 'https://api.anthropic.com/v1/models',
     deepseek: 'https://api.deepseek.com/models', xiaomi: 'https://api.xiaomimimo.com/v1/models',
     qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1/models',
     zhipu: 'https://open.bigmodel.cn/api/paas/v4/models', kimi: 'https://api.moonshot.cn/v1/models',
@@ -62,6 +66,8 @@ async function sync(id: string) {
     if (account.provider === 'openai') Object.assign(headers, { 'user-agent': CODEX_USER_AGENT, originator: CODEX_ORIGINATOR })
     const accountId = (account.metadata as { openai?: { chatgptAccountId?: unknown } } | null)?.openai?.chatgptAccountId
     if (account.provider === 'openai' && typeof accountId === 'string' && /^[\w-]{1,200}$/.test(accountId)) headers['ChatGPT-Account-ID'] = accountId
+    // Anthropic 除 Bearer 外还要求版本头，缺失会返回 400。
+    if (account.provider === 'claude') headers['anthropic-version'] = ANTHROPIC_VERSION
     const response = await fetchWithConnectTimeout(endpoint, { headers, signal: AbortSignal.timeout(15_000) })
     if (!response.ok) { await response.body?.cancel(); throw new Error(`上游返回 HTTP ${response.status}`) }
     const models = parseModelCatalog(await boundedJson(response))
