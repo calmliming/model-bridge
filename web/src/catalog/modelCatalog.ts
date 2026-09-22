@@ -361,6 +361,32 @@ export const MODEL_CATALOG: PlazaModel[] = [
     badge: 'new'
   },
   {
+    id: 'gpt-6-sol',
+    name: 'GPT-6 Sol',
+    provider: 'openai',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['旗舰', '成本腰斩', 'Agent'],
+    description: 'GPT-5.6 Sol 的继任者，能力持平而单价降到约一半；缓存读取享 9 折优惠，适合长程 Agent 与编码任务。',
+    context: '256K',
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.2,
+    badge: 'new'
+  },
+  {
+    id: 'gpt-6-luna',
+    name: 'GPT-6 Luna',
+    provider: 'openai',
+    categories: ['chat', 'lightweight'],
+    tags: ['轻量', '极低成本', '高并发'],
+    description: 'GPT-5.6 Luna 的继任者，单价降到约十分之一，是目前最低成本的 GPT 档位；适合大批量、延迟敏感的场景。',
+    context: '256K',
+    inputPrice: 0.1,
+    outputPrice: 0.5,
+    cacheReadPrice: 0.05,
+    badge: 'new'
+  },
+  {
     id: 'gpt-5.6-sol',
     name: 'GPT-5.6 Sol',
     provider: 'openai',

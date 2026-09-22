@@ -53,6 +53,58 @@ describe('DeepSeek V4.1 Flash pricing', () => {
 // resolvePrice() returns the built-in tier before loadPricing() runs, so these
 // exercise the pricing math without a database. They pin the gpt-5.6 family
 // (Sol/Terra/Luna) list prices added for sub2api v0.1.146 parity.
+// gpt-6 Sol/Luna (public 2026-09-16) are the gpt-5.6 tiers at a fraction of the
+// price. Their ids contain neither "5.6" nor "5-6", so they depend on a
+// dedicated gpt-6 branch — without it they fall through to the generic gpt-5
+// tier (input 1.25) and under-bill every request.
+describe('openai gpt-6 pricing', () => {
+  it('prices the Sol flagship at 2 / 10, half of gpt-5.6 Sol', () => {
+    expect(resolvePrice('openai', 'gpt-6-sol')).toMatchObject({
+      input: 2,
+      output: 10,
+      cacheWrite: 2.5,
+      cacheRead: 0.2
+    })
+  })
+
+  it('prices the Luna budget tier at 0.1 / 0.5', () => {
+    expect(resolvePrice('openai', 'gpt-6-luna')).toMatchObject({
+      input: 0.1,
+      output: 0.5,
+      cacheWrite: 0.125,
+      cacheRead: 0.05
+    })
+  })
+
+  it('never lets gpt-6 fall through to the generic gpt-5 tier', () => {
+    // The regression this guards: the gpt-5 base tier bills input at 1.25,
+    // which is neither Sol's 2 nor Luna's 0.1.
+    for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6', 'gpt-6-sol-high']) {
+      expect(resolvePrice('openai', model)).not.toMatchObject({ input: 1.25 })
+    }
+  })
+
+  it('keeps gpt-6-astra on its own premium tier rather than Sol', () => {
+    expect(resolvePrice('openai', 'gpt-6-astra')).toMatchObject({
+      input: 10,
+      output: 50
+    })
+  })
+
+  it('defaults a bare gpt-6 to the Sol flagship rate', () => {
+    expect(resolvePrice('openai', 'gpt-6')).toMatchObject({ input: 2, output: 10 })
+  })
+
+  it('routes gpt-6 through the sub2api provider too', () => {
+    expect(resolvePrice('sub2api', 'gpt-6-luna')).toMatchObject({ input: 0.1, output: 0.5 })
+  })
+
+  it('does not disturb the gpt-5.6 tiers', () => {
+    expect(resolvePrice('openai', 'gpt-5.6-sol')).toMatchObject({ input: 5, output: 30 })
+    expect(resolvePrice('openai', 'gpt-5.6-luna')).toMatchObject({ input: 1, output: 6 })
+  })
+})
+
 describe('openai gpt-5.6 pricing', () => {
   it('prices the Sol flagship at 5 / 30 with a 1.25× cache-write rate', () => {
     expect(resolvePrice('openai', 'gpt-5.6-sol')).toMatchObject({

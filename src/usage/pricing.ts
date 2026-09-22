@@ -183,6 +183,26 @@ const OPENAI_GPT56_LUNA: TierPrice = {
   cacheWrite: 1.25,
   cacheRead: 0.1
 }
+// gpt-6 Sol/Luna (public 2026-09-16). These are the gpt-5.6 Sol/Luna tiers at
+// roughly half the price — and in Luna's case a tenth — rather than a new
+// capability tier: Artificial Analysis measured Intelligence/Coding scores
+// level with gpt-5.6 while cost per task fell ~50% (Sol) and ~60% (Luna).
+// Cache economics are unchanged from gpt-5.6: reads at 0.1× input, writes at
+// 1.25× input. Deliberately its own constant so a later gpt-5.6 price change
+// cannot silently move gpt-6 billing.
+// https://artificialanalysis.ai/articles/gpt-6-sol-and-luna-push-the-cost-efficiency-frontier
+const OPENAI_GPT6_SOL: TierPrice = {
+  input: 2,
+  output: 10,
+  cacheWrite: 2.5,
+  cacheRead: 0.2
+}
+const OPENAI_GPT6_LUNA: TierPrice = {
+  input: 0.1,
+  output: 0.5,
+  cacheWrite: 0.125,
+  cacheRead: 0.05
+}
 // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
 const OPENAI_ASTRA: TierPrice = {
   input: 10,
@@ -235,6 +255,17 @@ const OPENAI_IMAGE_MINI: TierPrice = {
 
 function openaiPrice(model: string): TierPrice {
   if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
+  // gpt-6 Sol/Luna must be matched before the gpt-5.6 branch below: their ids
+  // contain neither "5.6" nor "5-6", so without this they would fall all the
+  // way through to the generic OPENAI_GPT5 tier and under-bill every request
+  // (base input is 1.25 — under Sol's 2 and over Luna's 0.1, i.e. wrong either
+  // way). A bare/unknown gpt-6 (excluding Astra, handled above) also resolves
+  // to the flagship, mirroring how a bare "gpt-5.6" resolves to Sol.
+  if (/^gpt-6(?:$|-)/i.test(model)) {
+    const g6 = model.toLowerCase()
+    if (g6.includes('luna')) return OPENAI_GPT6_LUNA
+    return OPENAI_GPT6_SOL
+  }
   const m = model.toLowerCase()
   if (isImage25Model(m)) return OPENAI_IMAGE_25
   if (m.startsWith('gpt-image-2')) return OPENAI_IMAGE_2
@@ -640,6 +671,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
+  { provider: 'openai', model: 'gpt-6-sol', price: OPENAI_GPT6_SOL },
+  { provider: 'openai', model: 'gpt-6-luna', price: OPENAI_GPT6_LUNA },
   { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },

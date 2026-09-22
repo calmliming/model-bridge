@@ -42,6 +42,8 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
   claude: ['claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
     'gpt-6-astra',
+    'gpt-6-sol',
+    'gpt-6-luna',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.6-luna',
