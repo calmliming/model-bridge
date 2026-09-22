@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -168,6 +168,12 @@ export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
     label: 'Kimi 月之暗面',
     initials: 'K',
     chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/15 dark:text-slate-200'
+  },
+  grok: {
+    id: 'grok',
+    label: 'xAI Grok',
+    initials: 'X',
+    chipClass: 'bg-neutral-200 text-neutral-800 dark:bg-neutral-500/15 dark:text-neutral-200'
   }
 }
 
@@ -306,6 +312,40 @@ export const MODEL_CATALOG: PlazaModel[] = [
     imageCacheReadPrice: 2,
     imageOutputPrice: 30,
     badge: 'new' as const
+  })),
+  {
+    // 第一代原生图片模型，仍可选，但已被 2.5 系列取代。
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    provider: 'openai',
+    image: true,
+    categories: ['image', 'multimodal'],
+    tags: ['原生生图', '图片编辑'],
+    description: '第一代原生图片模型；建议优先使用 2.5 系列（Flare / Sunburst）。',
+    context: '≤3840 px',
+    inputPrice: 5,
+    outputPrice: 10,
+    cacheReadPrice: 1.25,
+    imageInputPrice: 8,
+    imageCacheReadPrice: 1.25,
+    imageOutputPrice: 30
+  },
+  // 带日期的快照别名：价格与同名的浮动别名一致，仅 id 不同。
+  ...(['flare', 'sunburst'] as const).map((variant) => ({
+    id: `gpt-image-2.5-${variant}-2026-09-08`,
+    name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'} (2026-09-08)`,
+    provider: 'openai' as const,
+    image: true,
+    categories: ['image', 'multimodal'],
+    tags: ['快照版本', '原生生图', '可复现'],
+    description: '固定日期的快照模型，适合需要长期复现同一输出的场景；能力与浮动别名相同。',
+    context: '≤3840 px',
+    inputPrice: 5,
+    outputPrice: 0,
+    cacheReadPrice: 1.25,
+    imageInputPrice: 8,
+    imageCacheReadPrice: 2,
+    imageOutputPrice: 30
   })),
   {
     id: 'gpt-6-astra',
@@ -667,6 +707,31 @@ export const MODEL_CATALOG: PlazaModel[] = [
     outputPrice: 1.2,
     cacheReadPrice: 0.06
   },
+  {
+    // 与 M2.7 同代，主打低延迟，输入/输出单价为标准版的 2 倍。
+    id: 'MiniMax-M2.7-highspeed',
+    name: 'MiniMax M2.7 Highspeed',
+    provider: 'minimax',
+    categories: ['chat', 'code', 'lightweight'],
+    tags: ['低延迟', '编码', '高吞吐'],
+    description: 'M2.7 的高速版本，面向延迟敏感的编码与工具调用场景；单价为标准版的两倍。',
+    context: '204K',
+    inputPrice: 0.6,
+    outputPrice: 2.4,
+    cacheReadPrice: 0.06
+  },
+  {
+    id: 'MiniMax-M2.5',
+    name: 'MiniMax M2.5',
+    provider: 'minimax',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['上一代', '低成本', '工具调用'],
+    description: 'M2 系列上一代模型，成本更低，适合大批量、对质量要求不极致的任务。',
+    context: '204K',
+    inputPrice: 0.3,
+    outputPrice: 1.2,
+    cacheReadPrice: 0.03
+  },
   // --- Kimi 月之暗面 -------------------------------------------------------
   {
     id: 'kimi-k3',
@@ -701,5 +766,149 @@ export const MODEL_CATALOG: PlazaModel[] = [
     context: '256K',
     inputPrice: 0.91,
     outputPrice: 3.78
+  },
+  {
+    // K3 的短别名。上游同时接受这些写法，因此都要能在广场里被找到。
+    id: 'k3',
+    name: 'Kimi K3（短别名）',
+    provider: 'kimi',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['别名', '旗舰', '1M 上下文'],
+    description: 'kimi-k3 的短别名，能力与计费完全相同，便于客户端用更短的模型名调用。',
+    context: '1M',
+    inputPrice: 2.8,
+    outputPrice: 14.0,
+    cacheReadPrice: 0.28
+  },
+  {
+    id: 'k3-256k',
+    name: 'Kimi K3 256K',
+    provider: 'kimi',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['别名', '256K 上下文'],
+    description: 'K3 的 256K 上下文别名，计费与旗舰版一致。',
+    context: '256K',
+    inputPrice: 2.8,
+    outputPrice: 14.0,
+    cacheReadPrice: 0.28
+  },
+  {
+    id: 'kimi-code/k3',
+    name: 'Kimi Code K3',
+    provider: 'kimi',
+    categories: ['code', 'reasoning'],
+    tags: ['编码', '带命名空间', 'Agent'],
+    description: '带服务命名空间的 K3 写法，供 Kimi Code 类客户端直接使用，计费与 K3 一致。',
+    context: '1M',
+    inputPrice: 2.8,
+    outputPrice: 14.0,
+    cacheReadPrice: 0.28
+  },
+
+  // --- xAI Grok ------------------------------------------------------------
+  {
+    id: 'grok-4.6',
+    name: 'Grok 4.6',
+    provider: 'grok',
+    categories: ['chat', 'reasoning'],
+    tags: ['旗舰', '推理', '实时信息'],
+    description: 'xAI 当前旗舰，长程推理与实时信息结合最好的一代，适合复杂分析与调研类任务。',
+    context: '256K',
+    inputPrice: 2,
+    outputPrice: 6,
+    cacheReadPrice: 0.5,
+    badge: 'new'
+  },
+  {
+    id: 'grok-4.5',
+    name: 'Grok 4.5',
+    provider: 'grok',
+    categories: ['chat', 'reasoning', 'multimodal'],
+    tags: ['上一代', '多模态', '均衡'],
+    description: 'Grok 4 系列主力版本，推理与多模态理解均衡，价格低于旗舰。',
+    context: '256K',
+    inputPrice: 2,
+    outputPrice: 6,
+    cacheReadPrice: 0.3
+  },
+  {
+    id: 'grok-4.3',
+    name: 'Grok 4.3',
+    provider: 'grok',
+    categories: ['chat', 'lightweight'],
+    tags: ['低成本', '低延迟', '缓存便宜'],
+    description: '面向成本敏感场景的版本，单价与缓存读取价都更低，适合高并发日常对话。',
+    context: '256K',
+    inputPrice: 1.25,
+    outputPrice: 2.5,
+    cacheReadPrice: 0.2
+  },
+  {
+    id: 'grok-build-0.1',
+    name: 'Grok Build 0.1',
+    provider: 'grok',
+    categories: ['code'],
+    tags: ['编码', '构建专用', '实验版'],
+    description: '面向代码构建与工程任务的专用模型，属于实验版本，适合自动化编码流水线试跑。',
+    context: '256K',
+    inputPrice: 1,
+    outputPrice: 2,
+    cacheReadPrice: 0.2
   }
 ]
+
+/**
+ * 从模型 id 推断服务商，与服务端 inferProviderForModel 保持同一套前缀规则。
+ *
+ * 广场列表来自上面的静态常量，所以上游新发布的模型不会自动出现。这个函数
+ * 用于给「已定价但静态表里没有」的模型补一个服务商归属。只认前缀，
+ * 不认识的返回 null——宁可不显示，也不要错误归类。
+ */
+export function inferProviderFromModelId(id: string): ProviderId | null {
+  const lower = id.toLowerCase()
+  if (lower.startsWith('claude-')) return 'claude'
+  if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) return 'openai'
+  if (lower.startsWith('gemini-')) return 'gemini'
+  if (lower.startsWith('deepseek-')) return 'deepseek'
+  if (lower.startsWith('mimo-')) return 'xiaomi'
+  if (lower.startsWith('glm-')) return 'zhipu'
+  if (lower.startsWith('qwen')) return 'qwen'
+  if (lower.startsWith('kimi') || lower.startsWith('moonshot') || lower === 'k3' || lower === 'k3-256k') return 'kimi'
+  if (lower.startsWith('minimax-')) return 'minimax'
+  if (lower.startsWith('grok')) return 'grok'
+  return null
+}
+
+/**
+ * 把服务端已定价、但静态目录里没有的模型合成展示条目。
+ *
+ * 这样上游新发现的模型（服务端 /api/auth/model-prices 会带上）无需改代码
+ * 就能出现在广场里。合成条目只带 id 与服务商，刻意不编造名称、能力标签和
+ * 简介——价格永远由实时接口覆盖，静态表里的定价只是离线兜底。
+ * 前缀无法识别的模型会被跳过，避免出现错误的服务商归类。
+ */
+export function withAutoSurfacedModels(
+  livePrices: Record<string, { inputPrice: number; outputPrice: number; cacheReadPrice?: number }>,
+  staticCatalog: PlazaModel[] = MODEL_CATALOG,
+): { catalog: PlazaModel[]; autoSurfacedIds: string[] } {
+  const known = new Set(staticCatalog.map((m) => m.id))
+  const extra: PlazaModel[] = []
+  for (const id of Object.keys(livePrices).sort()) {
+    if (known.has(id)) continue
+    const provider = inferProviderFromModelId(id)
+    if (!provider) continue
+    extra.push({
+      id,
+      name: id,
+      provider,
+      categories: [],
+      tags: [],
+      description: '',
+      context: '—',
+      inputPrice: livePrices[id]!.inputPrice,
+      outputPrice: livePrices[id]!.outputPrice,
+      cacheReadPrice: livePrices[id]!.cacheReadPrice
+    })
+  }
+  return { catalog: extra.length ? [...staticCatalog, ...extra] : staticCatalog, autoSurfacedIds: extra.map((m) => m.id) }
+}

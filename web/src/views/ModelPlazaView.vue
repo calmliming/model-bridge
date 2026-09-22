@@ -7,6 +7,7 @@ import {
   MODEL_CATALOG,
   PROVIDERS,
   resolveModelPrice,
+  withAutoSurfacedModels,
   type PlazaModel,
   type ResolvedModelPrice,
   type ProviderId,
@@ -51,9 +52,15 @@ const providerList = Object.values(PROVIDERS)
 const categoryTabs = [{ key: 'all', label: '全部' }, ...CATEGORIES]
 const categoryLabel = (key: string) => CATEGORIES.find((c) => c.key === key)?.label ?? key
 
+// 静态目录 + 服务端已定价但静态表里没有的模型（上游新发现的）。
+const surfaced = computed(() => withAutoSurfacedModels(livePrices.value))
+const catalog = computed(() => surfaced.value.catalog)
+/** 自动出现的模型 id 集合，用于在卡片上标注来源。 */
+const autoSurfaced = computed(() => new Set(surfaced.value.autoSurfacedIds))
+
 const filtered = computed(() => {
   const kw = search.value.trim().toLowerCase()
-  return MODEL_CATALOG.filter((m) => {
+  return catalog.value.filter((m) => {
     if (activeCategory.value !== 'all' && !m.categories.includes(activeCategory.value)) return false
     if (activeProvider.value !== 'all' && m.provider !== activeProvider.value) return false
     if (kw) {
@@ -65,7 +72,7 @@ const filtered = computed(() => {
 })
 
 function providerCount(id: ProviderId): number {
-  return MODEL_CATALOG.filter((m) => m.provider === id).length
+  return catalog.value.filter((m) => m.provider === id).length
 }
 
 function formatPrice(value: number): string {
