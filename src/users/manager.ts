@@ -2,7 +2,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { pool } from '../db/index'
 import { microsToUsd } from '../wallet/money'
-import { startOfTodayMs } from '../time'
+import { config } from '../config'
+import { dayKeyInTz, startOfDayMs, startOfTodayMs } from '../time'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000
 const BCRYPT_ROUNDS = 10
@@ -445,14 +446,29 @@ export interface UserUsageSummary {
   success30d: number
 }
 
-const USAGE_MS_PER_DAY = 86_400_000
+export interface UserUsageDay {
+  day: string
+  requests: number
+  errors: number
+  cost: number
+}
+
+export interface UserFailureCategory {
+  category: string
+  count: number
+}
+
+function pastDayKey(today: string, daysAgo: number): string {
+  const [year, month, date] = today.split('-').map(Number)
+  return new Date(Date.UTC(year!, month! - 1, date! - daysAgo)).toISOString().slice(0, 10)
+}
 
 export async function userUsageSummary(userId: string): Promise<UserUsageSummary> {
-  const now = Date.now()
   // "Today" = since midnight in the configured stats timezone (default Beijing);
   // the *24h fields are kept for compatibility but now carry calendar-today figures.
   const since24h = startOfTodayMs()
-  const since30d = now - 30 * USAGE_MS_PER_DAY
+  // Keep the 30-day cards aligned with the daily chart's 30 calendar buckets.
+  const since30d = startOfDayMs(pastDayKey(dayKeyInTz(Date.now()), 29))
   const tokenSum = `input_tokens + output_tokens + cache_create_tokens + cache_read_tokens +
      image_input_tokens + image_output_tokens + image_cache_read_tokens`
   const { rows } = await pool.query<Record<string, unknown>>(
@@ -482,4 +498,51 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
     requestsTotal: num(r.requeststotal),
     success30d: num(r.success30d)
   }
+}
+
+/** Calendar-day totals for the signed-in user, including days with no usage. */
+export async function userUsageDaily(userId: string, days: 7 | 30 = 30): Promise<UserUsageDay[]> {
+  const now = Date.now()
+  const today = dayKeyInTz(now)
+  const since = startOfDayMs(pastDayKey(today, days - 1))
+  const { rows } = await pool.query<Record<string, unknown>>(
+    `SELECT to_char(to_timestamp(ts / 1000) AT TIME ZONE $3, 'YYYY-MM-DD') AS day,
+            COUNT(*) AS requests,
+            COUNT(*) FILTER (WHERE status = 'error') AS errors,
+            COALESCE(SUM(cost), 0) AS cost
+     FROM usage_logs
+     WHERE user_id = $1 AND ts >= $2
+     GROUP BY day
+     ORDER BY day`,
+    [userId, since, config.STATS_TIMEZONE]
+  )
+  const byDay = new Map(rows.map((row) => [row.day as string, row]))
+  const daily: UserUsageDay[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const day = pastDayKey(today, i)
+    const row = byDay.get(day)
+    daily.push({
+      day,
+      requests: Number(row?.requests ?? 0),
+      errors: Number(row?.errors ?? 0),
+      cost: Number(row?.cost ?? 0),
+    })
+  }
+  return daily
+}
+
+export async function userFailureCategoriesToday(userId: string): Promise<UserFailureCategory[]> {
+  const { rows } = await pool.query<Record<string, unknown>>(
+    `SELECT error_code, upstream_status, COUNT(*) AS count
+     FROM usage_logs
+     WHERE user_id = $1 AND ts >= $2 AND status = 'error'
+     GROUP BY error_code, upstream_status`,
+    [userId, startOfTodayMs()]
+  )
+  const totals = new Map<string, number>()
+  for (const row of rows) {
+    const category = normalizeUserErrorCategory(row.error_code, row.upstream_status) ?? '请求失败'
+    totals.set(category, (totals.get(category) ?? 0) + Number(row.count))
+  }
+  return [...totals].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count || a.category.localeCompare(b.category, 'zh-CN'))
 }

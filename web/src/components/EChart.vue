@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { BarChart, LineChart, PieChart } from 'echarts/charts'
 import {
@@ -30,6 +30,8 @@ const props = withDefaults(
   { height: '320px' },
 )
 
+const emit = defineEmits<{ (e: 'item-click', dataIndex: number): void }>()
+
 const root = ref<HTMLDivElement | null>(null)
 let instance: echarts.ECharts | null = null
 
@@ -41,6 +43,9 @@ onMounted(() => {
   if (!root.value) return
   instance = echarts.init(root.value)
   instance.setOption(props.option)
+  instance.on('click', (params) => {
+    if (typeof params.dataIndex === 'number') emit('item-click', params.dataIndex)
+  })
   window.addEventListener('resize', resize)
 })
 
@@ -57,6 +62,11 @@ watch(
   },
   { deep: true },
 )
+
+watch(() => props.height, async () => {
+  await nextTick()
+  resize()
+})
 </script>
 
 <template>

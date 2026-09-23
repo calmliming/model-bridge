@@ -12,6 +12,8 @@ const props = withDefaults(
   { height: '320px' },
 )
 
+const emit = defineEmits<{ (e: 'item-click', dataIndex: number): void }>()
+
 const target = ref<HTMLDivElement | null>(null)
 const visible = ref(false)
 let observer: IntersectionObserver | null = null
@@ -43,6 +45,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="target" :style="{ minHeight: height }">
-    <EChart v-if="visible" :option="props.option" :height="props.height" />
+    <EChart v-if="visible" :option="props.option" :height="props.height" @item-click="emit('item-click', $event)" />
   </div>
 </template>

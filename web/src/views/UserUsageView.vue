@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { h, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { UiTag, UiTooltip } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime, formatUsd } from '../utils'
+import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 
 interface UsageLog {
   id: string
@@ -40,6 +41,7 @@ interface WalletTransaction {
 }
 
 const message = useMessage()
+const route = useRoute()
 const usageLoading = ref(true)
 const walletLoading = ref(true)
 const usageRows = ref<UsageLog[]>([])
@@ -47,9 +49,15 @@ const walletRows = ref<WalletTransaction[]>([])
 
 // Date filter — stored as "YYYY-MM-DD" strings for the native date inputs,
 // converted to epoch-ms range when calling the API.
-const dateFrom = ref<string>('')
-const dateEnd = ref<string>('')
-const failureOnly = ref(false)
+function dayFromQuery(value: unknown): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return ''
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : ''
+}
+
+const dateFrom = ref(dayFromQuery(route.query.from))
+const dateEnd = ref(dayFromQuery(route.query.to))
+const failureOnly = ref(route.query.status === 'error')
 
 const datePresets = [
   { label: '全部', value: null as null | [string, string] },
@@ -71,14 +79,6 @@ function daysAgoStr(n: number): string {
 
 function pad2(v: number) {
   return String(v).padStart(2, '0')
-}
-
-function toEndOfDayMs(dateStr: string): number {
-  return new Date(`${dateStr}T23:59:59.999`).getTime()
-}
-
-function toStartOfDayMs(dateStr: string): number {
-  return new Date(`${dateStr}T00:00:00.000`).getTime()
 }
 
 function applyPreset(preset: (typeof datePresets)[number]) {
@@ -127,8 +127,8 @@ async function loadUsage() {
   usageLoading.value = true
   try {
     const params: Record<string, unknown> = { pageSize: 100 }
-    if (dateFrom.value) params.startDate = toStartOfDayMs(dateFrom.value)
-    if (dateEnd.value) params.endDate = toEndOfDayMs(dateEnd.value)
+    if (dateFrom.value) params.startDate = calendarDayRangeMs(dateFrom.value)[0]
+    if (dateEnd.value) params.endDate = calendarDayRangeMs(dateEnd.value)[1]
     if (failureOnly.value) params.status = 'error'
     const usageRes = await api.get('/users/usage', { params })
     usageRows.value = usageRes.data.logs
@@ -309,14 +309,11 @@ onMounted(load)
 }
 
 .preset-btn:hover {
-  border-color: var(--n-primary-color, #6366f1);
-  color: var(--n-primary-color, #6366f1);
+  @apply border-primary-500 text-primary-600;
 }
 
 .preset-btn.active {
-  background: var(--n-primary-color, #6366f1);
-  border-color: var(--n-primary-color, #6366f1);
-  color: #fff;
+  @apply border-primary-500 bg-primary-500 text-white;
 }
 
 .filter-dates {
@@ -337,7 +334,7 @@ onMounted(load)
 }
 
 .date-input:focus {
-  border-color: var(--n-primary-color, #6366f1);
+  @apply border-primary-500;
 }
 
 .date-sep {

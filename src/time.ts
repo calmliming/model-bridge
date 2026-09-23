@@ -7,8 +7,15 @@ import { config } from './config'
  * server's OS clock, which is often UTC on cloud hosts.
  */
 export function startOfTodayMs(timeZone: string = config.STATS_TIMEZONE): number {
-  const now = new Date()
-  const parts = new Intl.DateTimeFormat('en-US', {
+  return startOfDayMs(dayKeyInTz(Date.now(), timeZone), timeZone)
+}
+
+/** Epoch ms of a YYYY-MM-DD midnight in the chosen timezone. */
+export function startOfDayMs(day: string, timeZone: string = config.STATS_TIMEZONE): number {
+  const [year, month, date] = day.split('-').map(Number)
+  if (!year || !month || !date) throw new Error('invalid calendar day')
+  const target = Date.UTC(year, month - 1, date)
+  const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
@@ -17,19 +24,17 @@ export function startOfTodayMs(timeZone: string = config.STATS_TIMEZONE): number
     minute: '2-digit',
     second: '2-digit',
     hourCycle: 'h23',
-  }).formatToParts(now)
-  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value)
-  const y = get('year')
-  const mo = get('month')
-  const d = get('day')
-  const h = get('hour')
-  const mi = get('minute')
-  const s = get('second')
-  const nowSec = Math.floor(now.getTime() / 1000) * 1000
-  // Offset (ms) such that wall-clock-in-tz === utcInstant + offset.
-  const offset = Date.UTC(y, mo - 1, d, h, mi, s) - nowSec
-  // True UTC instant for today's local midnight in the target timezone.
-  return Date.UTC(y, mo - 1, d, 0, 0, 0) - offset
+  })
+  let instant = target
+  for (let i = 0; i < 4; i++) {
+    const parts = formatter.formatToParts(new Date(instant))
+    const part = (type: string) => Number(parts.find((entry) => entry.type === type)!.value)
+    const wallTime = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
+    const next = instant + target - wallTime
+    if (next === instant) break
+    instant = next
+  }
+  return instant
 }
 
 /**

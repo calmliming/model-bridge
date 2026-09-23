@@ -15,7 +15,7 @@ const span = computed(() => {
 </script>
 
 <template>
-  <div :style="{ gridColumn: `span ${span} / span ${span}` }">
+  <div class="min-w-0" :style="{ gridColumn: `span ${span} / span ${span}` }">
     <slot />
   </div>
 </template>

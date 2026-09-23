@@ -25,7 +25,7 @@ vi.mock('bcryptjs', () => ({
   },
 }))
 
-import { registerUser, UserManagerError } from './manager'
+import { registerUser, userFailureCategoriesToday, userUsageDaily, userUsageSummary, UserManagerError } from './manager'
 
 const USER_ROW = {
   id: 'u_1',
@@ -49,6 +49,68 @@ function scriptQueries(handlers: Array<{ match: RegExp; rows?: unknown[]; rowCou
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('userUsageDaily', () => {
+  it('keeps usage scoped to the user and fills missing calendar days', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-23T08:00:00Z'))
+    try {
+      mocks.query.mockResolvedValue({ rows: [
+        { day: '2026-09-21', requests: '2', errors: '1', cost: '0.25' },
+        { day: '2026-09-23', requests: '3', errors: '0', cost: '1.5' },
+      ] })
+
+      const daily = await userUsageDaily('u_1', 7)
+
+      expect(daily).toHaveLength(7)
+      expect(daily.at(-3)).toEqual({ day: '2026-09-21', requests: 2, errors: 1, cost: 0.25 })
+      expect(daily.at(-2)).toEqual({ day: '2026-09-22', requests: 0, errors: 0, cost: 0 })
+      expect(daily.at(-1)).toEqual({ day: '2026-09-23', requests: 3, errors: 0, cost: 1.5 })
+      const [sql, values] = mocks.query.mock.calls[0] as [string, unknown[]]
+      expect(sql).toContain('WHERE user_id = $1 AND ts >= $2')
+      expect(sql).toContain("status = 'error'")
+      expect(values[0]).toBe('u_1')
+      expect(values[2]).toBe('Asia/Shanghai')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('userUsageSummary', () => {
+  it('uses the same 30 calendar days as the daily trend', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-23T08:00:00Z'))
+    try {
+      mocks.query.mockResolvedValue({ rows: [{}] })
+      await userUsageSummary('u_1')
+      await userUsageDaily('u_1', 30)
+      const summaryValues = mocks.query.mock.calls[0]?.[1] as unknown[]
+      const dailyValues = mocks.query.mock.calls[1]?.[1] as unknown[]
+      expect(summaryValues[2]).toBe(dailyValues[1])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('userFailureCategoriesToday', () => {
+  it('combines raw errors into user-facing categories for the signed-in user', async () => {
+    mocks.query.mockResolvedValue({ rows: [
+      { error_code: 'rate_limit', upstream_status: 429, count: '2' },
+      { error_code: 'quota_exceeded', upstream_status: 429, count: '1' },
+      { error_code: 'server_error', upstream_status: 502, count: '1' },
+    ] })
+    const categories = await userFailureCategoriesToday('u_1')
+    expect(categories).toEqual([
+      { category: '上游限流', count: 3 },
+      { category: '上游服务异常', count: 1 },
+    ])
+    const [sql, values] = mocks.query.mock.calls[0] as [string, unknown[]]
+    expect(sql).toContain("WHERE user_id = $1 AND ts >= $2 AND status = 'error'")
+    expect(values[0]).toBe('u_1')
+  })
 })
 
 describe('registerUser', () => {

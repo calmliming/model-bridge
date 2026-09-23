@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { UiTag } from '../components/ui'
+import LazyEChart from '../components/LazyEChart.vue'
+import { useBreakpoint } from '../composables/useBreakpoint'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime, formatUsd } from '../utils'
+import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 import BrandLogo from '../components/BrandLogo.vue'
 
 interface UserMe {
@@ -29,7 +32,20 @@ interface UsageLog {
   provider: string
   model: string | null
   status: string
+  errorCategory: string | null
   cost: number
+}
+
+interface UserUsageDay {
+  day: string
+  requests: number
+  errors: number
+  cost: number
+}
+
+interface UserFailureCategory {
+  category: string
+  count: number
 }
 
 interface PaymentOrder {
@@ -78,6 +94,8 @@ interface StorePlan {
 }
 
 const message = useMessage()
+const router = useRouter()
+const { width: viewportWidth } = useBreakpoint()
 const loading = ref(true)
 const creatingOrder = ref(false)
 const showRecharge = ref(false)
@@ -103,6 +121,16 @@ const transactions = ref<WalletTransaction[]>([])
 const usageLogs = ref<UsageLog[]>([])
 const paymentOrders = ref<PaymentOrder[]>([])
 const summary = ref<UsageSummary | null>(null)
+const dailyUsage = ref<UserUsageDay[]>([])
+const failureCategories = ref<UserFailureCategory[]>([])
+const recentFailures = ref<UsageLog[]>([])
+const dailyLoading = ref(true)
+const failuresLoading = ref(true)
+const dailyError = ref(false)
+const failuresError = ref(false)
+const trendDays = ref<7 | 30>(7)
+const trendMetric = ref<'cost' | 'requests'>('cost')
+const trendRanges = [7, 30] as const
 
 // Date filter for usage logs
 const dateFrom = ref<string>('')
@@ -126,14 +154,6 @@ function daysAgoStr(n: number): string {
 }
 
 function pad2(v: number) { return String(v).padStart(2, '0') }
-
-function toStartOfDayMs(dateStr: string): number {
-  return new Date(`${dateStr}T00:00:00.000`).getTime()
-}
-
-function toEndOfDayMs(dateStr: string): number {
-  return new Date(`${dateStr}T23:59:59.999`).getTime()
-}
 
 function applyPreset(preset: (typeof datePresets)[number]) {
   if (preset.value) {
@@ -167,6 +187,102 @@ const successRate30d = computed(() => {
 const activeSubscriptions = computed(
   () => subscriptions.value.filter((s) => s.status === 'active').length,
 )
+
+const trendRows = computed(() => dailyUsage.value.slice(-trendDays.value))
+const compactChart = computed(() => viewportWidth.value < 480)
+const chartHeight = computed(() => viewportWidth.value < 640 ? '208px' : '248px')
+const todayFailures = computed(() => dailyUsage.value.at(-1)?.errors ?? 0)
+const todayRequests = computed(() => dailyUsage.value.at(-1)?.requests ?? 0)
+const trendOption = computed(() => ({
+  grid: { left: compactChart.value ? 12 : 56, right: compactChart.value ? 10 : 20, top: 20, bottom: 32 },
+  tooltip: {
+    trigger: 'axis',
+    valueFormatter: (value: number) => trendMetric.value === 'cost' ? formatUsd(value) : `${formatNumber(value)} 次`,
+  },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: trendRows.value.map((row) => compactChart.value ? `${Number(row.day.slice(5, 7))}/${Number(row.day.slice(8))}` : row.day.slice(5)),
+    axisLine: { lineStyle: { color: '#cbd5e1' } },
+    axisLabel: { color: '#64748b', fontSize: 11, interval: compactChart.value ? (trendDays.value === 7 ? 1 : 6) : (trendDays.value === 7 ? 0 : 4) },
+  },
+  yAxis: {
+    type: 'value',
+    minInterval: trendMetric.value === 'requests' ? 1 : undefined,
+    axisLabel: { show: !compactChart.value, color: '#64748b', fontSize: 11, formatter: (value: number) => trendMetric.value === 'cost' ? `$${value}` : formatNumber(value) },
+    splitLine: { lineStyle: { color: '#e2e8f0' } },
+  },
+  series: [{
+    type: 'line',
+    data: trendRows.value.map((row) => trendMetric.value === 'cost' ? row.cost : row.requests),
+    smooth: true,
+    symbol: 'circle',
+    symbolSize: trendDays.value === 7 ? 7 : 5,
+    showSymbol: true,
+    cursor: 'pointer',
+    lineStyle: { color: '#0d9488', width: 2 },
+    itemStyle: { color: '#0d9488' },
+    areaStyle: { color: 'rgba(20, 184, 166, 0.12)' },
+  }],
+}))
+
+type DashboardNotice = { key: string; title: string; detail: string; action: 'recharge' | 'store' | 'subscription' | 'orders'; actionLabel: string }
+const notices = computed<DashboardNotice[]>(() => {
+  if (!user.value) return []
+  const items: DashboardNotice[] = []
+  const now = Date.now()
+  const active = subscriptions.value.filter((sub) => sub.status === 'active')
+  if (active.length === 0 && user.value.balance < 5) {
+    items.push({ key: 'balance', title: user.value.balance <= 0 ? '钱包余额已用尽' : '钱包余额低于 $5', detail: '充值后可继续使用按量计费服务。', action: 'recharge', actionLabel: '去充值' })
+  }
+  const expiring = active.find((sub) => sub.expiresAt > now && sub.expiresAt <= now + 7 * 86_400_000)
+  if (expiring) {
+    const daysLeft = Math.ceil((expiring.expiresAt - now) / 86_400_000)
+    items.push({ key: 'expiry', title: `${expiring.planName || '订阅'}即将到期`, detail: daysLeft <= 1 ? '将在 24 小时内到期。' : `还有 ${daysLeft} 天到期。`, action: 'store', actionLabel: '查看套餐' })
+  }
+  const exhausted = active.find((sub) => sub.dailyRemaining === 0 || sub.weeklyRemaining === 0 || sub.monthlyRemaining === 0)
+  if (exhausted) {
+    items.push({ key: 'quota', title: `${exhausted.planName || '订阅'}额度已用尽`, detail: '查看当前额度或选择其他套餐。', action: 'subscription', actionLabel: '查看订阅' })
+  }
+  const pendingOrders = paymentOrders.value.filter((order) => order.status === 'pending' && order.expiresAt > now)
+  if (pendingOrders.length) {
+    items.push({ key: 'orders', title: '最近有充值订单待支付', detail: '请在订单有效期内完成支付。', action: 'orders', actionLabel: '查看订单' })
+  }
+  return items
+})
+
+function handleNotice(action: DashboardNotice['action']) {
+  if (action === 'recharge') showRecharge.value = true
+  else if (action === 'store') void openStore()
+  else document.getElementById(action === 'subscription' ? 'my-subscriptions' : 'payment-orders')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+function openFailures() {
+  void router.push({ name: 'user-usage', query: { status: 'error' } })
+}
+
+function openTrendDay(index: number) {
+  const day = trendRows.value[index]?.day
+  if (day) void router.push({ name: 'user-usage', query: { from: day, to: day } })
+}
+
+async function loadInsights() {
+  dailyLoading.value = true
+  failuresLoading.value = true
+  const [dailyResult, failuresResult] = await Promise.allSettled([
+    api.get<{ daily: UserUsageDay[]; failureCategories: UserFailureCategory[] }>('/users/usage/daily', { params: { days: 30 } }),
+    api.get<{ logs: UsageLog[] }>('/users/usage', { params: { pageSize: 3, status: 'error' } }),
+  ])
+  dailyError.value = dailyResult.status === 'rejected'
+  failuresError.value = failuresResult.status === 'rejected'
+  if (dailyResult.status === 'fulfilled') {
+    dailyUsage.value = dailyResult.value.data.daily
+    failureCategories.value = dailyResult.value.data.failureCategories
+  }
+  if (failuresResult.status === 'fulfilled') recentFailures.value = failuresResult.value.data.logs
+  dailyLoading.value = false
+  failuresLoading.value = false
+}
 
 function formatNumber(n: number): string {
   return Math.round(n).toLocaleString('en-US')
@@ -218,8 +334,8 @@ const providerLabels: Record<string, string> = {
 async function loadUsage() {
   try {
     const params: Record<string, unknown> = { pageSize: 8 }
-    if (dateFrom.value) params.startDate = toStartOfDayMs(dateFrom.value)
-    if (dateEnd.value) params.endDate = toEndOfDayMs(dateEnd.value)
+    if (dateFrom.value) params.startDate = calendarDayRangeMs(dateFrom.value)[0]
+    if (dateEnd.value) params.endDate = calendarDayRangeMs(dateEnd.value)[1]
     const usageRes = await api.get('/users/usage', { params })
     usageLogs.value = usageRes.data.logs
   } catch (e) {
@@ -446,7 +562,10 @@ const paymentColumns: TableColumn<PaymentOrder>[] = [
   { title: '入账时间', key: 'paidAt', minWidth: 140, render: (row) => row.paidAt ? formatTime(row.paidAt) : '—' },
 ]
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadInsights()
+})
 </script>
 
 <template>
@@ -475,7 +594,67 @@ onMounted(load)
         </UiCard>
       </div>
 
-      <UiCard title="我的订阅" :bordered="false" style="margin-bottom: 18px">
+      <UiCard v-if="notices.length" title="待处理事项" class="dashboard-notices" :bordered="false">
+        <div class="notice-grid">
+          <div v-for="notice in notices" :key="notice.key" class="notice-item">
+            <div>
+              <strong>{{ notice.title }}</strong>
+              <p>{{ notice.detail }}</p>
+            </div>
+            <button type="button" @click="handleNotice(notice.action)">{{ notice.actionLabel }} →</button>
+          </div>
+        </div>
+      </UiCard>
+
+      <div class="insight-grid">
+        <UiCard title="用量趋势" :bordered="false">
+          <div class="trend-controls">
+            <div class="trend-segment" aria-label="时间范围">
+              <button v-for="days in trendRanges" :key="days" type="button" :class="{ active: trendDays === days }" :aria-pressed="trendDays === days" @click="trendDays = days">近{{ days }}天</button>
+            </div>
+            <div class="trend-segment" aria-label="统计指标">
+              <button type="button" :class="{ active: trendMetric === 'cost' }" :aria-pressed="trendMetric === 'cost'" @click="trendMetric = 'cost'">费用</button>
+              <button type="button" :class="{ active: trendMetric === 'requests' }" :aria-pressed="trendMetric === 'requests'" @click="trendMetric = 'requests'">请求</button>
+            </div>
+          </div>
+          <div v-if="dailyLoading" class="insight-placeholder">正在加载趋势…</div>
+          <div v-else-if="dailyError" class="insight-placeholder">趋势暂时无法加载。</div>
+          <div v-else-if="!dailyUsage.some((day) => day.requests > 0)" class="insight-placeholder">近 30 天暂无用量。</div>
+          <LazyEChart v-else :option="trendOption" :height="chartHeight" @item-click="openTrendDay" />
+          <div class="trend-footer">
+            <span v-if="!dailyLoading && !dailyError && dailyUsage.some((day) => day.requests > 0)">点击数据点可查看当天明细</span>
+            <button type="button" @click="router.push({ name: 'user-usage' })">查看用量流水 →</button>
+          </div>
+        </UiCard>
+        <UiCard title="失败概览" :bordered="false">
+          <div v-if="dailyLoading" class="insight-placeholder short">正在加载失败统计…</div>
+          <div v-else-if="dailyError" class="insight-placeholder short">失败统计暂时无法加载。</div>
+          <div v-else class="failure-summary">
+            <strong>{{ todayFailures }}</strong>
+            <span>今日失败请求</span>
+            <small v-if="todayRequests">占今日请求的 {{ ((todayFailures / todayRequests) * 100).toFixed(1) }}%</small>
+          </div>
+          <div v-if="!dailyLoading && !dailyError && failureCategories.length" class="failure-top-category">
+            今日主要原因：{{ failureCategories[0]?.category }}（{{ failureCategories[0]?.count }} 次）
+          </div>
+          <div class="failure-list-head">最近失败</div>
+          <div v-if="failuresLoading" class="failure-empty">正在加载记录…</div>
+          <div v-else-if="failuresError" class="failure-empty">失败记录暂时无法加载。</div>
+          <div v-else-if="!recentFailures.length" class="failure-empty">暂无失败记录。</div>
+          <div v-else class="failure-list">
+            <div v-for="failure in recentFailures" :key="failure.id" class="failure-row">
+              <div>
+                <strong>{{ failure.errorCategory || '请求失败' }}</strong>
+                <span>{{ failure.model || failure.provider }}</span>
+              </div>
+              <time>{{ formatTime(failure.ts) }}</time>
+            </div>
+          </div>
+          <button type="button" class="failure-link" @click="openFailures">查看全部失败记录 →</button>
+        </UiCard>
+      </div>
+
+      <UiCard id="my-subscriptions" title="我的订阅" :bordered="false" style="margin-bottom: 18px">
         <template #header-extra>
           <UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton>
         </template>
@@ -497,33 +676,40 @@ onMounted(load)
         <UiGi span="2 m:1">
           <UiCard title="钱包流水" :bordered="false">
             <UiDataTable :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
+            <p class="table-scroll-hint">左右滑动查看完整记录</p>
           </UiCard>
         </UiGi>
         <UiGi span="2 m:1">
-          <UiCard title="近期用量" :bordered="false">
+          <UiCard title="近期用量" class="usage-card" :bordered="false">
             <template #header-extra>
               <div class="usage-filter">
-                <button
-                  v-for="preset in datePresets"
-                  :key="preset.label"
-                  type="button"
-                  class="preset-btn"
-                  :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
-                  @click="applyPreset(preset)"
-                >
-                  {{ preset.label }}
-                </button>
-                <input type="date" v-model="dateFrom" class="date-input" title="开始日期" />
-                <span class="date-sep">—</span>
-                <input type="date" v-model="dateEnd" class="date-input" title="结束日期" />
+                <div class="usage-presets">
+                  <button
+                    v-for="preset in datePresets"
+                    :key="preset.label"
+                    type="button"
+                    class="preset-btn"
+                    :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
+                    @click="applyPreset(preset)"
+                  >
+                    {{ preset.label }}
+                  </button>
+                </div>
+                <div class="usage-dates">
+                  <input type="date" v-model="dateFrom" class="date-input" aria-label="开始日期" />
+                  <span class="date-sep">—</span>
+                  <input type="date" v-model="dateEnd" class="date-input" aria-label="结束日期" />
+                </div>
               </div>
             </template>
             <UiDataTable :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
+            <p class="table-scroll-hint">左右滑动查看完整记录</p>
           </UiCard>
         </UiGi>
         <UiGi span="2 m:1">
-          <UiCard title="充值订单" :bordered="false">
+          <UiCard id="payment-orders" title="充值订单" :bordered="false">
             <UiDataTable :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
+            <p class="table-scroll-hint">左右滑动查看完整记录</p>
           </UiCard>
         </UiGi>
       </UiGrid>
@@ -657,11 +843,259 @@ onMounted(load)
 </template>
 
 <style scoped>
+.dashboard-notices {
+  margin-bottom: 18px;
+}
+
+.notice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.notice-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.notice-item strong,
+.failure-row strong {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.notice-item p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.notice-item button,
+.failure-link,
+.trend-footer button {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #0f766e;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notice-item button:hover,
+.failure-link:hover,
+.trend-footer button:hover {
+  text-decoration: underline;
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.trend-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.trend-segment {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.trend-segment button {
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.trend-segment button.active {
+  @apply border-primary-500 bg-primary-50 text-primary-700;
+  font-weight: 700;
+}
+
+.trend-segment button:focus-visible,
+.notice-item button:focus-visible,
+.failure-link:focus-visible,
+.trend-footer button:focus-visible {
+  @apply outline-none ring-2 ring-primary-500/40;
+}
+
+.trend-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.trend-footer button {
+  margin-left: auto;
+}
+
+.insight-placeholder {
+  display: grid;
+  min-height: 248px;
+  place-items: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.insight-placeholder.short {
+  min-height: 80px;
+}
+
+.failure-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.failure-summary strong {
+  color: #dc2626;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.failure-summary span {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.failure-summary small {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.failure-list-head {
+  margin: 14px 0 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.failure-top-category {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.failure-list {
+  display: grid;
+  gap: 0;
+}
+
+.failure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.failure-row span,
+.failure-row time,
+.failure-empty {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.failure-row time {
+  flex-shrink: 0;
+}
+
+.failure-empty {
+  padding: 16px 0;
+}
+
+.failure-link {
+  display: inline-block;
+  margin-top: 12px;
+}
+
+:global(.dark) .notice-item {
+  border-color: #78350f;
+  background: #451a03;
+}
+
+:global(.dark) .notice-item strong,
+:global(.dark) .failure-row strong {
+  color: #f8fafc;
+}
+
+:global(.dark) .trend-segment button {
+  border-color: #475569;
+  background: #1e293b;
+  color: #cbd5e1;
+}
+
+:global(.dark) .trend-segment button.active {
+  @apply border-primary-600 bg-primary-900/30 text-primary-300;
+}
+
+:global(.dark) .failure-summary,
+:global(.dark) .failure-row {
+  border-color: #334155;
+}
+
+:global(.dark) .failure-summary span {
+  color: #cbd5e1;
+}
+
+@media (max-width: 900px) {
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .usage-filter {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.usage-card :deep(.card-header) {
+  flex-wrap: wrap;
+}
+
+.usage-presets,
+.usage-dates {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.table-scroll-hint {
+  display: none;
 }
 
 .preset-btn {
@@ -677,18 +1111,17 @@ onMounted(load)
 }
 
 .preset-btn:hover {
-  border-color: var(--n-primary-color, #6366f1);
-  color: var(--n-primary-color, #6366f1);
+  @apply border-primary-500 text-primary-600;
 }
 
 .preset-btn.active {
-  background: var(--n-primary-color, #6366f1);
-  border-color: var(--n-primary-color, #6366f1);
-  color: #fff;
+  @apply border-primary-500 bg-primary-500 text-white;
 }
 
 .date-input {
   padding: 2px 6px;
+  width: 112px;
+  min-width: 0;
   border: 1px solid var(--n-border-color, #e5e7eb);
   border-radius: 4px;
   font-size: 11px;
@@ -699,7 +1132,7 @@ onMounted(load)
 }
 
 .date-input:focus {
-  border-color: var(--n-primary-color, #6366f1);
+  @apply border-primary-500;
 }
 
 .date-sep {
@@ -770,6 +1203,7 @@ onMounted(load)
   margin-top: 8px;
   color: #0f172a;
   font-size: 28px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-hint {
@@ -781,6 +1215,22 @@ onMounted(load)
 
 .metric-card :deep(.btn) {
   margin-top: 12px;
+}
+
+:global(.dark) .metric-card span,
+:global(.dark) .metric-hint,
+:global(.dark) .subtext,
+:global(.dark) .sub-empty {
+  color: #94a3b8;
+}
+
+:global(.dark) .metric-card strong,
+:global(.dark) .sub-info strong {
+  color: #f8fafc;
+}
+
+:global(.dark) .metric-card strong.danger {
+  color: #f87171;
 }
 
 :deep(.amount) {
@@ -1018,7 +1468,176 @@ onMounted(load)
 
 @media (max-width: 560px) {
   .metric-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .metric-card.is-balance,
+  .metric-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .metric-card :deep(.card-body) {
+    padding: 12px;
+  }
+
+  .metric-card.is-balance :deep(.card-body) {
+    padding: 16px;
+  }
+
+  .metric-card strong {
+    margin-top: 6px;
+    font-size: clamp(17px, 5.5vw, 23px);
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .metric-card.is-balance strong {
+    font-size: 28px;
+  }
+
+  .metric-hint {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .metric-card :deep(.btn) {
+    margin-top: 8px;
+  }
+
+  .dashboard-notices,
+  .insight-grid {
+    margin-bottom: 14px;
+  }
+
+  .notice-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .notice-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .notice-item strong,
+  .notice-item p {
+    overflow-wrap: anywhere;
+  }
+
+  .notice-item button {
+    align-self: center;
+    white-space: nowrap;
+  }
+
+  .insight-grid {
+    gap: 14px;
+  }
+
+  .trend-segment {
+    flex: 1;
+  }
+
+  .trend-segment button {
+    flex: 1;
+    min-height: 34px;
+    padding: 4px 8px;
+  }
+
+  .trend-footer span {
+    display: none;
+  }
+
+  .failure-summary {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+
+  .failure-summary small {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .failure-row > div {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .failure-row strong,
+  .failure-row span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sub-row,
+  .store-card {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sub-info,
+  .store-info {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .subtext {
+    overflow-wrap: anywhere;
+  }
+
+  .sub-row :deep(.badge) {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .store-buy {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .usage-filter {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .usage-presets {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .usage-dates {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .preset-btn {
+    min-height: 34px;
+    padding: 4px 6px;
+  }
+
+  .date-input {
+    width: 100%;
+    min-height: 34px;
+    font-size: 12px;
+  }
+
+  .table-scroll-hint {
+    display: block;
+    margin: 8px 0 0;
+    color: #94a3b8;
+    font-size: 11px;
+    text-align: right;
   }
 }
 </style>

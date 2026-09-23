@@ -8,6 +8,8 @@ import { checkLoginRateLimit, verifyTurnstileToken } from '../auth/security'
 import {
   acceptInvite,
   listUserUsage,
+  userFailureCategoriesToday,
+  userUsageDaily,
   userUsageSummary,
   UserManagerError,
   verifyUserCredentials,
@@ -282,6 +284,16 @@ export function registerUserRoutes(app: FastifyInstance): void {
 
   app.get('/api/users/usage/summary', { preHandler: requireUser }, async (request) => {
     return userUsageSummary(request.currentUser!.id)
+  })
+
+  app.get<{ Querystring: { days?: string } }>('/api/users/usage/daily', { preHandler: requireUser }, async (request, reply) => {
+    const query = z.object({ days: z.coerce.number().int().refine((days) => days === 7 || days === 30).default(30) }).safeParse(request.query)
+    if (!query.success) return reply.code(400).send({ error: 'invalid query' })
+    const [daily, failureCategories] = await Promise.all([
+      userUsageDaily(request.currentUser!.id, query.data.days as 7 | 30),
+      userFailureCategoriesToday(request.currentUser!.id),
+    ])
+    return { daily, failureCategories }
   })
 
   // Read-only group list so users can bind a key to a group (but not manage groups).

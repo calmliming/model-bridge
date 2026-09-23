@@ -25,6 +25,14 @@ function handleScroll() {
   scrolled.value = window.scrollY > 20
 }
 
+function handleResize() {
+  if (window.innerWidth >= 768) mobileMenuOpen.value = false
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') mobileMenuOpen.value = false
+}
+
 function formatRequestCount(requests: number): string {
   if (!Number.isFinite(requests) || requests < 10_000) {
     return Math.max(0, Math.round(requests)).toLocaleString('zh-CN')
@@ -33,8 +41,8 @@ function formatRequestCount(requests: number): string {
   return `${wan >= 100 ? wan.toFixed(0) : wan.toFixed(1)} 万`
 }
 
-const summaryAccounts = computed(() =>
-  systemSummary.value ? systemSummary.value.accounts.toLocaleString('zh-CN') : '多个',
+const summaryAccountsLabel = computed(() =>
+  systemSummary.value ? `${systemSummary.value.accounts.toLocaleString('zh-CN')} 个` : '多个',
 )
 const summaryRequests = computed(() =>
   systemSummary.value ? formatRequestCount(systemSummary.value.requests) : '',
@@ -43,6 +51,8 @@ const summaryRequests = computed(() =>
 onMounted(async () => {
   handleScroll()
   window.addEventListener('scroll', handleScroll, { passive: true })
+  window.addEventListener('resize', handleResize)
+  window.addEventListener('keydown', handleKeydown)
 
   try {
     const { data } = await api.get('/auth/system-summary')
@@ -54,6 +64,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('keydown', handleKeydown)
 })
 
 const features = [
@@ -108,35 +120,22 @@ const openai = new OpenAI({
 </script>
 
 <template>
-  <div class="min-h-screen bg-white text-slate-900 selection:bg-primary-500/20 dark:bg-dark-950 dark:text-white">
+  <div class="min-h-screen min-h-[100dvh] bg-white text-slate-900 selection:bg-primary-500/20 dark:bg-dark-950 dark:text-white">
     <!-- Simple Navbar -->
     <nav
       class="fixed inset-x-0 top-0 z-50 border-b transition-all duration-300"
       :class="(scrolled || mobileMenuOpen) ? 'bg-white/90 backdrop-blur-md border-slate-200 dark:bg-dark-900/90 dark:border-dark-800' : 'bg-transparent border-transparent'"
     >
-      <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-        <div class="flex items-center gap-3">
+      <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
+        <div class="flex min-w-0 items-center gap-2 sm:gap-3">
           <BrandLogo :size="36" />
-          <span class="text-xl font-bold tracking-tight">Model Bridge</span>
+          <span class="landing-wordmark truncate text-base font-bold tracking-tight sm:text-xl">Model Bridge</span>
         </div>
         
         <div class="hidden items-center gap-10 md:flex">
           <a href="#features" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">核心功能</a>
           <RouterLink :to="{ name: 'docs' }" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">文档</RouterLink>
         </div>
-
-        <button
-          type="button"
-          class="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:hidden dark:text-slate-300 dark:hover:bg-dark-800 dark:hover:text-white"
-          :aria-expanded="mobileMenuOpen"
-          aria-controls="mobile-navigation"
-          :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
-          @click="mobileMenuOpen = !mobileMenuOpen"
-        >
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" :d="mobileMenuOpen ? 'M6 18 18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'" />
-          </svg>
-        </button>
 
         <div
           v-if="mobileMenuOpen"
@@ -145,77 +144,90 @@ const openai = new OpenAI({
         >
           <a href="#features" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">核心功能</a>
           <RouterLink :to="{ name: 'docs' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">文档</RouterLink>
+          <RouterLink v-if="!auth.isAuthenticated" :to="{ name: 'login' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">登录</RouterLink>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex shrink-0 items-center gap-1.5 sm:gap-4">
           <RouterLink
             v-if="!auth.isAuthenticated"
             :to="{ name: 'login' }"
-            class="text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors"
+            class="hidden text-sm font-semibold text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white sm:inline"
           >
             登录
           </RouterLink>
           <RouterLink
             :to="auth.isAuthenticated ? (auth.isAdmin ? '/overview' : '/app') : { name: 'login' }"
-            class="rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-primary-700 transition-all active:scale-95"
+            class="whitespace-nowrap rounded-lg bg-primary-600 px-2 py-2 text-xs font-bold text-white shadow-sm transition-all hover:bg-primary-700 active:scale-95 sm:px-5 sm:py-2.5 sm:text-sm"
           >
             {{ auth.isAuthenticated ? '进入控制台' : '立即开始' }}
           </RouterLink>
+          <button
+            type="button"
+            class="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 md:hidden dark:text-slate-300 dark:hover:bg-dark-800 dark:hover:text-white"
+            :aria-expanded="mobileMenuOpen"
+            aria-controls="mobile-navigation"
+            :aria-label="mobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'"
+            @click="mobileMenuOpen = !mobileMenuOpen"
+          >
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="mobileMenuOpen ? 'M6 18 18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'" />
+            </svg>
+          </button>
         </div>
       </div>
     </nav>
 
     <!-- Hero Section -->
-    <section class="relative pt-32 pb-20 sm:pt-48 sm:pb-32 overflow-hidden bg-slate-50 dark:bg-dark-900 text-center lg:text-left">
-      <div class="mx-auto max-w-7xl px-6 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-        <div class="animate-in fade-in slide-in-from-left-4 duration-1000">
-          <div class="inline-flex items-center rounded-full bg-primary-50 px-4 py-1 text-sm font-bold text-primary-700 dark:bg-primary-950/30 dark:text-primary-400 mb-6">
-            {{ systemSummary?.providers.length ?? '多个' }} 个 AI 服务商已接入
+    <section class="relative overflow-hidden bg-slate-50 pb-14 pt-24 text-center dark:bg-dark-900 sm:pb-20 sm:pt-28 lg:pb-24 lg:pt-24 lg:text-left">
+      <div class="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-4 sm:gap-14 sm:px-6 lg:grid-cols-2 lg:gap-12">
+        <div class="min-w-0 animate-in fade-in slide-in-from-left-4 duration-1000">
+          <div class="mb-4 inline-flex max-w-full items-center rounded-full bg-primary-50 px-3 py-1 text-xs font-bold text-primary-700 dark:bg-primary-950/30 dark:text-primary-400 sm:mb-6 sm:px-4 sm:text-sm">
+            {{ systemSummary ? `${systemSummary.providers.length} 个` : '多个' }} AI 服务商已接入
           </div>
-          <h1 class="text-5xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-7xl leading-tight">
+          <h1 class="landing-hero-title text-[clamp(1.75rem,8.3vw,3.5rem)] font-extrabold leading-[1.22] tracking-tight text-slate-900 dark:text-white lg:text-[clamp(2.25rem,4vw,3.5rem)]">
             更稳定、更智能、<br />
             <span class="text-primary-600">更懂开发者的中转。</span>
           </h1>
-          <p class="mt-8 text-xl text-slate-600 dark:text-slate-400 leading-relaxed max-w-xl mx-auto lg:mx-0">
-            Model Bridge 将 {{ summaryAccounts }} 个上游账户聚合为单一入口。
+          <p class="mx-auto mt-5 max-w-xl text-base leading-relaxed text-slate-600 dark:text-slate-400 sm:mt-7 sm:text-lg lg:mx-0 lg:text-xl">
+            Model Bridge 将 {{ summaryAccountsLabel }}上游账户聚合为单一入口。
             <template v-if="systemSummary">累计已稳定处理 {{ summaryRequests }} 次 API 调用。</template>
             <template v-else>统一接入多个主流 AI 服务商。</template>
           </p>
-          <div class="mt-12 flex flex-wrap justify-center lg:justify-start gap-5">
+          <div class="mt-8 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:justify-center sm:gap-5 lg:justify-start">
             <RouterLink
               :to="auth.isAuthenticated ? (auth.isAdmin ? '/overview' : '/app') : { name: 'login' }"
-              class="rounded-xl bg-slate-900 px-8 py-4 text-lg font-bold text-white shadow-xl hover:bg-slate-800 transition-all dark:bg-primary-600 dark:hover:bg-primary-700"
+              class="flex min-h-12 items-center justify-center rounded-xl bg-slate-900 px-3 py-3 text-center text-sm font-bold text-white shadow-xl transition-all hover:bg-slate-800 dark:bg-primary-600 dark:hover:bg-primary-700 sm:px-8 sm:py-4 sm:text-lg"
             >
-              {{ auth.isAuthenticated ? '进入管理后台' : '立即开始构建' }}
+              {{ auth.isAuthenticated ? '进入控制台' : '立即开始构建' }}
             </RouterLink>
-            <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="rounded-xl bg-white border border-slate-200 px-8 py-4 text-lg font-bold text-slate-900 shadow-sm hover:bg-slate-50 transition-all dark:bg-dark-800 dark:border-dark-700 dark:text-white">
+            <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:bg-slate-50 dark:border-dark-700 dark:bg-dark-800 dark:text-white sm:px-8 sm:py-4 sm:text-lg">
               GitHub 源码
             </a>
           </div>
         </div>
-        <div class="relative animate-in fade-in zoom-in-95 duration-1000 delay-200">
-          <div class="rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-dark-700 dark:bg-dark-800">
+        <div class="relative min-w-0 animate-in fade-in zoom-in-95 duration-1000 delay-200">
+          <div class="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl dark:border-dark-700 dark:bg-dark-800 sm:p-2">
             <div class="bg-slate-50 dark:bg-dark-950 rounded-xl overflow-hidden">
-              <div class="flex items-center gap-2 px-5 py-3 border-b dark:border-dark-800">
+              <div class="flex items-center gap-2 border-b px-3 py-2.5 dark:border-dark-800 sm:px-5 sm:py-3">
                 <div class="flex gap-1.5">
                   <div class="h-3 w-3 rounded-full bg-red-400"></div>
                   <div class="h-3 w-3 rounded-full bg-yellow-400"></div>
                   <div class="h-3 w-3 rounded-full bg-green-400"></div>
                 </div>
-                <div class="mx-auto text-[11px] font-bold text-slate-400 uppercase tracking-widest">Analytics Dashboard</div>
+                <div class="min-w-0 flex-1 truncate text-center text-[10px] font-bold uppercase tracking-widest text-slate-400 sm:text-[11px]">Analytics Dashboard</div>
               </div>
-              <div class="p-8">
-                <div class="grid grid-cols-2 gap-6 mb-8">
-                  <div class="h-24 rounded-xl bg-white dark:bg-dark-900 border border-slate-100 dark:border-dark-800 p-4">
+              <div class="p-3 sm:p-6 lg:p-8">
+                <div class="mb-4 grid grid-cols-2 gap-3 sm:mb-8 sm:gap-6">
+                  <div class="h-16 rounded-xl border border-slate-100 bg-white p-3 dark:border-dark-800 dark:bg-dark-900 sm:h-24 sm:p-4">
                     <div class="h-3 w-1/2 rounded bg-slate-100 dark:bg-dark-800"></div>
-                    <div class="mt-4 h-6 w-3/4 rounded bg-primary-100 dark:bg-primary-900/30"></div>
+                    <div class="mt-3 h-5 w-3/4 rounded bg-primary-100 dark:bg-primary-900/30 sm:mt-4 sm:h-6"></div>
                   </div>
-                  <div class="h-24 rounded-xl bg-white dark:bg-dark-900 border border-slate-100 dark:border-dark-800 p-4">
+                  <div class="h-16 rounded-xl border border-slate-100 bg-white p-3 dark:border-dark-800 dark:bg-dark-900 sm:h-24 sm:p-4">
                     <div class="h-3 w-1/2 rounded bg-slate-100 dark:bg-dark-800"></div>
-                    <div class="mt-4 h-6 w-3/4 rounded bg-purple-100 dark:bg-purple-900/30"></div>
+                    <div class="mt-3 h-5 w-3/4 rounded bg-purple-100 dark:bg-purple-900/30 sm:mt-4 sm:h-6"></div>
                   </div>
                 </div>
-                <div class="h-40 rounded-xl bg-white dark:bg-dark-900 border border-slate-100 dark:border-dark-800 p-4 flex items-end justify-between gap-2">
+                <div class="flex h-28 items-end justify-between gap-1.5 rounded-xl border border-slate-100 bg-white p-3 dark:border-dark-800 dark:bg-dark-900 sm:h-40 sm:gap-2 sm:p-4">
                   <div v-for="(height, index) in chartBars" :key="index" class="w-full rounded-t-lg bg-primary-500/20 dark:bg-primary-500/40" :style="{ height: `${height}%` }"></div>
                 </div>
               </div>
@@ -226,21 +238,21 @@ const openai = new OpenAI({
     </section>
 
     <!-- Features Section -->
-    <section id="features" class="py-24 sm:py-32">
-      <div class="mx-auto max-w-7xl px-6">
-        <div class="text-center mb-20">
+    <section id="features" class="scroll-mt-20 py-16 sm:py-24 lg:py-28">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6">
+        <div class="mb-10 text-center sm:mb-14 lg:mb-16">
           <h2 class="text-3xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-4xl">核心特性</h2>
-          <p class="mt-4 text-lg text-slate-600 dark:text-slate-400">稳定高效的调度算法与完备的商业化方案，助您构建顶尖 AI 应用。</p>
+          <p class="mx-auto mt-4 max-w-2xl text-base text-slate-600 dark:text-slate-400 sm:text-lg">稳定高效的调度算法与完备的商业化方案，助您构建顶尖 AI 应用。</p>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <div v-for="f in features" :key="f.title" class="group rounded-2xl border border-slate-100 bg-white p-8 shadow-sm transition-all hover:border-primary-500/30 hover:shadow-xl dark:border-dark-800 dark:bg-dark-900">
-            <div class="mb-6 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-950/30 dark:text-primary-400 transition-transform group-hover:scale-110">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4 xl:gap-8">
+          <div v-for="f in features" :key="f.title" class="group rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:border-primary-500/30 hover:shadow-xl dark:border-dark-800 dark:bg-dark-900 sm:p-7 xl:p-8">
+            <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600 transition-transform group-hover:scale-110 dark:bg-primary-950/30 dark:text-primary-400 sm:mb-6">
               <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="f.icon" />
               </svg>
             </div>
-            <h3 class="text-xl font-bold text-slate-900 dark:text-white">{{ f.title }}</h3>
-            <p class="mt-4 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+            <h3 class="text-lg font-bold text-slate-900 dark:text-white sm:text-xl">{{ f.title }}</h3>
+            <p class="mt-3 text-sm leading-relaxed text-slate-600 dark:text-slate-400 sm:mt-4">
               {{ f.desc }}
             </p>
           </div>
@@ -249,12 +261,12 @@ const openai = new OpenAI({
     </section>
 
     <!-- Integration Section -->
-    <section class="bg-slate-50 dark:bg-dark-900 py-24 sm:py-32 overflow-hidden">
-      <div class="mx-auto max-w-7xl px-6 grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
-        <div class="relative">
+    <section class="overflow-hidden bg-slate-50 py-16 dark:bg-dark-900 sm:py-24 lg:py-28">
+      <div class="mx-auto grid max-w-7xl grid-cols-1 items-center gap-10 px-4 sm:px-6 lg:grid-cols-2 lg:gap-16">
+        <div class="relative min-w-0">
           <div class="absolute -inset-2 rounded-3xl bg-primary-600/5 blur-2xl"></div>
-          <div class="relative overflow-hidden rounded-2xl bg-slate-950 shadow-2xl border border-white/10">
-            <div class="flex items-center gap-2 border-b border-white/5 bg-white/5 px-6 py-4" role="tablist" aria-label="代码示例">
+          <div class="relative max-w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
+            <div class="flex items-center gap-2 border-b border-white/5 bg-white/5 px-4 py-3 sm:px-6 sm:py-4" role="tablist" aria-label="代码示例">
               <button
                 v-for="t in snippetTabs"
                 :key="t"
@@ -270,15 +282,16 @@ const openai = new OpenAI({
                 {{ t }}
               </button>
             </div>
-            <pre id="code-example" role="tabpanel" :aria-labelledby="`tab-${activeTab}`" class="p-8 text-sm leading-relaxed text-blue-300 font-mono overflow-x-auto"><code>{{ codeSnippets[activeTab] }}</code></pre>
+            <pre id="code-example" role="tabpanel" :aria-labelledby="`tab-${activeTab}`" class="max-w-full overflow-x-auto p-4 font-mono text-xs leading-relaxed text-blue-300 sm:p-6 sm:text-sm lg:p-8"><code>{{ codeSnippets[activeTab] }}</code></pre>
           </div>
+          <p class="mt-2 text-right text-xs text-slate-500 sm:hidden">左右滑动查看完整代码</p>
         </div>
-        <div class="text-left">
+        <div class="min-w-0 text-left">
           <h2 class="text-3xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-4xl">无缝平替</h2>
-          <p class="mt-6 text-lg leading-relaxed text-slate-600 dark:text-slate-400">
+          <p class="mt-4 text-base leading-relaxed text-slate-600 dark:text-slate-400 sm:mt-6 sm:text-lg">
             完全兼容 OpenAI API 协议，只需更改 API 地址即可无缝迁移。无论您使用的是官方 SDK 还是开源组件库，都能直接上手。
           </p>
-          <ul class="mt-10 space-y-4">
+          <ul class="mt-7 space-y-4 sm:mt-10">
             <li v-for="item in ['支持实时流式输出 (Stream)', '内置高并发优化架构', '多级分组计费策略支持']" :key="item" class="flex items-center gap-3 text-sm font-medium text-slate-700 dark:text-slate-300">
               <svg class="h-5 w-5 text-primary-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
               {{ item }}
@@ -289,11 +302,11 @@ const openai = new OpenAI({
     </section>
 
     <!-- Simple Footer -->
-    <footer class="border-t border-slate-100 dark:border-dark-800 py-16">
-      <div class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row items-center justify-between gap-10">
+    <footer class="border-t border-slate-100 py-10 dark:border-dark-800 sm:py-16">
+      <div class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-6 px-4 text-center sm:px-6 lg:flex-row lg:gap-10 lg:text-left">
         <div class="flex items-center gap-3">
           <BrandLogo :size="36" />
-          <span class="text-2xl font-black tracking-tighter uppercase">Model Bridge</span>
+          <span class="text-xl font-black tracking-tighter uppercase sm:text-2xl">Model Bridge</span>
         </div>
         <p class="text-sm font-medium text-slate-400 dark:text-dark-500">© 2026 Model Bridge Protocol. Open source infrastructure.</p>
         <div class="flex gap-8">
@@ -328,4 +341,20 @@ const openai = new OpenAI({
 .zoom-in-95 { animation-name: zoom-in-95; }
 
 .delay-200 { animation-delay: 200ms; }
+
+@media (max-width: 300px) {
+  .landing-wordmark {
+    display: none;
+  }
+
+  .landing-hero-title {
+    font-size: clamp(1.375rem, 8vw, 1.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}
 </style>

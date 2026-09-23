@@ -62,3 +62,32 @@ export function formatTime(ms: number | null | undefined): string {
     ...(displayTimeZone ? { timeZone: displayTimeZone } : {}),
   })
 }
+
+/** Epoch range [start, end) for a calendar day in the dashboard timezone. */
+export function calendarDayRangeMs(day: string): [number, number] {
+  const [year, month, date] = day.split('-').map(Number)
+  if (!year || !month || !date) throw new Error('invalid calendar day')
+  const nextDay = new Date(Date.UTC(year, month - 1, date + 1)).toISOString().slice(0, 10)
+  return [calendarDayStartMs(day), calendarDayStartMs(nextDay)]
+}
+
+function calendarDayStartMs(day: string): number {
+  if (!displayTimeZone) return new Date(`${day}T00:00:00`).getTime()
+  const [year, month, date] = day.split('-').map(Number)
+  const target = Date.UTC(year!, month! - 1, date)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: displayTimeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  })
+  let instant = target
+  for (let i = 0; i < 4; i++) {
+    const parts = formatter.formatToParts(new Date(instant))
+    const part = (type: string) => Number(parts.find((entry) => entry.type === type)!.value)
+    const wallTime = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
+    const next = instant + target - wallTime
+    if (next === instant) break
+    instant = next
+  }
+  return instant
+}
