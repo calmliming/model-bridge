@@ -137,16 +137,16 @@ beforeEach(async () => {
 })
 
 async function withRelay(run: (request: (
-  payload: Record<string, unknown>, url?: string,
+  payload: Record<string, unknown>, url?: string, headers?: Record<string, string>,
 ) => Promise<{ status: number; contentType: string; body: string }>) => Promise<void>) {
   const app = Fastify()
   registerRelayRoutes(app)
   // Real loopback sockets cover hijacked streaming replies as well as JSON.
   const origin = await app.listen({ host: '127.0.0.1', port: 0 })
   try {
-    await run(async (payload, url = '/v1/responses') => {
+    await run(async (payload, url = '/v1/responses', headers = {}) => {
       const response = await fetch(`${origin}${url}`, {
-        method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
+        method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json', ...headers },
         body: JSON.stringify(payload), signal: AbortSignal.timeout(5_000),
       })
       const body = await response.text()
@@ -160,6 +160,95 @@ async function withRelay(run: (request: (
 }
 
 const prompt = { model: 'gpt-5.4', stream: true, input: 'Hi' }
+
+describe('Claude Code safeguard protocol passthrough', () => {
+  const routes = [
+    { url: '/api/claude/v1/messages?beta=true', provider: 'claude' },
+    { url: '/v1/messages?beta=true', provider: 'claude' },
+    { url: '/api/sub2api/v1/messages?beta=true', provider: 'sub2api' },
+    { url: '/v1/messages?beta=true', provider: 'sub2api' },
+  ]
+
+  it.each(routes.flatMap(route => [false, true].map(stream => ({ ...route, stream }))))(
+    'preserves requests and verdicts on $provider $url with stream=$stream',
+    ({ url, provider, stream }) => withRelay(async request => {
+      mocks.key.allowedProviders = [provider]
+      mocks.accounts[0]!.proxyUrl = 'https://gateway.example/v1'
+      const toolId = 'toolu_original_safeguard_id'
+      // Opaque fixtures: the gateway must not depend on a particular version
+      // of the safeguards schema or reinterpret an upstream denial.
+      const results = [{ tool_use_id: toolId, decision: 'deny', future_detail: { reason: 'test denial' } }]
+      const message = {
+        id: 'msg_safeguards', type: 'message', role: 'assistant', model: 'claude-opus-5-5',
+        content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'pwd' } }],
+        stop_reason: 'tool_use', safeguard_results: results,
+        usage: { input_tokens: 100, output_tokens: 7 }, future_response_field: { preserved: true },
+      }
+      const events = [
+        { type: 'message_start', message: { ...message, content: [], usage: { input_tokens: 100 } } },
+        { type: 'content_block_start', index: 0, content_block: message.content[0] },
+        { type: 'content_block_stop', index: 0, safeguard_results: results },
+        { type: 'message_delta', delta: { stop_reason: 'tool_use', safeguard_results: results }, usage: { output_tokens: 7 } },
+        { type: 'message_stop' },
+        { type: 'future_safeguard_event', safeguard_results: results },
+      ]
+      const responseText = stream
+        ? ': upstream keepalive\n\nevent: ping\ndata: {"type":"ping"}\n\n' +
+          events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('')
+        : JSON.stringify(message)
+      const bytes = new TextEncoder().encode(responseText)
+      mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream({
+        start(controller) {
+          // Split inside JSON and SSE separators to exercise stream framing.
+          for (let offset = 0; offset < bytes.length; offset += 31) controller.enqueue(bytes.slice(offset, offset + 31))
+          controller.close()
+        },
+      }), { headers: { 'content-type': stream ? 'text/event-stream' : 'application/json' } }))
+      const payload = {
+        model: 'claude-opus-5-5', stream,
+        safeguards: { future_setting: { enabled: true } }, future_request_field: { preserved: true },
+        system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2.1.281; cch=original;' }],
+        tools: [{ name: 'Bash', input_schema: { type: 'object' } }],
+        messages: [
+          { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'pwd' } }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: '/workspace' }] },
+        ],
+      }
+      const beta = 'future-safeguards-test, future-capability-test'
+      const response = await request(payload, url, {
+        'anthropic-beta': beta, 'anthropic-version': '2023-06-01',
+        'user-agent': 'claude-cli/2.1.281 (external, cli)', 'x-api-key': 'mb-client-secret',
+      })
+      expect(response.status).toBe(200)
+      expect(response.body).toBe(responseText)
+      expect(response.contentType).toContain(stream ? 'text/event-stream' : 'application/json')
+      const [upstreamUrl, init] = mocks.fetch.mock.calls[0]!
+      expect(upstreamUrl).toBe(provider === 'claude'
+        ? 'https://api.anthropic.com/v1/messages' : 'https://gateway.example/v1/messages')
+      expect(JSON.parse(init.body)).toEqual(payload)
+      const sentHeaders = new Headers(init.headers)
+      expect(sentHeaders.get('anthropic-beta')?.startsWith(beta)).toBe(true)
+      expect(sentHeaders.get('anthropic-version')).toBe('2023-06-01')
+      expect(sentHeaders.get('authorization')).toBe('Bearer test-upstream-token')
+      expect(sentHeaders.get('x-api-key')).toBe(provider === 'sub2api' ? 'test-upstream-token' : null)
+      expect(mocks.logs).toHaveLength(1)
+      expect(mocks.logs[0]?.slice(9, 11)).toEqual([100, 7])
+      expect(mocks.quota).toBe(mocks.cost)
+    }),
+  )
+
+  it.each([false, true])('does not invent a verdict for an unsupported upstream with stream=%s', stream => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(stream ? claudeResponse() : new Response(JSON.stringify({
+      id: 'msg_without_safeguards', content: [], usage: { input_tokens: 100, output_tokens: 100 },
+    }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model: 'claude-sonnet-5', stream, messages: [], safeguards: {} }, '/v1/messages', {
+      'anthropic-beta': 'future-safeguards-test',
+    })
+    expect(response.status).toBe(200)
+    expect(response.body).not.toContain('safeguard_results')
+    expect(mocks.quota).toBe(mocks.cost)
+  }))
+})
 
 describe('relay settlement', () => {
   it('persists an over-balance charge and rejects the next request', () => withRelay(async (request) => {

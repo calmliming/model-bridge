@@ -5,6 +5,26 @@ const upstream = vi.hoisted(() => vi.fn())
 vi.mock('../../http/upstream', () => ({ fetchWithConnectTimeout: upstream }))
 afterEach(() => vi.resetAllMocks())
 
+describe('Sub2API Messages protocol forwarding', () => {
+  it('forwards client capabilities and safeguards unchanged using upstream credentials', async () => {
+    upstream.mockResolvedValue(new Response('{}'))
+    const body = { model: 'claude-opus-5-5', safeguards: { future_setting: true }, messages: [] }
+    await relaySub2ApiMessages('upstream-key', 'https://gateway.example/v1', body, {
+      'anthropic-beta': 'future-safeguards-test, future-capability-test',
+      'anthropic-version': 'test-version', 'anthropic-workspace-id': 'workspace-test',
+      authorization: 'Bearer client-secret', 'x-api-key': 'client-secret', cookie: 'private',
+    })
+    const [, init] = upstream.mock.calls[0]!
+    expect(JSON.parse(init.body)).toEqual(body)
+    expect(init.headers).toEqual({
+      authorization: 'Bearer upstream-key', 'x-api-key': 'upstream-key',
+      'content-type': 'application/json', accept: 'application/json',
+      'anthropic-beta': 'future-safeguards-test, future-capability-test',
+      'anthropic-version': 'test-version', 'anthropic-workspace-id': 'workspace-test',
+    })
+  })
+})
+
 describe('Sub2API Antigravity endpoints', () => {
   it.each(['/antigravity', '/antigravity/', '/antigravity/v1/', '/antigravity/v1beta/'])('normalizes %s without losing the dedicated prefix', suffix => {
     expect(normalizeSub2ApiBaseUrl(`https://gateway.example${suffix}`)).toBe('https://gateway.example/antigravity')

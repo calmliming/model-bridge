@@ -1,4 +1,6 @@
 import { fetchWithConnectTimeout } from '../../http/upstream'
+import type { IncomingHttpHeaders } from 'node:http'
+import { claudeProtocolHeaders } from '../claude/headers'
 
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 // Sub2API is a relay-to-relay gateway that may route requests through its own
@@ -63,12 +65,14 @@ export function relaySub2ApiMessages(
   apiKey: string,
   baseUrl: string | null,
   body: Record<string, unknown>,
+  clientHeaders: IncomingHttpHeaders = {},
 ): Promise<Response> {
   return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/messages'), {
     method: 'POST',
     headers: {
       ...jsonHeaders(apiKey, body.stream === true ? 'text/event-stream' : 'application/json'),
       'anthropic-version': DEFAULT_ANTHROPIC_VERSION,
+      ...claudeProtocolHeaders(clientHeaders),
     },
     body: JSON.stringify(body),
   }, SUB2API_TIMEOUT_MS)

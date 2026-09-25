@@ -1,6 +1,8 @@
 import { chatCompletionsToClaudeMessages } from './chat'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 import { config } from '../../config'
+import type { IncomingHttpHeaders } from 'node:http'
+import { claudeProtocolHeaders } from './headers'
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
@@ -307,16 +309,33 @@ export function relayClaudeChatCompletions(
 export function relayClaudeMessages(
   accessToken: string,
   body: Record<string, unknown>,
+  clientHeaders: IncomingHttpHeaders = {},
 ): Promise<Response> {
-  const payload = normalizeClaudeMessagesBody(body)
+  // Native Claude Code requests already carry their prompt/cache layout.
+  // Changing it can invalidate preserved thinking and server-side safeguards.
+  // Recognize the attribution block too: classifier-only requests need not
+  // contain the normal Claude Code identity prompt.
+  const clientUserAgent = clientHeaders['user-agent']
+  const passthrough = clientUserAgent?.startsWith('claude-cli/') ||
+    Object.hasOwn(body, 'safeguards') ||
+    (Array.isArray(body.system) && isBillingHeaderBlock(body.system[0]))
+  const payload = passthrough ? body : normalizeClaudeMessagesBody(body)
+  const protocolHeaders = claudeProtocolHeaders(clientHeaders)
+  const clientBeta = protocolHeaders['anthropic-beta']
+  // Keep every client capability, including future flags. OAuth still needs
+  // the relay's existing capabilities; append only those not already present.
+  const suppliedBetas = new Set(clientBeta?.split(',').map(value => value.trim()))
+  const missingBetas = ANTHROPIC_BETAS.filter(beta => !suppliedBetas.has(beta))
+  const beta = clientBeta ? [clientBeta, ...missingBetas].join(',') : ANTHROPIC_BETA
   return fetchWithConnectTimeout(ANTHROPIC_MESSAGES_URL, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${accessToken}`,
       'anthropic-version': ANTHROPIC_VERSION,
-      'anthropic-beta': ANTHROPIC_BETA,
+      ...protocolHeaders,
+      'anthropic-beta': beta,
       'content-type': 'application/json',
-      'user-agent': USER_AGENT,
+      'user-agent': passthrough && clientUserAgent ? clientUserAgent : USER_AGENT,
       accept: body.stream === true ? 'text/event-stream' : 'application/json',
       ...STAINLESS_HEADERS,
     },

@@ -157,6 +157,7 @@ interface ParsedRoute {
 
 interface UpstreamContext {
   apiKeyId: string
+  headers: FastifyRequest['headers']
   sessionKeyHash?: string | null
   model: string
   action: string
@@ -253,7 +254,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
     }),
-    callUpstream: (token, body, _ctx) => relayClaudeMessages(token, body),
+    callUpstream: (token, body, ctx) => relayClaudeMessages(token, body, ctx.headers),
     createStreamParser: claudeUsage.createStreamParser,
     parseJsonUsage: claudeUsage.parseJsonUsage,
   },
@@ -640,7 +641,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'messages',
     }),
-    callUpstream: (token, body, ctx) => relaySub2ApiMessages(token, ctx.account.proxyUrl, body),
+    callUpstream: (token, body, ctx) => relaySub2ApiMessages(token, ctx.account.proxyUrl, body, ctx.headers),
     createStreamParser: claudeUsage.createStreamParser,
     parseJsonUsage: claudeUsage.parseJsonUsage,
   },
@@ -2109,6 +2110,7 @@ async function runRelayLoop(
       try {
         upstream = await provider.callUpstream(token, body, {
           apiKeyId: apiKey.id,
+          headers: request.headers,
           sessionKeyHash: session?.hash ?? null,
           model: parsed.model,
           action: parsed.action,
