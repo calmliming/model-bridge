@@ -1,4 +1,7 @@
 import { cachedAntigravityModels } from '../accounts/antigravityModels'
+import { sanitizeToolSchemas } from '../providers/toolSchema'
+import { isResponsesTerminalBlock, readResponsesSse } from '../providers/openai/sse'
+import { antigravityThinkingLevel } from '../providers/antigravity/model'
 import { cachedAccountCatalogs } from '../accounts/modelCatalog'
 import { isImage25Model } from '../providers/openai/imageModels'
 import { convertNativeImageResponse, createNativeImagesUsageParser, createNativeImagesStreamTransform, parseNativeImageUsage } from '../providers/openai/directImages'
@@ -25,7 +28,7 @@ import {
 } from '../accounts/session'
 import { acquireSlot, checkRateLimit, releaseSlot } from '../middleware/limits'
 import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
-import { mapRequestedModel } from '../keys/modelMapping'
+import { findModelMapping, mapRequestedModel } from '../keys/modelMapping'
 import { relayClaudeChatCompletions, relayClaudeMessages } from '../providers/claude/relay'
 import * as claudeUsage from '../providers/claude/usage'
 import {
@@ -151,6 +154,8 @@ const KIMI_CONCURRENCY_LIMIT_MESSAGE =
 
 interface ParsedRoute {
   model: string
+  thinkingLevel?: string
+  preserveModel?: boolean
   /** Logical action — `messages` / `responses` / `generateContent` / `streamGenerateContent`. */
   action: string
 }
@@ -160,6 +165,8 @@ interface UpstreamContext {
   headers: FastifyRequest['headers']
   sessionKeyHash?: string | null
   model: string
+  thinkingLevel?: string
+  preserveModel?: boolean
   action: string
   account: { id: string; metadata: unknown; proxyUrl: string | null }
 }
@@ -193,6 +200,8 @@ interface ProviderHandler {
    * "stream closed before response.completed" and reconnects in a loop.
    */
   responsesProtocol?: boolean
+  /** Native Gemini output, whose Go/Python SDKs reject SSE comment frames. */
+  geminiProtocol?: boolean
   /**
    * Upstream is itself another relay/gateway (sub2api) rather than a single
    * OAuth/API-key credential. Such a gateway rotates its own backend pool, so a
@@ -335,6 +344,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: parseChatCompletionUsage,
   },
   gemini: {
+    geminiProtocol: true,
     id: 'gemini',
     forceStream: false,
     parseRoute: parseGeminiRoute,
@@ -366,6 +376,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     transformEventData: (data, meta) => meta ? antigravityJsonToMessages(data, meta).body : data,
   },
   'antigravity-gemini': {
+    geminiProtocol: true,
     id: 'antigravity', forceStream: false,
     parseRoute: parseGeminiRoute,
     normalizeModel: validateAntigravityModel,
@@ -658,6 +669,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: parseChatCompletionUsage,
   },
   'sub2api-gemini': {
+    geminiProtocol: true,
     id: 'sub2api', forceStream: false, relayToRelay: true,
     parseRoute: parseGeminiRoute,
     prepareBody: (body, ctx) => sanitizeGeminiBody(body, ctx.model),
@@ -1218,9 +1230,9 @@ export async function classifyBufferedResponsesFailure(
 
   const serialized = JSON.stringify({ error: terminal.error })
   const hasExplicitReset = terminal.error.resets_at != null || terminal.error.resets_in_seconds != null
-  const syntheticStatus = hasExplicitReset
+  const syntheticStatus = terminal.httpStatus ?? (hasExplicitReset
     ? 429
-    : responsesTerminalFailureStatus(terminal.code, terminal.message)
+    : responsesTerminalFailureStatus(terminal.code, terminal.message))
   const synthetic = new Response(serialized, { status: syntheticStatus })
   return classifyUpstreamFailure(provider, synthetic, model)
 }
@@ -1329,6 +1341,18 @@ export async function classifyBufferedOpenAIImageFailure(
   return classifyUpstreamFailure('openai', new Response(serialized, { status }), model)
 }
 
+const bufferedTranscripts = new WeakMap<Response, Promise<string>>()
+
+function bufferedUpstreamText(upstream: Response, provider: ProviderHandler): Promise<string> {
+  let pending = bufferedTranscripts.get(upstream)
+  if (!pending) {
+    pending = provider.bufferedResponsesProtocol && upstream.ok && upstream.headers.get('content-type')?.includes('text/event-stream')
+      ? readResponsesSse(upstream) : upstream.text()
+    bufferedTranscripts.set(upstream, pending)
+  }
+  return pending
+}
+
 async function inspectBufferedUpstreamFailure(
   upstream: Response,
   provider: ProviderHandler,
@@ -1340,7 +1364,7 @@ async function inspectBufferedUpstreamFailure(
     (!(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false) && !provider.bufferJsonResponse)
   ) return null
   try {
-    const text = await upstream.clone().text()
+    const text = await bufferedUpstreamText(upstream, provider)
     if (provider.classifyBufferedFailure) {
       return await provider.classifyBufferedFailure(text, model)
     }
@@ -1868,7 +1892,12 @@ async function executeRelay(
     }
     throw err
   }
-  const parsed: ParsedRoute = { ...route, model: normalizedModel }
+  const parsed: ParsedRoute = { ...route, model: normalizedModel,
+    ...(provider.id === 'antigravity' ? {
+      thinkingLevel: antigravityThinkingLevel(body),
+      preserveModel: findModelMapping(route.model, apiKey.modelMappings) !== undefined,
+    } : {}),
+  }
   if (provider === PROVIDERS['kimi-responses'] && supportsNativeKimiResponses(parsed.model)) {
     provider = {
       ...provider,
@@ -1916,7 +1945,8 @@ async function executeRelay(
     return
   }
   try {
-    const mappedBody = bodyWithMappedModel(body, parsed.model)
+    const mapped = bodyWithMappedModel(body, parsed.model)
+    const mappedBody = provider.relayToRelay ? mapped : sanitizeToolSchemas(mapped)
     const preparedBody = provider.prepareBody
       ? provider.prepareBody(mappedBody, {
           apiKeyId: apiKey.id,
@@ -2114,6 +2144,8 @@ async function runRelayLoop(
           sessionKeyHash: session?.hash ?? null,
           model: parsed.model,
           action: parsed.action,
+          thinkingLevel: parsed.thinkingLevel,
+          preserveModel: parsed.preserveModel,
           account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
         })
       } catch (err) {
@@ -2215,8 +2247,8 @@ async function runRelayLoop(
       }
 
       // Some Responses-compatible upstreams return HTTP 200 with a semantic
-      // response.failed/error event. Inspect a clone before sendBuffered() reads
-      // the original body, so a transient terminal can still rotate accounts.
+      // response.failed/error event. Cache the transcript for sendBuffered(),
+      // so a transient terminal can rotate accounts without teeing the body.
       const bufferedFailure = !wantStream
         ? await inspectBufferedUpstreamFailure(upstream, provider, parsed.model)
         : null
@@ -2343,6 +2375,17 @@ async function runRelayLoop(
 // silent, short enough to stay under typical reverse-proxy idle timeouts (~60s).
 const STREAM_HEARTBEAT_MS = 15_000
 
+export function geminiClientRejectsSseComments(headers: FastifyRequest['headers']): boolean {
+  return [headers['user-agent'], headers['x-goog-api-client']].some(value => {
+    const hint = String(value ?? '').toLowerCase()
+    return hint.includes('google-genai-sdk/') && /gl-(go|python)\//.test(hint)
+  })
+}
+
+function withoutSseComments(block: string): string {
+  return block.split('\n').filter(line => !line.startsWith(':')).join('\n')
+}
+
 /**
  * Starts an SSE response without allowing intermediary proxies to coalesce
  * events. Claude Code derives live OTPS (tokens/s) from event arrival times,
@@ -2384,6 +2427,7 @@ function isNonStreamContentType(contentType: string | null): boolean {
  * final usage object.
  */
 export function writeSseEventBlock(raw: ServerResponse, block: string): boolean {
+  if (!block.trim()) return true
   if (raw.destroyed || raw.writableEnded) return false
   try {
     raw.write(`${block}\n\n`)
@@ -2546,10 +2590,14 @@ async function sendStreaming(
     responsesProtocol ||
     !!useStreamTransform ||
     (upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
+  const omitComments = provider.geminiProtocol && geminiClientRejectsSseComments(reply.request.headers)
 
   const parser = provider.createStreamParser()
   const transform = provider.transformEventData
   const streamTransform = useStreamTransform ? provider.createStreamTransform!(meta) : null
+  // Chat->Responses adapters must still read the trailing Chat usage chunk.
+  // Only native Responses upstreams finish at these semantic terminals.
+  const stopAtTerminal = upstream.ok && (provider.bufferedResponsesProtocol || (responsesProtocol && !streamTransform))
   const parseUpstreamStream = provider.parseStreamEventsFrom === 'upstream'
   let buffer = ''
   let firstTokenMs: number | null = null
@@ -2562,12 +2610,13 @@ async function sendStreaming(
   const streamState: ResponsesStreamState = { sawTerminal: false, sawFailure: false }
   const modelAudit: ModelAuditState = { upstreamModel: null }
   let streamReadFailed = false
+  let reachedUpstreamTerminal = false
 
   if (upstream.body) {
     const reader = upstream.body.getReader()
     const decoder = new TextDecoder()
     let lastActivity = Date.now()
-    const heartbeat = sseOutput
+    const heartbeat = sseOutput && !omitComments
       ? setInterval(() => {
           if (!downstreamClosed && Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
             try {
@@ -2581,7 +2630,7 @@ async function sendStreaming(
         }, STREAM_HEARTBEAT_MS)
       : null
     try {
-      for (;;) {
+      readLoop: for (;;) {
         const { done, value } = await reader.read()
         if (done) break
         lastActivity = Date.now()
@@ -2595,9 +2644,10 @@ async function sendStreaming(
           // own `data:` line, and feed it to the usage parser.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            const block = buffer.slice(0, sep)
             const wrote = emitFromStreamTransform(
               downstreamClosed ? null : raw,
-              buffer.slice(0, sep),
+              block,
               streamTransform,
               parser,
               parseUpstreamStream,
@@ -2607,6 +2657,11 @@ async function sendStreaming(
             )
             if (!wrote) downstreamClosed = true
             buffer = buffer.slice(sep + 2)
+            if (stopAtTerminal && isResponsesTerminalBlock(block)) {
+              reachedUpstreamTerminal = true
+              buffer = ''
+              break readLoop
+            }
           }
         } else if (transform) {
           // Event-buffered: only emit complete events, rewriting payloads.
@@ -2614,7 +2669,7 @@ async function sendStreaming(
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
             const wrote = rewriteAndEmit(
               downstreamClosed ? null : raw,
-              buffer.slice(0, sep),
+              omitComments ? withoutSseComments(buffer.slice(0, sep)) : buffer.slice(0, sep),
               transform,
               parser,
               markFirstToken,
@@ -2634,12 +2689,17 @@ async function sendStreaming(
             while ((sep = buffer.indexOf('\n\n')) !== -1) {
               const block = buffer.slice(0, sep)
               feedSseBlock(block, parser, streamState, modelAudit)
-              if (!downstreamClosed && !writeSseEventBlock(raw, block)) {
+              if (!downstreamClosed && !writeSseEventBlock(raw, omitComments ? withoutSseComments(block) : block)) {
                 // The request close listener aborts the upstream transport.
                 downstreamClosed = true
               }
               markFirstToken()
               buffer = buffer.slice(sep + 2)
+              if (stopAtTerminal && isResponsesTerminalBlock(block)) {
+                reachedUpstreamTerminal = true
+                buffer = ''
+                break readLoop
+              }
             }
           } else if (value.byteLength > 0 && !downstreamClosed) {
             // Non-SSE error/body passthrough still needs byte fidelity.
@@ -2659,12 +2719,14 @@ async function sendStreaming(
     } finally {
       if (heartbeat) clearInterval(heartbeat)
       reader.releaseLock()
+      if (reachedUpstreamTerminal) await cancelUpstreamResponse(upstream)
     }
   }
   // Some upstreams close immediately after the final SSE line without the
   // customary blank separator. Preserve that final event instead of dropping
   // it while still keeping the normal event-level write path.
   if (sseOutput && buffer.trim()) {
+    if (omitComments) buffer = withoutSseComments(buffer)
     if (streamTransform) {
       if (!emitFromStreamTransform(downstreamClosed ? null : raw, buffer, streamTransform, parser,
         parseUpstreamStream, markFirstToken, streamState, modelAudit)) downstreamClosed = true
@@ -2901,7 +2963,7 @@ async function sendBuffered(
   const contentType = upstream.headers.get('content-type') ?? 'application/json'
   const bufferResponse = contentType.includes('text/event-stream') ? provider.bufferSseResponse : provider.bufferJsonResponse
   if (bufferResponse) {
-    const sseText = await upstream.text()
+    const sseText = await bufferedUpstreamText(upstream, provider)
     let responseText = sseText
     let usage: UsageData = emptyUsage()
     let responseContentType = contentType
@@ -2965,7 +3027,7 @@ async function sendBuffered(
     return
   }
 
-  let text = await upstream.text()
+  let text = await bufferedUpstreamText(upstream, provider)
   let usage: UsageData = emptyUsage()
   let upstreamModel: string | null = null
   let semanticFailure = false
@@ -3197,6 +3259,7 @@ function rewriteAndEmit(
   onEmit?: () => void,
   modelAudit?: ModelAuditState,
 ): boolean {
+  if (!block.trim()) return true
   const out: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -3273,7 +3336,9 @@ function validateAntigravityModel(model: string): string {
 function callAntigravity(token: string, body: Record<string, unknown>, ctx: UpstreamContext): Promise<Response> {
   const project = (ctx.account.metadata as { project?: unknown } | null)?.project
   if (typeof project !== 'string' || !project) throw new Error('Antigravity account is missing project metadata; refresh its quota or authorize again')
-  return relayAntigravity(token, body, { apiKeyId: ctx.apiKeyId, accountId: ctx.account.id, model: ctx.model, project, action: ctx.action, sessionKeyHash: ctx.sessionKeyHash })
+  const models = (ctx.account.metadata as { antigravityModels?: unknown } | null)?.antigravityModels
+  return relayAntigravity(token, body, { apiKeyId: ctx.apiKeyId, accountId: ctx.account.id, model: ctx.model, project, action: ctx.action,
+    sessionKeyHash: ctx.sessionKeyHash, models, thinkingLevel: ctx.thinkingLevel, preserveModel: ctx.preserveModel })
 }
 
 

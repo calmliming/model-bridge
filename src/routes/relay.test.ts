@@ -438,6 +438,22 @@ describe('classifyBufferedResponsesFailure', () => {
     expect(failure).toMatchObject({ penalty: 'rate_limited', retryable: true })
   })
 
+  it.each(['status', 'status_code'])('uses explicit error.%s for failure classification', async field => {
+    for (const value of [401, '401']) {
+      const failure = await classifyBufferedResponsesFailure('openai', failedSse({ [field]: value, message: 'opaque upstream failure' }))
+      expect(failure).toMatchObject({ penalty: 'error', retryable: true, accountScoped: true })
+    }
+    expect(await classifyBufferedResponsesFailure('openai', failedSse({ [field]: 403, message: 'opaque denial' })))
+      .toMatchObject({ penalty: null, retryable: false })
+    expect(await classifyBufferedResponsesFailure('openai', failedSse({ [field]: 429, message: 'opaque limit' })))
+      .toMatchObject({ penalty: 'rate_limited', retryable: true })
+  })
+
+  it('does not retry policy errors even if the embedded status is retryable', async () => {
+    expect(await classifyBufferedResponsesFailure('openai', failedSse({ status: 503, code: 'cyber_policy', message: 'blocked' })))
+      .toMatchObject({ penalty: null, retryable: false })
+  })
+
   it('keeps a buffered Spark rate-limit terminal model-scoped', async () => {
     const failure = await classifyBufferedResponsesFailure(
       'openai',

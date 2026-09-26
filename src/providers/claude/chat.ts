@@ -13,6 +13,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { anthropicToolSchema } from '../toolSchema'
 import { emptyUsage, type UsageData } from '../types'
 
 /** Anthropic requires max_tokens; use this when the client omits it. */
@@ -75,7 +76,7 @@ function convertTools(tools: unknown): AnthropicBlock[] | undefined {
     out.push({
       name: tool.function.name,
       ...(tool.function.description ? { description: tool.function.description } : {}),
-      input_schema: tool.function.parameters ?? { type: 'object', properties: {} },
+      input_schema: anthropicToolSchema(tool.function.parameters),
     })
   }
   return out.length ? out : undefined

@@ -31,8 +31,13 @@ export function mapRequestedModel(
   model: string,
   mappings: ModelMappings | null | undefined,
 ): string {
+  return findModelMapping(model, mappings) ?? model.trim()
+}
+
+/** Distinguishes explicit identity mappings from the unmapped fallback. */
+export function findModelMapping(model: string, mappings: ModelMappings | null | undefined): string | undefined {
   const requested = model.trim()
-  if (!requested || !mappings) return requested
+  if (!requested || !mappings) return undefined
 
   for (const [from, to] of Object.entries(mappings)) {
     if (from.includes('*')) continue
@@ -43,5 +48,5 @@ export function mapRequestedModel(
     const target = to.trim()
     if (source.includes('*') && target && wildcardMatch(source, requested)) return target
   }
-  return requested
+  return undefined
 }

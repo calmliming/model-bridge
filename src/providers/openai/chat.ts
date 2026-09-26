@@ -41,6 +41,9 @@ interface ResponsesUsage {
 
 interface ResponsesStreamEvent {
   type?: string
+  error?: { message?: unknown; code?: unknown; type?: unknown; status?: unknown; status_code?: unknown }
+  status?: unknown
+  status_code?: unknown
   delta?: string
   item_id?: string
   output_index?: number
@@ -53,7 +56,7 @@ interface ResponsesStreamEvent {
     created_at?: number
     usage?: ResponsesUsage
     output?: ResponsesOutputItem[]
-    error?: { message?: unknown; code?: unknown; type?: unknown }
+    error?: { message?: unknown; code?: unknown; type?: unknown; status?: unknown; status_code?: unknown }
     incomplete_details?: { reason?: unknown }
   }
 }
@@ -66,6 +69,19 @@ export interface ResponsesSseTerminalFailure {
   error: Record<string, unknown>
   /** True when semantic output was already emitted before the failure. */
   hasOutput: boolean
+  httpStatus?: number
+}
+
+/** Compatible upstreams use either status_code or status, sometimes as a string. */
+function explicitErrorStatus(...sources: Array<object | undefined>): number | undefined {
+  for (const source of sources) {
+    for (const key of ['status_code', 'status']) {
+      const value = (source as Record<string, unknown> | undefined)?.[key]
+      const status = typeof value === 'string' && /^\d{3}$/.test(value) ? Number(value) : value
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599) return status
+    }
+  }
+  return undefined
 }
 
 interface ResponsesOutputItem {
@@ -418,17 +434,17 @@ export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTe
       const message = typeof rawMessage === 'string' && rawMessage.trim()
         ? rawMessage
         : 'Upstream response failed.'
-      return { terminalType: 'response.failed', code, message, error, hasOutput }
+      return { terminalType: 'response.failed', code, message, error, hasOutput, httpStatus: explicitErrorStatus(error, event) }
     }
     if (type === 'error') {
-      const error = event.error && typeof event.error === 'object' ? { ...event.error } : {}
+      const error: Record<string, unknown> = event.error && typeof event.error === 'object' ? { ...event.error } : { ...event }
       const rawCode = error.code ?? error.type
       const code = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : 'error'
       const rawMessage = error.message
       const message = typeof rawMessage === 'string' && rawMessage.trim()
         ? rawMessage
         : 'Upstream response failed.'
-      return { terminalType: 'error', code, message, error, hasOutput }
+      return { terminalType: 'error', code, message, error, hasOutput, httpStatus: explicitErrorStatus(error, event) }
     }
   }
   return null
@@ -501,7 +517,7 @@ export function responsesSseToChatCompletion(
   let content = ''
   let output: ResponsesOutputItem[] | undefined
   let rawUsage: ResponsesUsage | undefined
-  let failure: { code: string; message: string } | undefined
+  let failure: { code: string; message: string; httpStatus?: number } | undefined
   let incompleteFinish: 'length' | 'content_filter' | null = null
   let serviceTier: string | undefined
   const calls = createFunctionCallTracker()
@@ -523,7 +539,7 @@ export function responsesSseToChatCompletion(
     }
     // A mid-stream terminal failure (upstream sent 200 then failed/incomplete).
     // Capture it so we don't return an empty, successful-looking completion.
-    if (e.type === 'response.failed' || e.type === 'response.incomplete') {
+    if (e.type === 'response.failed' || e.type === 'response.incomplete' || e.type === 'error') {
       if (e.response?.usage) rawUsage = e.response.usage
       if (e.type === 'response.incomplete') {
         // Truncation with usable content isn't an error: it becomes a normal
@@ -532,7 +548,7 @@ export function responsesSseToChatCompletion(
         if (!content) content = textFromOutputItems(e.response?.output)
         incompleteFinish = finishReasonFromIncomplete(e.response?.incomplete_details?.reason)
       }
-      const err = e.response?.error
+      const err = e.response?.error ?? e.error ?? (e as ResponsesStreamEvent['error'])
       const message =
         typeof err?.message === 'string' && err.message
           ? err.message
@@ -540,7 +556,7 @@ export function responsesSseToChatCompletion(
             ? 'Upstream response failed.'
             : 'Upstream response incomplete.'
       const rawCode = err?.code ?? err?.type
-      failure = { code: typeof rawCode === 'string' && rawCode ? rawCode : e.type, message }
+      failure = { code: typeof rawCode === 'string' && rawCode ? rawCode : e.type, message, httpStatus: explicitErrorStatus(err, e) }
     }
   }
 
@@ -557,7 +573,7 @@ export function responsesSseToChatCompletion(
       body: { error: { message: failure.message, type: failure.code, code: failure.code } },
       usage: parsedUsage,
       status: 'error',
-      httpStatus: responseFailureHttpStatus(failure.code, failure.message),
+      httpStatus: failure.httpStatus ?? responseFailureHttpStatus(failure.code, failure.message),
     }
   }
 
@@ -627,6 +643,7 @@ export function createOpenaiChatCompletionsStreamTransform(): {
 
   return {
     transform(data: unknown): unknown[] {
+      if (state.completed) return []
       const event = data as ResponsesStreamEvent
       if (event.response?.id) state.id = event.response.id
       if (event.response?.model) state.model = event.response.model
@@ -665,7 +682,7 @@ export function createOpenaiChatCompletionsStreamTransform(): {
       if (event.type === 'response.failed' || event.type === 'error') {
         failed = true
         state.completed = true
-        const err = event.response?.error ?? (event as { error?: { message?: unknown; code?: unknown; type?: unknown } }).error
+        const err = event.response?.error ?? event.error ?? (event as ResponsesStreamEvent['error'])
         const message =
           typeof err?.message === 'string' && err.message
             ? err.message

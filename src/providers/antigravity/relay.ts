@@ -3,8 +3,11 @@ import { config } from '../../config'
 import { prepareAntigravityGemini } from './converter'
 import { antigravityHeaders, fetchAntigravity, object } from './client'
 import { recallToolSignature, type SignatureScope } from './signatures'
+import { resolveAntigravityModel } from './model'
 
-export function relayAntigravity(token: string, body: Record<string, unknown>, scope: SignatureScope & { project: string; action: string }): Promise<Response> {
+export function relayAntigravity(token: string, body: Record<string, unknown>, scope: SignatureScope & {
+  project: string; action: string; models?: unknown; thinkingLevel?: string; preserveModel?: boolean
+}): Promise<Response> {
   const { stream: _stream, model: _model, metadata: _metadata, ...input } = body
   const request = prepareAntigravityGemini(input, scope.model)
   const contents = Array.isArray(request.contents) ? request.contents.map(raw => {
@@ -25,9 +28,10 @@ export function relayAntigravity(token: string, body: Record<string, unknown>, s
   const action = scope.action === 'messages' ? 'streamGenerateContent' : scope.action
   const streaming = action === 'streamGenerateContent'
   const requestType = Array.isArray(request.tools) && request.tools.some(tool => object(tool)?.googleSearch) ? 'web_search' : 'agent'
+  const model = resolveAntigravityModel(scope.model, scope.models, scope.thinkingLevel, scope.preserveModel)
   return fetchAntigravity(`https://${config.ANTIGRAVITY_API_HOST}/v1internal:${action}${streaming ? '?alt=sse' : ''}`, {
     method: 'POST', headers: { ...antigravityHeaders(token), accept: streaming ? 'text/event-stream' : 'application/json' },
-    body: JSON.stringify({ model: scope.model, project: scope.project, userAgent: 'antigravity', requestType,
+    body: JSON.stringify({ model, project: scope.project, userAgent: 'antigravity', requestType,
       requestId: `agent-${randomUUID()}`, request: { ...request, contents, sessionId } }),
   }, 60_000)
 }

@@ -2,6 +2,33 @@ import { describe, expect, it } from 'vitest'
 import { sanitizeGeminiBody } from './relay'
 
 describe('sanitizeGeminiBody', () => {
+  it('converts tuple schemas and null required without mutating the input', () => {
+    const parameters = { type: 'object', required: null, properties: {
+      modern: { type: 'array', prefixItems: [{ type: 'string' }, { type: 'number' }], items: false },
+      legacy: { type: 'array', items: [{ type: 'string' }, { type: 'string' }] },
+      missing: { type: 'array' },
+      required: { type: 'string' },
+    } }
+    const body = { tools: [{ functionDeclarations: [{ name: 'tuple', parameters }] }] }
+    const before = structuredClone(body)
+    const cleaned = (sanitizeGeminiBody(body).tools as typeof body.tools)[0]!.functionDeclarations[0]!.parameters
+    expect(cleaned).toEqual({ type: 'object', properties: {
+      modern: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+      legacy: { type: 'array', items: { type: 'string' } },
+      missing: { type: 'array', items: { type: 'string' } },
+      required: { type: 'string' },
+    } })
+    expect(body).toEqual(before)
+  })
+
+  it('retains both tuple prefixes and the explicit trailing item schema', () => {
+    const body = { tools: [{ functionDeclarations: [{ name: 'tuple', parameters: {
+      type: 'array', prefixItems: [{ type: 'number' }], items: { type: 'string' },
+    } }] }] }
+    expect((sanitizeGeminiBody(body).tools as typeof body.tools)[0]!.functionDeclarations[0]!.parameters).toEqual({
+      type: 'array', items: { anyOf: [{ type: 'number' }, { type: 'string' }] },
+    })
+  })
   it('strips unsupported JSON Schema fields from function declaration parameters', () => {
     const body = {
       contents: [{ role: 'user', parts: [{ text: 'hi' }] }],

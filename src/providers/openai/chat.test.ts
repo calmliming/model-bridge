@@ -240,6 +240,15 @@ describe('responsesSseToChatCompletion', () => {
     ].join('\n'), 'fallback')
     expect(result.httpStatus).toBe(429)
   })
+
+  it.each([
+    { type: 'response.failed', response: { error: { status: 403, message: 'denied' } } },
+    { type: 'error', error: { status_code: '403', message: 'denied' } },
+    { type: 'error', status: 403, message: 'denied' },
+  ])('preserves the embedded status for %j', event => {
+    const result = responsesSseToChatCompletion(`data: ${JSON.stringify(event)}\n\n`, 'fallback')
+    expect(result).toMatchObject({ status: 'error', httpStatus: 403, body: { error: { message: 'denied' } } })
+  })
 })
 
 describe('inspectResponsesSseTerminalFailure', () => {

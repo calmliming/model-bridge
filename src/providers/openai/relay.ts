@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { sanitizeToolSchemas } from '../toolSchema'
 import { chatCompletionsToResponses } from './chat'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 import { fetchWithConnectTimeout } from '../../http/upstream'
@@ -106,7 +107,7 @@ export function normalizeOpenaiResponsesBody(
   body: Record<string, unknown>,
   options: { allowImageGeneration?: boolean } = {},
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...body }
+  const out: Record<string, unknown> = { ...sanitizeToolSchemas(body) }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
   normalizeResponseTools(out)
   normalizeResponseInputItemIds(out)

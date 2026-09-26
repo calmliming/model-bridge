@@ -72,6 +72,7 @@ function cleanSchema(value: unknown): unknown {
   const out: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(input)) {
     if (UNSUPPORTED_SCHEMA_KEYS.has(key)) continue
+    if (key === 'required' && val === null) continue
     if (SCHEMA_MAP_KEYS.has(key) && val && typeof val === 'object' && !Array.isArray(val)) {
       const props: Record<string, unknown> = {}
       for (const [propName, propSchema] of Object.entries(val as Record<string, unknown>)) {
@@ -84,6 +85,22 @@ function cleanSchema(value: unknown): unknown {
       // Scalars (type, description, enum, required, format, …) pass through.
       out[key] = val
     }
+  }
+  // Gemini expects homogeneous items, not tuple keywords. Keep every tuple
+  // member as an item alternative instead of arbitrarily narrowing to one.
+  const tuple = Array.isArray(out.prefixItems) ? out.prefixItems : Array.isArray(out.items) ? out.items : null
+  if (tuple) {
+    const candidates = [...tuple]
+    if (out.prefixItems && out.items && typeof out.items === 'object' && !Array.isArray(out.items)) candidates.push(out.items)
+    const schemas = candidates.filter(item => item && typeof item === 'object' && !Array.isArray(item))
+    const unique = [...new Map(schemas.map(item => [JSON.stringify(item), item])).values()]
+    out.items = unique.length === 1 ? unique[0] : unique.length ? { anyOf: unique } : { type: 'string' }
+    delete out.prefixItems
+    out.type ??= 'array'
+  }
+  if (String(out.type).toLowerCase() === 'array' &&
+      (!out.items || typeof out.items !== 'object' || Array.isArray(out.items) || !Object.keys(out.items).length)) {
+    out.items = { type: 'string' }
   }
   if (Object.prototype.hasOwnProperty.call(out, 'enum')) {
     const normalized = normalizeGeminiEnum(out.enum)

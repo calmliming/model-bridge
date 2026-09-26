@@ -587,6 +587,85 @@ describe('mapped provider dispatch', () => {
 })
 
 describe('upstream compatibility regressions', () => {
+  it.each([
+    ['/v1/responses', true], ['/v1/chat/completions', true], ['/v1/chat/completions', false],
+  ] as const)('settles a terminal without waiting for upstream EOF at %s (stream=%s)', (url, stream) => withRelay(async request => {
+    const cancel = vi.fn()
+    const terminal = { type: 'response.completed', response: { id: 'resp_done', model: 'gpt-5.4',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'Done' }] }],
+      usage: { input_tokens: 100, output_tokens: 20 } } }
+    const bytes = new TextEncoder().encode(`data: ${JSON.stringify(terminal)}\r\n\r\ndata: {"type":"error","error":{"message":"late"}}\r\n\r\n`)
+    mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7))
+        // Intentionally never close: EOF used to keep the request and billing open.
+      }, cancel,
+    }), { headers: { 'content-type': 'text/event-stream' } }))
+    const response = await request({ model: 'gpt-5.4', stream, messages: [{ role: 'user', content: 'Hi' }], input: 'Hi' }, url)
+    expect(response.status).toBe(200)
+    expect(response.body).not.toContain('late')
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([100, 20])
+    expect(mocks.logs[0]?.[22]).toBe('success')
+    expect(mocks.quota).toBe(mocks.cost)
+  }))
+
+  it.each(['/v1/responses', '/v1/chat/completions'])('sends a protocol error once at %s', url => withRelay(async request => {
+    const error = { type: 'error', error: { code: 'server_error', message: 'failed once', status: 503 } }
+    mocks.fetch.mockResolvedValueOnce(sse([error, error, { type: 'response.completed', response: { usage: { output_tokens: 999 } } }]))
+    const response = await request({ ...prompt, stream: true }, url)
+    expect(response.body.match(/failed once/g)).toHaveLength(1)
+    expect(response.body).not.toContain('999')
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+
+  it('sanitizes native Messages schemas without touching tool input data', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(claudeResponse())
+    const messages = [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: 'tool', input: { required: null } }] }]
+    const response = await request({ model: 'kimi-k2.5', stream: true, messages,
+      tools: [{ name: 'tool', input_schema: { type: 'object', required: null, properties: { value: { type: 'object', required: null } } } }],
+    }, '/api/kimi/v1/messages')
+    expect(response.status).toBe(200)
+    const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
+    expect(body.tools[0].input_schema).toEqual({ type: 'object', properties: { value: { type: 'object' } } })
+    expect(body.messages).toEqual(messages)
+  }))
+
+  it.each([false, true])('resolves native Antigravity models before stripped thinking budgets (Messages=%s)', messages => withRelay(async request => {
+    mocks.accounts[0]!.metadata = { project: 'project-1', antigravityModels: [
+      { id: 'gemini-3.8-flash-low' }, { id: 'gemini-3.8-flash-high' },
+    ] }
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ response: { candidates: [{ content: { parts: [{ text: 'Hello' }] }, finishReason: 'STOP' }] } }),
+      { headers: { 'content-type': 'application/json' } }))
+    const response = await request(messages
+      ? { model: 'gemini-3.8-flash', stream: false, messages: [], thinking: { type: 'enabled', budget_tokens: 512 } }
+      : { contents: [], generationConfig: { thinkingConfig: { thinkingBudget: 512 } } },
+    messages ? '/api/antigravity/v1/messages' : '/api/antigravity/v1beta/models/gemini-3.8-flash:generateContent')
+    expect(response.status).toBe(200)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).model).toBe('gemini-3.8-flash-low')
+  }))
+
+  it.each(['gl-python/3.12', 'gl-go/1.25', 'gl-node/22'])('keeps Gemini SSE compatible with %s', language => withRelay(async request => {
+    mocks.accounts[0]!.metadata = { project: 'project-1' }
+    const payload = { response: { candidates: [{ content: { parts: [{ text: 'Done' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 10 } } }
+    mocks.fetch.mockResolvedValueOnce(new Response(`: upstream heartbeat\n\ndata: ${JSON.stringify(payload)}\n\n`,
+      { headers: { 'content-type': 'text/event-stream' } }))
+    const interval = vi.spyOn(globalThis, 'setInterval')
+    try {
+      const response = await request({ contents: [] }, '/api/antigravity/v1beta/models/gemini-3.8-flash:streamGenerateContent',
+        { 'x-goog-api-client': `google-genai-sdk/1.71.0 ${language}` })
+      expect(response.status).toBe(200)
+      expect(response.body).toContain('Done')
+      const supportsComments = language.startsWith('gl-node')
+      expect(response.body.includes(': upstream heartbeat')).toBe(supportsComments)
+      expect(interval.mock.calls.some(([, ms]) => ms === 15_000)).toBe(supportsComments)
+    } finally {
+      interval.mockRestore()
+    }
+  }))
+
   it.each(['/v1/responses', '/v1/chat/completions'])('records partial usage and diagnostics on stream failure at %s', (url) => withRelay(async (request) => {
     mocks.fetch.mockImplementation(async () => {
       const response = sse([
