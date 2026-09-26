@@ -44,6 +44,7 @@ export interface InviteResult {
 }
 
 export interface UserUsageLog {
+  usageSource: string
   id: string
   ts: number
   provider: string
@@ -122,6 +123,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     provider: row.provider as string,
     model: (row.model as string | null) ?? null,
     status: row.status as string,
+    usageSource: typeof row.usage_source === 'string' ? row.usage_source : 'unknown',
     errorCategory: normalizeUserErrorCategory(row.error_code, row.upstream_status),
     modelMismatch: row.model_mismatch === true,
     latencyMs: row.latency_ms == null ? null : Number(row.latency_ms),
@@ -411,7 +413,7 @@ export async function listUserUsage(
   const [total, logs] = await Promise.all([
     pool.query<Record<string, unknown>>(`SELECT COUNT(*) AS total FROM usage_logs l WHERE l.user_id = $1 ${dateClause}`, countValues),
     pool.query<Record<string, unknown>>(
-      `SELECT l.id, l.ts, l.provider, l.model, l.status, l.error_code,
+      `SELECT l.id, l.ts, l.provider, l.model, l.status, l.usage_source, l.error_code,
               l.upstream_status, l.attempt_count, l.upstream_model, l.model_mismatch,
               l.latency_ms, l.first_token_ms,
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,

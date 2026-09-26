@@ -789,7 +789,8 @@ describe('MiniMax and group admission', () => {
 })
 
 describe('client cancellation', () => {
-  it.each([false, true])('aborts upstream and releases all slots after disconnect (headers sent: %s)', async headersSent => {
+  it.each([{ headersSent: false, adapter: false }, { headersSent: true, adapter: false },
+    { headersSent: false, adapter: true }, { headersSent: true, adapter: true }])('aborts upstream and releases all slots after disconnect (headers: $headersSent, adapter: $adapter)', async ({ headersSent, adapter }) => {
     mocks.accounts[0]!.concurrencyLimit = 1
     mocks.key.concurrencyLimit = 1
     mocks.key.userConcurrencyLimit = 1
@@ -803,7 +804,9 @@ describe('client cancellation', () => {
         signal.addEventListener('abort', () => { canceled = true; reject(signal.reason) }, { once: true })
       })
       return new Response(new ReadableStream({ start(controller) {
-        controller.enqueue(new TextEncoder().encode('data: {"type":"message_start","message":{"usage":{"input_tokens":42}}}\n\n'))
+        const firstEvent = adapter ? { choices: [{ delta: { content: 'partial' } }], usage: { prompt_tokens: 42 } }
+          : { type: 'message_start', message: { usage: { input_tokens: 42 } } }
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(firstEvent)}\n\n`))
         signal.addEventListener('abort', () => { canceled = true; controller.error(signal.reason) }, { once: true })
       } }), { headers: { 'content-type': 'text/event-stream' } })
     })
@@ -812,9 +815,10 @@ describe('client cancellation', () => {
     const origin = await app.listen({ host: '127.0.0.1', port: 0 })
     const client = new AbortController()
     try {
-      const pending = fetch(`${origin}/v1/messages`, {
+      const pending = fetch(`${origin}${adapter ? '/api/qwen/v1/responses' : '/v1/messages'}`, {
         method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-5', stream: true, messages: [{ role: 'user', content: 'Hello' }] }),
+        body: JSON.stringify(adapter ? { model: 'qwen3.8-max', stream: true, input: 'Hello' }
+          : { model: 'claude-sonnet-5', stream: true, messages: [{ role: 'user', content: 'Hello' }] }),
         signal: client.signal,
       })
       const result = pending.catch(() => null)
@@ -837,6 +841,8 @@ describe('client cancellation', () => {
       expect(mocks.penalizeAccount).not.toHaveBeenCalled()
       expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
       expect(mocks.logs[0]?.[23]).toBe('client_disconnected')
+      expect(mocks.logs).toHaveLength(1)
+      expect(mocks.logs[0]?.[36]).toBe(headersSent ? 'partial' : 'missing')
       if (headersSent) expect(mocks.logs[0]?.[9]).toBe(42)
     } finally {
       client.abort()
@@ -1044,5 +1050,63 @@ describe('stream first-frame latency', () => {
 
     releaseBookkeeping()
     await vi.waitFor(() => expect(mocks.markAccountUsed).toHaveBeenCalledWith('account-1'))
+  }))
+})
+
+
+describe('Chat-backed Responses usage and termination', () => {
+  it.each([['kimi', 'kimi-k2.7-code'], ['qwen', 'qwen3.8-max'], ['xiaomi', 'mimo-v2.5'], ['zhipu', 'glm-5.3']])(
+    '%s requests usage and consumes the frame after finish_reason', (provider, model) => withRelay(async request => {
+      mocks.fetch.mockImplementation(async (_url, init) => {
+        const body = JSON.parse(init.body)
+        expect(body.stream_options).toEqual({ include_usage: true, extra: 'preserved' })
+        return sse([{ choices: [{ delta: { content: 'answer' }, finish_reason: 'stop' }] },
+          { choices: [], usage: { prompt_tokens: 17, completion_tokens: 3 } }])
+      })
+      const response = await request({ model, input: 'Hi', stream_options: { include_usage: false, extra: 'preserved' } }, `/api/${provider}/v1/responses`)
+      expect(response.body).toContain('response.completed')
+      expect(mocks.logs).toHaveLength(1)
+      expect(mocks.logs[0]?.slice(9, 11)).toEqual([17, 3])
+    }))
+  it.each([{ events: [] }, { events: [{ choices: [{ delta: { content: 'partial' } }] }] }])('marks an unfinished adapter stream as failed', ({ events }) => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse(events))
+    const response = await request({ model: 'qwen3.8-max', input: 'Hi' }, '/api/qwen/v1/responses')
+    expect(response.body).toContain('response.failed')
+    expect(response.body).not.toContain('response.completed')
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+})
+
+
+describe('upstream compatibility errors and usage provenance', () => {
+  it.each([
+    { model: 'glm-5.3', reasoning: { effort: 'ultra' }, input: 'Hi' },
+    { model: 'glm-5.2', input: [{ role: 'user', content: [{ type: 'input_image', image_url: 'https://example.org/a.png' }] }] },
+  ])('rejects invalid local conversion without penalizing accounts', body => withRelay(async request => {
+    mocks.cost = 0
+    const response = await request(body, '/api/zhipu/v1/responses')
+    expect(response.status).toBe(400)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[36]).toBe('missing')
+  }))
+  it('uses the mapped effort for both the upstream and billing metadata', () => withRelay(async request => {
+    mocks.fetch.mockImplementation(async (_url, init) => {
+      expect(JSON.parse(init.body).reasoning_effort).toBe('high')
+      return sse([{ choices: [{ delta: { content: 'yes' }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0 } }])
+    })
+    await request({ model: 'glm-5.3', reasoning: { effort: 'high' }, input: 'Hi' }, '/api/zhipu/v1/responses')
+    expect(mocks.logs[0]?.[33]).toBe('high')
+    expect(mocks.logs[0]?.[36]).toBe('upstream')
+  }))
+  it('records a successful native response without usage as missing, not an estimated charge', () => withRelay(async request => {
+    mocks.cost = 0
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'response.completed', response: { id: 'r', status: 'completed', output: [] } }]))
+    await request(prompt)
+    expect(mocks.logs[0]?.[22]).toBe('success')
+    expect(mocks.logs[0]?.[36]).toBe('missing')
+    expect(mocks.transactions).toHaveLength(0)
   }))
 })

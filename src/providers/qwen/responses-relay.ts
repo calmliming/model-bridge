@@ -1,3 +1,4 @@
+import { normalizeQwenChatCompletionsBody } from './chat-relay'
 import { responsesToChatCompletions } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
@@ -17,7 +18,8 @@ export function relayQwenResponses(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
+  const upstreamBody = normalizeQwenChatCompletionsBody({ ...responsesToChatCompletions({ ...body, stream: true }),
+    stream_options: body.stream_options })
   return fetchWithConnectTimeout(QWEN_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {

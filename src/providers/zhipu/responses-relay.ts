@@ -1,3 +1,4 @@
+import { normalizeZhipuChatCompletionsBody } from './chat-relay'
 import { responsesToChatCompletions } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
@@ -17,7 +18,8 @@ export function relayZhipuResponses(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
+  const upstreamBody = normalizeZhipuChatCompletionsBody({ ...responsesToChatCompletions({ ...body, stream: true }),
+    stream_options: body.stream_options })
   return fetchWithConnectTimeout(ZHIPU_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {

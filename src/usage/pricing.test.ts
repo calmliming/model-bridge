@@ -610,3 +610,19 @@ describe('MiniMax pricing', () => {
     ).toBe(0.3)
   })
 })
+
+
+describe('Grok 4.7 official rates', () => {
+  it.each(['grok', 'sub2api'])('applies the 200k input boundary including cached tokens for %s', provider => {
+    const usage = { ...emptyUsage(), inputTokens: 199_999, cacheReadTokens: 1, outputTokens: 10 }
+    expect(resolveUsagePrice(provider, 'grok-4.7', usage)).toMatchObject({ input: 2, output: 6, cacheRead: 0.5 })
+    expect(resolveUsagePrice(provider, 'grok-4.7', { ...usage, cacheReadTokens: 2 })).toMatchObject({ input: 4, output: 12, cacheRead: 1 })
+    expect(resolvePrice(provider, 'grok-4.5')).toMatchObject({ cacheRead: 0.3 })
+  })
+})
+
+it('charges Grok 4.7 image input tokens at the same context tier as text', () => {
+  const usage = { ...emptyUsage(), inputTokens: 199_999, imageInputTokens: 2 }
+  expect(resolveUsagePrice('grok', 'grok-4.7', usage)?.imageInput).toBe(4)
+  expect(estimateCost('grok', 'grok-4.7', usage)).toBe(0.800004)
+})

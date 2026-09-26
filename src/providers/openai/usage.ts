@@ -1,3 +1,4 @@
+import { hasReportedUsage } from '../usageSource'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 interface OpenAIUsage {
@@ -97,12 +98,16 @@ interface OpenAIStreamEvent {
  */
 export function createStreamParser() {
   const usage = emptyUsage()
+  let reported: OpenAIUsage = {}
   return {
     feed(event: unknown): void {
       const e = event as OpenAIStreamEvent
       if (typeof e?.response?.service_tier === 'string') usage.serviceTier = e.response.service_tier
-      if (['response.completed', 'response.failed', 'response.incomplete'].includes(e?.type ?? '') && e.response?.usage) {
-        Object.assign(usage, applyImageMetadata(parseOpenAIUsagePayload(e.response.usage), e.response))
+      if (e?.response?.usage && hasReportedUsage(e.response.usage)) {
+        reported = { ...reported, ...e.response.usage,
+          input_tokens_details: { ...reported.input_tokens_details, ...e.response.usage.input_tokens_details },
+          output_tokens_details: { ...reported.output_tokens_details, ...e.response.usage.output_tokens_details } }
+        Object.assign(usage, applyImageMetadata(parseOpenAIUsagePayload(reported), e.response))
       }
     },
     result(): UsageData {

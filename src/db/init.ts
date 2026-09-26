@@ -316,6 +316,7 @@ export async function initDb(): Promise<void> {
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS service_tier TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS reasoning_effort TEXT;`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS billing_price JSONB;`)
+  await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS usage_source TEXT NOT NULL DEFAULT 'unknown';`)
   await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS model_mismatch BOOLEAN NOT NULL DEFAULT FALSE;`)
   await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_input_price DOUBLE PRECISION NOT NULL DEFAULT 0;`)
   await pool.query(`ALTER TABLE model_pricing ADD COLUMN IF NOT EXISTS image_cache_read_price DOUBLE PRECISION;`)

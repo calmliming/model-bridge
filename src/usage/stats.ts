@@ -67,6 +67,7 @@ export interface StatsSummary {
 }
 
 export interface DashboardRecentLog {
+  usageSource: string
   id: string
   ts: number
   provider: string
@@ -273,6 +274,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     provider,
     model,
     status: row.status as string,
+    usageSource: typeof row.usagesource === 'string' ? row.usagesource : 'unknown',
     errorCode: (row.errorcode as string | null) ?? null,
     errorMessage: (row.errormessage as string | null) ?? null,
     upstreamStatus: row.upstreamstatus == null ? null : toNum(row.upstreamstatus),
@@ -592,6 +594,7 @@ export async function dashboardRecentLogs(
               usage_logs.provider AS provider,
               usage_logs.model AS model,
               usage_logs.status AS status,
+              usage_logs.usage_source AS usageSource,
               usage_logs.error_code AS errorCode,
               usage_logs.error_message AS errorMessage,
               usage_logs.upstream_status AS upstreamStatus,

@@ -88,3 +88,10 @@ describe('Astra default billing', () => {
     expect(estimateCost('sub2api', 'gpt-6-astra', usage)).toBe(12.015)
   })
 })
+
+
+it('preserves explicit Grok 4.7 price and context overrides', async () => {
+  await writeRules([{ provider: 'grok', model: 'grok-4.7', price: base, longContext: null }])
+  await reloadPricingOverrides(file)
+  expect(resolveUsagePrice('grok', 'grok-4.7', { ...emptyUsage(), inputTokens: 300_000 })).toEqual(base)
+})

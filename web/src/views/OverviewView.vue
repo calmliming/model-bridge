@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usageSourceLabel } from '../usageSource'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
@@ -46,6 +47,7 @@ interface DashboardKey {
 }
 
 interface DashboardRecentLog {
+  usageSource?: string
   id: string
   ts: number
   provider: string
@@ -756,6 +758,7 @@ function openRequestInput(row: DashboardRecentLog) {
 
           <div class="min-w-0 max-xl:col-span-full">
             <div class="flex items-center gap-2 min-w-0 flex-wrap">
+              <span v-if="row.usageSource === 'missing' || row.usageSource === 'partial'" class="text-xs text-amber-700">{{ usageSourceLabel(row.usageSource) }}</span>
               <span class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-emerald-600">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14m0 0 6-6m-6 6-6-6" />
@@ -908,6 +911,7 @@ function openRequestInput(row: DashboardRecentLog) {
       width="min(760px, calc(100vw - 32px))"
       @update:show="(shown: boolean) => { if (!shown) selectedLog = null }"
     >
+      <p v-if="selectedLog" class="mb-3 text-sm text-accent-900/70">用量来源：{{ usageSourceLabel(selectedLog.usageSource) }}<span v-if="selectedLog.usageSource === 'missing'"> · 上游未报告用量，未按估算 token 扣费</span></p>
       <div v-if="selectedLog?.status !== 'success' || selectedLog?.modelMismatch" class="grid grid-cols-2 gap-2 mb-3 text-xs">
         <div class="grid gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
           <span class="text-red-700/70 font-[650]">失败原因</span>

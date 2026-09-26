@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { usageSourceLabel } from '../usageSource'
 import { h, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { UiTag, UiTooltip } from '../components/ui'
@@ -8,6 +9,7 @@ import { api, errMsg } from '../api/client'
 import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 
 interface UsageLog {
+  usageSource?: string
   id: string
   ts: number
   provider: string
@@ -173,6 +175,9 @@ const usageColumns: TableColumn<UsageLog>[] = [
     minWidth: 180,
     render: (row) => row.model || '—'
   },
+  { title: '用量来源', key: 'usageSource', width: 125, render: row => h(UiTag,
+    { size: 'small', bordered: false, type: row.usageSource === 'missing' || row.usageSource === 'partial' ? 'warning' : 'default' },
+    { default: () => usageSourceLabel(row.usageSource) }) },
   { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
   {
     title: '成本',

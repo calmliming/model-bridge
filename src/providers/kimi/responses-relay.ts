@@ -1,3 +1,4 @@
+import { normalizeKimiChatCompletionsBody } from './chat-relay'
 import { mapModel, responsesToChatCompletions } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
@@ -34,7 +35,8 @@ export function relayKimiResponses(
   apiKey: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const upstreamBody = responsesToChatCompletions({ ...body, stream: true })
+  const upstreamBody = normalizeKimiChatCompletionsBody({ ...responsesToChatCompletions({ ...body, stream: true }),
+    stream_options: body.stream_options })
   return fetchWithConnectTimeout(KIMI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {

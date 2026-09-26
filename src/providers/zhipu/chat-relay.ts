@@ -1,3 +1,4 @@
+import { chatStreamOptions } from '../chatStreamOptions'
 import { mapModel } from './converter'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
@@ -12,11 +13,7 @@ export function normalizeZhipuChatCompletionsBody(
   }
 
   if (out.stream === true) {
-    const streamOptions =
-      out.stream_options && typeof out.stream_options === 'object'
-        ? (out.stream_options as Record<string, unknown>)
-        : {}
-    out.stream_options = { ...streamOptions, include_usage: true }
+    out.stream_options = chatStreamOptions(out.stream_options)
   }
 
   return out

@@ -1,3 +1,5 @@
+import { hasReportedUsage } from '../usageSource'
+import { splitToolMedia } from '../toolMedia'
 import { randomUUID } from 'node:crypto'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 import { createFunctionCallTracker } from './toolCalls'
@@ -95,6 +97,8 @@ interface ResponsesOutputItem {
 }
 
 interface ChatUsage {
+  cached_tokens?: number
+  prompt_cache_hit_tokens?: number
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
@@ -221,7 +225,10 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
   const instructions: string[] = []
   const input: Array<Record<string, unknown>> = []
 
+  const pendingImages: Array<Record<string, unknown>> = []
+  const flushImages = () => { if (pendingImages.length) input.push({ role: 'user', content: pendingImages.splice(0) }) }
   for (const message of messages) {
+    if (message.role !== 'tool') flushImages()
     const role = typeof message.role === 'string' ? message.role : 'user'
     const text = contentToText(message.content)
 
@@ -233,10 +240,13 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
 
     if (role === 'tool') {
       if (!message.tool_call_id) continue
+      const media = splitToolMedia(message.content)
+      pendingImages.push(...media.images.map(image => ({ type: 'input_image', image_url: image.image_url.url,
+        ...(image.image_url.detail ? { detail: image.image_url.detail } : {}) })))
       input.push({
         type: 'function_call_output',
         call_id: message.tool_call_id,
-        output: text,
+        output: media.text,
       })
       continue
     }
@@ -258,6 +268,8 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
       }
     }
   }
+
+  flushImages()
 
   const out: Record<string, unknown> = {
     model: typeof body.model === 'string' ? body.model : '',
@@ -320,7 +332,7 @@ export function parseChatCompletionUsage(body: unknown): UsageData {
   const parsed = usageWithCachedInput(
     usage.prompt_tokens,
     usage.completion_tokens,
-    d?.cached_tokens,
+    d?.cached_tokens ?? usage.cached_tokens ?? usage.prompt_cache_hit_tokens,
     usage.completion_tokens_details?.reasoning_tokens,
     d?.cache_write_tokens ?? d?.cache_creation_tokens,
   )
@@ -336,12 +348,7 @@ export function createChatCompletionStreamParser() {
       const tier = (event as { service_tier?: unknown } | null)?.service_tier
       if (typeof tier === 'string') usage.serviceTier = tier
       const parsed = parseChatCompletionUsage(event)
-      if (
-        parsed.inputTokens ||
-        parsed.outputTokens ||
-        parsed.cacheCreateTokens ||
-        parsed.cacheReadTokens
-      ) {
+      if (event && typeof event === 'object' && hasReportedUsage((event as { usage?: unknown }).usage)) {
         Object.assign(usage, parsed)
       }
     },

@@ -24,8 +24,11 @@ export interface TokenSet {
   metadata?: Record<string, unknown>
 }
 
+export type UsageSource = 'upstream' | 'partial' | 'missing' | 'unknown'
+
 /** Token counts extracted from one relayed request. */
 export interface UsageData {
+  usageSource?: UsageSource
   /** Actual processing tier reported upstream; not the requested tier. */
   serviceTier?: string
   reasoningEffort?: string

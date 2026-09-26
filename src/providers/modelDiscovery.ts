@@ -74,7 +74,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
   // can route the same identifiers that Sub2API v0.1.183 accepts.
   kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
-  grok: ['grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
+  grok: ['grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
 }
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {

@@ -1,3 +1,4 @@
+import { anthropicContent } from '../toolMedia'
 /**
  * OpenAI Chat Completions ⇄ Anthropic Messages semantic conversion.
  *
@@ -6,10 +7,8 @@
  * and the response is translated back Messages → Chat Completions, for both the
  * buffered JSON path and the streamed SSE path.
  *
- * Only text and tool-calling are translated; image parts and other multimodal
- * content are dropped (Claude Code subscription traffic is overwhelmingly text
- * + tools). The reverse direction (Anthropic client → OpenAI upstream) is not
- * implemented here.
+ * Text, images and tool-calling are translated. The reverse direction
+ * (Anthropic client → OpenAI upstream) is not implemented here.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -128,7 +127,7 @@ export function chatCompletionsToClaudeMessages(
         {
           type: 'tool_result',
           tool_use_id: msg.tool_call_id ?? '',
-          content: contentToText(msg.content),
+          content: typeof msg.content === 'string' ? msg.content : anthropicContent(msg.content),
         },
       ])
       continue
@@ -150,7 +149,7 @@ export function chatCompletionsToClaudeMessages(
       continue
     }
     // Default: treat as a user turn.
-    push('user', [{ type: 'text', text: contentToText(msg.content) }])
+    push('user', anthropicContent(msg.content))
   }
 
   const out: Record<string, unknown> = {

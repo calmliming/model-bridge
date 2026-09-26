@@ -1,3 +1,6 @@
+import { createPlan, assignSubscription } from '../subscriptions/manager'
+import { listUserUsage } from '../users/manager'
+import { emptyUsage } from '../providers/types'
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -190,4 +193,47 @@ describe.runIf(database)('upstream update database regressions', () => {
     const logs = await dashboardRecentLogs(1, 10, { key: 'image-cache-key' })
     expect(logs.logs[0]).toMatchObject({ imageCacheReadTokens: 200, imageCacheReadPrice: 2, imageCacheReadCost: 0.0004, cost: 0.020225 })
   })
+
+  it('migrates usage provenance idempotently without repricing historical rows', async () => {
+    const id = randomUUID()
+    await pool.query('ALTER TABLE usage_logs DROP COLUMN usage_source')
+    await pool.query("INSERT INTO usage_logs (id, provider, cost, input_tokens) VALUES ($1, 'grok', 0.123456, 0)", [id])
+    const migration = await readFile(new URL('../db/migrations/0014_usage_source.sql', import.meta.url), 'utf8')
+    await pool.query(migration)
+    await pool.query(migration)
+    await initDb()
+    expect((await pool.query('SELECT usage_source, cost, input_tokens FROM usage_logs WHERE id = $1', [id])).rows[0])
+      .toEqual({ usage_source: 'unknown', cost: 0.123456, input_tokens: 0 })
+  })
+
+  it('persists sources with consistent wallet, subscription and key ledgers', async () => {
+    await initPricing()
+    const userId = randomUUID(), model = 'grok-4.7'
+    await pool.query("INSERT INTO users (id, name, email, password_hash, balance_micros) VALUES ($1, 'Usage QA', $2, 'unused', 1000000)", [userId, `${userId}@example.test`])
+    const key = await createApiKey({ name: 'usage-source-key', userId })
+    const usage = { ...emptyUsage(), inputTokens: 1000, outputTokens: 100, usageSource: 'partial' as const }
+    const record = { apiKeyId: key.id, userId, accountId: null, provider: 'grok', model, usage, status: 'error', latencyMs: 10 }
+    expect(await recordUsage(record)).toBe(true)
+    const group = await createGroup({ name: 'usage-subscription' })
+    const plan = await createPlan({ name: 'usage-plan', groupId: group.id, dailyLimitUsd: 1 })
+    const subscription = await assignSubscription({ userId, planId: plan.id, assignedBy: 'qa' })
+    expect(await recordUsage({ ...record, status: 'success', usage: { ...usage, usageSource: 'upstream' }, billTo: 'subscription', subscriptionId: subscription.id })).toBe(true)
+    expect(await recordUsage({ ...record, usage: { ...emptyUsage(), usageSource: 'missing' } })).toBe(true)
+    const records = (await pool.query('SELECT usage_source, cost, bill_to FROM usage_logs WHERE user_id = $1 ORDER BY usage_source', [userId])).rows
+    expect(records).toEqual([
+      { usage_source: 'missing', cost: 0, bill_to: 'balance' },
+      { usage_source: 'partial', cost: 0.0026, bill_to: 'balance' },
+      { usage_source: 'upstream', cost: 0.0026, bill_to: 'subscription' },
+    ])
+    expect((await pool.query('SELECT balance_micros FROM users WHERE id = $1', [userId])).rows[0].balance_micros).toBe(997400)
+    expect((await pool.query('SELECT quota_used FROM api_keys WHERE id = $1', [key.id])).rows[0].quota_used).toBeCloseTo(0.0052)
+    expect((await pool.query('SELECT daily_usage_usd FROM user_subscriptions WHERE id = $1', [subscription.id])).rows[0].daily_usage_usd).toBeCloseTo(0.0026)
+    expect((await pool.query('SELECT COUNT(*)::int AS count FROM wallet_transactions WHERE user_id = $1', [userId])).rows[0].count).toBe(1)
+    expect((await listUserUsage(userId)).logs.map(x => x.usageSource).sort()).toEqual(['missing', 'partial', 'upstream'])
+    expect((await dashboardRecentLogs(1, 10, { key: 'usage-source-key' })).logs.map(x => x.usageSource).sort()).toEqual(['missing', 'partial', 'upstream'])
+    await pool.query("UPDATE model_pricing SET cache_read_price = 0.123 WHERE provider = 'grok' AND model = $1", [model])
+    await initPricing()
+    expect(resolvePrice('grok', model)?.cacheRead).toBe(0.123)
+  })
+
 })

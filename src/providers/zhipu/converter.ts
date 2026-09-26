@@ -1,3 +1,5 @@
+import { zhipuResponsesEffort } from './effort'
+import { liftResponsesToolMedia, chatContent, assertChatImageSupport } from '../toolMedia'
 /**
  * Converts an OpenAI Responses API request body (what Codex CLI sends) into
  * an OpenAI Chat Completions request body (what Zhipu GLM's upstream accepts
@@ -14,7 +16,7 @@ import { agentMessageText } from '../agentMessage'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string | null
+  content?: string | Array<Record<string, unknown>> | null
   reasoning_content?: string
   tool_calls?: Array<{
     id: string
@@ -41,6 +43,7 @@ export interface ChatCompletionsRequest {
   frequency_penalty?: number
   presence_penalty?: number
   response_format?: unknown
+  reasoning_effort?: string
 }
 
 /**
@@ -88,7 +91,7 @@ export function responsesToChatCompletions(
     messages.push({ role: 'user', content: input })
   } else if (Array.isArray(input)) {
     const state = { pendingReasoning: '' }
-    for (const item of input) convertInputItem(item, messages, state)
+    for (const item of liftResponsesToolMedia(input)) convertInputItem(item, messages, state)
   }
 
   // GLM thinking-mode "all-or-nothing" rule: if ANY assistant message in the
@@ -122,6 +125,9 @@ export function responsesToChatCompletions(
   if (typeof body.presence_penalty === 'number') out.presence_penalty = body.presence_penalty
   if (body.response_format != null) out.response_format = body.response_format
 
+  const effort = zhipuResponsesEffort(body, out.model)
+  if (effort !== undefined) out.reasoning_effort = effort
+  assertChatImageSupport('zhipu', out.model, messages)
   return out
 }
 
@@ -220,25 +226,7 @@ function convertInputItem(item: unknown, out: ChatMessage[], state: ConvertState
         ? rawRole
         : 'user'
 
-  const content = it.content
-  let text = ''
-  if (typeof content === 'string') {
-    text = content
-  } else if (Array.isArray(content)) {
-    for (const part of content) {
-      if (!part || typeof part !== 'object') continue
-      const p = part as Record<string, unknown>
-      if (
-        (p.type === 'input_text' || p.type === 'output_text' || p.type === 'text') &&
-        typeof p.text === 'string'
-      ) {
-        text += p.text
-      }
-      // input_image / image_url / file / etc. silently skipped — the GLM
-      // chat/completions text path doesn't carry multimodal input here.
-    }
-  }
-  const msg: ChatMessage = { role, content: text }
+  const msg: ChatMessage = { role, content: chatContent(it.content) }
   if (role === 'assistant' && state.pendingReasoning) {
     msg.reasoning_content = state.pendingReasoning
   }

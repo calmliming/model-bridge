@@ -234,6 +234,7 @@ export const apiKeys = pgTable('api_keys', {
 
 /** One relayed request — the basis for usage and cost statistics. */
 export const usageLogs = pgTable('usage_logs', {
+  usageSource: text('usage_source').notNull().default('unknown'),
   id: text('id').primaryKey(),
   apiKeyId: text('api_key_id'),
   userId: text('user_id'),

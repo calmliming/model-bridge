@@ -1,3 +1,7 @@
+import { trackUsageParser, jsonUsageSource, bufferedUsageSource } from '../providers/usageSource'
+import { zhipuResponsesEffort } from '../providers/zhipu/effort'
+import { ProviderRequestError } from '../providers/requestError'
+import type { StreamEndContext } from '../providers/chatResponsesStream'
 import { cachedAntigravityModels } from '../accounts/antigravityModels'
 import { sanitizeToolSchemas } from '../providers/toolSchema'
 import { isResponsesTerminalBlock, readResponsesSse } from '../providers/openai/sse'
@@ -182,7 +186,7 @@ interface StreamTransform {
   /** Translate one upstream SSE event into zero or more downstream events. */
   transform(data: unknown): unknown[]
   /** Emit closing / completion events once the upstream stream ends. */
-  flush(): unknown[]
+  flush(context?: StreamEndContext): unknown[]
   /** Final transformed-stream status, when success cannot be inferred from HTTP. */
   status?(): 'success' | 'error'
 }
@@ -477,8 +481,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       action: 'responses',
     }),
     callUpstream: (token, body, _ctx) => relayXiaomiResponses(token, body),
-    createStreamParser: xiaomiResponsesUsage.createStreamParser,
+    createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: xiaomiResponsesUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
     createStreamTransform: createXiaomiResponsesStreamTransform,
   },
   // Zhipu GLM (BigModel) — same shape as DeepSeek/Xiaomi: Anthropic-compatible
@@ -522,8 +527,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       action: 'responses',
     }),
     callUpstream: (token, body, _ctx) => relayZhipuResponses(token, body),
-    createStreamParser: zhipuResponsesUsage.createStreamParser,
+    createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: zhipuResponsesUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
     createStreamTransform: createZhipuResponsesStreamTransform,
   },
   // Qwen (通义千问 / Alibaba DashScope) — same shape as DeepSeek/Xiaomi/Zhipu:
@@ -567,8 +573,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       action: 'responses',
     }),
     callUpstream: (token, body, _ctx) => relayQwenResponses(token, body),
-    createStreamParser: qwenResponsesUsage.createStreamParser,
+    createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: qwenResponsesUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
     createStreamTransform: createQwenResponsesStreamTransform,
   },
   // Kimi (月之暗面 / Moonshot) — same shape as DeepSeek/Xiaomi/Zhipu/Qwen:
@@ -612,8 +619,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       action: 'responses',
     }),
     callUpstream: (token, body, _ctx) => relayKimiResponses(token, body),
-    createStreamParser: kimiResponsesUsage.createStreamParser,
+    createStreamParser: createChatCompletionStreamParser,
     parseJsonUsage: kimiResponsesUsage.parseJsonUsage,
+    parseStreamEventsFrom: 'upstream',
     createStreamTransform: createKimiResponsesStreamTransform,
   },
   minimax: {
@@ -1904,6 +1912,7 @@ async function executeRelay(
       forceStream: false,
       callUpstream: (token, input) => relayNativeKimiResponses(token, input),
       createStreamTransform: undefined,
+      createStreamParser: kimiResponsesUsage.createStreamParser,
     }
   }
 
@@ -2062,7 +2071,7 @@ async function runRelayLoop(
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
         subscriptionId: apiKey.subscriptionId,
-        usage: emptyUsage(),
+        usage: { ...emptyUsage(), usageSource: 'missing' },
         status: 'error',
         errorCode: 'no_available_account',
         errorMessage: unavailableMessage,
@@ -2149,12 +2158,19 @@ async function runRelayLoop(
           account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
         })
       } catch (err) {
+        if (err instanceof ProviderRequestError) {
+          await recordUsage({ apiKeyId: apiKey.id, userId: apiKey.userId, accountId: account.id,
+            provider: provider.id, model: parsed.model, usage: { ...emptyUsage(), usageSource: 'missing' }, status: 'error',
+            errorCode: err.code, errorMessage: err.message, latencyMs: Date.now() - startedAt })
+          await reply.code(400).send({ error: { type: 'invalid_request_error', code: err.code, message: err.message } })
+          return
+        }
         if (upstreamSignal()?.aborted) {
           await recordUsage({
             apiKeyId: apiKey.id, userId: apiKey.userId, accountId: account.id,
             provider: provider.id, model: parsed.model, multiplier: apiKey.groupMultiplier ?? 1,
             billTo: apiKey.billTo, subscriptionId: apiKey.subscriptionId,
-            usage: emptyUsage(), status: 'error', errorCode: 'client_disconnected',
+            usage: { ...emptyUsage(), usageSource: 'missing' }, status: 'error', errorCode: 'client_disconnected',
             errorMessage: 'Client disconnected before upstream response headers.',
             attemptCount: attempt + 1, latencyMs: Date.now() - startedAt,
           })
@@ -2184,7 +2200,7 @@ async function runRelayLoop(
             multiplier: apiKey.groupMultiplier ?? 1,
             billTo: apiKey.billTo,
             subscriptionId: apiKey.subscriptionId,
-            usage: emptyUsage(),
+            usage: { ...emptyUsage(), usageSource: 'missing' },
             status: 'error',
             errorCode: 'upstream_network_error',
             errorMessage: redactUrls(upstreamError),
@@ -2217,7 +2233,8 @@ async function runRelayLoop(
         subscriptionId: apiKey.subscriptionId,
         attemptCount: attempt + 1,
         upstreamRequestId: upstreamRequestId(upstream.headers, (account.metadata as Record<string, unknown> | null)?.upstreamRequestIdHeader),
-        reasoningEffort: typeof body.reasoning_effort === 'string' ? body.reasoning_effort
+        reasoningEffort: provider === PROVIDERS['zhipu-responses'] ? zhipuResponsesEffort(body, parsed.model) ?? null
+          : typeof body.reasoning_effort === 'string' ? body.reasoning_effort
           : typeof jsonRecord(body.reasoning)?.effort === 'string' ? jsonRecord(body.reasoning)!.effort as string : null,
       }
 
@@ -2321,7 +2338,7 @@ async function runRelayLoop(
       } catch (error) {
         if (!upstreamSignal()?.aborted) throw error
         await recordUsage({
-          ...meta, usage: emptyUsage(), status: 'error', errorCode: 'client_disconnected',
+          ...meta, usage: { ...emptyUsage(), usageSource: 'missing' }, status: 'error', errorCode: 'client_disconnected',
           errorMessage: 'Client disconnected before buffered usage was available.',
           latencyMs: Date.now() - meta.startedAt,
         })
@@ -2347,7 +2364,7 @@ async function runRelayLoop(
       multiplier: apiKey.groupMultiplier ?? 1,
       billTo: apiKey.billTo,
       subscriptionId: apiKey.subscriptionId,
-      usage: emptyUsage(),
+      usage: { ...emptyUsage(), usageSource: 'missing' },
       status: 'error',
       errorCode: 'all_accounts_failed',
       errorMessage: `All ${provider.id} accounts failed before a response was available.`,
@@ -2497,7 +2514,7 @@ async function sendStreaming(
       multiplier: meta.multiplier,
       billTo: meta.billTo,
       subscriptionId: meta.subscriptionId,
-      usage: emptyUsage(),
+      usage: { ...emptyUsage(), usageSource: 'missing' },
       status: 'error',
       errorCode: code,
       errorMessage: redactUrls(message),
@@ -2526,7 +2543,7 @@ async function sendStreaming(
   ) {
     const bodyText = await upstream.text().catch(() => '')
     startStreamingResponse(raw, 200)
-    const jsonParser = provider.createStreamParser()
+    const jsonParser = trackUsageParser(provider.createStreamParser())
     const jsonState = newResponsesStreamState()
     const responseObject = parseResponseObject(bodyText)
     const upstreamModel = extractDeclaredModel(responseObject)
@@ -2592,7 +2609,7 @@ async function sendStreaming(
     (upstream.headers.get('content-type')?.includes('text/event-stream') ?? false)
   const omitComments = provider.geminiProtocol && geminiClientRejectsSseComments(reply.request.headers)
 
-  const parser = provider.createStreamParser()
+  const parser = trackUsageParser(provider.createStreamParser())
   const transform = provider.transformEventData
   const streamTransform = useStreamTransform ? provider.createStreamTransform!(meta) : null
   // Chat->Responses adapters must still read the trailing Chat usage chunk.
@@ -2739,7 +2756,7 @@ async function sendStreaming(
     }
   }
   if (streamTransform) {
-    for (const event of streamTransform.flush()) {
+    for (const event of streamTransform.flush({ interrupted: streamReadFailed, clientCanceled: !!upstreamSignal()?.aborted })) {
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
       noteResponsesTerminal(event, streamState)
       markFirstToken()
@@ -2780,7 +2797,7 @@ async function sendStreaming(
     multiplier: meta.multiplier,
     billTo: meta.billTo,
     subscriptionId: meta.subscriptionId,
-    usage: parser.result(),
+    usage: parser.result(streamReadFailed || !!clientCanceled),
     // Responses-protocol success requires a `response.completed` terminal. A
     // `response.failed` / `response.incomplete` (incl. `cyber_policy` blocks) or
     // a dropped stream is an error. Non-Responses providers use upstream.ok.
@@ -2913,7 +2930,7 @@ async function sendSanitizedRelayError(
     multiplier: meta.multiplier,
     billTo: meta.billTo,
     subscriptionId: meta.subscriptionId,
-    usage: emptyUsage(),
+    usage: { ...emptyUsage(), usageSource: 'missing' },
     status: 'error',
     errorCode: code,
     errorMessage: redactUrls(message),
@@ -2965,7 +2982,7 @@ async function sendBuffered(
   if (bufferResponse) {
     const sseText = await bufferedUpstreamText(upstream, provider)
     let responseText = sseText
-    let usage: UsageData = emptyUsage()
+    let usage: UsageData = { ...emptyUsage(), usageSource: 'missing' }
     let responseContentType = contentType
     let convertedStatus: 'error' | undefined
     let convertedHttpStatus: number | undefined
@@ -2973,7 +2990,7 @@ async function sendBuffered(
     if (upstream.ok) {
       const converted = bufferResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
-      usage = converted.usage
+      usage = { ...converted.usage, usageSource: bufferedUsageSource(sseText, contentType.includes('text/event-stream')) }
       responseContentType = 'application/json'
       convertedStatus = converted.status
       convertedHttpStatus = converted.httpStatus
@@ -2991,7 +3008,7 @@ async function sendBuffered(
       }
     } else {
       errorDetails = extractUpstreamError(sseText, upstream.status)
-      if (provider.bufferJsonResponse) usage = bufferResponse(sseText, meta).usage
+      if (provider.bufferJsonResponse) usage = { ...bufferResponse(sseText, meta).usage, usageSource: bufferedUsageSource(sseText, false) }
     }
     const recorded = await recordUsage({
       apiKeyId: meta.apiKeyId,
@@ -3028,7 +3045,7 @@ async function sendBuffered(
   }
 
   let text = await bufferedUpstreamText(upstream, provider)
-  let usage: UsageData = emptyUsage()
+  let usage: UsageData = { ...emptyUsage(), usageSource: 'missing' }
   let upstreamModel: string | null = null
   let semanticFailure = false
   let convertedFailure: ReturnType<typeof streamFailureDetails> = null
@@ -3040,7 +3057,7 @@ async function sendBuffered(
       json = provider.transformEventData(json, meta)
       text = JSON.stringify(json)
     }
-    usage = provider.parseJsonUsage(json)
+    usage = { ...provider.parseJsonUsage(json), usageSource: jsonUsageSource(json) }
     responseParser.feed(json)
     if (provider.id === 'antigravity' && jsonRecord(json)?.error) {
       semanticFailure = true
