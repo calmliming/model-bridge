@@ -9,12 +9,22 @@ const mocks = vi.hoisted(() => ({
   },
   verifyUserCredentials: vi.fn(),
   getUserById: vi.fn(),
+  isOnlinePaymentEnabled: vi.fn(),
+  getAvailableProviders: vi.fn(),
   userUsageDaily: vi.fn(),
   userFailureCategoriesToday: vi.fn(),
   user: { id: 'user-1', email: 'test@example.com', name: 'Test', status: 'active' },
 }))
 vi.mock('../config', () => ({ config: mocks.config }))
 vi.mock('../db/index', () => ({ db: {}, pool: {} }))
+vi.mock('../db/settings', async (original) => ({
+  ...await original<typeof import('../db/settings')>(),
+  isOnlinePaymentEnabled: mocks.isOnlinePaymentEnabled,
+}))
+vi.mock('../payments/providers/index', async (original) => ({
+  ...await original<typeof import('../payments/providers/index')>(),
+  getAvailableProviders: mocks.getAvailableProviders,
+}))
 vi.mock('../users/manager', async (original) => ({
   ...await original<typeof import('../users/manager')>(),
   verifyUserCredentials: mocks.verifyUserCredentials,
@@ -35,6 +45,8 @@ beforeEach(async () => {
   mocks.config.TURNSTILE_SECRET_KEY = 'test-secret'
   mocks.verifyUserCredentials.mockResolvedValue(mocks.user)
   mocks.getUserById.mockResolvedValue(mocks.user)
+  mocks.isOnlinePaymentEnabled.mockResolvedValue(true)
+  mocks.getAvailableProviders.mockReturnValue(['manual', 'alipay', 'alipay_web', 'wechat'])
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -47,6 +59,33 @@ async function withApp(run: (app: ReturnType<typeof Fastify>) => Promise<void>) 
 }
 
 const credentials = { email: 'test@example.com', password: 'password' }
+
+describe('online payment availability', () => {
+  it('lists configured online channels when payments are enabled', () => withApp(async app => {
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const response = await app.inject({ method: 'GET', url: '/api/users/payment-providers', headers: { authorization: `Bearer ${token}` } })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ onlinePaymentsEnabled: true, providers: ['manual', 'alipay', 'alipay_web', 'wechat'] })
+  }))
+
+  it('hides online channels and rejects stale or direct checkout requests after disabling', () => withApp(async app => {
+    mocks.isOnlinePaymentEnabled.mockResolvedValue(false)
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const headers = { authorization: `Bearer ${token}` }
+    const listing = await app.inject({ method: 'GET', url: '/api/users/payment-providers', headers })
+    expect(listing.statusCode).toBe(200)
+    expect(listing.json()).toEqual({ onlinePaymentsEnabled: false, providers: ['manual'] })
+    const checkout = await app.inject({ method: 'POST', url: '/api/users/payment-orders', headers, payload: { amount: 1, provider: 'alipay' } })
+    expect(checkout.statusCode).toBe(403)
+    expect(checkout.json().error).toContain('在线支付已关闭')
+  }))
+
+  it('keeps payment availability behind user authentication', () => withApp(async app => {
+    const response = await app.inject({ method: 'GET', url: '/api/users/payment-providers' })
+    expect(response.statusCode).toBe(401)
+    expect(mocks.isOnlinePaymentEnabled).not.toHaveBeenCalled()
+  }))
+})
 
 describe('user daily usage', () => {
   it('requires a user session and only accepts supported day ranges', () => withApp(async (app) => {

@@ -28,6 +28,18 @@ export async function setRegistrationEnabled(enabled: boolean): Promise<void> {
   await setSetting(REGISTRATION_ENABLED_KEY, enabled ? 'true' : 'false')
 }
 
+const ONLINE_PAYMENTS_ENABLED_KEY = 'online_payments_enabled'
+
+/** Preserve existing configured payment channels until an admin disables new checkouts. */
+export async function isOnlinePaymentEnabled(): Promise<boolean> {
+  const value = await getSetting(ONLINE_PAYMENTS_ENABLED_KEY)
+  return value === undefined || value === 'true'
+}
+
+export async function setOnlinePaymentEnabled(enabled: boolean): Promise<void> {
+  await setSetting(ONLINE_PAYMENTS_ENABLED_KEY, enabled ? 'true' : 'false')
+}
+
 const QUOTA_AUTOPAUSE_PERCENT_KEY = 'quota_autopause_percent'
 /** 100 = pause only when a window is actually exceeded (legacy behavior). */
 export const DEFAULT_QUOTA_AUTOPAUSE_PERCENT = 100

@@ -40,7 +40,9 @@ import {
   getOpenAiSchedulingStrategy,
   getPanelRateLimitSettings,
   getQuotaAutopausePercent,
+  isOnlinePaymentEnabled,
   isRegistrationEnabled,
+  setOnlinePaymentEnabled,
   setOpenAiSchedulingStrategy,
   setPanelRateLimitSettings,
   setQuotaAutopausePercent,
@@ -262,6 +264,7 @@ const updateRedeemCodeSchema = z.object({
 const updateSettingsSchema = z
   .object({
     registrationEnabled: z.boolean().optional(),
+    onlinePaymentsEnabled: z.boolean().optional(),
     quotaAutopausePercent: z.number().int().min(1).max(100).optional(),
     openaiSchedulingStrategy: z.enum(['weighted_lru', 'prefer_soonest_reset']).optional(),
     panelAuthenticatedRateLimit: z.number().int().positive().max(100_000).optional(),
@@ -544,6 +547,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
+      onlinePaymentsEnabled: await isOnlinePaymentEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,
@@ -563,6 +567,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (body.data.registrationEnabled !== undefined) {
       await setRegistrationEnabled(body.data.registrationEnabled)
     }
+    if (body.data.onlinePaymentsEnabled !== undefined) {
+      await setOnlinePaymentEnabled(body.data.onlinePaymentsEnabled)
+    }
     if (body.data.quotaAutopausePercent !== undefined) {
       await setQuotaAutopausePercent(body.data.quotaAutopausePercent)
     }
@@ -578,6 +585,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
+      onlinePaymentsEnabled: await isOnlinePaymentEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
       securityHeadersEnabled: config.SECURITY_HEADERS_ENABLED,

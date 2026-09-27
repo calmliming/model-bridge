@@ -22,6 +22,7 @@ import {
   queryPaymentOrder,
 } from '../payments/manager'
 import { getAvailableProviders } from '../payments/providers/index'
+import { isOnlinePaymentEnabled } from '../db/settings'
 import { redeemCode, RedeemError } from '../redeem/manager'
 import { checkRateLimit } from '../middleware/limits'
 import {
@@ -162,7 +163,11 @@ export function registerUserRoutes(app: FastifyInstance): void {
   })
 
   app.get('/api/users/payment-providers', { preHandler: requireUser }, async () => {
-    return { providers: getAvailableProviders() }
+    const onlinePaymentsEnabled = await isOnlinePaymentEnabled()
+    return {
+      onlinePaymentsEnabled,
+      providers: getAvailableProviders().filter(provider => onlinePaymentsEnabled || provider === 'manual'),
+    }
   })
 
   app.get('/api/users/wallet', { preHandler: requireUser }, async (request) => {

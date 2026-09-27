@@ -1,4 +1,5 @@
 import { AlipaySdk, type AlipaySdkCommonResult } from 'alipay-sdk'
+import { alipayCnyToUsd, parseAlipayRate, usdMicrosToAlipayCny } from './alipay-amount'
 import type {
   CreatePaymentParams,
   CreatePaymentResult,
@@ -10,8 +11,6 @@ import type {
 } from './base'
 
 const ORDER_TTL_MS = 30 * 60_000
-const USD_MICROS = 1_000_000n
-const RATE_SCALE = 10_000n
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -22,14 +21,6 @@ function normalizeCnyAmount(value: unknown): string | null {
   const match = text.match(/^(\d+)(?:\.(\d{1,2}))?$/)
   if (!match) return null
   return `${BigInt(match[1]!).toString()}.${(match[2] ?? '').padEnd(2, '0')}`
-}
-
-function parseRate(value: string): bigint {
-  const match = value.trim().match(/^(\d+)(?:\.(\d{1,4}))?$/)
-  if (!match) throw new Error('ALIPAY_USD_CNY_RATE must be a positive decimal with up to 4 places')
-  const scaled = BigInt(match[1]!) * RATE_SCALE + BigInt((match[2] ?? '').padEnd(4, '0'))
-  if (scaled <= 0n) throw new Error('ALIPAY_USD_CNY_RATE must be positive')
-  return scaled
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -68,7 +59,7 @@ export class AlipayWebProvider implements PaymentProvider {
     this.returnUrl = config.returnUrl.trim()
     this.sellerId = config.sellerId?.trim() ?? ''
     this.sellerEmail = config.sellerEmail?.trim() ?? ''
-    this.usdCnyRate = parseRate(config.usdCnyRate)
+    this.usdCnyRate = parseAlipayRate(config.usdCnyRate)
     if (!this.returnUrl) throw new Error('ALIPAY_RETURN_URL is required for AI web application payment')
     this.sdk = new AlipaySdk({
       appId: this.appId,
@@ -82,7 +73,7 @@ export class AlipayWebProvider implements PaymentProvider {
   }
 
   async createPayment(params: CreatePaymentParams): Promise<CreatePaymentResult> {
-    const providerAmount = this.usdMicrosToCny(params.amountMicros)
+    const providerAmount = usdMicrosToAlipayCny(params.amountMicros, this.usdCnyRate)
     const requestOptions: Record<string, unknown> = {
       returnUrl: this.returnUrl,
       bizContent: {
@@ -132,7 +123,7 @@ export class AlipayWebProvider implements PaymentProvider {
       providerOrderId,
       orderId,
       status: paid ? 'success' : 'ignored',
-      paidAmount: paid && providerAmount ? Number(providerAmount) / this.rateAsNumber() : undefined,
+      paidAmount: paid && providerAmount ? alipayCnyToUsd(Number(providerAmount), this.usdCnyRate) : undefined,
       paidProviderAmount: paid ? providerAmount ?? undefined : undefined,
       paidAt: paid && Number.isFinite(paidAt) ? paidAt : undefined,
       tradeStatus,
@@ -160,7 +151,7 @@ export class AlipayWebProvider implements PaymentProvider {
       providerOrderId: stringValue(result.trade_no),
       orderId: stringValue(result.out_trade_no) || outTradeNo,
       status: paid ? 'success' : 'ignored',
-      paidAmount: paid && providerAmount ? Number(providerAmount) / this.rateAsNumber() : undefined,
+      paidAmount: paid && providerAmount ? alipayCnyToUsd(Number(providerAmount), this.usdCnyRate) : undefined,
       paidProviderAmount: paid ? providerAmount ?? undefined : undefined,
       paidAt: paid && Number.isFinite(paidAt) ? paidAt : undefined,
       tradeStatus,
@@ -221,19 +212,5 @@ export class AlipayWebProvider implements PaymentProvider {
       (this.sellerId && stringValue(data.seller_id) === this.sellerId) ||
       (this.sellerEmail && stringValue(data.seller_email) === this.sellerEmail)
     )
-  }
-
-  private usdMicrosToCny(amountMicros: number): string {
-    if (!Number.isSafeInteger(amountMicros) || amountMicros <= 0) {
-      throw new Error('payment amount must be a positive safe integer in micro-USD')
-    }
-    const denominator = USD_MICROS * RATE_SCALE
-    const cents = (BigInt(amountMicros) * this.usdCnyRate * 100n + denominator / 2n) / denominator
-    if (cents < 1n) throw new Error('payment amount converts to less than CNY 0.01')
-    return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
-  }
-
-  private rateAsNumber(): number {
-    return Number(this.usdCnyRate) / Number(RATE_SCALE)
   }
 }

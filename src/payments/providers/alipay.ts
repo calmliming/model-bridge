@@ -1,4 +1,5 @@
 import { createSign, createVerify } from 'node:crypto'
+import { alipayCnyToUsd, parseAlipayRate, usdMicrosToAlipayCny } from './alipay-amount'
 import type {
   CreatePaymentParams,
   CreatePaymentResult,
@@ -17,6 +18,7 @@ export class AlipayProvider implements PaymentProvider {
   private readonly gatewayUrl: string
   private readonly notifyUrl: string
   private readonly returnUrl: string
+  private readonly usdCnyRate: bigint
 
   constructor(config: {
     appId: string
@@ -25,6 +27,7 @@ export class AlipayProvider implements PaymentProvider {
     gatewayUrl?: string
     notifyUrl?: string
     returnUrl?: string
+    usdCnyRate: string
   }) {
     this.appId = config.appId
     this.privateKey = config.privateKey
@@ -32,13 +35,14 @@ export class AlipayProvider implements PaymentProvider {
     this.gatewayUrl = config.gatewayUrl || 'https://openapi.alipay.com/gateway.do'
     this.notifyUrl = config.notifyUrl ?? ''
     this.returnUrl = config.returnUrl ?? ''
+    this.usdCnyRate = parseAlipayRate(config.usdCnyRate)
   }
 
   async createPayment(params: CreatePaymentParams): Promise<CreatePaymentResult> {
-    const amountCny = this.usdToCny(params.amount)
+    const providerAmount = usdMicrosToAlipayCny(params.amountMicros, this.usdCnyRate)
     const bizContent = {
       out_trade_no: params.orderId,
-      total_amount: amountCny.toFixed(2),
+      total_amount: providerAmount,
       subject: params.subject,
       body: params.body || params.subject,
       timeout_express: '30m',
@@ -61,7 +65,7 @@ export class AlipayProvider implements PaymentProvider {
 
     const response = await fetch(this.gatewayUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
       body: new URLSearchParams(requestParams as Record<string, string>),
     })
 
@@ -69,13 +73,17 @@ export class AlipayProvider implements PaymentProvider {
     const responseData = result.alipay_trade_precreate_response as Record<string, any>
 
     if (responseData.code !== '10000') {
-      throw new Error(`Alipay error: ${responseData.sub_msg || responseData.msg}`)
+      throw new Error(
+        `Alipay error: code=${responseData.code} sub_code=${responseData.sub_code ?? '-'} msg=${responseData.sub_msg || responseData.msg}`,
+      )
     }
 
     return {
       providerOrderId: responseData.out_trade_no,
       paymentUrl: responseData.qr_code,
       qrCode: responseData.qr_code,
+      providerAmount,
+      providerCurrency: 'CNY',
       expiresAt: Date.now() + 30 * 60_000,
     }
   }
@@ -105,7 +113,8 @@ export class AlipayProvider implements PaymentProvider {
       providerOrderId: data.trade_no as string,
       orderId: data.out_trade_no as string,
       status,
-      paidAmount: status === 'success' ? this.cnyToUsd(Number(data.total_amount)) : undefined,
+      paidAmount: status === 'success' ? alipayCnyToUsd(Number(data.total_amount), this.usdCnyRate) : undefined,
+      paidProviderAmount: status === 'success' ? String(data.total_amount ?? '') : undefined,
       paidAt: status === 'success' ? new Date(data.gmt_payment as string).getTime() : undefined,
       rawData: data,
     }
@@ -129,7 +138,7 @@ export class AlipayProvider implements PaymentProvider {
 
     const response = await fetch(this.gatewayUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
       body: new URLSearchParams(requestParams as Record<string, string>),
     })
 
@@ -149,7 +158,8 @@ export class AlipayProvider implements PaymentProvider {
       providerOrderId: responseData.trade_no,
       orderId: responseData.out_trade_no,
       status,
-      paidAmount: status === 'success' ? this.cnyToUsd(Number(responseData.total_amount)) : undefined,
+      paidAmount: status === 'success' ? alipayCnyToUsd(Number(responseData.total_amount), this.usdCnyRate) : undefined,
+      paidProviderAmount: status === 'success' ? String(responseData.total_amount ?? '') : undefined,
       paidAt: status === 'success' ? new Date(responseData.send_pay_date).getTime() : undefined,
       rawData: responseData,
     }
@@ -182,14 +192,5 @@ export class AlipayProvider implements PaymentProvider {
   private formatDateTime(date: Date): string {
     const pad = (n: number) => n.toString().padStart(2, '0')
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  }
-
-  private usdToCny(usd: number): number {
-    // 简化汇率转换，实际应该调用汇率 API
-    return usd * 7.2
-  }
-
-  private cnyToUsd(cny: number): number {
-    return cny / 7.2
   }
 }

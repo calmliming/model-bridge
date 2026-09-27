@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { pool } from '../db/index'
+import { isOnlinePaymentEnabled } from '../db/settings'
 import { applyWalletTransactionWithClient } from '../wallet/manager'
 import { microsToUsd, usdToMicros } from '../wallet/money'
 import { getPaymentProvider } from './providers/index'
@@ -161,6 +162,9 @@ export async function createPaymentOrder(input: {
 
   // 如果使用第三方支付，调用支付网关创建订单
   if (provider === 'alipay' || provider === 'alipay_web' || provider === 'wechat') {
+    if (!(await isOnlinePaymentEnabled())) {
+      throw new PaymentOrderError('在线支付已关闭，请使用其他充值方式', 403)
+    }
     const paymentProvider = getPaymentProvider(provider)
     if (!paymentProvider) {
       throw new PaymentOrderError(`Payment provider ${provider} is not configured`, 400)
@@ -438,24 +442,7 @@ export async function handlePaymentNotification(input: {
       throw new PaymentOrderError('payment provider does not match order', 409)
     }
 
-    if (notification.status === 'success') {
-      const expectedProviderAmount = normalizeProviderAmount(order.provider_amount)
-      const paidProviderAmount = normalizeProviderAmount(notification.paidProviderAmount)
-      if (order.provider === 'alipay_web') {
-        if (!expectedProviderAmount || !paidProviderAmount || expectedProviderAmount !== paidProviderAmount) {
-          throw new PaymentOrderError('payment provider amount does not match order', 409)
-        }
-      } else {
-        if (notification.paidAmount == null || !Number.isFinite(notification.paidAmount)) {
-          throw new PaymentOrderError('payment notification amount is missing', 400)
-        }
-        const paidAmountMicros = usdToMicros(notification.paidAmount)
-        const orderAmountMicros = Number(order.amount_micros)
-        if (Math.abs(paidAmountMicros - orderAmountMicros) > CALLBACK_AMOUNT_TOLERANCE_MICROS) {
-          throw new PaymentOrderError('payment amount does not match order', 409)
-        }
-      }
-    }
+    if (notification.status === 'success') assertProviderAmountMatches(order, notification)
 
     const rawNotifyId = String(input.data.notify_id ?? '').trim()
     const replayKey = rawNotifyId ? `${input.provider}:${rawNotifyId}` : [
@@ -588,19 +575,26 @@ function assertProviderAmountMatches(order: Record<string, unknown>, notificatio
   paidAmount?: number
   paidProviderAmount?: string
 }): void {
-  const expectedProviderAmount = normalizeProviderAmount(order.provider_amount)
-  const paidProviderAmount = normalizeProviderAmount(notification.paidProviderAmount)
-  if (order.provider === 'alipay_web') {
-    if (!expectedProviderAmount || !paidProviderAmount || expectedProviderAmount !== paidProviderAmount) {
-      throw new PaymentOrderError('payment provider amount does not match order', 409)
+  let paidAmount = notification.paidAmount
+  if (order.provider === 'alipay' || order.provider === 'alipay_web') {
+    const paidProviderAmount = normalizeProviderAmount(notification.paidProviderAmount)
+    if (!paidProviderAmount) throw new PaymentOrderError('payment provider amount is missing', 400)
+    if (order.provider_amount != null || order.provider === 'alipay_web') {
+      const expectedProviderAmount = normalizeProviderAmount(order.provider_amount)
+      if (!expectedProviderAmount || expectedProviderAmount !== paidProviderAmount) {
+        throw new PaymentOrderError('payment provider amount does not match order', 409)
+      }
+      return
     }
-    return
+    // Legacy QR orders did not store CNY amounts and always charged 7.2 CNY
+    // per wallet USD. Preserve their original terms after a rate change.
+    paidAmount = Number(paidProviderAmount) / 7.2
   }
-  if (notification.paidAmount == null || !Number.isFinite(notification.paidAmount)) {
+  if (paidAmount == null || !Number.isFinite(paidAmount)) {
     throw new PaymentOrderError('payment amount is missing', 400)
   }
   if (
-    Math.abs(usdToMicros(notification.paidAmount) - Number(order.amount_micros)) >
+    Math.abs(usdToMicros(paidAmount) - Number(order.amount_micros)) >
     CALLBACK_AMOUNT_TOLERANCE_MICROS
   ) {
     throw new PaymentOrderError('payment amount does not match order', 409)

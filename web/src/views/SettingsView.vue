@@ -16,6 +16,9 @@ const saving = ref(false)
 
 const registrationEnabled = ref(false)
 const togglingRegistration = ref(false)
+const onlinePaymentsEnabled = ref(false)
+const paymentSettingsLoaded = ref(false)
+const togglingOnlinePayments = ref(false)
 const turnstileEnabled = ref(false)
 const turnstileConfigured = ref(false)
 const securityHeadersEnabled = ref(false)
@@ -133,6 +136,8 @@ async function loadSettings() {
   try {
     const { data } = await api.get('/admin/settings')
     registrationEnabled.value = !!data.registrationEnabled
+    onlinePaymentsEnabled.value = data.onlinePaymentsEnabled !== false
+    paymentSettingsLoaded.value = true
     turnstileEnabled.value = !!data.turnstileEnabled
     turnstileConfigured.value = !!data.turnstileConfigured
     securityHeadersEnabled.value = !!data.securityHeadersEnabled
@@ -193,6 +198,20 @@ async function toggleRegistration(value: boolean) {
     message.error(errMsg(e, '操作失败'))
   } finally {
     togglingRegistration.value = false
+  }
+}
+
+async function toggleOnlinePayments(value: boolean) {
+  if (!paymentSettingsLoaded.value || togglingOnlinePayments.value) return
+  togglingOnlinePayments.value = true
+  try {
+    const { data } = await api.patch('/admin/settings', { onlinePaymentsEnabled: value })
+    onlinePaymentsEnabled.value = !!data.onlinePaymentsEnabled
+    message.success(onlinePaymentsEnabled.value ? '已开启在线支付' : '已关闭在线支付')
+  } catch (e) {
+    message.error(errMsg(e, '支付开关保存失败'))
+  } finally {
+    togglingOnlinePayments.value = false
   }
 }
 
@@ -470,6 +489,32 @@ function confirmSystemUpdate() {
           :value="registrationEnabled"
           @update:value="toggleRegistration"
         />
+      </div>
+    </UiCard>
+
+    <UiCard id="online-payments" class="max-w-xl scroll-mt-6" title="支付设置">
+      <div class="flex items-center justify-between gap-5">
+        <div>
+          <strong class="text-gray-900 dark:text-white">允许在线支付</strong>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            控制支付宝、微信的新充值订单，切换后立即生效。
+            关闭后，已有订单仍可查询和到账，线下转账和兑换码仍可使用。
+          </p>
+          <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
+            开启后仅显示已配置的支付渠道。
+          </p>
+        </div>
+        <div class="flex shrink-0 items-center gap-3">
+          <span class="text-sm text-gray-500 dark:text-dark-400">
+            {{ paymentSettingsLoaded ? (onlinePaymentsEnabled ? '已开启' : '已关闭') : '加载中' }}
+          </span>
+          <UiSwitch
+            :value="onlinePaymentsEnabled"
+            :disabled="!paymentSettingsLoaded || togglingOnlinePayments"
+            aria-label="在线支付开关"
+            @update:value="toggleOnlinePayments"
+          />
+        </div>
       </div>
     </UiCard>
 

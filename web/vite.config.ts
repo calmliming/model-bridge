@@ -17,6 +17,18 @@ export default defineConfig({
     proxy: {
       '/api': backendTarget,
       '/health': backendTarget,
+      // Client snippets and CC Switch use this origin as the API base URL.
+      // Forward the bare relay routes as well as the dashboard API.
+      '^/(v1|v1beta|responses|chat/completions|user/balance)(/|\\?|$)': backendTarget,
+      '^/models(/|\\?|$)': {
+        target: backendTarget,
+        bypass(request) {
+          // /models is also a dashboard page; keep browser navigation in Vite.
+          if (request.method === 'GET' && request.headers.accept?.includes('text/html')) {
+            return '/index.html'
+          }
+        },
+      },
     },
   },
 })

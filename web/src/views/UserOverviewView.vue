@@ -55,6 +55,8 @@ interface PaymentOrder {
   amount: number
   paymentUrl: string | null
   paymentHtml: string | null
+  providerAmount: string | null
+  providerCurrency: string | null
   expiresAt: number
   paidAt: number | null
   createdAt: number
@@ -111,7 +113,11 @@ const rechargeAmount = ref(10)
 type PaymentProvider = 'manual' | 'alipay' | 'alipay_web' | 'wechat'
 const selectedProvider = ref<PaymentProvider>('manual')
 const availableProviders = ref<PaymentProvider[]>(['manual'])
+const onlinePaymentsEnabled = ref(true)
 const currentPaymentOrder = ref<PaymentOrder | null>(null)
+const checkoutCnyAmount = computed(() => currentPaymentOrder.value?.providerCurrency === 'CNY'
+  ? currentPaymentOrder.value.providerAmount
+  : null)
 const paymentQrDataUrl = ref('')
 const paymentQrLoading = ref(false)
 const paymentQrError = ref('')
@@ -368,6 +374,7 @@ async function load() {
       }
     }
     availableProviders.value = providersRes.data.providers
+    onlinePaymentsEnabled.value = providersRes.data.onlinePaymentsEnabled !== false
     subscriptions.value = subsRes.data.subscriptions
     summary.value = summaryRes.data
     if (availableProviders.value.length > 0) {
@@ -716,8 +723,11 @@ onMounted(() => {
     </UiSpin>
 
     <UiModal v-model:show="showRecharge" title="发起充值" :width="420">
+      <UiAlert v-if="!onlinePaymentsEnabled" type="info" class="mb-4">
+        在线支付暂未开放，可使用线下转账或兑换码充值。
+      </UiAlert>
       <UiForm label-placement="top">
-        <UiFormItem label="充值金额（USD）">
+        <UiFormItem label="到账金额（USD）">
           <UiInputNumber v-model:value="rechargeAmount" :min="0.01" :precision="2" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="支付方式">
@@ -790,8 +800,9 @@ onMounted(() => {
         </div>
 
         <div class="checkout-summary">
-          <span>应付金额</span>
-          <strong>{{ formatUsd(currentPaymentOrder.amount) }}</strong>
+          <span>{{ checkoutCnyAmount ? '应付金额（人民币）' : '到账金额（USD）' }}</span>
+          <strong>{{ checkoutCnyAmount ? `¥${checkoutCnyAmount}` : formatUsd(currentPaymentOrder.amount) }}</strong>
+          <small v-if="checkoutCnyAmount">到账 {{ formatUsd(currentPaymentOrder.amount) }}</small>
           <small>{{ providerLabels[currentPaymentOrder.provider] }}扫码支付</small>
         </div>
 

@@ -18,7 +18,7 @@ vi.mock('alipay-sdk', () => ({
 
 import { AlipayWebProvider } from './alipay-web'
 
-function provider() {
+function provider(rate = '7.20') {
   return new AlipayWebProvider({
     appId: 'app_1',
     privateKey: 'raw-pkcs1-key',
@@ -27,7 +27,7 @@ function provider() {
     notifyUrl: 'https://merchant.example/api/payment/callback/alipay',
     returnUrl: 'https://merchant.example/api/payment/return/alipay',
     sellerId: 'seller_1',
-    usdCnyRate: '7.20',
+    usdCnyRate: rate,
   })
 }
 
@@ -38,6 +38,16 @@ beforeEach(() => {
 })
 
 describe('AlipayWebProvider', () => {
+  it('charges CNY 0.50 for USD 0.50 of wallet credit at a 1:1 recharge rate', async () => {
+    const result = await provider('1.00').createPayment({
+      orderId: 'po_1', amount: 0.5, amountMicros: 500_000, subject: '充值', userId: 'user_1',
+    })
+    expect(mocks.pageExec).toHaveBeenCalledWith('alipay.trade.page.pay', 'POST', expect.objectContaining({
+      bizContent: expect.objectContaining({ total_amount: '0.50' }),
+    }))
+    expect(result).toMatchObject({ providerAmount: '0.50', providerCurrency: 'CNY' })
+  })
+
   it('uses the verified SDK ESM export and pageExec POST form', async () => {
     const result = await provider().createPayment({
       orderId: 'po_1',
