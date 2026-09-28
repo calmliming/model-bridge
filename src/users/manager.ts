@@ -44,6 +44,7 @@ export interface InviteResult {
 }
 
 export interface UserUsageLog {
+  subscriptionPoints: number | null
   usageSource: string
   id: string
   ts: number
@@ -118,6 +119,7 @@ function asUserListRow(row: Record<string, unknown>): UserListRow {
 
 function asUsageLog(row: Record<string, unknown>): UserUsageLog {
   return {
+    subscriptionPoints: row.subscription_points == null ? null : Number(row.subscription_points),
     id: row.id as string,
     ts: Number(row.ts),
     provider: row.provider as string,
@@ -419,7 +421,7 @@ export async function listUserUsage(
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
               l.image_cache_read_tokens,
-              l.image_count, l.image_size, l.image_model, l.cost, l.request_input,
+              l.image_count, l.image_size, l.image_model, l.cost, l.request_input, l.subscription_points,
               k.name AS api_key_name
        FROM usage_logs l
        LEFT JOIN api_keys k ON k.id = l.api_key_id
@@ -477,10 +479,10 @@ export async function userUsageSummary(userId: string): Promise<UserUsageSummary
     `SELECT
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS requests24h,
        (SELECT COALESCE(SUM(${tokenSum}), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS tokens24h,
-       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $2) AS cost24h,
+       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $2 AND subscription_points IS NULL) AS cost24h,
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS requests30d,
        (SELECT COALESCE(SUM(${tokenSum}), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS tokens30d,
-       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3) AS cost30d,
+       (SELECT COALESCE(SUM(cost), 0) FROM usage_logs WHERE user_id = $1 AND ts >= $3 AND subscription_points IS NULL) AS cost30d,
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1) AS requestsTotal,
        (SELECT COUNT(*) FROM usage_logs WHERE user_id = $1 AND ts >= $3 AND status = 'success') AS success30d`,
     [userId, since24h, since30d]
@@ -511,7 +513,7 @@ export async function userUsageDaily(userId: string, days: 7 | 30 = 30): Promise
     `SELECT to_char(to_timestamp(ts / 1000) AT TIME ZONE $3, 'YYYY-MM-DD') AS day,
             COUNT(*) AS requests,
             COUNT(*) FILTER (WHERE status = 'error') AS errors,
-            COALESCE(SUM(cost), 0) AS cost
+            COALESCE(SUM(cost) FILTER (WHERE subscription_points IS NULL), 0) AS cost
      FROM usage_logs
      WHERE user_id = $1 AND ts >= $2
      GROUP BY day

@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
-import { UiButton, UiSpace, UiTag } from '../components/ui'
+import { computed, onMounted, ref } from 'vue'
+import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
-import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatUsd } from '../utils'
 import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 
 interface Plan {
@@ -21,6 +19,13 @@ interface Plan {
   validityDays: number
   forSale: boolean
   sortOrder: number
+  paymentProvider: 'wallet' | 'waffo'
+  waffoProductId: string | null
+  hasAccounts: boolean
+  quotaMode: 'spend' | 'usage'
+  fiveHourLimitPoints: number | null
+  weeklyLimitPoints: number | null
+  monthlyLimitPoints: number | null
 }
 
 interface GroupOption {
@@ -31,6 +36,8 @@ interface GroupOption {
 const message = useMessage()
 const dialog = useDialog()
 const loading = ref(false)
+const loadError = ref('')
+const waffo = ref<{ configured: boolean; mode: string; missing: string[] } | null>(null)
 const plans = ref<Plan[]>([])
 const groups = ref<GroupOption[]>([])
 const groupOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
@@ -47,16 +54,18 @@ const form = ref({
   weeklyLimitUsd: null as number | null,
   monthlyLimitUsd: null as number | null,
   validityDays: 30,
-  forSale: false
+  forSale: false,
+  paymentProvider: 'waffo' as 'wallet' | 'waffo',
+  waffoProductId: '',
+  quotaMode: 'usage' as 'spend' | 'usage',
+  fiveHourLimitPoints: 2000 as number | null,
+  weeklyLimitPoints: 10000 as number | null,
+  monthlyLimitPoints: 30000 as number | null
 })
-
-/** Plan limits are optional: an unset limit means the plan does not cap it. */
-function formatLimitUsd(value: number | null): string {
-  return value == null ? '不限' : formatUsd(value)
-}
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     // Bound both requests: batch completion waits here before releasing bulkBusy.
     const [planRes, groupRes] = await Promise.all([
@@ -64,10 +73,11 @@ async function load() {
       api.get('/admin/account-groups', { timeout: 20_000 })
     ])
     plans.value = planRes.data.plans
+    waffo.value = planRes.data.waffo
     pruneSelectedPlans()
     groups.value = groupRes.data.groups
   } catch (e) {
-    message.error(errMsg(e))
+    loadError.value = errMsg(e, '套餐加载失败，请重试')
   } finally {
     loading.value = false
   }
@@ -84,7 +94,13 @@ function openCreate() {
     weeklyLimitUsd: null,
     monthlyLimitUsd: null,
     validityDays: 30,
-    forSale: false
+    forSale: false,
+    paymentProvider: 'waffo',
+    waffoProductId: '',
+    quotaMode: 'usage',
+    fiveHourLimitPoints: 2000,
+    weeklyLimitPoints: 10000,
+    monthlyLimitPoints: 30000
   }
   showEdit.value = true
 }
@@ -100,7 +116,13 @@ function openEdit(plan: Plan) {
     weeklyLimitUsd: plan.weeklyLimitUsd,
     monthlyLimitUsd: plan.monthlyLimitUsd,
     validityDays: plan.validityDays,
-    forSale: plan.forSale
+    forSale: plan.forSale,
+    paymentProvider: plan.paymentProvider,
+    waffoProductId: plan.waffoProductId ?? '',
+    quotaMode: plan.quotaMode,
+    fiveHourLimitPoints: plan.fiveHourLimitPoints,
+    weeklyLimitPoints: plan.weeklyLimitPoints,
+    monthlyLimitPoints: plan.monthlyLimitPoints
   }
   showEdit.value = true
 }
@@ -114,6 +136,14 @@ async function save() {
     message.warning('请选择绑定的账号分组')
     return
   }
+  if (form.value.paymentProvider === 'waffo' && (!Number.isFinite(form.value.price) || form.value.price <= 0)) {
+    message.warning('Waffo 月费必须大于 0')
+    return
+  }
+  if (form.value.quotaMode === 'usage' && [form.value.fiveHourLimitPoints, form.value.weeklyLimitPoints, form.value.monthlyLimitPoints].some(value => value == null || !Number.isFinite(value) || value <= 0)) {
+    message.warning('请填写大于 0 的 5 小时、周和月用量上限')
+    return
+  }
   saving.value = true
   const payload = {
     name: form.value.name.trim(),
@@ -124,7 +154,13 @@ async function save() {
     weeklyLimitUsd: form.value.weeklyLimitUsd,
     monthlyLimitUsd: form.value.monthlyLimitUsd,
     validityDays: form.value.validityDays,
-    forSale: form.value.forSale
+    forSale: form.value.forSale,
+    paymentProvider: form.value.paymentProvider,
+    waffoProductId: form.value.waffoProductId.trim() || null,
+    quotaMode: form.value.quotaMode,
+    fiveHourLimitPoints: form.value.fiveHourLimitPoints,
+    weeklyLimitPoints: form.value.weeklyLimitPoints,
+    monthlyLimitPoints: form.value.monthlyLimitPoints
   }
   try {
     if (editing.value) {
@@ -170,9 +206,13 @@ const {
   selectedCount: selectedPlanCount,
   prune: pruneSelectedPlans,
   retainFailures: retainFailedPlans,
-  rowCheckable: planRowCheckable,
   runBatch
 } = useBulkSelection(plans, planRowKey)
+
+function selectPlan(id: string, event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  selectedPlanIds.value = checked ? [...new Set([...selectedPlanIds.value, id])] : selectedPlanIds.value.filter(value => value !== id)
+}
 
 function notifyBatchResult(action: string, results: BatchOutcome[]) {
   const { success, failed, firstError } = summarizeBatch(results)
@@ -232,100 +272,21 @@ function confirmBulkDeletePlans() {
   })
 }
 
-// SUB_PLANS_COLUMNS_MARKER
-const columns: TableColumn<Plan>[] = [
-  {
-    title: '名称',
-    key: 'name',
-    minWidth: 140,
-    render: (row) => h('div', [h('strong', row.name), row.description ? h('div', { class: 'subtext' }, row.description) : null])
-  },
-  {
-    title: '分组',
-    key: 'groupName',
-    width: 120,
-    render: (row) => row.groupName || '(已删除)'
-  },
-  {
-    title: '售价',
-    key: 'price',
-    width: 90,
-    render: (row) => (row.price > 0 ? `$${row.price.toFixed(2)}` : '免费')
-  },
-  {
-    title: '日限额',
-    key: 'dailyLimitUsd',
-    width: 90,
-    render: (row) => formatLimitUsd(row.dailyLimitUsd)
-  },
-  {
-    title: '周限额',
-    key: 'weeklyLimitUsd',
-    width: 90,
-    render: (row) => formatLimitUsd(row.weeklyLimitUsd)
-  },
-  {
-    title: '月限额',
-    key: 'monthlyLimitUsd',
-    width: 90,
-    render: (row) => formatLimitUsd(row.monthlyLimitUsd)
-  },
-  {
-    title: '有效期',
-    key: 'validityDays',
-    width: 90,
-    render: (row) => `${row.validityDays} 天`
-  },
-  {
-    title: '上架',
-    key: 'forSale',
-    width: 80,
-    render: (row) =>
-      h(
-        UiTag,
-        {
-          size: 'small',
-          type: row.forSale ? 'success' : 'default',
-          bordered: false
-        },
-        { default: () => (row.forSale ? '售卖中' : '未上架') }
-      )
-  },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 130,
-    render: (row) =>
-      h(
-        UiSpace,
-        { size: 4, wrap: false },
-        {
-          default: () => [
-            h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                type: 'error',
-                quaternary: true,
-                onClick: () => confirmDelete(row)
-              },
-              { default: () => '删除' }
-            )
-          ]
-        }
-      )
-  }
-]
-
 onMounted(load)
 </script>
 
 <template>
   <div>
     <div class="toolbar">
-      <UiButton type="primary" @click="openCreate">新建套餐</UiButton>
-      <UiButton secondary :loading="loading" @click="load">刷新</UiButton>
+      <div class="catalog-heading"><h2>为每种用量，准备合适的套餐。</h2><p>按月订阅，额度清晰。价格与服务资源可随时调整。</p></div>
+      <div class="toolbar-actions"><UiButton secondary :loading="loading" @click="load">刷新</UiButton><UiButton type="primary" @click="openCreate">新建套餐</UiButton></div>
+    </div>
+    <UiAlert v-if="loadError" type="error" class="mb-4">{{ loadError }}</UiAlert>
+    <div v-if="waffo" class="waffo-status">
+      <div><strong>Waffo 订阅支付</strong><span>{{ waffo.configured ? (waffo.mode === 'test' ? '测试模式' : '正式模式') : '待配置' }}</span></div>
+      <p v-if="!waffo.configured">在服务端配置商户密钥和通知公钥，再为每档套餐填写 Waffo 月度产品 ID。</p>
+      <p v-else>每档套餐关联 Waffo 月度产品；支付成功后自动开通，后续由 Waffo 按月续订。</p>
+      <a href="https://pancake.waffo.ai/" target="_blank" rel="noopener noreferrer">打开 Waffo 控制台 ↗</a>
     </div>
     <Transition name="fade">
       <div v-if="selectedPlanCount" class="bulk-actions">
@@ -342,19 +303,16 @@ onMounted(load)
       </div>
     </Transition>
 
-    <UiCard class="table-card" :bordered="false">
-      <UiDataTable
-      selectable
-      v-model:checked-row-keys="selectedPlanIds"
-      :row-key="planRowKey"
-      :row-checkable="planRowCheckable"
-      :columns="columns"
-      :data="plans"
-      :loading="loading"
-      :bordered="false"
-      :scroll-x="1000"
-    />
-    </UiCard>
+    <div v-if="loading && !plans.length" class="plan-grid" aria-label="正在加载套餐" aria-busy="true"><div v-for="n in 3" :key="n" class="plan-skeleton" /></div>
+    <div v-else-if="plans.length" class="plan-grid">
+      <SubscriptionPlanCard v-for="plan in plans" :key="plan.id" :plan="plan">
+        <template #selection><input type="checkbox" class="plan-select" :aria-label="`选择 ${plan.name}`" :checked="selectedPlanIds.includes(plan.id)" :disabled="bulkBusy" @change="selectPlan(plan.id, $event)" /></template>
+        <div class="plan-actions"><UiButton secondary :disabled="bulkBusy" @click="openEdit(plan)">编辑套餐</UiButton><UiButton quaternary type="error" :disabled="bulkBusy" @click="confirmDelete(plan)">删除</UiButton></div>
+        <template #status><div class="plan-status"><UiTag :type="plan.forSale ? 'success' : 'default'" size="small" :bordered="false">{{ plan.forSale ? '已上架' : '未上架' }}</UiTag><span v-if="plan.paymentProvider === 'waffo'">{{ !plan.hasAccounts ? '需分配上游账户' : plan.waffoProductId ? '产品已关联' : '待关联 Waffo 产品' }}</span></div></template>
+      </SubscriptionPlanCard>
+    </div>
+    <div v-else-if="!loadError" class="plans-empty"><h3>还没有套餐</h3><p>创建套餐并绑定账号分组，即可配置订阅额度。</p><UiButton secondary @click="openCreate">新建套餐</UiButton></div>
+    <p class="catalog-footnote">加权用量按订阅用户汇总，多个 API Key 共享额度。任一窗口用尽后暂停新调用，等待对应窗口重置。</p>
 
     <UiModal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
       <UiForm label-placement="top" @submit="save">
@@ -367,19 +325,38 @@ onMounted(load)
         <UiFormItem label="绑定账号分组">
           <UiSelect v-model:value="form.groupId" :options="groupOptions" placeholder="订阅授予的调度分组" />
         </UiFormItem>
+        <UiFormItem label="购买方式">
+          <UiSelect v-model:value="form.paymentProvider" :options="[{ label: 'Waffo 按月订阅', value: 'waffo' }, { label: '钱包余额购买', value: 'wallet' }]" />
+        </UiFormItem>
+        <UiFormItem v-if="form.paymentProvider === 'waffo'" label="Waffo 月度产品 ID">
+          <UiInput v-model:value="form.waffoProductId" placeholder="PROD_…" />
+          <p class="field-hint">关联 monthly 产品。下单按当前 USD 月费计价，税费由收银台展示；未关联时用户无法付款。</p>
+        </UiFormItem>
         <UiGrid :cols="2" :x-gap="12" :y-gap="2" responsive="screen">
           <UiGi span="2 s:1">
-            <UiFormItem label="售价（USD，0=免费）">
-              <UiInputNumber v-model:value="form.price" :min="0" :precision="2" style="width: 100%" />
+            <UiFormItem :label="form.paymentProvider === 'waffo' ? '月费（USD）' : '售价（USD，0=免费）'">
+              <UiInputNumber v-model:value="form.price" :min="form.paymentProvider === 'waffo' ? 0.01 : 0" :precision="2" style="width: 100%" />
             </UiFormItem>
           </UiGi>
           <UiGi span="2 s:1">
             <UiFormItem label="有效期（天）">
-              <UiInputNumber v-model:value="form.validityDays" :min="1" :precision="0" style="width: 100%" />
+              <UiInputNumber v-model:value="form.validityDays" :disabled="form.paymentProvider === 'waffo'" :min="1" :precision="0" style="width: 100%" />
+              <p v-if="form.paymentProvider === 'waffo'" class="field-hint">Waffo 以实际月度账期为准。</p>
             </UiFormItem>
           </UiGi>
         </UiGrid>
-        <UiGrid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
+        <UiFormItem label="用量规则">
+          <UiSelect v-model:value="form.quotaMode" :options="[{ label: '加权用量 · 5 小时 / 周 / 月', value: 'usage' }, { label: '金额额度 · 日 / 周 / 30 天（兼容旧套餐）', value: 'spend' }]" />
+        </UiFormItem>
+        <template v-if="form.quotaMode === 'usage'">
+          <UiGrid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
+            <UiGi span="3 s:1"><UiFormItem label="5 小时上限（点）"><UiInputNumber v-model:value="form.fiveHourLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
+            <UiGi span="3 s:1"><UiFormItem label="周上限（点）"><UiInputNumber v-model:value="form.weeklyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
+            <UiGi span="3 s:1"><UiFormItem label="月上限（点）"><UiInputNumber v-model:value="form.monthlyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
+          </UiGrid>
+          <p class="field-hint mb-4">标准用量为 2,000 / 10,000 / 30,000 点，三档初始容量为 1× / 3× / 10×。用量点按模型 Token 权重累计，不是钱包余额。月额度按实际订阅账期重置。</p>
+        </template>
+        <UiGrid v-else :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
           <UiGi span="3 s:1">
             <UiFormItem label="日限额">
               <UiInputNumber v-model:value="form.dailyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
@@ -391,7 +368,7 @@ onMounted(load)
             </UiFormItem>
           </UiGi>
           <UiGi span="3 s:1">
-            <UiFormItem label="月限额">
+            <UiFormItem label="30 天限额">
               <UiInputNumber v-model:value="form.monthlyLimitUsd" :min="0" placeholder="不限" style="width: 100%" />
             </UiFormItem>
           </UiGi>
@@ -413,14 +390,35 @@ onMounted(load)
 <style scoped>
 .toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 24px;
 }
-
-:deep(.subtext) {
-  margin-top: 3px;
-  color: rgba(15, 23, 42, 0.48);
-  font-size: 12px;
-}
+.catalog-heading h2 { font-size: 21px; font-weight: 600; letter-spacing: -.4px; }
+.catalog-heading p, .catalog-footnote { color: #72827f; font-size: 12px; margin-top: 8px; line-height: 1.8; }
+.toolbar-actions, .plan-actions { display: flex; gap: 10px; }
+.plan-actions > :first-child { flex: 1; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr)); gap: 18px; }
+.plan-select { accent-color: #0d9488; width: 16px; height: 16px; cursor: pointer; }
+.plan-select:focus-visible { outline: 2px solid #0d9488; outline-offset: 3px; }
+.plan-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: #72827f; padding-top: 16px; }
+.waffo-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 16px 18px; border: 1px solid #dce8e4; border-radius: 12px; margin-bottom: 22px; background: #f1f7f4; }
+.waffo-status strong { font-size: 13px; font-weight: 600; }
+.waffo-status span { font-size: 11px; color: #697b75; margin-left: 10px; }
+.waffo-status p { font-size: 12px; color: #647970; flex: 1 1 300px; line-height: 1.8; }
+.waffo-status a { color: #0f766e; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.catalog-footnote { margin-top: 18px; }
+.plans-empty { padding: 70px 24px; text-align: center; }
+.plans-empty h3 { font-weight: 600; }
+.plans-empty p { margin: 10px 0 20px; color: #72827f; font-size: 13px; }
+.plan-skeleton { height: 440px; background: #e9eeec; border-radius: 18px; animation: skeleton-pulse 1.5s ease-in-out infinite; }
+:global(.dark) .waffo-status { background: #182f2a; border-color: #354a43; }
+:global(.dark) .waffo-status p, :global(.dark) .waffo-status span, :global(.dark) .catalog-heading p, :global(.dark) .catalog-footnote, :global(.dark) .plan-status { color: #a5bab3; }
+:global(.dark) .waffo-status a { color: #79d0b8; }
+:global(.dark) .plan-skeleton { background: #1d3632; }
+@keyframes skeleton-pulse { 50% { opacity: .55; } }
+@media (max-width: 600px) { .catalog-heading h2 { font-size: 18px; } .toolbar-actions { width: 100%; justify-content: flex-end; } }
+@media (prefers-reduced-motion: reduce) { .plan-skeleton { animation: none; } }
 </style>

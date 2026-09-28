@@ -5,6 +5,7 @@ import { apiKeys } from '../db/schema'
 import { findApiKeyBySecret } from '../keys/manager'
 import { microsToUsd } from '../wallet/money'
 import { hasWindowHeadroom, resolveActiveSubscription } from '../subscriptions/manager'
+import type { SubscriptionQuotaMode } from '../subscriptions/usageWindows'
 
 export interface AuthedApiKey {
   id: string
@@ -28,6 +29,7 @@ export interface AuthedApiKey {
   billTo: 'subscription' | 'balance'
   /** The subscription to charge when billTo === 'subscription'. */
   subscriptionId: string | null
+  subscriptionQuotaMode?: SubscriptionQuotaMode
 }
 
 /**
@@ -79,6 +81,7 @@ export async function requireApiKey(
   }
   let billTo: 'subscription' | 'balance' = 'balance'
   let subscriptionId: string | null = null
+  let subscriptionQuotaMode: SubscriptionQuotaMode = 'spend'
 
   if (!record.userId || !record.userStatus) {
     reply.code(401).send({ error: 'API key owner is unavailable' })
@@ -105,7 +108,19 @@ export async function requireApiKey(
     const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
     if (sub) {
       subscriptionId = sub.subscriptionId
-      subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
+      subscriptionQuotaMode = sub.quotaMode ?? 'spend'
+      if (subscriptionQuotaMode === 'usage') {
+        const exhausted = sub.usageWindows.filter(window => window.remaining != null && window.remaining <= 0)
+        if (exhausted.length) {
+          const resetsAt = Math.max(...exhausted.map(window => window.resetsAt ?? Date.now()))
+          reply.header('Retry-After', String(Math.max(1, Math.ceil((resetsAt - Date.now()) / 1000))))
+          reply.code(429).send({ error: '订阅用量已达到上限，请等待额度重置', code: 'subscription_usage_exhausted', resetsAt, usageWindows: sub.usageWindows })
+          return
+        }
+        subscriptionUsable = true
+      } else {
+        subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
+      }
     }
   }
   if (subscriptionUsable) {
@@ -136,6 +151,7 @@ export async function requireApiKey(
     userBalance: microsToUsd(record.userBalanceMicros ?? 0),
     billTo,
     subscriptionId,
+    subscriptionQuotaMode,
   }
 }
 

@@ -9,6 +9,7 @@ import { api, errMsg } from '../api/client'
 import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 
 interface UsageLog {
+  subscriptionPoints: number | null
   usageSource?: string
   id: string
   ts: number
@@ -180,10 +181,10 @@ const usageColumns: TableColumn<UsageLog>[] = [
     { default: () => usageSourceLabel(row.usageSource) }) },
   { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
   {
-    title: '成本',
+    title: '消耗',
     key: 'cost',
-    width: 100,
-    render: (row) => formatUsd(row.cost)
+    width: 125,
+    render: (row) => row.subscriptionPoints != null ? `${row.subscriptionPoints.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 用量点` : formatUsd(row.cost)
   },
   {
     title: '首字',

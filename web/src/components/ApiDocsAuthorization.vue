@@ -111,7 +111,7 @@ defineExpose({ open })
 
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="dialogOpen" class="authorization-backdrop" @click.self="close">
+        <div v-if="dialogOpen" class="authorization-backdrop">
           <section class="authorization-dialog" role="dialog" aria-modal="true" aria-labelledby="authorization-title">
             <header>
               <span class="dialog-icon">

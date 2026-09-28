@@ -206,6 +206,12 @@ const schema = z.object({
       && (!url.pathname || url.pathname === '/') && !url.search && !url.hash
   }, 'must be an HTTP(S) or SOCKS5 proxy URL without a path/query/fragment').optional()),
   // Payment providers
+  WAFFO_MODE: z.enum(['test', 'prod']).default('test'),
+  WAFFO_MERCHANT_ID: z.preprocess(blankToUndefined, z.string().optional()),
+  WAFFO_STORE_ID: z.preprocess(blankToUndefined, z.string().optional()),
+  WAFFO_PRIVATE_KEY: z.preprocess(blankToUndefined, z.string().optional()),
+  WAFFO_WEBHOOK_PUBLIC_KEY: z.preprocess(blankToUndefined, z.string().optional()),
+  WAFFO_SUCCESS_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => new URL(value).protocol === 'https:', 'must use HTTPS').optional()),
   ALIPAY_ENV: z.enum(['production', 'sandbox']).default('production'),
   ALIPAY_APP_ID: z.string().optional(),
   ALIPAY_PRIVATE_KEY: z.string().optional(),

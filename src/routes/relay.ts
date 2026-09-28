@@ -713,6 +713,7 @@ interface RelayMeta {
   multiplier: number
   billTo: 'subscription' | 'balance'
   subscriptionId: string | null
+  subscriptionQuotaMode?: 'spend' | 'usage'
   attemptCount: number
   upstreamRequestId?: string | null
   reasoningEffort?: string | null
@@ -2070,7 +2071,7 @@ async function runRelayLoop(
         model: parsed.model,
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
-        subscriptionId: apiKey.subscriptionId,
+        subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
         usage: { ...emptyUsage(), usageSource: 'missing' },
         status: 'error',
         errorCode: 'no_available_account',
@@ -2169,7 +2170,7 @@ async function runRelayLoop(
           await recordUsage({
             apiKeyId: apiKey.id, userId: apiKey.userId, accountId: account.id,
             provider: provider.id, model: parsed.model, multiplier: apiKey.groupMultiplier ?? 1,
-            billTo: apiKey.billTo, subscriptionId: apiKey.subscriptionId,
+            billTo: apiKey.billTo, subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
             usage: { ...emptyUsage(), usageSource: 'missing' }, status: 'error', errorCode: 'client_disconnected',
             errorMessage: 'Client disconnected before upstream response headers.',
             attemptCount: attempt + 1, latencyMs: Date.now() - startedAt,
@@ -2199,7 +2200,7 @@ async function runRelayLoop(
             model: parsed.model,
             multiplier: apiKey.groupMultiplier ?? 1,
             billTo: apiKey.billTo,
-            subscriptionId: apiKey.subscriptionId,
+            subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
             usage: { ...emptyUsage(), usageSource: 'missing' },
             status: 'error',
             errorCode: 'upstream_network_error',
@@ -2230,7 +2231,7 @@ async function runRelayLoop(
         startedAt,
         multiplier: apiKey.groupMultiplier ?? 1,
         billTo: apiKey.billTo,
-        subscriptionId: apiKey.subscriptionId,
+        subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
         attemptCount: attempt + 1,
         upstreamRequestId: upstreamRequestId(upstream.headers, (account.metadata as Record<string, unknown> | null)?.upstreamRequestIdHeader),
         reasoningEffort: provider === PROVIDERS['zhipu-responses'] ? zhipuResponsesEffort(body, parsed.model) ?? null
@@ -2363,7 +2364,7 @@ async function runRelayLoop(
       model: parsed.model,
       multiplier: apiKey.groupMultiplier ?? 1,
       billTo: apiKey.billTo,
-      subscriptionId: apiKey.subscriptionId,
+      subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
       usage: { ...emptyUsage(), usageSource: 'missing' },
       status: 'error',
       errorCode: 'all_accounts_failed',
@@ -2513,7 +2514,7 @@ async function sendStreaming(
       model: meta.model,
       multiplier: meta.multiplier,
       billTo: meta.billTo,
-      subscriptionId: meta.subscriptionId,
+      subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
       usage: { ...emptyUsage(), usageSource: 'missing' },
       status: 'error',
       errorCode: code,
@@ -2571,7 +2572,7 @@ async function sendStreaming(
       model: meta.model,
       multiplier: meta.multiplier,
       billTo: meta.billTo,
-      subscriptionId: meta.subscriptionId,
+      subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
       usage: jsonParser.result(),
       status: responsesStreamStatus(upstream.ok, responsesProtocol, jsonState),
       errorCode: jsonState.errorCode ?? (jsonState.sawFailure ? 'invalid_upstream_response' : null),
@@ -2796,7 +2797,7 @@ async function sendStreaming(
     model: meta.model,
     multiplier: meta.multiplier,
     billTo: meta.billTo,
-    subscriptionId: meta.subscriptionId,
+    subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
     usage: parser.result(streamReadFailed || !!clientCanceled),
     // Responses-protocol success requires a `response.completed` terminal. A
     // `response.failed` / `response.incomplete` (incl. `cyber_policy` blocks) or
@@ -2929,7 +2930,7 @@ async function sendSanitizedRelayError(
     model: meta.model,
     multiplier: meta.multiplier,
     billTo: meta.billTo,
-    subscriptionId: meta.subscriptionId,
+    subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
     usage: { ...emptyUsage(), usageSource: 'missing' },
     status: 'error',
     errorCode: code,
@@ -3018,7 +3019,7 @@ async function sendBuffered(
       model: meta.model,
       multiplier: meta.multiplier,
       billTo: meta.billTo,
-      subscriptionId: meta.subscriptionId,
+      subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
       usage,
       status: convertedStatus ?? (upstream.ok ? 'success' : 'error'),
       errorCode: errorDetails?.code ?? (convertedStatus ? 'upstream_response_failed' : null),
@@ -3085,7 +3086,7 @@ async function sendBuffered(
     model: meta.model,
     multiplier: meta.multiplier,
     billTo: meta.billTo,
-    subscriptionId: meta.subscriptionId,
+    subscriptionId: meta.subscriptionId, subscriptionQuotaMode: meta.subscriptionQuotaMode,
     usage,
     status: upstream.ok && !semanticFailure ? 'success' : 'error',
     errorCode: errorDetails?.code ?? null,

@@ -35,6 +35,7 @@ function fakeReply() {
   const reply = {
     statusCode: 200,
     payload: null as unknown,
+    header: vi.fn().mockReturnThis(),
     code(code: number) {
       reply.statusCode = code
       return reply
@@ -84,6 +85,26 @@ beforeEach(() => {
 })
 
 describe('requireApiKey', () => {
+  it.each(['fiveHour', 'weekly', 'monthly'])('blocks exhausted %s usage even with a positive wallet', async key => {
+    const request = fakeRequest()
+    const reply = fakeReply()
+    mocks.findApiKeyBySecret.mockResolvedValue(apiKeyRecord({ userId: 'user-1', userStatus: 'active', userBalanceMicros: 100_000_000, accountGroupId: 'group-1' }))
+    mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-usage', quotaMode: 'usage', usageWindows: [{ key, remaining: 0, percent: 100, resetsAt: Date.now() + 3600_000 }] })
+    await requireApiKey(request, reply)
+    expect(reply.statusCode).toBe(429)
+    expect(reply.payload).toMatchObject({ code: 'subscription_usage_exhausted' })
+    expect(request.apiKey).toBeUndefined()
+    expect(mocks.hasWindowHeadroom).not.toHaveBeenCalled()
+  })
+  it('attaches the weighted settlement policy to admitted requests', async () => {
+    const request = fakeRequest()
+    const reply = fakeReply()
+    mocks.findApiKeyBySecret.mockResolvedValue(apiKeyRecord({ userId: 'user-1', userStatus: 'active', userBalanceMicros: 0, accountGroupId: 'group-1' }))
+    mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-usage', quotaMode: 'usage', usageWindows: [{ key: 'fiveHour', remaining: 100 }] })
+    await requireApiKey(request, reply)
+    expect(request.apiKey).toMatchObject({ billTo: 'subscription', subscriptionQuotaMode: 'usage', subscriptionId: 'sub-usage' })
+    expect(mocks.hasWindowHeadroom).not.toHaveBeenCalled()
+  })
   it('blocks existing wallet debt even when a subscription has remaining quota', async () => {
     const request = fakeRequest()
     const reply = fakeReply()

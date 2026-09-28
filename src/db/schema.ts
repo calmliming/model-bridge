@@ -72,6 +72,12 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   validityDays: bigint('validity_days', { mode: 'number' }).notNull().default(30),
   forSale: boolean('for_sale').notNull().default(false), // listed in the user-facing store
   sortOrder: bigint('sort_order', { mode: 'number' }).notNull().default(0),
+  paymentProvider: text('payment_provider').notNull().default('wallet'),
+  waffoProductId: text('waffo_product_id'),
+  quotaMode: text('quota_mode').notNull().default('spend'),
+  fiveHourLimitPoints: doublePrecision('five_hour_limit_points'),
+  weeklyLimitPoints: doublePrecision('weekly_limit_points'),
+  monthlyLimitPoints: doublePrecision('monthly_limit_points'),
   createdAt: epochMs('created_at'),
 })
 
@@ -93,8 +99,45 @@ export const userSubscriptions = pgTable('user_subscriptions', {
   dailyUsageUsd: doublePrecision('daily_usage_usd').notNull().default(0),
   weeklyUsageUsd: doublePrecision('weekly_usage_usd').notNull().default(0),
   monthlyUsageUsd: doublePrecision('monthly_usage_usd').notNull().default(0),
+  fiveHourWindowStart: bigint('five_hour_window_start', { mode: 'number' }),
+  fiveHourUsagePoints: doublePrecision('five_hour_usage_points').notNull().default(0),
+  weeklyPointsStart: bigint('weekly_points_start', { mode: 'number' }),
+  weeklyUsagePoints: doublePrecision('weekly_usage_points').notNull().default(0),
+  monthlyPointsStart: bigint('monthly_points_start', { mode: 'number' }),
+  monthlyUsagePoints: doublePrecision('monthly_usage_points').notNull().default(0),
+  billingPeriodStart: bigint('billing_period_start', { mode: 'number' }),
+  billingPeriodEnd: bigint('billing_period_end', { mode: 'number' }),
   assignedBy: text('assigned_by'), // admin username or 'purchase'
   note: text('note'),
+  createdAt: epochMs('created_at'),
+})
+
+/** A server-created Waffo checkout, retained across renewals. Never credits the wallet. */
+export const subscriptionCheckouts = pgTable('subscription_checkouts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  planId: text('plan_id').notNull(),
+  groupId: text('group_id').notNull(),
+  productId: text('product_id').notNull(),
+  storeId: text('store_id').notNull(),
+  mode: text('mode').notNull(),
+  price: doublePrecision('price').notNull(),
+  status: text('status').notNull().default('creating'),
+  sessionId: text('session_id'),
+  checkoutUrl: text('checkout_url'),
+  providerOrderId: text('provider_order_id').unique(),
+  subscriptionId: text('subscription_id').unique(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  eventAt: bigint('event_at', { mode: 'number' }).notNull().default(0),
+  createdAt: epochMs('created_at'),
+})
+
+/** Replay protection is committed in the same transaction as subscription changes. */
+export const subscriptionEvents = pgTable('subscription_events', {
+  id: text('id').primaryKey(),
+  checkoutId: text('checkout_id'),
+  eventType: text('event_type').notNull(),
+  payload: jsonb('payload').notNull(),
   createdAt: epochMs('created_at'),
 })
 
@@ -259,6 +302,8 @@ export const usageLogs = pgTable('usage_logs', {
   cost: doublePrecision('cost').notNull().default(0), // amount charged to the user (base_cost × group multiplier)
   baseCost: doublePrecision('base_cost').notNull().default(0), // list-price cost before markup
   billTo: text('bill_to').notNull().default('balance'), // subscription | balance — which budget paid
+  subscriptionId: text('subscription_id'),
+  subscriptionPoints: doublePrecision('subscription_points'), // null = legacy monetary metering
   status: text('status').notNull().default('success'),
   errorCode: text('error_code'),
   errorMessage: text('error_message'),

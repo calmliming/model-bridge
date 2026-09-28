@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
 import { config } from '../config'
+import { waffoConfiguration } from '../payments/providers/waffo'
 import { changeAdminPassword, getAdminUserId, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
@@ -284,6 +285,12 @@ const planFields = {
   validityDays: z.number().int().positive().max(3650).optional(),
   forSale: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  paymentProvider: z.enum(['wallet', 'waffo']).optional(),
+  waffoProductId: z.string().trim().regex(/^PROD_[A-Za-z0-9_-]+$/).nullable().optional(),
+  quotaMode: z.enum(['spend', 'usage']).optional(),
+  fiveHourLimitPoints: z.number().finite().positive().nullable().optional(),
+  weeklyLimitPoints: z.number().finite().positive().nullable().optional(),
+  monthlyLimitPoints: z.number().finite().positive().nullable().optional(),
 }
 const createPlanSchema = z.object(planFields)
 const updatePlanSchema = z
@@ -298,6 +305,12 @@ const updatePlanSchema = z
     validityDays: planFields.validityDays,
     forSale: planFields.forSale,
     sortOrder: planFields.sortOrder,
+    paymentProvider: planFields.paymentProvider,
+    waffoProductId: planFields.waffoProductId,
+    quotaMode: planFields.quotaMode,
+    fiveHourLimitPoints: planFields.fiveHourLimitPoints,
+    weeklyLimitPoints: planFields.weeklyLimitPoints,
+    monthlyLimitPoints: planFields.monthlyLimitPoints,
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
 
@@ -1082,7 +1095,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   // ── Subscription plans ───────────────────────────────────
   app.get('/api/admin/subscription-plans', { preHandler: requireAdmin }, async () => {
-    return { plans: await listPlans(false) }
+    return { plans: await listPlans(false), waffo: waffoConfiguration() }
   })
 
   app.post('/api/admin/subscription-plans', { preHandler: requireAdmin }, async (request, reply) => {
@@ -1105,17 +1118,21 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
-      await updatePlan(request.params.id, body.data)
-      return { ok: true }
+      try {
+        await updatePlan(request.params.id, body.data)
+        return { ok: true }
+      } catch (error) { return sendUserManagerError(reply, error) }
     },
   )
 
   app.delete<{ Params: { id: string } }>(
     '/api/admin/subscription-plans/:id',
     { preHandler: requireAdmin },
-    async (request) => {
-      await deletePlan(request.params.id)
-      return { ok: true }
+    async (request, reply) => {
+      try {
+        await deletePlan(request.params.id)
+        return { ok: true }
+      } catch (error) { return sendUserManagerError(reply, error) }
     },
   )
 

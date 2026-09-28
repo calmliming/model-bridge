@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { UiTag } from '../components/ui'
@@ -10,8 +10,13 @@ import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 import BrandLogo from '../components/BrandLogo.vue'
+import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
+import RechargeAmountPicker from '../components/RechargeAmountPicker.vue'
+import SubscriptionUsageMeters from '../components/SubscriptionUsageMeters.vue'
+import { isWaffoCheckoutUrl, type BillingPlan, type SubscriptionUsageWindow } from '../billing'
 
 interface UserMe {
+  id: string
   email: string
   name: string
   balance: number
@@ -27,6 +32,7 @@ interface WalletTransaction {
 }
 
 interface UsageLog {
+  subscriptionPoints: number | null
   id: string
   ts: number
   provider: string
@@ -71,6 +77,10 @@ interface Subscription {
   dailyRemaining: number | null
   weeklyRemaining: number | null
   monthlyRemaining: number | null
+  paymentProvider: 'wallet' | 'waffo'
+  renewalStatus: string | null
+  quotaMode: 'spend' | 'usage'
+  usageWindows: SubscriptionUsageWindow[]
 }
 
 interface UsageSummary {
@@ -84,16 +94,8 @@ interface UsageSummary {
   success30d: number
 }
 
-interface StorePlan {
-  id: string
-  name: string
-  description: string | null
-  price: number
-  validityDays: number
-  dailyLimitUsd: number | null
-  weeklyLimitUsd: number | null
-  monthlyLimitUsd: number | null
-}
+type StorePlan = BillingPlan
+interface SubscriptionCheckout { id: string; status: string; checkoutUrl: string | null; expiresAt: number }
 
 const message = useMessage()
 const router = useRouter()
@@ -109,6 +111,13 @@ const showStore = ref(false)
 const purchasingId = ref<string | null>(null)
 const subscriptions = ref<Subscription[]>([])
 const storePlans = ref<StorePlan[]>([])
+const storeLoading = ref(false)
+const storeError = ref('')
+const waffoTestMode = ref(false)
+const subscriptionCheckout = ref<SubscriptionCheckout | null>(null)
+const checkingSubscription = ref(false)
+const refreshingUsage = ref(false)
+let usageRefreshTimer: ReturnType<typeof setInterval> | undefined
 const rechargeAmount = ref(10)
 type PaymentProvider = 'manual' | 'alipay' | 'alipay_web' | 'wechat'
 const selectedProvider = ref<PaymentProvider>('manual')
@@ -246,7 +255,9 @@ const notices = computed<DashboardNotice[]>(() => {
     const daysLeft = Math.ceil((expiring.expiresAt - now) / 86_400_000)
     items.push({ key: 'expiry', title: `${expiring.planName || '订阅'}即将到期`, detail: daysLeft <= 1 ? '将在 24 小时内到期。' : `还有 ${daysLeft} 天到期。`, action: 'store', actionLabel: '查看套餐' })
   }
-  const exhausted = active.find((sub) => sub.dailyRemaining === 0 || sub.weeklyRemaining === 0 || sub.monthlyRemaining === 0)
+  const exhausted = active.find((sub) => sub.quotaMode === 'usage'
+    ? sub.usageWindows.some(window => window.remaining === 0)
+    : sub.dailyRemaining === 0 || sub.weeklyRemaining === 0 || sub.monthlyRemaining === 0)
   if (exhausted) {
     items.push({ key: 'quota', title: `${exhausted.planName || '订阅'}额度已用尽`, detail: '查看当前额度或选择其他套餐。', action: 'subscription', actionLabel: '查看订阅' })
   }
@@ -308,13 +319,13 @@ const metricCards = computed(() => [
     tone: 'indigo',
   },
   {
-    label: '今日费用',
+    label: '今日按量费用',
     value: formatUsd(stat.value.cost24h),
     hint: `${formatNumber(stat.value.tokens24h)} tokens`,
     tone: 'rose',
   },
   {
-    label: '30天 费用',
+    label: '30天 按量费用',
     value: formatUsd(stat.value.cost30d),
     hint: `${formatNumber(stat.value.requests30d)} 次 · ${formatNumber(stat.value.tokens30d)} tokens`,
     tone: 'amber',
@@ -508,17 +519,30 @@ async function redeem() {
 
 async function openStore() {
   showStore.value = true
+  storeLoading.value = true
+  storeError.value = ''
   try {
     const { data } = await api.get('/users/subscription-plans')
     storePlans.value = data.plans
+    waffoTestMode.value = data.waffo?.mode === 'test' && data.waffo?.configured
   } catch (e) {
-    message.error(errMsg(e, '加载套餐失败'))
+    storeError.value = errMsg(e, '加载套餐失败')
+  } finally {
+    storeLoading.value = false
   }
 }
 
 async function purchase(plan: StorePlan) {
+  if (purchasingId.value) return
   purchasingId.value = plan.id
   try {
+    if (plan.paymentProvider === 'waffo') {
+      const { data } = await api.post('/users/subscriptions/checkout', { planId: plan.id })
+      if (!data.checkout.checkoutUrl || !isWaffoCheckoutUrl(data.checkout.checkoutUrl)) throw new Error('invalid checkout URL')
+      subscriptionCheckout.value = data.checkout
+      sessionStorage.setItem(`mb_subscription_checkout:${user.value!.id}`, data.checkout.id)
+      return
+    }
     await api.post('/users/subscriptions/purchase', { planId: plan.id })
     message.success(`已开通「${plan.name}」`)
     showStore.value = false
@@ -530,12 +554,37 @@ async function purchase(plan: StorePlan) {
   }
 }
 
-function limitLabel(plan: StorePlan): string {
-  const parts: string[] = []
-  if (plan.dailyLimitUsd != null) parts.push(`日 $${plan.dailyLimitUsd}`)
-  if (plan.weeklyLimitUsd != null) parts.push(`周 $${plan.weeklyLimitUsd}`)
-  if (plan.monthlyLimitUsd != null) parts.push(`月 $${plan.monthlyLimitUsd}`)
-  return parts.length ? parts.join(' · ') : '额度不限'
+async function checkSubscriptionPayment(silent = false) {
+  const id = subscriptionCheckout.value?.id ?? (user.value ? sessionStorage.getItem(`mb_subscription_checkout:${user.value.id}`) : null)
+  if (!id || checkingSubscription.value) return
+  checkingSubscription.value = true
+  try {
+    const { data } = await api.get(`/users/subscription-checkouts/${encodeURIComponent(id)}`)
+    subscriptionCheckout.value = data.checkout
+    if (['active', 'canceling'].includes(data.checkout.status)) {
+      sessionStorage.removeItem(`mb_subscription_checkout:${user.value!.id}`)
+      subscriptionCheckout.value = null
+      message.success('付款已确认，订阅已开通')
+      await load()
+    } else if (!silent) {
+      message.info(data.checkout.status === 'expired' ? '支付会话已过期，请重新选择套餐' : '尚未收到付款确认，请稍后刷新')
+    }
+  } catch (e) {
+    if (!silent) message.error(errMsg(e, '查询订阅状态失败'))
+  } finally { checkingSubscription.value = false }
+}
+
+function refreshSubscriptionOnFocus() { void checkSubscriptionPayment(true) }
+
+async function refreshSubscriptionUsage(silent = false) {
+  if (refreshingUsage.value) return
+  refreshingUsage.value = true
+  try {
+    const { data } = await api.get('/users/subscriptions', { timeout: 15_000 })
+    subscriptions.value = data.subscriptions
+  } catch (error) {
+    if (!silent) message.error(errMsg(error, '刷新订阅用量失败'))
+  } finally { refreshingUsage.value = false }
 }
 
 function remainLabel(sub: Subscription): string {
@@ -558,7 +607,7 @@ const usageColumns: TableColumn<UsageLog>[] = [
   { title: '时间', key: 'ts', minWidth: 140, render: (row) => formatTime(row.ts) },
   { title: '服务商', key: 'provider', width: 90 },
   { title: '模型', key: 'model', minWidth: 160, render: (row) => row.model || '—' },
-  { title: '成本', key: 'cost', width: 100, render: (row) => formatUsd(row.cost) },
+  { title: '消耗', key: 'cost', width: 115, render: (row) => row.subscriptionPoints != null ? `${row.subscriptionPoints.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 用量点` : formatUsd(row.cost) },
   { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
 ]
 
@@ -570,8 +619,14 @@ const paymentColumns: TableColumn<PaymentOrder>[] = [
 ]
 
 onMounted(() => {
-  void load()
+  void load().then(() => checkSubscriptionPayment(true))
   void loadInsights()
+  window.addEventListener('focus', refreshSubscriptionOnFocus)
+  usageRefreshTimer = setInterval(() => { if (document.visibilityState === 'visible') void refreshSubscriptionUsage(true) }, 60_000)
+})
+onUnmounted(() => {
+  window.removeEventListener('focus', refreshSubscriptionOnFocus)
+  clearInterval(usageRefreshTimer)
 })
 </script>
 
@@ -663,17 +718,19 @@ onMounted(() => {
 
       <UiCard id="my-subscriptions" title="我的订阅" :bordered="false" style="margin-bottom: 18px">
         <template #header-extra>
-          <UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton>
+          <UiSpace :size="8"><UiButton size="small" quaternary :loading="refreshingUsage" @click="refreshSubscriptionUsage()">刷新用量</UiButton><UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton></UiSpace>
         </template>
         <p v-if="!subscriptions.length" class="sub-empty">
-          暂无订阅。可在「套餐商店」用余额开通，或联系管理员分配。
+          暂无订阅。可在「套餐商店」选择 Lite、Pro 或 Max，或联系管理员分配。
         </p>
-        <div v-for="sub in subscriptions" :key="sub.id" class="sub-row">
+        <div v-for="sub in subscriptions" :key="sub.id" class="sub-row" :class="{ 'sub-row--usage': sub.quotaMode === 'usage' }">
           <div class="sub-info">
             <strong>{{ sub.planName || '套餐' }}</strong>
             <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
+            <span v-if="sub.paymentProvider === 'waffo'" class="subtext">{{ sub.renewalStatus === 'canceling' ? '已取消续订，当前已付费周期仍可使用' : sub.renewalStatus === 'past_due' ? '续费未成功，请在 Waffo 更新支付方式' : sub.status === 'active' ? '通过 Waffo 按月续订' : 'Waffo 订阅已结束' }} · <a class="subscription-manage-link" href="https://pancake.waffo.ai/buyer" target="_blank" rel="noopener noreferrer">管理订阅 ↗</a></span>
           </div>
-          <UiTag size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
+          <SubscriptionUsageMeters v-if="sub.quotaMode === 'usage'" :windows="sub.usageWindows" :expired="sub.status !== 'active'" />
+          <UiTag v-else size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
             {{ sub.status === 'active' ? remainLabel(sub) : '已过期' }}
           </UiTag>
         </div>
@@ -722,12 +779,13 @@ onMounted(() => {
       </UiGrid>
     </UiSpin>
 
-    <UiModal v-model:show="showRecharge" title="发起充值" :width="420">
+    <UiModal v-model:show="showRecharge" title="按量充值" :width="500">
       <UiAlert v-if="!onlinePaymentsEnabled" type="info" class="mb-4">
         在线支付暂未开放，可使用线下转账或兑换码充值。
       </UiAlert>
       <UiForm label-placement="top">
-        <UiFormItem label="到账金额（USD）">
+        <RechargeAmountPicker v-model="rechargeAmount" />
+        <UiFormItem label="自定义到账金额（USD）">
           <UiInputNumber v-model:value="rechargeAmount" :min="0.01" :precision="2" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="支付方式">
@@ -762,26 +820,27 @@ onMounted(() => {
       </template>
     </UiModal>
 
-    <UiModal v-model:show="showStore" title="套餐商店" :width="560">
-      <p v-if="!storePlans.length" class="sub-empty">暂无可购买的套餐。</p>
-      <div v-for="plan in storePlans" :key="plan.id" class="store-card">
-        <div class="store-info">
-          <strong>{{ plan.name }}</strong>
-          <span class="subtext">{{ plan.description || limitLabel(plan) }}</span>
-          <span class="subtext">额度：{{ limitLabel(plan) }} · 有效期 {{ plan.validityDays }} 天</span>
-        </div>
-        <div class="store-buy">
-          <strong class="store-price">{{ plan.price > 0 ? `$${plan.price.toFixed(2)}` : '免费' }}</strong>
-          <UiButton
-            size="small"
-            type="primary"
-            :loading="purchasingId === plan.id"
-            @click="purchase(plan)"
-          >
-            {{ plan.price > 0 ? '余额购买' : '领取' }}
-          </UiButton>
+    <UiModal v-model:show="showStore" title="选择适合你的套餐" :width="1060">
+      <div class="store-intro"><p>从轻量体验，到高频使用。</p><span>Waffo 按月自动续订，可在订阅管理中取消续订；税费以收银台显示为准。</span></div>
+      <UiAlert v-if="waffoTestMode" type="warning" class="mb-4">当前为 Waffo 测试模式，请使用测试支付方式。</UiAlert>
+      <UiAlert v-if="storeError" type="error" class="mb-4">{{ storeError }} <UiButton size="small" quaternary @click="openStore">重新加载</UiButton></UiAlert>
+      <div v-if="subscriptionCheckout" class="subscription-checkout" role="status">
+        <div><strong>{{ subscriptionCheckout.status === 'pending' ? '前往 Waffo 完成订阅' : subscriptionCheckout.status === 'expired' ? '支付会话已过期' : '订阅付款状态' }}</strong><p>付款确认后自动开通。返回此页可刷新订阅状态。</p></div>
+        <div class="subscription-checkout-actions">
+          <a v-if="subscriptionCheckout.status === 'pending' && subscriptionCheckout.checkoutUrl && isWaffoCheckoutUrl(subscriptionCheckout.checkoutUrl)" class="btn btn-primary" :href="subscriptionCheckout.checkoutUrl" target="_blank" rel="noopener noreferrer">打开 Waffo 收银台 ↗</a>
+          <UiButton secondary :loading="checkingSubscription" @click="checkSubscriptionPayment()">刷新付款状态</UiButton>
         </div>
       </div>
+      <div v-if="storeLoading" class="store-plan-grid" aria-busy="true" aria-label="正在加载套餐"><div v-for="n in 3" :key="n" class="store-skeleton" /></div>
+      <p v-else-if="!storePlans.length && !storeError" class="sub-empty">暂无可购买的套餐。</p>
+      <div v-else class="store-plan-grid">
+        <SubscriptionPlanCard v-for="plan in storePlans" :key="plan.id" :plan="plan">
+          <UiButton block :type="plan.name.toLowerCase() === 'pro' ? 'primary' : 'default'" :secondary="plan.name.toLowerCase() !== 'pro'" :loading="purchasingId === plan.id" :disabled="!!purchasingId || plan.checkoutAvailable === false" @click="purchase(plan)">
+            {{ plan.checkoutAvailable === false ? '暂未开放订阅' : plan.paymentProvider === 'waffo' ? `订阅 ${plan.name}` : plan.price > 0 ? '余额购买' : '领取' }}
+          </UiButton>
+        </SubscriptionPlanCard>
+      </div>
+      <div class="store-footer"><p>加权套餐按订阅账户共享用量。达到任一上限后暂停新调用，等待窗口重置。按量充值用于钱包计费。</p><div><a href="https://pancake.waffo.ai/buyer" target="_blank" rel="noopener noreferrer">管理 Waffo 订阅 ↗</a><UiButton quaternary type="primary" @click="showStore = false; showRecharge = true">按量充值</UiButton></div></div>
     </UiModal>
 
     <UiModal v-model:show="showPaymentQr" title="账户充值" :width="520">
@@ -854,6 +913,23 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.store-intro { margin-bottom: 23px; }
+.store-intro p { font-size: 21px; font-weight: 600; letter-spacing: -.5px; margin-bottom: 8px; }
+.store-intro span, .store-footer p { font-size: 12px; color: #71837b; line-height: 1.8; }
+.store-plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr)); gap: 16px; }
+.store-skeleton { height: 440px; border-radius: 18px; background: #ecf1ee; }
+.store-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 20px; }
+.store-footer > div { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.store-footer a, .subscription-manage-link { color: #0f766e; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.subscription-checkout { padding: 18px; border: 1px solid #98c4b8; border-radius: 12px; background: #f0faf5; margin-bottom: 20px; }
+.subscription-checkout strong { font-size: 14px; }
+.subscription-checkout p { margin-top: 6px; font-size: 12px; color: #5f7c71; }
+.subscription-checkout-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+:global(.dark) .store-intro span, :global(.dark) .store-footer p { color: #a5bcb2; }
+:global(.dark) .store-footer a, :global(.dark) .subscription-manage-link { color: #79d0b8; }
+:global(.dark) .subscription-checkout { background: #1c352e; border-color: #456e5d; }
+:global(.dark) .subscription-checkout p { color: #b7cfc1; }
+:global(.dark) .store-skeleton { background: #1c352e; }
 .dashboard-notices {
   margin-bottom: 18px;
 }
@@ -1255,8 +1331,7 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.sub-row,
-.store-card {
+.sub-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1265,13 +1340,13 @@ onMounted(() => {
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
 }
 
-.sub-row:last-child,
-.store-card:last-child {
+.sub-row:last-child {
   border-bottom: none;
 }
+.sub-row--usage { flex-direction: column; align-items: stretch; gap: 16px; padding: 18px 0; }
+.sub-row--usage .sub-info { gap: 5px; }
 
-.sub-info,
-.store-info {
+.sub-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1280,17 +1355,6 @@ onMounted(() => {
 .subtext {
   color: rgba(15, 23, 42, 0.5);
   font-size: 12px;
-}
-
-.store-buy {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.store-price {
-  color: #0f766e;
-  font-size: 15px;
 }
 
 .danger,
@@ -1586,15 +1650,13 @@ onMounted(() => {
     white-space: nowrap;
   }
 
-  .sub-row,
-  .store-card {
+  .sub-row {
     align-items: flex-start;
     flex-direction: column;
     gap: 8px;
   }
 
-  .sub-info,
-  .store-info {
+  .sub-info {
     min-width: 0;
     max-width: 100%;
   }
@@ -1608,11 +1670,6 @@ onMounted(() => {
     white-space: normal;
     line-height: 1.35;
     overflow-wrap: anywhere;
-  }
-
-  .store-buy {
-    justify-content: space-between;
-    width: 100%;
   }
 
   .usage-filter {

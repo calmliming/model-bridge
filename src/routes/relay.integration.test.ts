@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   cost: 0.01, key: {} as Record<string, unknown>,
   fetch: vi.fn(), query: vi.fn(), connect: vi.fn(),
   consumeSubscriptionUsage: vi.fn(), resolveActiveSubscription: vi.fn(),
+  consumeWeightedSubscriptionUsage: vi.fn(),
   pickAccount: vi.fn(), markAccountUsed: vi.fn(), penalizeAccount: vi.fn(), penalizeAccountModel: vi.fn(),
   ensureFreshToken: vi.fn(),
   cachedAntigravityModels: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('../subscriptions/manager', () => ({
   resolveActiveSubscription: mocks.resolveActiveSubscription,
   hasWindowHeadroom: async () => true,
   consumeSubscriptionUsage: mocks.consumeSubscriptionUsage,
+  consumeWeightedSubscriptionUsage: mocks.consumeWeightedSubscriptionUsage,
 }))
 vi.mock('../http/upstream', () => ({ fetchWithConnectTimeout: mocks.fetch }))
 
@@ -98,6 +100,7 @@ beforeEach(async () => {
   }
   mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-1', planLimits: {} })
   mocks.consumeSubscriptionUsage.mockResolvedValue(false)
+  mocks.consumeWeightedSubscriptionUsage.mockResolvedValue(undefined)
   mocks.fetch.mockImplementation(async () => openaiResponse())
 
   // Transactional storage double. Real auth, relay, usage recording, wallet
@@ -160,6 +163,27 @@ async function withRelay(run: (request: (
 }
 
 const prompt = { model: 'gpt-5.4', stream: true, input: 'Hi' }
+
+describe('weighted subscription relay settlement', () => {
+  it.each([
+    ['/v1/responses', false], ['/v1/responses', true],
+    ['/v1/chat/completions', false], ['/v1/chat/completions', true],
+    ['/api/claude/v1/messages', false], ['/api/claude/v1/messages', true],
+  ] as const)('keeps the subscription meter through %s stream=%s', (url, stream) => withRelay(async request => {
+    mocks.key.accountGroupId = 'group-1'
+    mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-1', quotaMode: 'usage', usageWindows: [{ remaining: 100 }] })
+    const anthropic = url.includes('/messages')
+    if (anthropic) mocks.fetch.mockImplementation(async () => claudeResponse())
+    const result = await request({ model: anthropic ? 'claude-sonnet-5' : 'gpt-5.4', stream,
+      input: 'Hi', messages: [{ role: 'user', content: 'Hi' }], max_tokens: 100 }, url)
+    expect(result.status).toBe(200)
+    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 'sub-1', 10)
+    expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
+    expect(mocks.transactions).toHaveLength(0)
+    expect(mocks.balance).toBe(1000)
+    expect(mocks.logs[0]?.slice(-2)).toEqual(['sub-1', 10])
+  }))
+})
 
 describe('Claude Code safeguard protocol passthrough', () => {
   const routes = [

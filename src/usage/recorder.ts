@@ -5,7 +5,8 @@ import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
 import { roundUsd } from '../wallet/money'
-import { consumeSubscriptionUsage } from '../subscriptions/manager'
+import { consumeSubscriptionUsage, consumeWeightedSubscriptionUsage } from '../subscriptions/manager'
+import { usagePoints, type SubscriptionQuotaMode } from '../subscriptions/usageWindows'
 
 export interface UsageRecord {
   apiKeyId: string
@@ -36,6 +37,7 @@ export interface UsageRecord {
   billTo?: 'subscription' | 'balance'
   /** Subscription to charge when billTo === 'subscription'. */
   subscriptionId?: string | null
+  subscriptionQuotaMode?: SubscriptionQuotaMode
 }
 
 const pendingUsageWrites = new Set<Promise<boolean>>()
@@ -75,7 +77,13 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     await client.query('BEGIN')
     let billTo: 'subscription' | 'balance' = preferredBillTo
     let subscriptionCharged = false
-    if (cost > 0 && preferredBillTo === 'subscription') {
+    let subscriptionPoints: number | null = null
+    if (preferredBillTo === 'subscription' && record.subscriptionQuotaMode === 'usage') {
+      // Wallet markup does not change the weight of a subscription request.
+      subscriptionPoints = usagePoints(baseCost)
+      await consumeWeightedSubscriptionUsage(client, record.subscriptionId!, subscriptionPoints)
+      subscriptionCharged = true
+    } else if (cost > 0 && preferredBillTo === 'subscription') {
       subscriptionCharged = await consumeSubscriptionUsage(client, record.subscriptionId!, cost)
       if (!subscriptionCharged) billTo = 'balance'
     }
@@ -87,10 +95,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
            image_input_tokens, image_output_tokens, image_count, image_size, image_model,
            cost, base_cost, bill_to, status, error_code, error_message, upstream_status,
            attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms, upstream_request_id,
-           service_tier, reasoning_effort, billing_price, image_cache_read_tokens, usage_source)
+           service_tier, reasoning_effort, billing_price, image_cache_read_tokens, usage_source,
+           subscription_id, subscription_points)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-               $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)`,
+               $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)`,
       [
         id,
         record.apiKeyId,
@@ -128,7 +137,9 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         usage.reasoningEffort?.slice(0, 100) || null,
         JSON.stringify({ price, imagePrice }),
         record.usage.imageCacheReadTokens ?? 0,
-        record.usage.usageSource ?? 'unknown'
+        record.usage.usageSource ?? 'unknown',
+        billTo === 'subscription' ? record.subscriptionId ?? null : null,
+        subscriptionPoints,
       ]
     )
     if (record.apiKeyId && cost > 0) {

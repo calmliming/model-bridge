@@ -4,6 +4,7 @@ import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, update
 import { normalizeModelMappings } from '../keys/modelMapping'
 import { groupExists, listGroups } from '../accounts/groups'
 import { requireUser } from '../middleware/userAuth'
+import { waffoConfiguration } from '../payments/providers/waffo'
 import { checkLoginRateLimit, verifyTurnstileToken } from '../auth/security'
 import {
   acceptInvite,
@@ -243,7 +244,16 @@ export function registerUserRoutes(app: FastifyInstance): void {
   })
 
   app.get('/api/users/subscription-plans', { preHandler: requireUser }, async () => {
-    return { plans: await listPlans(true) }
+    const [plans, onlinePaymentsEnabled] = await Promise.all([listPlans(true), isOnlinePaymentEnabled()])
+    const waffo = waffoConfiguration()
+    return {
+      plans: plans.map(({ waffoProductId, ...plan }) => ({
+        ...plan,
+        checkoutAvailable: plan.paymentProvider !== 'waffo' || Boolean(onlinePaymentsEnabled && waffo.configured && waffoProductId && plan.hasAccounts),
+      })),
+      waffo: { configured: waffo.configured, mode: waffo.mode },
+      onlinePaymentsEnabled,
+    }
   })
 
   app.post('/api/users/subscriptions/purchase', { preHandler: requireUser }, async (request, reply) => {

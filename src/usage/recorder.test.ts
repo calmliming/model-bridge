@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     estimateCost: vi.fn(),
     debitWalletForUsage: vi.fn(),
     consumeSubscriptionUsage: vi.fn(),
+    consumeWeightedSubscriptionUsage: vi.fn(),
   }
 })
 
@@ -30,6 +31,7 @@ vi.mock('../wallet/manager', () => ({
 
 vi.mock('../subscriptions/manager', () => ({
   consumeSubscriptionUsage: mocks.consumeSubscriptionUsage,
+  consumeWeightedSubscriptionUsage: mocks.consumeWeightedSubscriptionUsage,
 }))
 
 import { recordUsage, waitForPendingUsage } from './recorder'
@@ -65,9 +67,27 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
   mocks.consumeSubscriptionUsage.mockResolvedValue(true)
+  mocks.consumeWeightedSubscriptionUsage.mockResolvedValue(undefined)
 })
 
 describe('recordUsage', () => {
+  it('meters subscription points without wallet markup, fallback or a wallet debit', async () => {
+    mocks.estimateCost.mockReturnValue(0.125)
+    mocks.consumeSubscriptionUsage.mockResolvedValue(false)
+    await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage', multiplier: 3 }))
+    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_usage', 125)
+    expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
+    expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+    expect(insertParams()[21]).toBe('subscription')
+    expect(insertParams().slice(-2)).toEqual(['s_usage', 125])
+  })
+  it('rolls back the entire weighted usage settlement on persistence failure', async () => {
+    mocks.estimateCost.mockReturnValue(1)
+    mocks.consumeWeightedSubscriptionUsage.mockRejectedValueOnce(new Error('transaction failed'))
+    await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage' }))).resolves.toBe(false)
+    expect(mocks.query).toHaveBeenCalledWith('ROLLBACK')
+    expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+  })
   it('applies the group multiplier to the base cost and stores both', async () => {
     mocks.estimateCost.mockReturnValue(2)
     await recordUsage(baseRecord({ multiplier: 1.5 }))

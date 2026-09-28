@@ -425,6 +425,42 @@ export async function initDb(): Promise<void> {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_created_at ON payment_orders (created_at);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_provider_order_id ON payment_orders (provider_order_id);`)
 
+  await pool.query(`
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS payment_provider TEXT NOT NULL DEFAULT 'wallet';
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS waffo_product_id TEXT;
+    CREATE TABLE IF NOT EXISTS subscription_checkouts (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, plan_id TEXT NOT NULL,
+      group_id TEXT NOT NULL, product_id TEXT NOT NULL, store_id TEXT NOT NULL,
+      mode TEXT NOT NULL, price DOUBLE PRECISION NOT NULL,
+      status TEXT NOT NULL DEFAULT 'creating', session_id TEXT, checkout_url TEXT,
+      provider_order_id TEXT UNIQUE, subscription_id TEXT UNIQUE,
+      expires_at BIGINT NOT NULL, event_at BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_subscription_checkouts_user ON subscription_checkouts (user_id);
+    CREATE TABLE IF NOT EXISTS subscription_events (
+      id TEXT PRIMARY KEY, checkout_id TEXT, event_type TEXT NOT NULL, payload JSONB NOT NULL,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+  `)
+
+  await pool.query(`
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS quota_mode TEXT NOT NULL DEFAULT 'spend';
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS five_hour_limit_points DOUBLE PRECISION;
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS weekly_limit_points DOUBLE PRECISION;
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_limit_points DOUBLE PRECISION;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS five_hour_window_start BIGINT;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS five_hour_usage_points DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS weekly_points_start BIGINT;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS weekly_usage_points DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS monthly_points_start BIGINT;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS monthly_usage_points DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS billing_period_start BIGINT;
+    ALTER TABLE user_subscriptions ADD COLUMN IF NOT EXISTS billing_period_end BIGINT;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS subscription_id TEXT;
+    ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS subscription_points DOUBLE PRECISION;
+  `)
+
   // One-time backfill: migrate the legacy single-group accounts.group_id into
   // the many-to-many membership table. Gated by a settings flag so it runs
   // exactly once — otherwise an admin removing a membership would see it

@@ -9,6 +9,8 @@ import fastifyFormbody from '@fastify/formbody'
 import { config } from './config'
 import { pool } from './db/index'
 import { initDb } from './db/init'
+import { seedSubscriptionPlans } from './subscriptions/defaults'
+import { registerWaffoRoutes } from './routes/waffo'
 import { waitForDatabase } from './db/ready'
 import { initPricing } from './usage/pricing'
 import { startPricingOverrideReload } from './usage/pricingOverrides'
@@ -39,6 +41,7 @@ const SHUTDOWN_TIMEOUT_MS = 30_000
 async function main(): Promise<void> {
   await waitForDatabase(pool)
   await initDb()
+  await seedSubscriptionPlans()
   await initPricing()
   const stopPricingOverrideReload = await startPricingOverrideReload(config.PRICING_OVERRIDE_FILE)
   await ensureAdmin()
@@ -94,6 +97,7 @@ async function main(): Promise<void> {
   registerRelayRoutes(app)
   registerUsageRoutes(app)
   registerPaymentCallbackRoutes(app)
+  await registerWaffoRoutes(app)
 
   // Serve the built admin dashboard (web/dist) if it has been built.
   const webDist = join(process.cwd(), 'web', 'dist')

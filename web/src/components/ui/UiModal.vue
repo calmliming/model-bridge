@@ -20,7 +20,7 @@ const emit = defineEmits<{ (e: 'update:show', value: boolean): void }>()
 
 const widthStyle = computed(() => ({
   width: typeof props.width === 'number' ? `${props.width}px` : props.width,
-  maxWidth: '95vw',
+  maxWidth: '100%',
 }))
 
 function close() {
@@ -53,7 +53,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-overlay" @click.self="close">
+      <div v-if="show" class="modal-overlay">
         <div class="modal-panel" :style="widthStyle" role="dialog" aria-modal="true" :aria-label="title">
           <div class="modal-header">
             <h3 class="modal-title">{{ title }}</h3>

@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
 import { applyWalletTransactionWithClient } from '../wallet/manager'
 import { usdToMicros } from '../wallet/money'
+import { subscriptionUsageWindows, type SubscriptionQuotaMode, type UsageWindow } from './usageWindows'
 
 const DAY_MS = 24 * 60 * 60_000
 const WEEK_MS = 7 * DAY_MS
@@ -30,6 +31,13 @@ export interface PlanView {
   validityDays: number
   forSale: boolean
   sortOrder: number
+  paymentProvider: 'wallet' | 'waffo'
+  waffoProductId: string | null
+  hasAccounts: boolean
+  quotaMode: SubscriptionQuotaMode
+  fiveHourLimitPoints: number | null
+  weeklyLimitPoints: number | null
+  monthlyLimitPoints: number | null
   createdAt: number
 }
 
@@ -41,6 +49,10 @@ export interface SubscriptionView {
   groupId: string
   groupName: string | null
   status: string
+  paymentProvider: 'wallet' | 'waffo'
+  renewalStatus: string | null
+  quotaMode: SubscriptionQuotaMode
+  usageWindows: UsageWindow[]
   startsAt: number
   expiresAt: number
   dailyLimitUsd: number | null
@@ -105,6 +117,8 @@ export function rolledWindows(sub: SubRow, now: number) {
 export interface SubscriptionBillingState {
   subscriptionId: string
   planLimits: { daily: number | null; weekly: number | null; monthly: number | null }
+  quotaMode: SubscriptionQuotaMode
+  usageWindows: UsageWindow[]
 }
 
 /**
@@ -117,12 +131,12 @@ export async function resolveActiveSubscription(
   groupId: string,
   now = Date.now(),
 ): Promise<SubscriptionBillingState | null> {
-  const { rows } = await pool.query<SubRow & {
+  const { rows } = await pool.query<SubRow & Record<string, unknown> & {
     daily_limit_usd: number | null
     weekly_limit_usd: number | null
     monthly_limit_usd: number | null
   }>(
-    `SELECT s.id, s.expires_at,
+    `SELECT s.*, p.quota_mode, p.five_hour_limit_points, p.weekly_limit_points, p.monthly_limit_points,
             p.daily_limit_usd, p.weekly_limit_usd, p.monthly_limit_usd
      FROM user_subscriptions s
      JOIN subscription_plans p ON p.id = s.plan_id
@@ -136,6 +150,8 @@ export async function resolveActiveSubscription(
   if (!row) return null
   return {
     subscriptionId: row.id,
+    quotaMode: row.quota_mode === 'usage' ? 'usage' : 'spend',
+    usageWindows: row.quota_mode === 'usage' ? subscriptionUsageWindows(row, now) : [],
     planLimits: {
       daily: row.daily_limit_usd == null ? null : Number(row.daily_limit_usd),
       weekly: row.weekly_limit_usd == null ? null : Number(row.weekly_limit_usd),
@@ -147,7 +163,7 @@ export async function resolveActiveSubscription(
 /**
  * Whether the subscription has any window headroom right now (after lazy
  * window rollover). A null limit means that window is unlimited. Returns false
- * only when every defined window is already at/over its limit.
+ * when any defined window is already at/over its limit.
  */
 export async function hasWindowHeadroom(
   subscriptionId: string,
@@ -234,6 +250,34 @@ export async function consumeSubscriptionUsage(
 }
 
 /**
+ * Settle an already-admitted weighted-usage request. In-flight completions stay
+ * on the subscription even if they cross a limit or finish after expiry;
+ * admission blocks the next request, and no wallet debit is introduced.
+ */
+export async function consumeWeightedSubscriptionUsage(
+  client: Pick<PoolClient, 'query'>,
+  subscriptionId: string,
+  points: number,
+  now = Date.now(),
+): Promise<void> {
+  if (!Number.isFinite(points) || points < 0) throw new Error('usage points must be finite and non-negative')
+  if (points === 0) return
+  const { rows } = await client.query<Record<string, unknown>>(
+    'SELECT * FROM user_subscriptions WHERE id = $1 FOR UPDATE', [subscriptionId],
+  )
+  const sub = rows[0]
+  if (!sub) throw new Error('admitted subscription is missing during settlement')
+  const [five, weekly, monthly] = subscriptionUsageWindows(sub, now)
+  await client.query(
+    `UPDATE user_subscriptions SET five_hour_window_start = $2, five_hour_usage_points = $3,
+       weekly_points_start = $4, weekly_usage_points = $5,
+       monthly_points_start = $6, monthly_usage_points = $7 WHERE id = $1`,
+    [subscriptionId, five.startedAt ?? now, five.used + points,
+      weekly.startedAt, weekly.used + points, monthly.startedAt, monthly.used + points],
+  )
+}
+
+/**
  * Adds `cost` to all three usage windows (rolling each forward first) inside
  * the caller's transaction. Charges at sale price, matching the limit units.
  */
@@ -278,30 +322,56 @@ export interface CreatePlanInput {
   validityDays?: number
   forSale?: boolean
   sortOrder?: number
+  paymentProvider?: 'wallet' | 'waffo'
+  waffoProductId?: string | null
+  quotaMode?: SubscriptionQuotaMode
+  fiveHourLimitPoints?: number | null
+  weeklyLimitPoints?: number | null
+  monthlyLimitPoints?: number | null
+}
+
+function validateUsageLimits(input: Pick<CreatePlanInput, 'quotaMode' | 'fiveHourLimitPoints' | 'weeklyLimitPoints' | 'monthlyLimitPoints'>) {
+  if (input.quotaMode !== 'usage') return
+  for (const value of [input.fiveHourLimitPoints, input.weeklyLimitPoints, input.monthlyLimitPoints]) {
+    if (value == null || !Number.isFinite(value) || value <= 0) throw new SubscriptionError('请设置大于 0 的 5 小时、周和月用量上限', 400)
+  }
 }
 
 export async function createPlan(input: CreatePlanInput): Promise<{ id: string }> {
+  validateUsageLimits(input)
   const id = planId()
   await pool.query(
     `INSERT INTO subscription_plans
        (id, name, description, group_id, price, daily_limit_usd, weekly_limit_usd,
-        monthly_limit_usd, validity_days, for_sale, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        monthly_limit_usd, validity_days, for_sale, sort_order, payment_provider, waffo_product_id,
+        quota_mode, five_hour_limit_points, weekly_limit_points, monthly_limit_points)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
     [
       id, input.name, input.description ?? null, input.groupId, input.price ?? 0,
       input.dailyLimitUsd ?? null, input.weeklyLimitUsd ?? null, input.monthlyLimitUsd ?? null,
       input.validityDays ?? 30, input.forSale ?? false, input.sortOrder ?? 0,
+      input.paymentProvider ?? 'wallet', input.waffoProductId ?? null,
+      input.quotaMode ?? 'spend', input.fiveHourLimitPoints ?? null,
+      input.weeklyLimitPoints ?? null, input.monthlyLimitPoints ?? null,
     ],
   )
   return { id }
 }
 
 export async function updatePlan(id: string, patch: Partial<CreatePlanInput>): Promise<void> {
+  if (['quotaMode', 'fiveHourLimitPoints', 'weeklyLimitPoints', 'monthlyLimitPoints'].some(key => key in patch)) {
+    const row = await getPlan(pool, id)
+    if (!row) throw new SubscriptionError('plan not found', 404)
+    validateUsageLimits({ ...asPlan(row), ...patch })
+  }
   const cols: Record<string, string> = {
     name: 'name', description: 'description', groupId: 'group_id', price: 'price',
     dailyLimitUsd: 'daily_limit_usd', weeklyLimitUsd: 'weekly_limit_usd',
     monthlyLimitUsd: 'monthly_limit_usd', validityDays: 'validity_days',
     forSale: 'for_sale', sortOrder: 'sort_order',
+    paymentProvider: 'payment_provider', waffoProductId: 'waffo_product_id',
+    quotaMode: 'quota_mode', fiveHourLimitPoints: 'five_hour_limit_points',
+    weeklyLimitPoints: 'weekly_limit_points', monthlyLimitPoints: 'monthly_limit_points',
   }
   const sets: string[] = []
   const values: unknown[] = []
@@ -317,7 +387,21 @@ export async function updatePlan(id: string, patch: Partial<CreatePlanInput>): P
 }
 
 export async function deletePlan(id: string): Promise<void> {
-  await pool.query(`DELETE FROM subscription_plans WHERE id = $1`, [id])
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    // Checkout creation takes the same plan lock, so a payment cannot race deletion.
+    await client.query('SELECT id FROM subscription_plans WHERE id = $1 FOR UPDATE', [id])
+    const pending = await client.query(
+      `SELECT id FROM subscription_checkouts WHERE plan_id = $1 AND status NOT IN ('canceled','failed') LIMIT 1`, [id],
+    )
+    if (pending.rows.length) throw new SubscriptionError('该套餐仍有关联的 Waffo 订单，请改为下架，并在 Waffo 处理现有订阅', 409)
+    await client.query('DELETE FROM subscription_plans WHERE id = $1', [id])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally { client.release() }
 }
 
 function asPlan(row: Record<string, unknown>): PlanView {
@@ -334,6 +418,13 @@ function asPlan(row: Record<string, unknown>): PlanView {
     validityDays: Number(row.validity_days),
     forSale: !!row.for_sale,
     sortOrder: Number(row.sort_order),
+    paymentProvider: row.payment_provider === 'waffo' ? 'waffo' : 'wallet',
+    waffoProductId: (row.waffo_product_id as string | null) ?? null,
+    hasAccounts: Boolean(row.has_accounts),
+    quotaMode: row.quota_mode === 'usage' ? 'usage' : 'spend',
+    fiveHourLimitPoints: row.five_hour_limit_points == null ? null : Number(row.five_hour_limit_points),
+    weeklyLimitPoints: row.weekly_limit_points == null ? null : Number(row.weekly_limit_points),
+    monthlyLimitPoints: row.monthly_limit_points == null ? null : Number(row.monthly_limit_points),
     createdAt: Number(row.created_at),
   }
 }
@@ -342,7 +433,8 @@ function asPlan(row: Record<string, unknown>): PlanView {
 export async function listPlans(onlyForSale = false): Promise<PlanView[]> {
   const where = onlyForSale ? 'WHERE p.for_sale = TRUE' : ''
   const { rows } = await pool.query<Record<string, unknown>>(
-    `SELECT p.*, g.name AS group_name
+    `SELECT p.*, g.name AS group_name,
+            EXISTS(SELECT 1 FROM account_group_members m WHERE m.group_id = p.group_id) AS has_accounts
      FROM subscription_plans p
      LEFT JOIN account_groups g ON g.id = p.group_id
      ${where}
@@ -435,6 +527,7 @@ export async function purchaseSubscription(userId: string, planIdInput: string):
     await client.query('BEGIN')
     const plan = await getPlan(client, planIdInput)
     if (!plan || !plan.for_sale) throw new SubscriptionError('plan not available', 404)
+    if (plan.payment_provider === 'waffo') throw new SubscriptionError('请通过 Waffo 收银台订阅该套餐', 400)
     const priceMicros = usdToMicros(Number(plan.price))
     if (priceMicros > 0) {
       const balance = await client.query<{ balance_micros: string | number }>(
@@ -468,10 +561,13 @@ export async function purchaseSubscription(userId: string, planIdInput: string):
 export async function listUserSubscriptions(userId: string, now = Date.now()): Promise<SubscriptionView[]> {
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT s.*, p.name AS plan_name, p.daily_limit_usd, p.weekly_limit_usd,
-            p.monthly_limit_usd, g.name AS group_name
+            p.quota_mode, p.five_hour_limit_points, p.weekly_limit_points, p.monthly_limit_points,
+            p.monthly_limit_usd, g.name AS group_name, c.status AS renewal_status,
+            CASE WHEN c.id IS NOT NULL THEN 'waffo' ELSE 'wallet' END AS payment_provider
      FROM user_subscriptions s
      JOIN subscription_plans p ON p.id = s.plan_id
      LEFT JOIN account_groups g ON g.id = s.group_id
+     LEFT JOIN subscription_checkouts c ON c.subscription_id = s.id
      WHERE s.user_id = $1
      ORDER BY s.expires_at DESC`,
     [userId],
@@ -490,6 +586,10 @@ export async function listUserSubscriptions(userId: string, now = Date.now()): P
       groupId: row.group_id as string,
       groupName: (row.group_name as string | null) ?? null,
       status: expired ? 'expired' : (row.status as string),
+      paymentProvider: row.payment_provider as 'wallet' | 'waffo',
+      renewalStatus: (row.renewal_status as string | null) ?? null,
+      quotaMode: row.quota_mode === 'usage' ? 'usage' : 'spend',
+      usageWindows: row.quota_mode === 'usage' ? subscriptionUsageWindows(row, now) : [],
       startsAt: Number(row.starts_at),
       expiresAt: Number(row.expires_at),
       dailyLimitUsd: dl,
