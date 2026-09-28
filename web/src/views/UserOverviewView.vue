@@ -307,28 +307,24 @@ function formatNumber(n: number): string {
 
 const metricCards = computed(() => [
   {
-    label: '今日请求',
+    label: '近 24 小时请求',
     value: formatNumber(stat.value.requests24h),
     hint: `累计 ${formatNumber(stat.value.requestsTotal)} 次`,
-    tone: 'violet',
   },
   {
-    label: '今日 Tokens',
+    label: '近 24 小时 Tokens',
     value: formatNumber(stat.value.tokens24h),
     hint: `费用 ${formatUsd(stat.value.cost24h)}`,
-    tone: 'indigo',
   },
   {
-    label: '今日按量费用',
+    label: '近 24 小时按量费用',
     value: formatUsd(stat.value.cost24h),
     hint: `${formatNumber(stat.value.tokens24h)} tokens`,
-    tone: 'rose',
   },
   {
     label: '30天 按量费用',
     value: formatUsd(stat.value.cost30d),
     hint: `${formatNumber(stat.value.requests30d)} 次 · ${formatNumber(stat.value.tokens30d)} tokens`,
-    tone: 'amber',
   },
   {
     label: '30天 成功率',
@@ -337,7 +333,6 @@ const metricCards = computed(() => [
       successRate30d.value == null
         ? '暂无请求'
         : `成功 ${formatNumber(stat.value.success30d)} / ${formatNumber(stat.value.requests30d)}`,
-    tone: 'teal',
   },
 ])
 
@@ -631,29 +626,30 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="user-overview">
     <UiSpin :show="loading">
-      <div class="metric-grid">
-        <UiCard class="metric-card is-balance" :bordered="false">
-          <span>钱包余额</span>
+      <div class="overview-hero">
+        <UiCard class="wallet-card" :bordered="false">
+          <span class="wallet-label">钱包余额</span>
           <strong :class="{ danger: (user?.balance ?? 0) <= 0 }">{{ formatUsd(user?.balance ?? 0) }}</strong>
-          <small class="metric-hint">{{ activeSubscriptions }} 个生效订阅</small>
-          <UiSpace :size="8">
+          <small class="wallet-hint">{{ activeSubscriptions }} 个生效订阅 · 按量调用从钱包扣费</small>
+          <UiSpace class="wallet-actions" :size="8">
             <UiButton size="small" secondary type="primary" @click="showRecharge = true">充值</UiButton>
             <UiButton size="small" secondary @click="showRedeem = true">兑换码</UiButton>
           </UiSpace>
         </UiCard>
-        <UiCard
-          v-for="card in metricCards"
-          :key="card.label"
-          class="metric-card"
-          :class="`is-${card.tone}`"
-          :bordered="false"
-        >
-          <span>{{ card.label }}</span>
-          <strong>{{ loading ? '—' : card.value }}</strong>
-          <small class="metric-hint">{{ card.hint }}</small>
-        </UiCard>
+        <div class="metric-grid">
+          <UiCard
+            v-for="card in metricCards"
+            :key="card.label"
+            class="metric-card"
+            :bordered="false"
+          >
+            <span>{{ card.label }}</span>
+            <strong>{{ loading ? '—' : card.value }}</strong>
+            <small class="metric-hint">{{ card.hint }}</small>
+          </UiCard>
+        </div>
       </div>
 
       <UiCard v-if="notices.length" title="待处理事项" class="dashboard-notices" :bordered="false">
@@ -665,6 +661,27 @@ onUnmounted(() => {
             </div>
             <button type="button" @click="handleNotice(notice.action)">{{ notice.actionLabel }} →</button>
           </div>
+        </div>
+      </UiCard>
+
+      <UiCard id="my-subscriptions" title="我的订阅" class="subscription-card" :bordered="false">
+        <template #header-extra>
+          <UiSpace class="subscription-actions" :size="8"><UiButton size="small" quaternary :loading="refreshingUsage" @click="refreshSubscriptionUsage()">刷新用量</UiButton><UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton></UiSpace>
+        </template>
+        <div v-if="!subscriptions.length" class="subscription-empty">
+          <strong>还没有订阅套餐</strong>
+          <p>可在套餐商店选择合适的用量方案，或联系管理员分配。</p>
+        </div>
+        <div v-for="sub in subscriptions" :key="sub.id" class="sub-row" :class="{ 'sub-row--usage': sub.quotaMode === 'usage' }">
+          <div class="sub-info">
+            <strong>{{ sub.planName || '套餐' }}</strong>
+            <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
+            <span v-if="sub.paymentProvider === 'waffo'" class="subtext">{{ sub.renewalStatus === 'canceling' ? '已取消续订，当前已付费周期仍可使用' : sub.renewalStatus === 'past_due' ? '续费未成功，请在 Waffo 更新支付方式' : sub.status === 'active' ? '通过 Waffo 按月续订' : 'Waffo 订阅已结束' }} · <a class="subscription-manage-link" href="https://pancake.waffo.ai/buyer" target="_blank" rel="noopener noreferrer">管理订阅 ↗</a></span>
+          </div>
+          <SubscriptionUsageMeters v-if="sub.quotaMode === 'usage'" :windows="sub.usageWindows" :expired="sub.status !== 'active'" />
+          <UiTag v-else size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
+            {{ sub.status === 'active' ? remainLabel(sub) : '已过期' }}
+          </UiTag>
         </div>
       </UiCard>
 
@@ -716,35 +733,8 @@ onUnmounted(() => {
         </UiCard>
       </div>
 
-      <UiCard id="my-subscriptions" title="我的订阅" :bordered="false" style="margin-bottom: 18px">
-        <template #header-extra>
-          <UiSpace :size="8"><UiButton size="small" quaternary :loading="refreshingUsage" @click="refreshSubscriptionUsage()">刷新用量</UiButton><UiButton size="small" secondary type="primary" @click="openStore">套餐商店</UiButton></UiSpace>
-        </template>
-        <p v-if="!subscriptions.length" class="sub-empty">
-          暂无订阅。可在「套餐商店」选择 Lite、Pro 或 Max，或联系管理员分配。
-        </p>
-        <div v-for="sub in subscriptions" :key="sub.id" class="sub-row" :class="{ 'sub-row--usage': sub.quotaMode === 'usage' }">
-          <div class="sub-info">
-            <strong>{{ sub.planName || '套餐' }}</strong>
-            <span class="subtext">{{ sub.groupName || '' }} · 到期 {{ formatTime(sub.expiresAt) }}</span>
-            <span v-if="sub.paymentProvider === 'waffo'" class="subtext">{{ sub.renewalStatus === 'canceling' ? '已取消续订，当前已付费周期仍可使用' : sub.renewalStatus === 'past_due' ? '续费未成功，请在 Waffo 更新支付方式' : sub.status === 'active' ? '通过 Waffo 按月续订' : 'Waffo 订阅已结束' }} · <a class="subscription-manage-link" href="https://pancake.waffo.ai/buyer" target="_blank" rel="noopener noreferrer">管理订阅 ↗</a></span>
-          </div>
-          <SubscriptionUsageMeters v-if="sub.quotaMode === 'usage'" :windows="sub.usageWindows" :expired="sub.status !== 'active'" />
-          <UiTag v-else size="small" :type="sub.status === 'active' ? 'success' : 'default'" :bordered="false">
-            {{ sub.status === 'active' ? remainLabel(sub) : '已过期' }}
-          </UiTag>
-        </div>
-      </UiCard>
-
-      <UiGrid :cols="2" :x-gap="18" :y-gap="18" responsive="screen">
-        <UiGi span="2 m:1">
-          <UiCard title="钱包流水" :bordered="false">
-            <UiDataTable :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
-            <p class="table-scroll-hint">左右滑动查看完整记录</p>
-          </UiCard>
-        </UiGi>
-        <UiGi span="2 m:1">
-          <UiCard title="近期用量" class="usage-card" :bordered="false">
+      <div class="records-grid">
+          <UiCard title="近期用量" class="usage-card records-usage" :bordered="false">
             <template #header-extra>
               <div class="usage-filter">
                 <div class="usage-presets">
@@ -769,14 +759,15 @@ onUnmounted(() => {
             <UiDataTable :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
             <p class="table-scroll-hint">左右滑动查看完整记录</p>
           </UiCard>
-        </UiGi>
-        <UiGi span="2 m:1">
+          <UiCard title="钱包流水" :bordered="false">
+            <UiDataTable :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
+            <p class="table-scroll-hint">左右滑动查看完整记录</p>
+          </UiCard>
           <UiCard id="payment-orders" title="充值订单" :bordered="false">
             <UiDataTable :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
             <p class="table-scroll-hint">左右滑动查看完整记录</p>
           </UiCard>
-        </UiGi>
-      </UiGrid>
+      </div>
     </UiSpin>
 
     <UiModal v-model:show="showRecharge" title="按量充值" :width="500">
@@ -913,6 +904,32 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.user-overview { width: 100%; max-width: 1440px; margin-inline: auto; }
+.overview-hero { display: grid; grid-template-columns: minmax(260px, .82fr) minmax(0, 2fr); gap: 16px; margin-bottom: 18px; }
+.wallet-card { display: flex; min-width: 0; flex-direction: column; background: linear-gradient(145deg, #e9f5ee, #f5faf6 68%, #fff); border-color: #d7e9dd; }
+.wallet-card :deep(.card-body) { display: flex; flex: 1; flex-direction: column; padding: 24px; }
+.wallet-label { color: #3e6b57; font-size: 12px; font-weight: 600; }
+.wallet-card strong { display: block; margin-top: 12px; color: #163b2b; font-size: clamp(30px, 3vw, 42px); line-height: 1.15; letter-spacing: -.04em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wallet-card strong.danger { color: #b93838; }
+.wallet-hint { display: block; margin-top: 9px; color: #668373; font-size: 12px; line-height: 1.5; }
+.wallet-actions { margin-top: auto; padding-top: 22px; }
+.wallet-actions :deep(.btn) { min-height: 34px; }
+.subscription-card { margin-bottom: 18px; }
+.subscription-card :deep(.card-header) { flex-wrap: wrap; }
+.subscription-actions { margin-left: auto; }
+.subscription-empty { padding: 18px 20px; border-radius: 12px; background: #f4f8f6; }
+.subscription-empty strong { color: #244b3e; font-size: 14px; }
+.subscription-empty p { margin-top: 5px; color: #657c70; font-size: 12px; line-height: 1.6; }
+.records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 600px), 1fr)); gap: 18px; }
+.records-grid > .card { min-width: 0; }
+.records-usage { grid-column: 1 / -1; }
+:global(.dark) .wallet-card { border-color: #315848; background: linear-gradient(145deg, #1d3d31, #20362f 72%, #24332e); }
+:global(.dark) .wallet-label, :global(.dark) .wallet-hint { color: #a3c9b1; }
+:global(.dark) .wallet-card strong { color: #e0f4e7; }
+:global(.dark) .wallet-card strong.danger { color: #fca5a5; }
+:global(.dark) .subscription-empty { background: #1a3329; }
+:global(.dark) .subscription-empty strong { color: #d3eddd; }
+:global(.dark) .subscription-empty p { color: #a5c2af; }
 .store-intro { margin-bottom: 23px; }
 .store-intro p { font-size: 21px; font-weight: 600; letter-spacing: -.5px; margin-bottom: 8px; }
 .store-intro span, .store-footer p { font-size: 12px; color: #71837b; line-height: 1.8; }
@@ -985,7 +1002,7 @@ onUnmounted(() => {
 
 .insight-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
   gap: 18px;
   margin-bottom: 18px;
 }
@@ -1161,7 +1178,7 @@ onUnmounted(() => {
 
 .usage-filter {
   display: flex;
-  flex: 1 1 100%;
+  flex: 1 1 460px;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -1205,6 +1222,11 @@ onUnmounted(() => {
   @apply border-primary-500 bg-primary-500 text-white;
 }
 
+.preset-btn:focus-visible,
+.date-input:focus-visible {
+  @apply outline-none ring-2 ring-primary-500/40;
+}
+
 .date-input {
   padding: 2px 6px;
   width: 112px;
@@ -1230,50 +1252,23 @@ onUnmounted(() => {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: 12px;
 }
 
 .metric-card {
-  position: relative;
-  overflow: hidden;
-  border-radius: 8px;
+  min-width: 0;
+  border-radius: 14px;
 }
 
-.metric-card::after {
-  content: '';
-  position: absolute;
-  width: 80px;
-  height: 80px;
-  right: -24px;
-  top: -24px;
-  border-radius: 999px;
-  background: #94a3b8;
-  opacity: 0.14;
+.metric-card:nth-child(5) {
+  grid-column: span 2;
 }
 
-.metric-card.is-balance::after {
-  background: #16a34a;
-}
-
-.metric-card.is-violet::after {
-  background: #8b5cf6;
-}
-
-.metric-card.is-indigo::after {
-  background: #6366f1;
-}
-
-.metric-card.is-rose::after {
-  background: #f43f5e;
-}
-
-.metric-card.is-amber::after {
-  background: #f59e0b;
-}
-
-.metric-card.is-teal::after {
-  background: #0d9488;
+.metric-card :deep(.card-body) {
+  display: flex;
+  min-height: 122px;
+  flex-direction: column;
+  padding: 17px 19px;
 }
 
 .metric-card span,
@@ -1282,26 +1277,28 @@ onUnmounted(() => {
 }
 
 .metric-card span {
-  color: rgba(15, 23, 42, 0.52);
+  color: #60746b;
   font-size: 12px;
+  font-weight: 600;
 }
 
 .metric-card strong {
-  margin-top: 8px;
-  color: #0f172a;
-  font-size: 28px;
+  margin-top: 10px;
+  color: #1c3328;
+  font-size: clamp(22px, 2vw, 29px);
+  line-height: 1.2;
+  letter-spacing: -.025em;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .metric-hint {
   display: block;
-  margin-top: 4px;
-  color: rgba(15, 23, 42, 0.42);
-  font-size: 12px;
-}
-
-.metric-card :deep(.btn) {
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 6px;
+  color: #84958b;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 :global(.dark) .metric-card span,
@@ -1314,10 +1311,6 @@ onUnmounted(() => {
 :global(.dark) .metric-card strong,
 :global(.dark) .sub-info strong {
   color: #f8fafc;
-}
-
-:global(.dark) .metric-card strong.danger {
-  color: #f87171;
 }
 
 :deep(.amount) {
@@ -1535,51 +1528,61 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-@media (max-width: 980px) {
-  .metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+@media (max-width: 1280px) {
+  .overview-hero { grid-template-columns: minmax(0, 1fr); }
+  .wallet-card :deep(.card-body) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; column-gap: 20px; }
+  .wallet-label, .wallet-card strong, .wallet-hint { grid-column: 1; }
+  .wallet-card strong { margin-top: 5px; }
+  .wallet-actions { grid-column: 2; grid-row: 1 / 4; align-self: center; margin-top: 0; padding-top: 0; }
+}
+
+@media (max-width: 900px) {
+  .usage-filter { flex-basis: 100%; justify-content: flex-start; }
+}
+
+@media (max-width: 860px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 560px) {
+  .overview-hero { gap: 10px; margin-bottom: 14px; }
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
-    margin-bottom: 14px;
-  }
-
-  .metric-card.is-balance,
-  .metric-card:last-child {
-    grid-column: 1 / -1;
   }
 
   .metric-card :deep(.card-body) {
-    padding: 12px;
+    min-height: 106px;
+    padding: 13px;
   }
 
-  .metric-card.is-balance :deep(.card-body) {
-    padding: 16px;
+  .wallet-card :deep(.card-body) {
+    display: flex;
+    padding: 19px;
   }
 
   .metric-card strong {
-    margin-top: 6px;
-    font-size: clamp(17px, 5.5vw, 23px);
-    line-height: 1.2;
-    overflow-wrap: anywhere;
+    margin-top: 8px;
+    font-size: clamp(19px, 5.5vw, 24px);
   }
 
-  .metric-card.is-balance strong {
-    font-size: 28px;
+  .wallet-card strong {
+    margin-top: 12px;
+    font-size: 34px;
   }
+  .wallet-actions { margin-top: auto; padding-top: 16px; }
 
   .metric-hint {
     font-size: 11px;
     line-height: 1.35;
   }
 
-  .metric-card :deep(.btn) {
-    margin-top: 8px;
-  }
+  .subscription-card { margin-bottom: 14px; }
+  .subscription-actions { width: 100%; margin-left: 0; }
+  .subscription-actions :deep(.btn) { min-height: 34px; }
+  .records-grid { gap: 14px; }
+  .usage-card :deep(.card-header) { align-items: flex-start; }
+  .usage-filter { margin-left: 0; }
 
   .dashboard-notices,
   .insight-grid {
@@ -1700,12 +1703,13 @@ onUnmounted(() => {
     font-size: 12px;
   }
 
-  .table-scroll-hint {
-    display: block;
-    margin: 8px 0 0;
-    color: #94a3b8;
-    font-size: 11px;
-    text-align: right;
-  }
+}
+
+@media (max-width: 1450px) {
+  .records-grid > .card:not(.records-usage) .table-scroll-hint { display: block; margin-top: 8px; color: #94a3b8; font-size: 11px; text-align: right; }
+}
+
+@media (max-width: 760px) {
+  .records-usage .table-scroll-hint { display: block; margin-top: 8px; color: #94a3b8; font-size: 11px; text-align: right; }
 }
 </style>
