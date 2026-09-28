@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { db } from '../db/index'
 import { oauthSessions } from '../db/schema'
 import { config } from '../config'
+import { emailRegistrationConfigured } from '../users/registrationEmail'
 import { waffoConfiguration } from '../payments/providers/waffo'
 import { changeAdminPassword, getAdminUserId, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
@@ -560,6 +561,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
+      emailRegistrationReady: emailRegistrationConfigured(),
       onlinePaymentsEnabled: await isOnlinePaymentEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),
@@ -598,6 +600,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     const panelLimits = await getPanelRateLimitSettings()
     return {
       registrationEnabled: await isRegistrationEnabled(),
+      emailRegistrationReady: emailRegistrationConfigured(),
       onlinePaymentsEnabled: await isOnlinePaymentEnabled(),
       turnstileEnabled: turnstileEnabled(),
       turnstileConfigured: !!(config.TURNSTILE_SITE_KEY || config.TURNSTILE_SECRET_KEY),

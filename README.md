@@ -23,7 +23,7 @@ daily / provider / model / key breakdowns, and a one-command Docker deploy.
 ## Tech stack
 
 - **Backend:** Node.js + TypeScript, Fastify, PostgreSQL (Drizzle ORM)
-- **Frontend:** Vue 3 + Vite + Naive UI + ECharts
+- **Frontend:** Vue 3 + Vite + Pinia + Tailwind CSS (self-built component library) + ECharts
 
 ## Quick start (development)
 

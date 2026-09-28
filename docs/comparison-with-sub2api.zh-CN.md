@@ -21,7 +21,7 @@
 | 后端 | Node.js + TypeScript + **Fastify** | **Go** + Gin + Ent |
 | 数据库 | **PostgreSQL**（Drizzle ORM）| PostgreSQL 15+ |
 | 缓存 / 共享状态 | **可选 Redis（可插拔）**，默认走进程内存 | Redis 7+（必需） |
-| 前端 | Vue 3 + Vite + **Naive UI** + ECharts | Vue 3 + Vite + **TailwindCSS** |
+| 前端 | Vue 3 + Vite + **Tailwind CSS**（自建组件库）+ ECharts | Vue 3 + Vite + **TailwindCSS** |
 | 部署 | Docker Compose / 裸机 | 一键脚本(systemd) / Docker / 源码 |
 
 > 说明：model-bridge 的限流、并发门、粘性会话状态做成了「可插拔后端」——不配置 `REDIS_URL` 时走进程内存（保持零依赖部署），配置后切到 Redis 实现多实例水平扩展。详见下文「差异化机会清单」第 9 项。

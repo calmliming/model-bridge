@@ -15,6 +15,7 @@ const confirmPassword = ref('')
 const saving = ref(false)
 
 const registrationEnabled = ref(false)
+const emailRegistrationReady = ref(false)
 const togglingRegistration = ref(false)
 const onlinePaymentsEnabled = ref(false)
 const paymentSettingsLoaded = ref(false)
@@ -136,6 +137,7 @@ async function loadSettings() {
   try {
     const { data } = await api.get('/admin/settings')
     registrationEnabled.value = !!data.registrationEnabled
+    emailRegistrationReady.value = !!data.emailRegistrationReady
     onlinePaymentsEnabled.value = data.onlinePaymentsEnabled !== false
     paymentSettingsLoaded.value = true
     turnstileEnabled.value = !!data.turnstileEnabled
@@ -189,10 +191,11 @@ async function toggleRegistration(value: boolean) {
   try {
     const { data } = await api.patch('/admin/settings', { registrationEnabled: value })
     registrationEnabled.value = !!data.registrationEnabled
+    emailRegistrationReady.value = !!data.emailRegistrationReady
     turnstileEnabled.value = !!data.turnstileEnabled
     turnstileConfigured.value = !!data.turnstileConfigured
     securityHeadersEnabled.value = !!data.securityHeadersEnabled
-    message.success(value ? '已开放注册' : '已关闭注册')
+    message.success(value ? emailRegistrationReady.value ? '已开放邮箱验证注册' : '注册开关已打开，配置发件邮箱后才会显示注册入口' : '已关闭注册')
   } catch (e) {
     registrationEnabled.value = !value
     message.error(errMsg(e, '操作失败'))
@@ -483,6 +486,9 @@ function confirmSystemUpdate() {
           <strong class="text-gray-900 dark:text-white">开放用户自助注册</strong>
           <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
             关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。
+          </p>
+          <p v-if="!emailRegistrationReady" class="mt-1.5 text-[13px] text-amber-700 dark:text-amber-300">
+            邮箱注册尚未就绪：请验证 Resend 发件域名，并配置 RESEND_API_KEY、RESEND_FROM_EMAIL 后重启服务。
           </p>
         </div>
         <UiSwitch

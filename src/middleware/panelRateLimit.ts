@@ -11,6 +11,8 @@ const SETTINGS_CACHE_MS = 5_000
 const PANEL_PREFIXES = ['/api/admin', '/api/auth', '/api/users', '/api/usage']
 const SENSITIVE_WRITE_PATHS = new Set([
   '/api/auth/register',
+  '/api/auth/register/resend',
+  '/api/auth/register/verify',
   '/api/users/invites/accept',
   '/api/users/redeem',
 ])

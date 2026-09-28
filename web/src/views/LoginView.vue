@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
@@ -23,14 +23,22 @@ const turnstileRef = ref<{ reset: () => void } | null>(null)
 const captchaMissing = computed(() => !!turnstileSiteKey.value && !turnstileToken.value)
 
 // Registration
-const mode = ref<'login' | 'register'>('login')
+const mode = ref<'login' | 'register' | 'verify'>('login')
 const registrationEnabled = ref(false)
 const regEmail = ref('')
 const regPassword = ref('')
 const regConfirm = ref('')
 const regName = ref('')
+const regCode = ref('')
+const verificationExpiresAt = ref(0)
+const resendAfter = ref(0)
+const now = ref(Date.now())
+const resending = ref(false)
+const resendSeconds = computed(() => Math.max(0, Math.ceil((resendAfter.value - now.value) / 1000)))
+let clock: ReturnType<typeof setInterval> | undefined
 
 onMounted(async () => {
+  clock = setInterval(() => { now.value = Date.now() }, 1000)
   try {
     const { data } = await api.get('/auth/registration-status')
     registrationEnabled.value = !!data.enabled
@@ -42,6 +50,7 @@ onMounted(async () => {
     // 注册入口仅为可选展示，状态拉取失败时静默隐藏
   }
 })
+onUnmounted(() => clearInterval(clock))
 
 function resetTurnstile() {
   turnstileToken.value = ''
@@ -118,14 +127,63 @@ async function register() {
       name: regName.value.trim() || undefined,
       turnstileToken: turnstileToken.value || undefined,
     })
-    auth.setSession(data.token, data.user.email, 'user')
-    message.success('注册成功')
-    void router.push({ name: 'user-overview' })
+    verificationExpiresAt.value = data.expiresAt
+    resendAfter.value = data.resendAfter
+    regEmail.value = data.email
+    regPassword.value = ''
+    regConfirm.value = ''
+    regCode.value = ''
+    mode.value = 'verify'
+    resetTurnstile()
+    message.success('验证码已发送，请查收邮件')
   } catch (e) {
     resetTurnstile()
     message.error(errMsg(e, '注册失败'))
   } finally {
     loading.value = false
+  }
+}
+
+async function verifyRegistration() {
+  const code = regCode.value.trim()
+  if (!/^\d{6}$/.test(code)) {
+    message.warning('请输入 6 位数字验证码')
+    return
+  }
+  loading.value = true
+  try {
+    const { data } = await api.post('/auth/register/verify', { email: regEmail.value.trim(), code })
+    auth.setSession(data.token, data.user.email, 'user')
+    message.success('邮箱验证成功，注册完成')
+    void router.push({ name: 'user-overview' })
+  } catch (e) {
+    message.error(errMsg(e, '验证失败'))
+  } finally {
+    loading.value = false
+  }
+}
+
+async function resendRegistration() {
+  if (resending.value || resendSeconds.value > 0) return
+  if (captchaMissing.value) {
+    message.warning('请先完成人机验证')
+    return
+  }
+  resending.value = true
+  try {
+    const { data } = await api.post('/auth/register/resend', {
+      email: regEmail.value.trim(),
+      turnstileToken: turnstileToken.value || undefined,
+    })
+    verificationExpiresAt.value = data.expiresAt
+    resendAfter.value = data.resendAfter
+    regCode.value = ''
+    message.success('新的验证码已发送')
+  } catch (e) {
+    message.error(errMsg(e, '重新发送失败'))
+  } finally {
+    resetTurnstile()
+    resending.value = false
   }
 }
 </script>
@@ -176,7 +234,7 @@ async function register() {
         <div class="form-head">
           <div>
             <div class="form-eyebrow">Unified Console</div>
-            <h2>{{ mode === 'login' ? '欢迎回来' : '创建账号' }}</h2>
+            <h2>{{ mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建账号' : '验证邮箱' }}</h2>
           </div>
           <span class="secure-badge">Secure</span>
         </div>
@@ -220,7 +278,7 @@ async function register() {
           </p>
         </UiForm>
 
-        <UiForm v-else label-placement="top" novalidate class="login-form" @submit="register">
+        <UiForm v-else-if="mode === 'register'" label-placement="top" novalidate class="login-form" @submit="register">
           <UiFormItem label="邮箱" for-id="register-email">
             <UiInput
               id="register-email"
@@ -281,7 +339,17 @@ async function register() {
             已有账号？<button type="button" class="form-switch-link" @click="setMode('login')">返回登录</button>
           </p>
         </UiForm>
-        <GoogleSignIn v-if="googleClientId" :client-id="googleClientId" :disabled="loading" @busy="googleLoading = $event" @success="googleSignedIn" />
+        <UiForm v-else label-placement="top" novalidate class="login-form" @submit="verifyRegistration">
+          <p class="verification-hint">验证码已发送至 <strong>{{ regEmail }}</strong>。验证通过后才会创建账号，有效期至 {{ new Date(verificationExpiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}。</p>
+          <UiFormItem label="6 位验证码" for-id="register-code">
+            <input id="register-code" v-model="regCode" class="input verification-code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="输入邮件中的验证码" required />
+          </UiFormItem>
+          <UiButton type="primary" size="large" block native-type="submit" :loading="loading">验证并完成注册</UiButton>
+          <TurnstileWidget v-if="turnstileSiteKey" ref="turnstileRef" :site-key="turnstileSiteKey" @update:token="turnstileToken = $event" />
+          <p class="form-switch">没有收到？<button type="button" class="form-switch-link" :disabled="resending || resendSeconds > 0" @click="resendRegistration">{{ resendSeconds > 0 ? `${resendSeconds} 秒后可重发` : '重新发送验证码' }}</button></p>
+          <p class="form-switch"><button type="button" class="form-switch-link" @click="setMode('register')">修改注册信息</button><span> · </span><button type="button" class="form-switch-link" @click="setMode('login')">返回登录</button></p>
+        </UiForm>
+        <GoogleSignIn v-if="googleClientId && mode !== 'verify'" :client-id="googleClientId" :disabled="loading" @busy="googleLoading = $event" @success="googleSignedIn" />
         </div>
       </main>
     </div>
@@ -289,6 +357,11 @@ async function register() {
 </template>
 
 <style scoped>
+.verification-hint { margin: 0 0 18px; color: #60706b; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.verification-hint strong { color: #173d32; font-weight: 600; }
+.verification-code { font-size: 20px; letter-spacing: .2em; font-variant-numeric: tabular-nums; }
+:global(.dark) .verification-hint { color: #a9bdb4; }
+:global(.dark) .verification-hint strong { color: #e1f1e8; }
 .login-wrap {
   position: relative;
   min-height: 100vh;

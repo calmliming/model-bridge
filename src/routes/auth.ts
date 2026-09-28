@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getAdminUsername, verifyAdminCredentials } from '../auth/admin'
 import { checkLoginRateLimit, getTurnstileSiteKey, verifyTurnstileToken } from '../auth/security'
-import { registerUser, UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
+import { UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
+import { beginEmailRegistration, resendEmailRegistrationCode, verifyEmailRegistration } from '../users/emailRegistration'
+import { emailRegistrationConfigured } from '../users/registrationEmail'
 import { isRegistrationEnabled } from '../db/settings'
 import { config } from '../config'
 import { checkRateLimit } from '../middleware/limits'
@@ -21,10 +23,20 @@ const loginSchema = z.object({
 })
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
+  email: z.string().email().max(254),
+  password: z.string().min(6).max(128),
   name: z.string().trim().min(1).max(60).optional(),
   turnstileToken: z.string().optional(),
+})
+
+const resendRegistrationSchema = z.object({
+  email: z.string().email().max(254),
+  turnstileToken: z.string().optional(),
+})
+
+const verifyRegistrationSchema = z.object({
+  email: z.string().email().max(254),
+  code: z.string().regex(/^\d{6}$/),
 })
 
 /** Max registration attempts per client IP per minute. */
@@ -80,7 +92,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   // Public: the login page reads this to show/hide the registration entry.
   app.get('/api/auth/registration-status', async () => {
     return {
-      enabled: await isRegistrationEnabled(),
+      enabled: (await isRegistrationEnabled()) && emailRegistrationConfigured(),
       turnstileSiteKey: getTurnstileSiteKey(),
       googleClientId: getGoogleLoginClientId(),
     }
@@ -125,13 +137,48 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: '人机验证失败，请重试' })
     }
     try {
-      const user = await registerUser(body.data)
-      const token = app.jwt.sign(userSessionPayload(user), { expiresIn: '7d' })
-      return reply.code(201).send({ role: 'user', token, user })
+      const result = await beginEmailRegistration(body.data)
+      return reply.code(202).send({ verificationRequired: true, email: body.data.email.trim().toLowerCase(), ...result })
     } catch (err) {
       if (err instanceof UserManagerError) {
         return reply.code(err.statusCode).send({ error: err.message })
       }
+      throw err
+    }
+  })
+
+  app.post('/api/auth/register/resend', async (request, reply) => {
+    if (!(await isRegistrationEnabled())) return reply.code(403).send({ error: '当前未开放注册' })
+    if (!(await checkRateLimit(`register-resend:${request.ip}`, REGISTER_RATE_LIMIT))) {
+      return reply.code(429).send({ error: '验证码发送过于频繁，请稍后再试' })
+    }
+    const body = resendRegistrationSchema.safeParse(request.body)
+    if (!body.success) return reply.code(400).send({ error: 'invalid request body' })
+    if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
+      return reply.code(400).send({ error: '人机验证失败，请重试' })
+    }
+    try {
+      const result = await resendEmailRegistrationCode(body.data.email)
+      return { email: body.data.email.trim().toLowerCase(), ...result }
+    } catch (err) {
+      if (err instanceof UserManagerError) return reply.code(err.statusCode).send({ error: err.message })
+      throw err
+    }
+  })
+
+  app.post('/api/auth/register/verify', async (request, reply) => {
+    if (!(await isRegistrationEnabled())) return reply.code(403).send({ error: '当前未开放注册' })
+    if (!(await checkRateLimit(`register-verify:${request.ip}`, 10))) {
+      return reply.code(429).send({ error: '验证码尝试过于频繁，请稍后再试' })
+    }
+    const body = verifyRegistrationSchema.safeParse(request.body)
+    if (!body.success) return reply.code(400).send({ error: '请输入 6 位数字验证码' })
+    try {
+      const user = await verifyEmailRegistration(body.data.email, body.data.code)
+      const token = app.jwt.sign(userSessionPayload(user), { expiresIn: '7d' })
+      return reply.code(201).send({ role: 'user', token, user })
+    } catch (err) {
+      if (err instanceof UserManagerError) return reply.code(err.statusCode).send({ error: err.message })
       throw err
     }
   })

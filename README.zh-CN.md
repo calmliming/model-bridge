@@ -20,7 +20,7 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek �
 ## 技术栈
 
 - **后端：** Node.js + TypeScript、Fastify、PostgreSQL（Drizzle ORM）
-- **前端：** Vue 3 + Vite + Naive UI + ECharts
+- **前端：** Vue 3 + Vite + Pinia + Tailwind CSS（自建组件库）+ ECharts
 
 ## 快速开始（开发环境）
 

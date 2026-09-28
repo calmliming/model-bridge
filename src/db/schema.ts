@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
+import { bigint, boolean, doublePrecision, index, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
 
 const epochMs = (name: string) =>
   bigint(name, { mode: 'number' })
@@ -188,6 +188,19 @@ export const userInvites = pgTable('user_invites', {
   createdBy: text('created_by'),
   createdAt: epochMs('created_at'),
 })
+
+/** Registration details held only until the recipient confirms their email. */
+export const pendingUserRegistrations = pgTable('pending_user_registrations', {
+  email: text('email').primaryKey(),
+  id: text('id').notNull(),
+  name: text('name').notNull(),
+  passwordHash: text('password_hash').notNull(),
+  codeHash: text('code_hash').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  sentAt: bigint('sent_at', { mode: 'number' }).notNull(),
+  attempts: bigint('attempts', { mode: 'number' }).notNull().default(0),
+  createdAt: epochMs('created_at'),
+}, (table) => ({ expiresAtIndex: index('idx_pending_user_registrations_expires_at').on(table.expiresAt) }))
 
 /** Immutable wallet ledger. Amounts are signed micro-USD values. */
 export const walletTransactions = pgTable('wallet_transactions', {

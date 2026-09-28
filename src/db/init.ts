@@ -128,6 +128,19 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_user_invites_user_id ON user_invites (user_id);
     CREATE INDEX IF NOT EXISTS idx_user_invites_expires_at ON user_invites (expires_at);
 
+    CREATE TABLE IF NOT EXISTS pending_user_registrations (
+      email TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      sent_at BIGINT NOT NULL,
+      attempts BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_user_registrations_expires_at ON pending_user_registrations (expires_at);
+
     CREATE TABLE IF NOT EXISTS wallet_transactions (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

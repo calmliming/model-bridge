@@ -127,6 +127,13 @@
       "when": 1790549874377,
       "tag": "0017_subscription_usage_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790568339189,
+      "tag": "0018_curly_ink",
+      "breakpoints": true
     }
   ]
 }
