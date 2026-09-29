@@ -1,196 +1,34 @@
-import { createSign, createVerify } from 'node:crypto'
-import { alipayCnyToUsd, parseAlipayRate, usdMicrosToAlipayCny } from './alipay-amount'
-import type {
-  CreatePaymentParams,
-  CreatePaymentResult,
-  PaymentNotification,
-  PaymentProvider,
-} from './base'
+import { AlipayTradeClient } from './alipay-client'
+import { usdMicrosToAlipayCny } from './alipay-amount'
+import type { CreatePaymentParams, CreatePaymentResult, PaymentProvider } from './base'
 
-/**
- * 支付宝支付提供商
- * 使用当面付（扫码支付）API
- */
-export class AlipayProvider implements PaymentProvider {
-  private readonly appId: string
-  private readonly privateKey: string
-  private readonly alipayPublicKey: string
-  private readonly gatewayUrl: string
-  private readonly notifyUrl: string
-  private readonly returnUrl: string
-  private readonly usdCnyRate: bigint
-
-  constructor(config: {
-    appId: string
-    privateKey: string
-    alipayPublicKey: string
-    gatewayUrl?: string
-    notifyUrl?: string
-    returnUrl?: string
-    usdCnyRate: string
-  }) {
-    this.appId = config.appId
-    this.privateKey = config.privateKey
-    this.alipayPublicKey = config.alipayPublicKey
-    this.gatewayUrl = config.gatewayUrl || 'https://openapi.alipay.com/gateway.do'
-    this.notifyUrl = config.notifyUrl ?? ''
-    this.returnUrl = config.returnUrl ?? ''
-    this.usdCnyRate = parseAlipayRate(config.usdCnyRate)
-  }
-
+/** 支付宝当面付扫码支付，与网页支付共用 SDK 验签及交易校验。 */
+export class AlipayProvider extends AlipayTradeClient implements PaymentProvider {
   async createPayment(params: CreatePaymentParams): Promise<CreatePaymentResult> {
     const providerAmount = usdMicrosToAlipayCny(params.amountMicros, this.usdCnyRate)
-    const bizContent = {
-      out_trade_no: params.orderId,
-      total_amount: providerAmount,
-      subject: params.subject,
-      body: params.body || params.subject,
-      timeout_express: '30m',
+    const result = await this.sdk.exec('alipay.trade.precreate', {
+      ...(this.notifyUrl ? { notifyUrl: this.notifyUrl } : {}),
+      bizContent: {
+        out_trade_no: params.orderId,
+        total_amount: providerAmount,
+        subject: params.subject,
+        body: params.body || params.subject,
+        timeout_express: '30m',
+      },
+    }, { validateSign: true })
+    if (result.code !== '10000') {
+      throw new Error('Alipay precreate error: ' + (result.sub_msg || result.msg || result.sub_code || result.code))
     }
-
-    const commonParams = {
-      app_id: this.appId,
-      method: 'alipay.trade.precreate', // 当面付-扫码支付
-      format: 'JSON',
-      charset: 'utf-8',
-      sign_type: 'RSA2',
-      timestamp: this.formatDateTime(new Date()),
-      version: '1.0',
-      notify_url: this.notifyUrl,
-      biz_content: JSON.stringify(bizContent),
+    if (result.out_trade_no !== params.orderId || typeof result.qr_code !== 'string' || !result.qr_code) {
+      throw new Error('Alipay precreate response is missing the requested order or QR code')
     }
-
-    const sign = this.sign(commonParams)
-    const requestParams = { ...commonParams, sign }
-
-    const response = await fetch(this.gatewayUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
-      body: new URLSearchParams(requestParams as Record<string, string>),
-    })
-
-    const result = (await response.json()) as Record<string, any>
-    const responseData = result.alipay_trade_precreate_response as Record<string, any>
-
-    if (responseData.code !== '10000') {
-      throw new Error(
-        `Alipay error: code=${responseData.code} sub_code=${responseData.sub_code ?? '-'} msg=${responseData.sub_msg || responseData.msg}`,
-      )
-    }
-
     return {
-      providerOrderId: responseData.out_trade_no,
-      paymentUrl: responseData.qr_code,
-      qrCode: responseData.qr_code,
+      providerOrderId: params.orderId,
+      paymentUrl: result.qr_code,
+      qrCode: result.qr_code,
       providerAmount,
       providerCurrency: 'CNY',
       expiresAt: Date.now() + 30 * 60_000,
     }
-  }
-
-  async verifyNotification(data: Record<string, unknown>): Promise<PaymentNotification> {
-    // 验证签名
-    const sign = data.sign as string
-    const signType = data.sign_type as string
-    if (!sign || signType !== 'RSA2') {
-      throw new Error('Invalid signature')
-    }
-
-    const params = { ...data }
-    delete params.sign
-    delete params.sign_type
-
-    if (!this.verify(params, sign)) {
-      throw new Error('Signature verification failed')
-    }
-
-    const tradeStatus = data.trade_status as string
-    const status = tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED'
-      ? 'success'
-      : 'failed'
-
-    return {
-      providerOrderId: data.trade_no as string,
-      orderId: data.out_trade_no as string,
-      status,
-      paidAmount: status === 'success' ? alipayCnyToUsd(Number(data.total_amount), this.usdCnyRate) : undefined,
-      paidProviderAmount: status === 'success' ? String(data.total_amount ?? '') : undefined,
-      paidAt: status === 'success' ? new Date(data.gmt_payment as string).getTime() : undefined,
-      rawData: data,
-    }
-  }
-
-  async queryOrder(outTradeNo: string): Promise<PaymentNotification> {
-    const bizContent = { out_trade_no: outTradeNo }
-    const commonParams = {
-      app_id: this.appId,
-      method: 'alipay.trade.query',
-      format: 'JSON',
-      charset: 'utf-8',
-      sign_type: 'RSA2',
-      timestamp: this.formatDateTime(new Date()),
-      version: '1.0',
-      biz_content: JSON.stringify(bizContent),
-    }
-
-    const sign = this.sign(commonParams)
-    const requestParams = { ...commonParams, sign }
-
-    const response = await fetch(this.gatewayUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8' },
-      body: new URLSearchParams(requestParams as Record<string, string>),
-    })
-
-    const result = (await response.json()) as Record<string, any>
-    const responseData = result.alipay_trade_query_response as Record<string, any>
-
-    if (responseData.code !== '10000') {
-      throw new Error(`Alipay query error: ${responseData.sub_msg || responseData.msg}`)
-    }
-
-    const tradeStatus = responseData.trade_status
-    const status = tradeStatus === 'TRADE_SUCCESS' || tradeStatus === 'TRADE_FINISHED'
-      ? 'success'
-      : 'failed'
-
-    return {
-      providerOrderId: responseData.trade_no,
-      orderId: responseData.out_trade_no,
-      status,
-      paidAmount: status === 'success' ? alipayCnyToUsd(Number(responseData.total_amount), this.usdCnyRate) : undefined,
-      paidProviderAmount: status === 'success' ? String(responseData.total_amount ?? '') : undefined,
-      paidAt: status === 'success' ? new Date(responseData.send_pay_date).getTime() : undefined,
-      rawData: responseData,
-    }
-  }
-
-  private sign(params: Record<string, unknown>): string {
-    const sortedParams = Object.keys(params)
-      .sort()
-      .filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== '')
-      .map((key) => `${key}=${params[key]}`)
-      .join('&')
-
-    const sign = createSign('RSA-SHA256')
-    sign.update(sortedParams, 'utf-8')
-    return sign.sign(this.privateKey, 'base64')
-  }
-
-  private verify(params: Record<string, unknown>, signature: string): boolean {
-    const sortedParams = Object.keys(params)
-      .sort()
-      .filter((key) => params[key] !== undefined && params[key] !== null && params[key] !== '')
-      .map((key) => `${key}=${params[key]}`)
-      .join('&')
-
-    const verify = createVerify('RSA-SHA256')
-    verify.update(sortedParams, 'utf-8')
-    return verify.verify(this.alipayPublicKey, signature, 'base64')
-  }
-
-  private formatDateTime(date: Date): string {
-    const pad = (n: number) => n.toString().padStart(2, '0')
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   }
 }

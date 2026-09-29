@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { config } from '../config'
 import type { PaymentConfig } from './providers/base'
+import { parseAlipayProductionConfig } from './alipay-production'
 
 const PROJECT_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const SANDBOX_GATEWAY = 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
@@ -42,6 +43,7 @@ export function loadAlipayPaymentConfig(): PaymentConfig['alipay'] | undefined {
     sellerId: config.ALIPAY_SELLER_ID,
     sellerEmail: config.ALIPAY_SELLER_EMAIL,
     usdCnyRate: config.ALIPAY_USD_CNY_RATE,
+    paymentMode: config.ALIPAY_PAYMENT_MODE,
   }
 
   if (config.ALIPAY_ENV === 'sandbox') {
@@ -59,16 +61,5 @@ export function loadAlipayPaymentConfig(): PaymentConfig['alipay'] | undefined {
     }
   }
 
-  const credentials = [config.ALIPAY_APP_ID, config.ALIPAY_PRIVATE_KEY, config.ALIPAY_PUBLIC_KEY]
-  if (credentials.every((value) => !value?.trim())) return undefined
-  if (credentials.some((value) => !value?.trim())) {
-    throw new Error('Production Alipay configuration requires APP_ID, PRIVATE_KEY, and PUBLIC_KEY together')
-  }
-  return {
-    appId: config.ALIPAY_APP_ID!,
-    privateKey: config.ALIPAY_PRIVATE_KEY!,
-    alipayPublicKey: config.ALIPAY_PUBLIC_KEY!,
-    gatewayUrl: config.ALIPAY_GATEWAY,
-    ...common,
-  }
+  return parseAlipayProductionConfig(config)
 }

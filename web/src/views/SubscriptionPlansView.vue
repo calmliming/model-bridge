@@ -23,6 +23,7 @@ interface Plan {
   waffoProductId: string | null
   hasAccounts: boolean
   quotaMode: 'spend' | 'usage'
+  usageProfile?: 'base' | 'opencode-go'
   fiveHourLimitPoints: number | null
   weeklyLimitPoints: number | null
   monthlyLimitPoints: number | null
@@ -58,9 +59,10 @@ const form = ref({
   paymentProvider: 'waffo' as 'wallet' | 'waffo',
   waffoProductId: '',
   quotaMode: 'usage' as 'spend' | 'usage',
-  fiveHourLimitPoints: 2000 as number | null,
-  weeklyLimitPoints: 10000 as number | null,
-  monthlyLimitPoints: 30000 as number | null
+  usageProfile: 'opencode-go' as 'base' | 'opencode-go',
+  fiveHourLimitPoints: 12000 as number | null,
+  weeklyLimitPoints: 30000 as number | null,
+  monthlyLimitPoints: 60000 as number | null
 })
 
 async function load() {
@@ -98,9 +100,10 @@ function openCreate() {
     paymentProvider: 'waffo',
     waffoProductId: '',
     quotaMode: 'usage',
-    fiveHourLimitPoints: 2000,
-    weeklyLimitPoints: 10000,
-    monthlyLimitPoints: 30000
+    usageProfile: 'opencode-go',
+    fiveHourLimitPoints: 12000,
+    weeklyLimitPoints: 30000,
+    monthlyLimitPoints: 60000
   }
   showEdit.value = true
 }
@@ -120,6 +123,7 @@ function openEdit(plan: Plan) {
     paymentProvider: plan.paymentProvider,
     waffoProductId: plan.waffoProductId ?? '',
     quotaMode: plan.quotaMode,
+    usageProfile: plan.usageProfile ?? 'base',
     fiveHourLimitPoints: plan.fiveHourLimitPoints,
     weeklyLimitPoints: plan.weeklyLimitPoints,
     monthlyLimitPoints: plan.monthlyLimitPoints
@@ -158,6 +162,7 @@ async function save() {
     paymentProvider: form.value.paymentProvider,
     waffoProductId: form.value.waffoProductId.trim() || null,
     quotaMode: form.value.quotaMode,
+    usageProfile: form.value.usageProfile,
     fiveHourLimitPoints: form.value.fiveHourLimitPoints,
     weeklyLimitPoints: form.value.weeklyLimitPoints,
     monthlyLimitPoints: form.value.monthlyLimitPoints
@@ -349,12 +354,16 @@ onMounted(load)
           <UiSelect v-model:value="form.quotaMode" :options="[{ label: '加权用量 · 5 小时 / 周 / 月', value: 'usage' }, { label: '金额额度 · 日 / 周 / 30 天（兼容旧套餐）', value: 'spend' }]" />
         </UiFormItem>
         <template v-if="form.quotaMode === 'usage'">
+          <UiFormItem label="模型扣点规则">
+            <UiSelect v-model:value="form.usageProfile" :options="[{ label: '参考 Go · 不同模型按 1 / 2 / 4 倍扣点', value: 'opencode-go' }, { label: '统一模型价卡加权（原规则）', value: 'base' }]" />
+          </UiFormItem>
           <UiGrid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
             <UiGi span="3 s:1"><UiFormItem label="5 小时上限（点）"><UiInputNumber v-model:value="form.fiveHourLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
             <UiGi span="3 s:1"><UiFormItem label="周上限（点）"><UiInputNumber v-model:value="form.weeklyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
             <UiGi span="3 s:1"><UiFormItem label="月上限（点）"><UiInputNumber v-model:value="form.monthlyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
           </UiGrid>
-          <p class="field-hint mb-4">标准用量为 2,000 / 10,000 / 30,000 点，三档初始容量为 1× / 3× / 10×。用量点按模型 Token 权重累计，不是钱包余额。月额度按实际订阅账期重置。</p>
+          <p v-if="form.usageProfile === 'opencode-go'" class="field-hint mb-4">以 Go 的 $10 档为参考：5 小时 12,000、周 30,000、月 60,000 点；本站 $30 / $100 档按 3 / 10 倍扩展。标准模型 $1 参考用量扣 1,000 点，其他模型按 2 / 4 倍扣点；未列模型默认 4 倍。切换规则不会自动修改上限。</p>
+          <p v-else class="field-hint mb-4">1,000 点对应模型价目表中 $1 的参考用量，不是实际采购成本或钱包余额。请结合上游成本、按量售价和实际承载量设置额度；三项上限同时生效，月额度按订阅账期重置。</p>
         </template>
         <UiGrid v-else :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
           <UiGi span="3 s:1">

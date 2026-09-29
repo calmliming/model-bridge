@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => {
     query,
     release,
     connect,
-    estimateCost: vi.fn(),
+    calculateUsageCost: vi.fn(),
     debitWalletForUsage: vi.fn(),
     consumeSubscriptionUsage: vi.fn(),
     consumeWeightedSubscriptionUsage: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock('../db/index', () => ({
 }))
 
 vi.mock('./pricing', () => ({
-  estimateCost: mocks.estimateCost,
+  calculateUsageCost: mocks.calculateUsageCost,
   resolvePrice: () => null,
   resolveUsagePrice: () => null,
 }))
@@ -67,29 +67,45 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
   mocks.consumeSubscriptionUsage.mockResolvedValue(true)
-  mocks.consumeWeightedSubscriptionUsage.mockResolvedValue(undefined)
+  mocks.consumeWeightedSubscriptionUsage.mockImplementation(async (_client, _id, points) => points)
 })
 
 describe('recordUsage', () => {
+  it('persists the actually settled model multiplier with the usage ledger', async () => {
+    mocks.calculateUsageCost.mockReturnValue(0.125)
+    mocks.consumeWeightedSubscriptionUsage.mockResolvedValueOnce(500)
+    await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_go', subscriptionQuotaMode: 'usage' }))).resolves.toBe(true)
+    expect(insertParams().slice(-2)).toEqual(['s_go', 500])
+    expect(JSON.parse(insertParams()[34] as string)).toMatchObject({ subscriptionPointMultiplier: 4 })
+    expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+  })
+  it('retains sub-micro-dollar subscription usage while the wallet amount rounds to zero', async () => {
+    mocks.calculateUsageCost.mockReturnValue(0.000000003)
+    await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage', multiplier: 3 }))).resolves.toBe(true)
+    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_usage', 0.000003, expect.any(Number), 'claude-opus-4')
+    expect(insertParams().slice(19, 21)).toEqual([0, 0])
+    expect(insertParams().slice(-2)).toEqual(['s_usage', 0.000003])
+    expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+  })
   it('meters subscription points without wallet markup, fallback or a wallet debit', async () => {
-    mocks.estimateCost.mockReturnValue(0.125)
+    mocks.calculateUsageCost.mockReturnValue(0.125)
     mocks.consumeSubscriptionUsage.mockResolvedValue(false)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage', multiplier: 3 }))
-    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_usage', 125)
+    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_usage', 125, expect.any(Number), 'claude-opus-4')
     expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
     expect(insertParams()[21]).toBe('subscription')
     expect(insertParams().slice(-2)).toEqual(['s_usage', 125])
   })
   it('rolls back the entire weighted usage settlement on persistence failure', async () => {
-    mocks.estimateCost.mockReturnValue(1)
+    mocks.calculateUsageCost.mockReturnValue(1)
     mocks.consumeWeightedSubscriptionUsage.mockRejectedValueOnce(new Error('transaction failed'))
     await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage' }))).resolves.toBe(false)
     expect(mocks.query).toHaveBeenCalledWith('ROLLBACK')
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
   })
   it('applies the group multiplier to the base cost and stores both', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     await recordUsage(baseRecord({ multiplier: 1.5 }))
 
     const params = insertParams()
@@ -102,38 +118,38 @@ describe('recordUsage', () => {
   })
 
   it('defaults to 1x when no multiplier is given', async () => {
-    mocks.estimateCost.mockReturnValue(4)
+    mocks.calculateUsageCost.mockReturnValue(4)
     await recordUsage(baseRecord())
     expect(insertParams().slice(19, 21)).toEqual([4, 4])
   })
 
   it('treats a non-positive or non-finite multiplier as 1x', async () => {
-    mocks.estimateCost.mockReturnValue(5)
+    mocks.calculateUsageCost.mockReturnValue(5)
     await recordUsage(baseRecord({ multiplier: 0 }))
     expect(insertParams()[19]).toBe(5)
 
     vi.clearAllMocks()
     mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
-    mocks.estimateCost.mockReturnValue(5)
+    mocks.calculateUsageCost.mockReturnValue(5)
     await recordUsage(baseRecord({ multiplier: Number.NaN }))
     expect(insertParams()[19]).toBe(5)
   })
 
   it('discounts below 1x', async () => {
-    mocks.estimateCost.mockReturnValue(10)
+    mocks.calculateUsageCost.mockReturnValue(10)
     await recordUsage(baseRecord({ multiplier: 0.8 }))
     expect(insertParams().slice(19, 21)).toEqual([8, 10])
   })
 
   it('does not debit the wallet when there is no userId', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     await recordUsage(baseRecord({ userId: null, multiplier: 2 }))
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
     expect(insertParams()[19]).toBe(4)
   })
 
   it('bills a subscription request to the subscription, not the wallet', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_1', multiplier: 1.5 }))
     expect(insertParams()[21]).toBe('subscription')
     expect(mocks.consumeSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_1', 3)
@@ -141,7 +157,7 @@ describe('recordUsage', () => {
   })
 
   it('falls back to the wallet when the exact request cost exceeds subscription headroom', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     mocks.consumeSubscriptionUsage.mockResolvedValue(false)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_1' }))
     expect(insertParams()[21]).toBe('balance')
@@ -149,7 +165,7 @@ describe('recordUsage', () => {
   })
 
   it('falls back to wallet when a subscriptionId is missing', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     await recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: null }))
     expect(insertParams()[21]).toBe('balance')
     expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
@@ -157,7 +173,7 @@ describe('recordUsage', () => {
   })
 
   it('bills to balance by default', async () => {
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     await recordUsage(baseRecord())
     expect(insertParams()[21]).toBe('balance')
     expect(mocks.debitWalletForUsage).toHaveBeenCalled()
@@ -165,7 +181,7 @@ describe('recordUsage', () => {
   })
 
   it('stores non-sensitive sticky session diagnostics', async () => {
-    mocks.estimateCost.mockReturnValue(0)
+    mocks.calculateUsageCost.mockReturnValue(0)
     await recordUsage(baseRecord({
       sessionKeyHash: '0123456789abcdef',
       sessionSource: 'prompt_cache_key',
@@ -175,7 +191,7 @@ describe('recordUsage', () => {
   })
 
   it('stores image token and output metadata', async () => {
-    mocks.estimateCost.mockReturnValue(1)
+    mocks.calculateUsageCost.mockReturnValue(1)
     await recordUsage(baseRecord({
       usage: {
         ...USAGE,
@@ -190,7 +206,7 @@ describe('recordUsage', () => {
   })
 
   it('stores bounded failure tracing and upstream model audit fields', async () => {
-    mocks.estimateCost.mockReturnValue(0)
+    mocks.calculateUsageCost.mockReturnValue(0)
     await recordUsage(baseRecord({
       status: 'error',
       errorCode: ' rate_limit_error ',
@@ -212,7 +228,7 @@ describe('recordUsage', () => {
 
   it('returns false when persistence fails', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mocks.estimateCost.mockReturnValue(2)
+    mocks.calculateUsageCost.mockReturnValue(2)
     mocks.query.mockRejectedValueOnce(new Error('database unavailable'))
     await expect(recordUsage(baseRecord())).resolves.toBe(false)
     expect(mocks.query).toHaveBeenCalledWith('ROLLBACK')
@@ -220,7 +236,7 @@ describe('recordUsage', () => {
   })
 
   it('drains usage writes that are still pending', async () => {
-    mocks.estimateCost.mockReturnValue(0)
+    mocks.calculateUsageCost.mockReturnValue(0)
     let unblockConnect!: () => void
     const blocked = new Promise<void>((resolve) => {
       unblockConnect = resolve

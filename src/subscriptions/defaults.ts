@@ -1,4 +1,5 @@
 import { pool } from '../db/index'
+import { goUsageLimits } from './usageProfiles'
 
 export const DEFAULT_SUBSCRIPTION_PLANS = [
   { id: 'plan_lite', name: 'Lite', price: 10, daily: 2, weekly: 10, monthly: 30, description: '轻量任务与日常编程，提供标准订阅用量。' },
@@ -20,14 +21,17 @@ export async function seedSubscriptionPlans(): Promise<void> {
         await client.query("INSERT INTO account_groups (id, name, description) VALUES ($1, '订阅套餐', '请在分组管理中添加用于套餐的上游账户') ON CONFLICT DO NOTHING", [groupId])
       }
       for (const [index, plan] of DEFAULT_SUBSCRIPTION_PLANS.entries()) {
+        const limits = goUsageLimits(plan.price)
         await client.query(
           `INSERT INTO subscription_plans
            (id, name, description, group_id, price, daily_limit_usd, weekly_limit_usd, monthly_limit_usd,
-            validity_days, for_sale, sort_order, payment_provider)
-           SELECT $1, $2, $3, $4, $5, $6, $7, $8, 30, TRUE, $9, 'waffo'
+            validity_days, for_sale, sort_order, payment_provider,
+            quota_mode, usage_profile, five_hour_limit_points, weekly_limit_points, monthly_limit_points)
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, 30, TRUE, $9, 'waffo', 'usage', 'opencode-go', $10, $11, $12
            WHERE NOT EXISTS (SELECT 1 FROM subscription_plans WHERE lower(name) = lower($2))
            ON CONFLICT (id) DO NOTHING`,
-          [plan.id, plan.name, plan.description, groupId, plan.price, plan.daily, plan.weekly, plan.monthly, index],
+          [plan.id, plan.name, plan.description, groupId, plan.price, plan.daily, plan.weekly, plan.monthly, index,
+            limits.fiveHour, limits.weekly, limits.monthly],
         )
       }
       await client.query("INSERT INTO settings (key, value) VALUES ('subscription_plan_defaults_v1', '1')")
@@ -49,6 +53,24 @@ export async function seedSubscriptionPlans(): Promise<void> {
         )
       }
       await client.query("INSERT INTO settings (key, value) VALUES ('subscription_usage_windows_v1', '1')")
+    }
+    const benchmarked = await client.query("SELECT value FROM settings WHERE key = 'subscription_opencode_go_20260929'")
+    if (!benchmarked.rows.length) {
+      for (const plan of DEFAULT_SUBSCRIPTION_PLANS) {
+        const limits = goUsageLimits(plan.price)
+        await client.query('SELECT id FROM subscription_plans WHERE id = $1 FOR UPDATE', [plan.id])
+        await client.query(
+          `UPDATE subscription_plans SET usage_profile = 'opencode-go',
+             five_hour_limit_points = $2, weekly_limit_points = $3, monthly_limit_points = $4
+           WHERE id = $1 AND name = $5 AND price = $6 AND quota_mode = 'usage' AND usage_profile = 'base'
+             AND five_hour_limit_points = $7 AND weekly_limit_points = $8 AND monthly_limit_points = $9
+             AND NOT EXISTS (SELECT 1 FROM user_subscriptions WHERE plan_id = $1)
+             AND NOT EXISTS (SELECT 1 FROM subscription_checkouts WHERE plan_id = $1)`,
+          [plan.id, limits.fiveHour, limits.weekly, limits.monthly, plan.name, plan.price,
+            plan.daily * 1000, plan.weekly * 1000, plan.monthly * 1000],
+        )
+      }
+      await client.query("INSERT INTO settings (key, value) VALUES ('subscription_opencode_go_20260929', '1')")
     }
     await client.query('COMMIT')
   } catch (error) {

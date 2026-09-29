@@ -13,6 +13,8 @@ export interface BillingPlan {
   paymentProvider: 'wallet' | 'waffo'
   checkoutAvailable?: boolean
   quotaMode: 'spend' | 'usage'
+  usageProfile?: 'base' | 'opencode-go'
+  usageBands?: Array<{ multiplier: number; label: string; examples: string; monthlyReferenceUsd: number | null }>
   fiveHourLimitPoints: number | null
   weeklyLimitPoints: number | null
   monthlyLimitPoints: number | null
@@ -28,8 +30,8 @@ export interface SubscriptionUsageWindow {
   startedAt: number | null
 }
 
-export function quotaRatio(limit: number | null, baseline: number): string {
-  return limit == null ? '不限' : `${(limit / baseline).toLocaleString('en-US', { maximumFractionDigits: 2 })}× 标准`
+export function formatUsagePoints(limit: number | null): string {
+  return limit == null ? '不限' : `${limit.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 点`
 }
 
 export function isWaffoCheckoutUrl(value: string): boolean {

@@ -8,6 +8,8 @@ export interface PaymentConfig {
     appId: string
     privateKey: string
     alipayPublicKey: string
+    keyType?: 'PKCS1' | 'PKCS8'
+    paymentMode?: 'qr' | 'web' | 'both'
     gatewayUrl?: string
     notifyUrl?: string
     returnUrl?: string

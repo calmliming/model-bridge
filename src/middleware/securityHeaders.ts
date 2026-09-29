@@ -9,6 +9,9 @@ function contentSecurityPolicy(): string {
   const frameSrc = ["'self'"]
   const connectSrc = ["'self'"]
   const styleSrc = ["'self'", "'unsafe-inline'"]
+  // page.pay posts to the gateway, then redirects within Alipay to its cashier.
+  // Keep form destinations limited to the active environment's official domain.
+  const alipayFormTarget = config.ALIPAY_ENV === 'sandbox' ? 'https://*.alipaydev.com' : 'https://*.alipay.com'
   if (config.GOOGLE_LOGIN_CLIENT_ID) {
     scriptSrc.push('https://accounts.google.com/gsi/client')
     frameSrc.push('https://accounts.google.com/gsi/')
@@ -24,7 +27,7 @@ function contentSecurityPolicy(): string {
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'none'",
-    "form-action 'self'",
+    `form-action 'self' ${alipayFormTarget}`,
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     `style-src ${styleSrc.join(' ')}`,

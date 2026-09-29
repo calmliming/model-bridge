@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { emptyUsage } from '../providers/types'
-import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
+import { calculateUsageCost, estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
+import { usagePoints } from '../subscriptions/usageWindows'
+
+describe('subscription metering precision', () => {
+  it('counts a single cheap cache token before wallet rounding', () => {
+    const time = Date.parse('2026-09-12T10:00:00+08:00')
+    const usage = { ...emptyUsage(), cacheReadTokens: 1 }
+    expect(estimateCost('deepseek', 'deepseek-flash', usage, time)).toBe(0)
+    expect(usagePoints(calculateUsageCost('deepseek', 'deepseek-flash', usage, time))).toBe(0.000003)
+    expect(usagePoints(calculateUsageCost('deepseek', 'deepseek-flash', { ...usage, cacheReadTokens: 1000 }, time)))
+      .toBeCloseTo(1000 * usagePoints(calculateUsageCost('deepseek', 'deepseek-flash', usage, time)), 9)
+  })
+  it('uses the effective price for all token buckets without counting reasoning tokens twice', () => {
+    const usage = { ...emptyUsage(), inputTokens: 1000, outputTokens: 100, reasoningTokens: 80, cacheCreateTokens: 200, cacheReadTokens: 500 }
+    const price = resolveUsagePrice('claude', 'claude-sonnet-4', usage)!
+    expect(calculateUsageCost('claude', 'claude-sonnet-4', usage))
+      .toBeCloseTo((1000 * price.input + 100 * price.output + 200 * price.cacheWrite + 500 * price.cacheRead) / 1_000_000, 12)
+  })
+})
 
 describe('DeepSeek V4.1 Flash pricing', () => {
   const launch = Date.parse('2026-09-10T12:00:00+08:00')

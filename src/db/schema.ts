@@ -75,6 +75,7 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   paymentProvider: text('payment_provider').notNull().default('wallet'),
   waffoProductId: text('waffo_product_id'),
   quotaMode: text('quota_mode').notNull().default('spend'),
+  usageProfile: text('usage_profile').notNull().default('base'),
   fiveHourLimitPoints: doublePrecision('five_hour_limit_points'),
   weeklyLimitPoints: doublePrecision('weekly_limit_points'),
   monthlyLimitPoints: doublePrecision('monthly_limit_points'),

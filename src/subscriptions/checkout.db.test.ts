@@ -189,10 +189,10 @@ describe.runIf(database)('Waffo subscription database lifecycle', () => {
     expect(results).toEqual([true, true])
     const [view] = await listUserSubscriptions(user.id)
     expect(view.quotaMode).toBe('usage')
-    expect(view.usageWindows.map(window => window.used)).toEqual([36, 36, 36])
-    expect(view.usageWindows[0].percent).toBeCloseTo(1.8)
+    expect(view.usageWindows.map(window => window.used)).toEqual([144, 144, 144])
+    expect(view.usageWindows[0].percent).toBeCloseTo(1.2)
     const history = await listUserUsage(user.id, 1, 10)
-    expect(history.logs.map(row => row.subscriptionPoints)).toEqual([18, 18])
+    expect(history.logs.map(row => row.subscriptionPoints)).toEqual([72, 72])
     expect((await userUsageSummary(user.id)).cost24h).toBe(0)
     expect((await pool.query('SELECT * FROM wallet_transactions WHERE user_id=$1', [user.id])).rows).toHaveLength(0)
     expect(Number((await pool.query('SELECT balance_micros FROM users WHERE id=$1', [user.id])).rows[0].balance_micros)).toBe(10000000)
@@ -203,21 +203,21 @@ describe.runIf(database)('Waffo subscription database lifecycle', () => {
     await applyWaffoEvent(renewed)
     await applyWaffoEvent(renewed)
     const [after] = await listUserSubscriptions(user.id)
-    expect(after.usageWindows.map(window => window.used)).toEqual([36, 36, 0])
+    expect(after.usageWindows.map(window => window.used)).toEqual([144, 144, 0])
   })
 
   it('serializes concurrent completions and retains over-limit usage without a wallet debit', async () => {
     const order = await create()
     await applyWaffoEvent(event(order.id))
     const subscriptionId = (await subscriptions())[0].id
-    await Promise.all([1200, 1200].map(async points => {
+    await Promise.all([7000, 7000].map(async points => {
       const client = await pool.connect()
-      try { await client.query('BEGIN'); await consumeWeightedSubscriptionUsage(client, subscriptionId, points); await client.query('COMMIT') }
+      try { await client.query('BEGIN'); await consumeWeightedSubscriptionUsage(client, subscriptionId, points, Date.now(), 'deepseek-flash'); await client.query('COMMIT') }
       finally { client.release() }
     }))
     const [view] = await listUserSubscriptions(user.id)
-    expect(view.usageWindows[0]).toMatchObject({ used: 2400, remaining: 0, percent: 100 })
-    expect(view.usageWindows[1].used).toBe(2400)
+    expect(view.usageWindows[0]).toMatchObject({ used: 14000, remaining: 0, percent: 100 })
+    expect(view.usageWindows[1].used).toBe(14000)
     expect((await pool.query('SELECT * FROM wallet_transactions WHERE user_id=$1', [user.id])).rows).toHaveLength(0)
   })
 })

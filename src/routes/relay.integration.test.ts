@@ -36,7 +36,7 @@ vi.mock('../accounts/manager', () => ({
   accountConcurrencyKey: (id: string) => `account:${id}`,
   updateAccountQuota: async () => undefined,
 }))
-vi.mock('../usage/pricing', () => ({ estimateCost: () => mocks.cost, resolvePrice: () => null, resolveUsagePrice: () => null }))
+vi.mock('../usage/pricing', () => ({ calculateUsageCost: () => mocks.cost, estimateCost: () => mocks.cost, resolvePrice: () => null, resolveUsagePrice: () => null }))
 vi.mock('../subscriptions/manager', () => ({
   resolveActiveSubscription: mocks.resolveActiveSubscription,
   hasWindowHeadroom: async () => true,
@@ -100,7 +100,7 @@ beforeEach(async () => {
   }
   mocks.resolveActiveSubscription.mockResolvedValue({ subscriptionId: 'sub-1', planLimits: {} })
   mocks.consumeSubscriptionUsage.mockResolvedValue(false)
-  mocks.consumeWeightedSubscriptionUsage.mockResolvedValue(undefined)
+  mocks.consumeWeightedSubscriptionUsage.mockImplementation(async (_client, _id, points) => points)
   mocks.fetch.mockImplementation(async () => openaiResponse())
 
   // Transactional storage double. Real auth, relay, usage recording, wallet
@@ -177,7 +177,7 @@ describe('weighted subscription relay settlement', () => {
     const result = await request({ model: anthropic ? 'claude-sonnet-5' : 'gpt-5.4', stream,
       input: 'Hi', messages: [{ role: 'user', content: 'Hi' }], max_tokens: 100 }, url)
     expect(result.status).toBe(200)
-    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 'sub-1', 10)
+    expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 'sub-1', 10, expect.any(Number), expect.any(String))
     expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
     expect(mocks.transactions).toHaveLength(0)
     expect(mocks.balance).toBe(1000)

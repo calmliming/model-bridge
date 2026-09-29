@@ -73,6 +73,7 @@ describe('AlipayWebProvider', () => {
           out_trade_no: 'po_1',
           total_amount: '72.00',
           product_code: 'FAST_INSTANT_TRADE_PAY',
+          timeout_express: '30m',
         }),
       }),
     )
@@ -157,5 +158,6 @@ describe('AlipayWebProvider', () => {
       'alipay.trade.fastpay.refund.query',
       'alipay.trade.close',
     ])
+    expect(mocks.exec.mock.calls.every(call => call[2]?.validateSign === true)).toBe(true)
   })
 })

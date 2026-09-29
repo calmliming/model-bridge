@@ -4,6 +4,7 @@ import { pool } from '../db/index'
 import { applyWalletTransactionWithClient } from '../wallet/manager'
 import { usdToMicros } from '../wallet/money'
 import { subscriptionUsageWindows, type SubscriptionQuotaMode, type UsageWindow } from './usageWindows'
+import { subscriptionModelMultiplier, subscriptionUsageBands, type SubscriptionUsageProfile } from './usageProfiles'
 
 const DAY_MS = 24 * 60 * 60_000
 const WEEK_MS = 7 * DAY_MS
@@ -35,6 +36,8 @@ export interface PlanView {
   waffoProductId: string | null
   hasAccounts: boolean
   quotaMode: SubscriptionQuotaMode
+  usageProfile: SubscriptionUsageProfile
+  usageBands: ReturnType<typeof subscriptionUsageBands>
   fiveHourLimitPoints: number | null
   weeklyLimitPoints: number | null
   monthlyLimitPoints: number | null
@@ -259,22 +262,27 @@ export async function consumeWeightedSubscriptionUsage(
   subscriptionId: string,
   points: number,
   now = Date.now(),
-): Promise<void> {
+  model = '',
+): Promise<number> {
   if (!Number.isFinite(points) || points < 0) throw new Error('usage points must be finite and non-negative')
-  if (points === 0) return
+  if (points === 0) return 0
   const { rows } = await client.query<Record<string, unknown>>(
-    'SELECT * FROM user_subscriptions WHERE id = $1 FOR UPDATE', [subscriptionId],
+    `SELECT s.*, p.usage_profile FROM user_subscriptions s
+     LEFT JOIN subscription_plans p ON p.id = s.plan_id WHERE s.id = $1 FOR UPDATE OF s`, [subscriptionId],
   )
   const sub = rows[0]
   if (!sub) throw new Error('admitted subscription is missing during settlement')
+  const profile = sub.usage_profile === 'opencode-go' ? 'opencode-go' : 'base'
+  const chargedPoints = Math.round(points * subscriptionModelMultiplier(profile, model) * 1_000_000) / 1_000_000
   const [five, weekly, monthly] = subscriptionUsageWindows(sub, now)
   await client.query(
     `UPDATE user_subscriptions SET five_hour_window_start = $2, five_hour_usage_points = $3,
        weekly_points_start = $4, weekly_usage_points = $5,
        monthly_points_start = $6, monthly_usage_points = $7 WHERE id = $1`,
-    [subscriptionId, five.startedAt ?? now, five.used + points,
-      weekly.startedAt, weekly.used + points, monthly.startedAt, monthly.used + points],
+    [subscriptionId, five.startedAt ?? now, five.used + chargedPoints,
+      weekly.startedAt, weekly.used + chargedPoints, monthly.startedAt, monthly.used + chargedPoints],
   )
+  return chargedPoints
 }
 
 /**
@@ -325,6 +333,7 @@ export interface CreatePlanInput {
   paymentProvider?: 'wallet' | 'waffo'
   waffoProductId?: string | null
   quotaMode?: SubscriptionQuotaMode
+  usageProfile?: SubscriptionUsageProfile
   fiveHourLimitPoints?: number | null
   weeklyLimitPoints?: number | null
   monthlyLimitPoints?: number | null
@@ -344,8 +353,8 @@ export async function createPlan(input: CreatePlanInput): Promise<{ id: string }
     `INSERT INTO subscription_plans
        (id, name, description, group_id, price, daily_limit_usd, weekly_limit_usd,
         monthly_limit_usd, validity_days, for_sale, sort_order, payment_provider, waffo_product_id,
-        quota_mode, five_hour_limit_points, weekly_limit_points, monthly_limit_points)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+        quota_mode, five_hour_limit_points, weekly_limit_points, monthly_limit_points, usage_profile)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
     [
       id, input.name, input.description ?? null, input.groupId, input.price ?? 0,
       input.dailyLimitUsd ?? null, input.weeklyLimitUsd ?? null, input.monthlyLimitUsd ?? null,
@@ -353,6 +362,7 @@ export async function createPlan(input: CreatePlanInput): Promise<{ id: string }
       input.paymentProvider ?? 'wallet', input.waffoProductId ?? null,
       input.quotaMode ?? 'spend', input.fiveHourLimitPoints ?? null,
       input.weeklyLimitPoints ?? null, input.monthlyLimitPoints ?? null,
+      input.usageProfile ?? 'base',
     ],
   )
   return { id }
@@ -371,6 +381,7 @@ export async function updatePlan(id: string, patch: Partial<CreatePlanInput>): P
     forSale: 'for_sale', sortOrder: 'sort_order',
     paymentProvider: 'payment_provider', waffoProductId: 'waffo_product_id',
     quotaMode: 'quota_mode', fiveHourLimitPoints: 'five_hour_limit_points',
+    usageProfile: 'usage_profile',
     weeklyLimitPoints: 'weekly_limit_points', monthlyLimitPoints: 'monthly_limit_points',
   }
   const sets: string[] = []
@@ -422,6 +433,8 @@ function asPlan(row: Record<string, unknown>): PlanView {
     waffoProductId: (row.waffo_product_id as string | null) ?? null,
     hasAccounts: Boolean(row.has_accounts),
     quotaMode: row.quota_mode === 'usage' ? 'usage' : 'spend',
+    usageProfile: row.usage_profile === 'opencode-go' ? 'opencode-go' : 'base',
+    usageBands: subscriptionUsageBands(row.usage_profile === 'opencode-go' ? 'opencode-go' : 'base', row.monthly_limit_points == null ? null : Number(row.monthly_limit_points)),
     fiveHourLimitPoints: row.five_hour_limit_points == null ? null : Number(row.five_hour_limit_points),
     weeklyLimitPoints: row.weekly_limit_points == null ? null : Number(row.weekly_limit_points),
     monthlyLimitPoints: row.monthly_limit_points == null ? null : Number(row.monthly_limit_points),

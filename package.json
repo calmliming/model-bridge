@@ -14,6 +14,7 @@
     "db:migrate-from-sqlite": "tsx scripts/migrate-sqlite-to-pg.ts",
     "diagnose:sub2api": "tsx scripts/diagnose-sub2api.ts",
     "pay:smoke": "tsx scripts/alipay-sandbox-smoke.ts",
+    "pay:check": "tsx scripts/alipay-production-check.ts",
     "fix:sub2api-cooldown": "tsx scripts/clear-sub2api-cooldown.ts",
     "fix:cooldown": "tsx scripts/clear-account-cooldown.ts",
     "dev:db": "node scripts/dev-db.mjs up",

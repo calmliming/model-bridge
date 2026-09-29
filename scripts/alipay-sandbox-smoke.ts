@@ -1,5 +1,10 @@
 import { loadAlipayPaymentConfig } from '../src/payments/config'
 import { AlipayProvider } from '../src/payments/providers/alipay'
+import { config as runtimeConfig } from '../src/config'
+
+if (runtimeConfig.ALIPAY_ENV !== 'sandbox') {
+  throw new Error('pay:smoke only supports ALIPAY_ENV=sandbox; use pay:check for production')
+}
 
 const config = loadAlipayPaymentConfig()
 if (!config) {

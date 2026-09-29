@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
-import { estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
+import { calculateUsageCost, resolvePrice, resolveUsagePrice } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
 import { roundUsd } from '../wallet/money'
@@ -54,7 +54,8 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const pricedAt = record.requestStartedAt ?? Date.now()
     const usage = { ...record.usage }
     if (record.reasoningEffort) usage.reasoningEffort = record.reasoningEffort
-    const baseCost = estimateCost(record.provider, record.model, usage, pricedAt)
+    const unroundedCost = calculateUsageCost(record.provider, record.model, usage, pricedAt)
+    const baseCost = roundUsd(unroundedCost)
     const price = resolveUsagePrice(record.provider, record.model, usage, pricedAt)
     const imagePrice = usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price
     const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
@@ -78,10 +79,12 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     let billTo: 'subscription' | 'balance' = preferredBillTo
     let subscriptionCharged = false
     let subscriptionPoints: number | null = null
+    let subscriptionPointMultiplier: number | null = null
     if (preferredBillTo === 'subscription' && record.subscriptionQuotaMode === 'usage') {
       // Wallet markup does not change the weight of a subscription request.
-      subscriptionPoints = usagePoints(baseCost)
-      await consumeWeightedSubscriptionUsage(client, record.subscriptionId!, subscriptionPoints)
+      const basePoints = usagePoints(unroundedCost)
+      subscriptionPoints = await consumeWeightedSubscriptionUsage(client, record.subscriptionId!, basePoints, Date.now(), record.model)
+      subscriptionPointMultiplier = basePoints > 0 ? subscriptionPoints / basePoints : 1
       subscriptionCharged = true
     } else if (cost > 0 && preferredBillTo === 'subscription') {
       subscriptionCharged = await consumeSubscriptionUsage(client, record.subscriptionId!, cost)
@@ -135,7 +138,7 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         record.upstreamRequestId?.trim().slice(0, 200) || null,
         usage.serviceTier?.slice(0, 100) || null,
         usage.reasoningEffort?.slice(0, 100) || null,
-        JSON.stringify({ price, imagePrice }),
+        JSON.stringify({ price, imagePrice, ...(subscriptionPointMultiplier != null ? { subscriptionPointMultiplier } : {}) }),
         record.usage.imageCacheReadTokens ?? 0,
         record.usage.usageSource ?? 'unknown',
         billTo === 'subscription' ? record.subscriptionId ?? null : null,

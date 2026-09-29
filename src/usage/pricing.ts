@@ -1199,8 +1199,8 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   }
 }
 
-/** Estimates the USD cost of one request from its token usage. */
-export function estimateCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
+/** Unrounded reference cost, retaining small cache/token weights for subscription metering. */
+export function calculateUsageCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
   const p = resolveUsagePrice(provider, model, usage, atMs)
   if (!p) return 0
   const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p
@@ -1213,5 +1213,10 @@ export function estimateCost(provider: string, model: string, usage: UsageData, 
       (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +
       (usage.imageOutputTokens ?? 0) * (imagePrice?.imageOutput ?? 0)) /
     1_000_000
-  return roundUsd(cost)
+  return cost
+}
+
+/** Wallet estimates retain their existing micro-USD precision. */
+export function estimateCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
+  return roundUsd(calculateUsageCost(provider, model, usage, atMs))
 }

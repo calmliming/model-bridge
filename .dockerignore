@@ -9,6 +9,7 @@ data
 .env
 .env.*
 !.env.example
+.alipay-sandbox.json
 
 # Git / editor / logs
 .git

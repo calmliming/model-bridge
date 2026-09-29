@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BillingPlan } from '../billing'
-import { quotaRatio } from '../billing'
+import { formatUsagePoints } from '../billing'
 
 const props = defineProps<{ plan: BillingPlan }>()
 const recommended = computed(() => props.plan.name.toLowerCase() === 'pro')
@@ -22,9 +22,9 @@ const money = (value: number | null) => value == null ? '不限' : `$${value.toL
     <p class="plan-billing-note">{{ plan.paymentProvider === 'waffo' ? 'Waffo 按月订阅' : '钱包余额一次性购买' }}</p>
     <dl class="plan-allowances">
       <template v-if="plan.quotaMode === 'usage'">
-        <div class="plan-monthly"><dt>5 小时用量</dt><dd>{{ quotaRatio(plan.fiveHourLimitPoints, 2000) }}</dd></div>
-        <div><dt>每周用量</dt><dd>{{ quotaRatio(plan.weeklyLimitPoints, 10000) }}</dd></div>
-        <div><dt>每月用量</dt><dd>{{ quotaRatio(plan.monthlyLimitPoints, 30000) }}</dd></div>
+        <div class="plan-monthly"><dt>5 小时用量</dt><dd>{{ formatUsagePoints(plan.fiveHourLimitPoints) }}</dd></div>
+        <div><dt>每周用量</dt><dd>{{ formatUsagePoints(plan.weeklyLimitPoints) }}</dd></div>
+        <div><dt>每月用量</dt><dd>{{ formatUsagePoints(plan.monthlyLimitPoints) }}</dd></div>
       </template>
       <template v-else>
       <div class="plan-monthly"><dt>每 30 天可用额度</dt><dd>{{ money(plan.monthlyLimitUsd) }}</dd></div>
@@ -32,7 +32,15 @@ const money = (value: number | null) => value == null ? '不限' : `$${value.toL
       <div><dt>每周额度</dt><dd>{{ money(plan.weeklyLimitUsd) }}</dd></div>
       </template>
     </dl>
-    <p v-if="plan.quotaMode === 'usage'" class="plan-policy">按模型与实际用量加权，三项上限同时生效。</p>
+    <p v-if="plan.quotaMode === 'usage'" class="plan-policy">按模型及实际输入、输出、缓存用量扣点，三项上限同时生效。同样的任务，模型和缓存命中情况会影响消耗。</p>
+    <details v-if="plan.quotaMode === 'usage' && plan.usageProfile === 'opencode-go'" class="model-allowances">
+      <summary>不同模型能用多少</summary>
+      <div v-for="band in plan.usageBands" :key="band.multiplier" class="model-allowance">
+        <strong>{{ band.label }} · 每月 {{ money(band.monthlyReferenceUsd) }} 参考用量</strong>
+        <span>{{ band.examples }}</span>
+      </div>
+      <p>各模型共享上方三项额度，不能叠加领取。未列模型按本站 4 倍规则计量，实际可用模型以分组为准。</p>
+    </details>
     <p v-if="plan.groupName" class="plan-group"><span class="plan-group-dot" />{{ plan.groupName }}</p>
     <div class="plan-card-actions"><slot /></div>
     <slot name="status" />
@@ -60,6 +68,13 @@ h2 { font-size: 25px; font-weight: 650; letter-spacing: -.7px; line-height: 1.2;
 .plan-monthly dd { color: #0f766e; font-size: 21px; }
 .plan-group { display: flex; align-items: baseline; gap: 7px; margin: 22px 0 0; font-size: 12px; color: #657975; overflow-wrap: anywhere; }
 .plan-policy { color: #657975; font-size: 11px; line-height: 1.7; margin-top: 16px; }
+.model-allowances { margin-top: 12px; font-size: 11px; line-height: 1.7; color: #657975; }
+.model-allowances summary { cursor: pointer; color: #0f766e; font-size: 12px; }
+.model-allowance { display: grid; gap: 3px; margin-top: 12px; }
+.model-allowance strong { font-weight: 600; color: #244b3e; }
+.model-allowances p { margin-top: 12px; }
+:global(.dark) .model-allowances { color: #aac1bb; }
+:global(.dark) .model-allowances summary, :global(.dark) .model-allowance strong { color: #79d0b8; }
 .plan-group-dot { height: 5px; width: 5px; border-radius: 50%; background: #71a79b; flex-shrink: 0; }
 .plan-card-actions { padding-top: 24px; margin-top: auto; }
 :global(.dark) .plan-card { background: #15282a; color: #e4f0ed; border-color: #304647; }

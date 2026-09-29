@@ -459,6 +459,7 @@ export async function initDb(): Promise<void> {
 
   await pool.query(`
     ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS quota_mode TEXT NOT NULL DEFAULT 'spend';
+    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS usage_profile TEXT NOT NULL DEFAULT 'base';
     ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS five_hour_limit_points DOUBLE PRECISION;
     ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS weekly_limit_points DOUBLE PRECISION;
     ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_limit_points DOUBLE PRECISION;
