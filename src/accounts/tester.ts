@@ -36,6 +36,9 @@ import {
   type AccountBalanceSnapshot,
 } from '../providers/balance'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
+import { fetchCodexManifest } from '../providers/openai/codexCatalog'
+import { openAIAccountIdFromMetadata } from '../providers/openai/quota'
+import { parseModelCatalog } from '../providers/modelCatalog'
 import { GROK_MODELS_URL, GROK_USER_AGENT } from '../providers/grok/constants'
 import { fetchWithConnectTimeout } from '../http/upstream'
 
@@ -47,6 +50,22 @@ const XIAOMI_MESSAGES_URL = 'https://api.xiaomimimo.com/anthropic/v1/messages'
 const ZHIPU_MESSAGES_URL = 'https://open.bigmodel.cn/api/anthropic/v1/messages'
 const QWEN_MESSAGES_URL = 'https://dashscope.aliyuncs.com/apps/anthropic/v1/messages'
 const KIMI_MESSAGES_URL = 'https://api.moonshot.cn/anthropic/v1/messages'
+// ChatGPT sign-in only serves the models the account's plan carries, and OpenAI
+// retires them on its own schedule (gpt-5.4 / gpt-5.4-mini left Codex on
+// 2026-08-31), so a hard-coded probe model eventually fails every healthy
+// account. The probe defaults to the newest model and only steps down this
+// newest-first list when the account's live Codex catalog does not offer it
+// (gpt-6.1-sol is not on Free / Go plans); the head of the list is also the
+// fallback when the catalog cannot be read.
+const OPENAI_PROBE_MODELS = [
+  'gpt-6.1-sol',
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+]
 
 interface AccountRow {
   metadata?: unknown
@@ -156,7 +175,25 @@ async function testClaude(accessToken: string): Promise<ProviderTestOutcome> {
   }
 }
 
-async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
+async function pickOpenAIProbeModel(account: AccountRow, accessToken: string): Promise<string> {
+  try {
+    const manifest = await fetchCodexManifest({
+      accountId: account.id,
+      token: accessToken,
+      chatgptAccountId: openAIAccountIdFromMetadata(account.metadata),
+      clientVersion: CODEX_USER_AGENT.split('/')[1]!,
+    })
+    const offered = parseModelCatalog(manifest).map((model) => model.id)
+    return OPENAI_PROBE_MODELS.find((model) => offered.includes(model)) ?? offered[0] ?? OPENAI_PROBE_MODELS[0]!
+  } catch {
+    // An unreadable catalog is not the verdict: the Responses probe below
+    // reports the real upstream error (expired token, blocked account, …).
+    return OPENAI_PROBE_MODELS[0]!
+  }
+}
+
+async function testOpenAI(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
+  const model = await pickOpenAIProbeModel(account, accessToken)
   const response = await fetchWithTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
     headers: {
@@ -169,7 +206,7 @@ async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
       session_id: randomUUID(),
     },
     body: JSON.stringify({
-      model: 'gpt-5.4',
+      model,
       input: [
         {
           role: 'user',
@@ -184,7 +221,7 @@ async function testOpenAI(accessToken: string): Promise<ProviderTestOutcome> {
   if (!response.ok) await assertOk(response)
   await drainBody(response)
   return {
-    message: 'OpenAI / Codex Responses 端点可访问',
+    message: `OpenAI / Codex Responses 端点可访问（探测模型 ${model}）`,
     quota: extractAccountQuota('openai', response.headers),
   }
 }
@@ -253,7 +290,8 @@ async function testXiaomi(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      model: 'mimo-v2.5-pro',
+      // mimo-v2.5-pro goes offline on 2026-10-21 with no reroute to a successor.
+      model: 'mimo-v2.6-pro',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),
@@ -354,7 +392,7 @@ async function testGrok(accessToken: string): Promise<ProviderTestOutcome> {
 async function runProviderTest(account: AccountRow, accessToken: string): Promise<ProviderTestOutcome> {
   let result: ProviderTestOutcome
   if (account.provider === 'claude') result = await testClaude(accessToken)
-  else if (account.provider === 'openai') result = await testOpenAI(accessToken)
+  else if (account.provider === 'openai') result = await testOpenAI(account, accessToken)
   else if (account.provider === 'gemini') result = await testGemini(accessToken)
   else if (account.provider === 'antigravity') {
     const metadata = { ...object(account.metadata), ...await fetchAntigravityMetadata(accessToken) }

@@ -69,7 +69,9 @@ export interface BufferedImageConversion {
 }
 
 const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
-const IMAGE_RESPONSES_MODEL = 'gpt-5.4-mini'
+// Host model for the image_generation tool. gpt-5.4-mini left ChatGPT-signed-in
+// Codex on 2026-08-31; OpenAI names gpt-6-luna as its replacement.
+const IMAGE_RESPONSES_MODEL = 'gpt-6-luna'
 const MAX_UPLOAD_PART_BYTES = 20 * 1024 * 1024
 
 function stringField(value: unknown): string {

@@ -28,6 +28,7 @@ vi.mock('../db/settings', () => settings)
 vi.mock('../http/upstream', () => upstream)
 
 import { testAccountConnectivity } from './tester'
+import { resetCodexCatalogCache } from '../providers/openai/codexCatalog'
 
 function deepseekAccount(status: string, cooldownUntil: number | null) {
   return {
@@ -122,5 +123,79 @@ describe('testAccountConnectivity', () => {
     expect(result.success).toBe(true)
     expect(result.balance).toBeUndefined()
     expect(manager.updateAccountMetadata).not.toHaveBeenCalled()
+  })
+})
+
+describe('testAccountConnectivity (OpenAI probe model)', () => {
+  const openaiAccount = {
+    ...deepseekAccount('active', null),
+    id: 'acct-oa',
+    provider: 'openai',
+    name: 'Codex',
+    metadata: { openai: { chatgptAccountId: 'chatgpt-1' } },
+  }
+  const manifest = (models: unknown[]) =>
+    new Response(JSON.stringify({ models }), { status: 200, headers: { 'content-type': 'application/json' } })
+  const probeModel = () => {
+    const call = upstream.fetchWithConnectTimeout.mock.calls.find(([url]) => String(url).endsWith('/codex/responses'))
+    return JSON.parse(String(call?.[1]?.body)).model
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetCodexCatalogCache()
+    manager.ensureFreshToken.mockResolvedValue('oauth-token')
+    manager.getAccount.mockResolvedValue(openaiAccount)
+    settings.getQuotaAutopausePercent.mockResolvedValue(100)
+  })
+
+  it('probes the newest model the account catalog offers', async () => {
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(manifest([
+        { slug: 'gpt-6-luna' },
+        { slug: 'gpt-6-sol' },
+        { slug: 'gpt-6.1-sol' },
+        { slug: 'gpt-5.4', visibility: 'hide' },
+      ]))
+      .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
+
+    const result = await testAccountConnectivity('acct-oa')
+
+    const [catalogUrl, catalogInit] = upstream.fetchWithConnectTimeout.mock.calls[0]!
+    expect(String(catalogUrl)).toContain('/backend-api/codex/models?client_version=')
+    expect(catalogInit.headers).toMatchObject({ 'ChatGPT-Account-ID': 'chatgpt-1' })
+    expect(probeModel()).toBe('gpt-6.1-sol')
+    expect(result.message).toContain('gpt-6.1-sol')
+  })
+
+  it('steps down to the newest model a plan without gpt-6.1-sol carries', async () => {
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(manifest([{ slug: 'gpt-6-luna' }, { slug: 'gpt-6-sol' }]))
+      .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
+
+    await testAccountConnectivity('acct-oa')
+
+    expect(probeModel()).toBe('gpt-6-sol')
+  })
+
+  it('falls back to the first catalog model when none of the preferred ones is offered', async () => {
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(manifest([{ slug: 'gpt-7-nova' }, { slug: 'gpt-7-mini' }]))
+      .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
+
+    await testAccountConnectivity('acct-oa')
+
+    expect(probeModel()).toBe('gpt-7-nova')
+  })
+
+  it('still probes with the default model when the catalog is unreadable', async () => {
+    upstream.fetchWithConnectTimeout
+      .mockResolvedValueOnce(new Response('busy', { status: 503 }))
+      .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
+
+    const result = await testAccountConnectivity('acct-oa')
+
+    expect(result.success).toBe(true)
+    expect(probeModel()).toBe('gpt-6.1-sol')
   })
 })
