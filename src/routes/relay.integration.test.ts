@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   ensureFreshToken: vi.fn(),
   cachedAntigravityModels: vi.fn(),
   cachedAccountCatalogs: vi.fn(),
+  resolvePrice: vi.fn(),
   accounts: [] as Array<{ id: string; concurrencyLimit: number | null; metadata: Record<string, unknown> | null; proxyUrl?: string | null }>,
 }))
 
@@ -36,7 +37,7 @@ vi.mock('../accounts/manager', () => ({
   accountConcurrencyKey: (id: string) => `account:${id}`,
   updateAccountQuota: async () => undefined,
 }))
-vi.mock('../usage/pricing', () => ({ calculateUsageCost: () => mocks.cost, estimateCost: () => mocks.cost, resolvePrice: () => null, resolveUsagePrice: () => null }))
+vi.mock('../usage/pricing', () => ({ calculateUsageCost: () => mocks.cost, estimateCost: () => mocks.cost, resolvePrice: (...args: unknown[]) => mocks.resolvePrice(...args), resolveUsagePrice: () => null }))
 vi.mock('../subscriptions/manager', () => ({
   resolveActiveSubscription: mocks.resolveActiveSubscription,
   hasWindowHeadroom: async () => true,
@@ -49,6 +50,9 @@ import { registerRelayRoutes } from './relay'
 import { waitForPendingUsage } from '../usage/recorder'
 import { adjustWalletUsd } from '../wallet/manager'
 import { resetLimits, currentConcurrency } from '../middleware/limits'
+import { resetInflightReservations } from '../wallet/inflight'
+import { resetCodexCatalogCache } from '../providers/openai/codexCatalog'
+import { config } from '../config'
 
 function sse(events: unknown[]): Response {
   return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), {
@@ -77,6 +81,10 @@ beforeEach(async () => {
   vi.clearAllMocks()
   mocks.fetch.mockReset()
   await resetLimits()
+  resetInflightReservations()
+  resetCodexCatalogCache()
+  config.BALANCE_INFLIGHT_RESERVATION_ENABLED = false
+  mocks.resolvePrice.mockReturnValue(null)
   mocks.balance = 1_000
   mocks.quota = 0
   mocks.logs = []
@@ -274,6 +282,27 @@ describe('Claude Code safeguard protocol passthrough', () => {
   }))
 })
 
+describe('Sub2API converted Messages usage', () => {
+  it('records input and cache counts that only arrive in the final message_delta', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example/v1'
+    // Sub2API serving a GPT account over Messages: message_start reports 0.
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'message_start', message: { id: 'msg_gpt', model: 'gpt-6-sol', usage: { input_tokens: 0, output_tokens: 0 } } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hi' } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' },
+        usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 3000, cache_creation_input_tokens: 0 } },
+      { type: 'message_stop' },
+    ]))
+    const response = await request({ model: 'gpt-6-sol', stream: true, max_tokens: 64, messages: [{ role: 'user', content: 'Hi' }] }, '/v1/messages')
+    expect(response.status).toBe(200)
+    expect(mocks.logs).toHaveLength(1)
+    // input, output, reasoning, cache create, cache read
+    expect(mocks.logs[0]?.slice(9, 14)).toEqual([1200, 80, 0, 0, 3000])
+    expect(mocks.logs[0]?.[36]).toBe('upstream')
+  }))
+})
+
 describe('relay settlement', () => {
   it('persists an over-balance charge and rejects the next request', () => withRelay(async (request) => {
     const first = await request(prompt)
@@ -352,6 +381,150 @@ describe('Claude Chat Completions response format', () => {
     expect(response.body).toContain('chat.completion.chunk')
     expect(response.body).toContain('[DONE]')
     expect(mocks.logs).toHaveLength(1)
+  }))
+
+  it('drops settings Sonnet 5.5 rejects before calling Anthropic', () => withRelay(async (request) => {
+    mocks.fetch.mockImplementation(async () => claudeResponse())
+    const response = await request({
+      model: 'claude-sonnet-5-5', stream: true, temperature: 0.3, top_p: 0.8, tool_choice: 'required',
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object', properties: {} } } }],
+      messages: [{ role: 'user', content: 'Hi' }],
+    }, '/api/claude/v1/chat/completions')
+    expect(response.status).toBe(200)
+    const sent = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
+    expect(sent).not.toHaveProperty('temperature')
+    expect(sent).not.toHaveProperty('top_p')
+    expect(sent.tool_choice).toEqual({ type: 'auto' })
+    expect(sent.tools[0]).toMatchObject({ name: 'lookup', strict: true })
+  }))
+
+  it.each([
+    ['claude-sonnet-5-5', false],
+    ['claude-sonnet-5', true],
+  ])('handles the fine-grained streaming beta with computer toolsets on %s', (model, kept) => withRelay(async (request) => {
+    mocks.key.allowedProviders = ['claude']
+    mocks.fetch.mockImplementation(async () => claudeResponse())
+    const response = await request({
+      model, stream: true, max_tokens: 64,
+      tools: [{ type: 'computer_toolset_20260801', name: 'computer' }],
+      messages: [{ role: 'user', content: 'Hi' }],
+    }, '/v1/messages', { 'anthropic-beta': 'fine-grained-tool-streaming-2025-05-14,future-capability-test' })
+    expect(response.status).toBe(200)
+    const beta = new Headers(mocks.fetch.mock.calls[0]![1].headers).get('anthropic-beta')!.split(',')
+    expect(beta.includes('fine-grained-tool-streaming-2025-05-14')).toBe(kept)
+    expect(beta).toContain('future-capability-test')
+    expect(beta).toContain('oauth-2025-04-20')
+  }))
+})
+
+describe('balance in-flight reservation', () => {
+  function deferredUpstream() {
+    let resolve!: (response: Response) => void
+    const pending = new Promise<Response>(done => { resolve = done })
+    return { pending, resolve }
+  }
+
+  it('rejects a concurrent request once in-flight reservations cover the balance', () => withRelay(async (request) => {
+    config.BALANCE_INFLIGHT_RESERVATION_ENABLED = true
+    // $10 / $100 per 1M: a 100-output-token request reserves well over 1,000 micros.
+    mocks.resolvePrice.mockReturnValue({ input: 10, output: 100, cacheWrite: 0, cacheRead: 0 })
+    const first = deferredUpstream()
+    let started!: () => void
+    const upstreamStarted = new Promise<void>(done => { started = done })
+    mocks.fetch.mockImplementationOnce(async () => { started(); return first.pending })
+    const body = { ...prompt, max_output_tokens: 100 }
+    const firstRequest = request(body)
+    await upstreamStarted
+    const second = await request(body)
+    expect(second.status).toBe(402)
+    expect(JSON.parse(second.body).error).toContain('in-flight')
+    first.resolve(openaiResponse())
+    expect((await firstRequest).status).toBe(200)
+    // The reservation is released after settlement.
+    mocks.balance = 1_000_000
+    mocks.fetch.mockImplementation(async () => openaiResponse())
+    expect((await request(body)).status).toBe(200)
+  }))
+
+  it('admits concurrent requests while disabled or when the model is unpriced', () => withRelay(async (request) => {
+    for (const enabled of [false, true]) {
+      config.BALANCE_INFLIGHT_RESERVATION_ENABLED = enabled
+      mocks.resolvePrice.mockReturnValue(enabled ? null : { input: 10, output: 100, cacheWrite: 0, cacheRead: 0 })
+      const first = deferredUpstream()
+      let started!: () => void
+      const upstreamStarted = new Promise<void>(done => { started = done })
+      mocks.fetch.mockImplementationOnce(async () => { started(); return first.pending })
+      mocks.fetch.mockImplementationOnce(async () => openaiResponse())
+      const firstRequest = request({ ...prompt, max_output_tokens: 100 })
+      await upstreamStarted
+      expect((await request({ ...prompt, max_output_tokens: 100 })).status).toBe(200)
+      first.resolve(openaiResponse())
+      expect((await firstRequest).status).toBe(200)
+      mocks.balance = 1_000
+    }
+  }))
+})
+
+describe('Codex remote model catalog', () => {
+  async function get(url: string) {
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      return await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer mb-test' } })
+    } finally {
+      await app.close()
+    }
+  }
+  const manifest = { models: [{ slug: 'gpt-6-sol', display_name: 'GPT-6 Sol', priority: 1 }, { slug: 'gpt-5.4', priority: 2 }, { name: 'no-slug' }], etag: 'v1' }
+
+  it('serves the upstream manifest filtered to the key and caches it briefly', async () => {
+    mocks.key.allowedModels = ['gpt-6*']
+    mocks.accounts[0]!.metadata = { openai: { chatgptAccountId: 'acct-123' } }
+    mocks.fetch.mockImplementation(async () => new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } }))
+    const response = await get('/v1/models?client_version=0.158.0')
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ models: [manifest.models[0]], etag: 'v1' })
+    const [url, init] = mocks.fetch.mock.calls[0]!
+    expect(url).toBe('https://chatgpt.com/backend-api/codex/models?client_version=0.158.0')
+    expect(init.headers).toMatchObject({ authorization: 'Bearer test-upstream-token', 'ChatGPT-Account-ID': 'acct-123' })
+    expect((await get('/api/openai/v1/models?client_version=0.158.0')).statusCode).toBe(200)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the OpenAI-style list without a client version and rejects keys without OpenAI', async () => {
+    const list = await get('/v1/models')
+    expect(list.json()).toMatchObject({ object: 'list' })
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    mocks.key.allowedProviders = ['deepseek']
+    expect((await get('/v1/models?client_version=0.158.0')).statusCode).toBe(403)
+  })
+
+  it('reports an upstream failure without caching it', async () => {
+    mocks.fetch.mockResolvedValueOnce(new Response('busy', { status: 500 }))
+    expect((await get('/v1/models?client_version=0.158.0')).statusCode).toBe(502)
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify(manifest)))
+    expect((await get('/v1/models?client_version=0.158.0')).statusCode).toBe(200)
+  })
+})
+
+describe('Codex request headers', () => {
+  it('forwards the caller multi-agent beta to the Codex backend', () => withRelay(async (request) => {
+    const response = await request(prompt, '/v1/responses', { 'openai-beta': 'responses_multi_agent=v1' })
+    expect(response.status).toBe(200)
+    expect(new Headers(mocks.fetch.mock.calls[0]![1].headers).get('openai-beta')).toBe('responses_multi_agent=v1')
+  }))
+
+  it('keeps the default beta for callers that send none', () => withRelay(async (request) => {
+    expect((await request(prompt)).status).toBe(200)
+    expect(new Headers(mocks.fetch.mock.calls[0]![1].headers).get('openai-beta')).toBe('responses=experimental')
+  }))
+
+  it('rejects an unsupported GPT-6.1 Sol effort without penalizing the account', () => withRelay(async (request) => {
+    const response = await request({ model: 'gpt-6.1-sol', stream: true, input: 'Hi', reasoning: { effort: 'none' } })
+    expect(response.status).toBe(400)
+    expect(JSON.parse(response.body).error.code).toBe('unsupported_reasoning_effort')
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
   }))
 })
 
@@ -986,6 +1159,50 @@ describe('native Antigravity relay', () => {
     expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ project: 'google-project', model: 'claude-sonnet-5', request: { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] } })
     expect(mocks.logs[0]?.[4]).toBe('antigravity')
     expect(mocks.logs[0]?.slice(9, 12)).toEqual([70, 25, 5])
+  }))
+
+  function malformedResponse() {
+    return sse([{ response: { candidates: [{ content: { parts: [{ thoughtSignature: 'sig-only' }] }, finishReason: 'MALFORMED_FUNCTION_CALL' }],
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 0 } } }])
+  }
+
+  it.each([true, false])('retries an empty MALFORMED_FUNCTION_CALL reply before the client sees it (stream=%s)', stream => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'google-project' }
+    mocks.fetch.mockResolvedValueOnce(malformedResponse()).mockResolvedValueOnce(nativeResponse())
+    const response = await request({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Hello' }], stream }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Native answer')
+    expect(response.body).not.toContain('MALFORMED_FUNCTION_CALL')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    // The flake is not an account fault: no penalty, and the only account is reused.
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.pickAccount).toHaveBeenCalledTimes(2)
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[26]).toBe(2) // attempt_count
+  }))
+
+  it('passes the empty reply through on the last attempt', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'google-project' }
+    mocks.fetch.mockImplementation(async () => malformedResponse())
+    const response = await request({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Hello' }], stream: true }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('MALFORMED_FUNCTION_CALL')
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+
+  it('retries an empty native Gemini stream as well', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockResolvedValueOnce(malformedResponse()).mockResolvedValueOnce(nativeResponse())
+    const response = await request({ contents: [{ role: 'user', parts: [{ text: 'Hi' }] }] },
+      '/api/antigravity/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Native answer')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
   }))
 
   it('routes an Antigravity-only key from the common Messages endpoint', () => withRelay(async request => {

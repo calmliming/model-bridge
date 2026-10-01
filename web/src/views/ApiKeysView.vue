@@ -611,8 +611,13 @@ const baseOrigin = computed(() => {
   return window.location.origin
 })
 
+// Codex 0.156+ can load the model picker from the gateway; older versions
+// should keep the bundled catalog, so this stays opt-in.
+const codexRemoteCatalog = ref(false)
+
 const snippets = computed(() => {
   const key = useKeySecret.value || 'mb-xxxxxxxx'
+  const codexCatalogLine = codexRemoteCatalog.value ? `model_catalog_url = "${baseOrigin.value}/v1/models"\n` : ''
   return {
     claude: `export ANTHROPIC_BASE_URL=${baseOrigin.value}
 export ANTHROPIC_AUTH_TOKEN=${key}
@@ -630,7 +635,7 @@ model = "gpt-5.5"
 [model_providers.model-bridge]
 name = "model-bridge"
 base_url = "${baseOrigin.value}/v1"
-env_key = "MODEL_BRIDGE_API_KEY"
+${codexCatalogLine}env_key = "MODEL_BRIDGE_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 
@@ -1158,6 +1163,10 @@ onMounted(() => {
           <UiButton size="small" secondary @click="copyKey(snippets.deepseek)">复制</UiButton>
         </UiTabPane>
         <UiTabPane name="codex" tab="Codex CLI">
+          <label class="codex-catalog-toggle">
+            <UiSwitch v-model:value="codexRemoteCatalog" size="small" />
+            <span>从网关加载模型列表（需要 Codex 0.156 及以上；只显示该 Key 可用的模型）</span>
+          </label>
           <pre><code>{{ snippets.codex }}</code></pre>
           <UiButton size="small" secondary @click="copyKey(snippets.codex)">复制</UiButton>
         </UiTabPane>
@@ -1287,6 +1296,16 @@ onMounted(() => {
 
 <style scoped>
 /* 批量操作条与 fade 过渡已提升为 web/src/styles.css 的全局类。 */
+.codex-catalog-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: #475569;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 pre {
   margin: 0 0 12px;
   overflow-x: auto;

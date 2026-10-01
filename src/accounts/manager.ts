@@ -127,6 +127,13 @@ export async function createAccount(input: CreateAccountInput): Promise<{ id: st
   return { id }
 }
 
+/** ChatGPT subscription tier from the OAuth id_token (`metadata.openai`); display only. */
+export function openAIPlanType(provider: string, metadata: unknown): string | null {
+  if (provider !== 'openai') return null
+  const planType = metadataObject(metadataObject(metadata).openai).planType
+  return typeof planType === 'string' && planType.trim() ? planType.trim() : null
+}
+
 /** Lists accounts for the dashboard — OAuth tokens are never exposed. */
 export async function listAccounts() {
   await clearExpiredAccountCooldowns()
@@ -174,6 +181,7 @@ export async function listAccounts() {
     ...account,
     upstreamRequestIdHeader: typeof metadataObject(metadata).upstreamRequestIdHeader === 'string'
       ? metadataObject(metadata).upstreamRequestIdHeader : null,
+    planType: openAIPlanType(account.provider, metadata),
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
     quota: accountQuotaFromMetadata(metadata),

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { apiKeys, accountGroups, users } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
@@ -34,6 +34,38 @@ export interface CreatedApiKey {
   id: string
   /** Plaintext secret — returned to the admin and stored encrypted for later admin copy/reveal. */
   key: string
+}
+
+export interface ApiKeyCreationLimits {
+  maxActive: number
+  maxPerHour: number
+}
+
+/**
+ * Returns why a user may not create another key, or null when allowed. A
+ * limit of 0 is disabled. Concurrent requests may overshoot by a few keys;
+ * the cap exists to stop runaway creation, not to be an exact quota.
+ */
+export async function apiKeyCreationLimitError(
+  userId: string,
+  limits: ApiKeyCreationLimits,
+  now = Date.now(),
+): Promise<string | null> {
+  if (limits.maxActive <= 0 && limits.maxPerHour <= 0) return null
+  const [row] = await db
+    .select({
+      active: sql<number>`count(*) filter (where ${apiKeys.enabled} and (${apiKeys.expiresAt} is null or ${apiKeys.expiresAt} > ${now}))`,
+      recent: sql<number>`count(*) filter (where ${apiKeys.createdAt} >= ${now - 3_600_000})`,
+    })
+    .from(apiKeys)
+    .where(eq(apiKeys.userId, userId))
+  if (limits.maxActive > 0 && Number(row?.active ?? 0) >= limits.maxActive) {
+    return `有效 API Key 已达上限（${limits.maxActive} 个），请先停用或删除不用的 Key`
+  }
+  if (limits.maxPerHour > 0 && Number(row?.recent ?? 0) >= limits.maxPerHour) {
+    return `API Key 创建过于频繁（每小时最多 ${limits.maxPerHour} 个），请稍后再试`
+  }
+  return null
 }
 
 /** Creates a new API key and returns its plaintext secret once. */

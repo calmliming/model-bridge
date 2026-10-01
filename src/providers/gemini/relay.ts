@@ -102,6 +102,20 @@ function cleanSchema(value: unknown): unknown {
       (!out.items || typeof out.items !== 'object' || Array.isArray(out.items) || !Object.keys(out.items).length)) {
     out.items = { type: 'string' }
   }
+  // Gemini has no `const`, and its enum only constrains strings. A string
+  // const becomes a single-value enum; other consts are dropped. With an
+  // existing enum both apply, so keep the intersection instead of widening.
+  // A disjoint pair keeps the const alone, because an empty enum is rejected.
+  if (Object.prototype.hasOwnProperty.call(out, 'const')) {
+    const constant = typeof out.const === 'string' ? [out.const] : null
+    delete out.const
+    if (constant) {
+      const existing = Object.prototype.hasOwnProperty.call(out, 'enum') ? normalizeGeminiEnum(out.enum) : null
+      const intersection = existing?.filter(value => value === constant[0])
+      out.enum = intersection?.length ? intersection : constant
+      out.type ??= 'string'
+    }
+  }
   if (Object.prototype.hasOwnProperty.call(out, 'enum')) {
     const normalized = normalizeGeminiEnum(out.enum)
     if (normalized) out.enum = normalized

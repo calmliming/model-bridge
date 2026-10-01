@@ -91,3 +91,36 @@ function calendarDayStartMs(day: string): number {
   }
   return instant
 }
+
+/**
+ * Display name for a ChatGPT subscription `plan_type` claim. Values arrive in
+ * mixed spellings (`chatgpt_pro`, `self_serve_business_prolite`), so compare a
+ * normalized key. Unknown values are returned as-is rather than guessed.
+ * Wire names follow openai/codex protocol/src/account.rs.
+ */
+export function openAIPlanLabel(value: string | null | undefined): string {
+  const raw = (value ?? '').trim()
+  const key = raw.toLowerCase().replace(/[\s_-]+/g, '')
+  switch (key === 'chatgptpro' ? 'pro' : key) {
+    case '': return ''
+    case 'free': return 'Free'
+    case 'go': return 'Go'
+    case 'plus': return 'Plus'
+    case 'prolite': return 'Pro 100'
+    case 'pro': return 'Pro 200'
+    case 'promax': return 'Pro 500'
+    case 'team':
+    case 'selfservebusinessusagebased': return 'Business'
+    case 'selfservebusinessprolite': return 'Business Premium'
+    case 'business':
+    case 'enterprise':
+    case 'ent26':
+    case 'enterprisecbpusagebased': return 'Enterprise'
+    case 'enterprisecbpautomation': return 'Enterprise (Automation)'
+    case 'edu': return 'Edu'
+    case 'eduplus': return 'Edu Plus'
+    case 'edupro': return 'Edu Pro'
+    case 'unknown': return ''
+    default: return raw
+  }
+}

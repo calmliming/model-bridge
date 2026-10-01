@@ -5,7 +5,7 @@ import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, openAIPlanLabel } from '../utils'
 import ImportAccountsModal from '../components/ImportAccountsModal.vue'
 
 interface AccountQuotaWindow {
@@ -77,6 +77,8 @@ interface Account {
   groups: AccountGroupRef[]
   notes: string | null
   createdAt: number
+  // ChatGPT subscription plan claim (OpenAI OAuth accounts only).
+  planType?: string | null
   quota: AccountQuotaSnapshot | null
   balance: AccountBalanceSnapshot | null
   // null = inherit global; 0 = auto-pause disabled; 1-100 = own threshold
@@ -145,6 +147,15 @@ const refreshingQuotaId = ref<string | null>(null)
 const balanceRefreshingIds = ref<Set<string>>(new Set())
 const balanceErrors = ref<Record<string, string>>({})
 const resettingQuotaId = ref<string | null>(null)
+// Claude native reset credits from the last on-demand query, by account id.
+const claudeResetCounts = ref<Record<string, number>>({})
+
+interface ClaudeResetCreditsView {
+  eligible: boolean
+  availableCount: number
+  credits: Array<{ label: string; resetsLeft: number; expiresAt: string | null; clears: string[]; redeemable: boolean }>
+  cooldownUntil: string | null
+}
 const savingWeightId = ref<string | null>(null)
 const savingConcurrencyId = ref<string | null>(null)
 const savingNotesId = ref<string | null>(null)
@@ -441,7 +452,12 @@ function quotaWindowClass(window: AccountQuotaWindow) {
 }
 
 function renderAccount(row: Account) {
-  return h('div', { class: 'account-name' }, row.name)
+  const plan = openAIPlanLabel(row.planType)
+  if (!plan) return h('div', { class: 'account-name' }, row.name)
+  return h('div', { class: 'account-name-line' }, [
+    h('div', { class: 'account-name' }, row.name),
+    h(UiTag, { size: 'small', bordered: false, title: `ChatGPT 套餐：${row.planType}` }, { default: () => plan }),
+  ])
 }
 
 function renderReauthBadge(row: Account) {
@@ -712,10 +728,11 @@ function renderAccountBalance(row: Account) {
 }
 
 function renderResetCredits(row: Account) {
-  // OpenAI-only: surface the reset-credit balance, when known, next to the
-  // quota windows. `null`/undefined means we haven't queried it yet.
-  if (row.provider !== 'openai') return null
-  const credits = row.quota?.resetCredits
+  // Surface the reset-credit balance, when known, next to the quota windows:
+  // OpenAI from the stored quota, Claude from the last on-demand query.
+  // `null`/undefined means we haven't queried it yet.
+  if (row.provider !== 'openai' && row.provider !== 'claude') return null
+  const credits = row.provider === 'claude' ? claudeResetCounts.value[row.id] : row.quota?.resetCredits
   if (typeof credits !== 'number') return null
   return h(
     UiTag,
@@ -1552,6 +1569,72 @@ function confirmResetQuota(row: Account) {
   })
 }
 
+const CLAUDE_RESET_WINDOWS: Record<string, string> = { five_hour: '5小时', seven_day: '7天', seven_day_overage_included: '7天（含超额）' }
+
+function describeClaudeResetCredits(credits: ClaudeResetCreditsView): string {
+  const parts = [credits.availableCount > 0 ? `当前可兑换 ${credits.availableCount} 次。` : '当前没有可兑换的重置额度。']
+  if (credits.cooldownUntil) parts.push(`冷却至 ${formatShortTime(Date.parse(credits.cooldownUntil))}。`)
+  for (const credit of credits.credits) {
+    const windows = credit.clears.map(window => CLAUDE_RESET_WINDOWS[window] ?? window).join('、')
+    const expires = credit.expiresAt ? `，${formatShortTime(Date.parse(credit.expiresAt))} 到期` : ''
+    parts.push(`${credit.label || '重置额度'}：剩余 ${credit.resetsLeft} 次，可重置 ${windows}${expires}${credit.redeemable ? '' : '（暂不可用）'}。`)
+  }
+  if (!credits.eligible && !credits.credits.length) parts.push('该账号暂未参与 Claude 原生重置计划。')
+  return parts.join('')
+}
+
+/** Claude OAuth: query native reset credits, then confirm before redeeming one. */
+async function openClaudeReset(row: Account) {
+  resettingQuotaId.value = row.id
+  let credits: ClaudeResetCreditsView
+  try {
+    const { data } = await api.get(`/admin/accounts/${row.id}/claude/reset-credits`)
+    if (!data.success) {
+      message.error(data.error || '查询重置额度失败')
+      return
+    }
+    credits = data.credits
+  } catch (e) {
+    message.error(errMsg(e, '查询重置额度失败'))
+    return
+  } finally {
+    resettingQuotaId.value = null
+  }
+  claudeResetCounts.value = { ...claudeResetCounts.value, [row.id]: credits.availableCount }
+  const summary = describeClaudeResetCredits(credits)
+  if (credits.availableCount <= 0) {
+    dialog.info({ title: 'Claude 重置额度', content: summary, positiveText: '知道了' })
+    return
+  }
+  // One key per confirmation: a repeated submit replays instead of spending again.
+  const idempotencyKey = crypto.randomUUID()
+  dialog.warning({
+    title: '兑换重置额度',
+    content: `确定为「${row.name}」兑换一次 Claude 原生重置额度吗？该操作会立即重置限额窗口，且不可撤销。${summary}`,
+    positiveText: '兑换',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      resettingQuotaId.value = row.id
+      try {
+        const { data } = await api.post(`/admin/accounts/${row.id}/claude/reset-credits/redeem`, {}, {
+          headers: { 'Idempotency-Key': idempotencyKey },
+        })
+        if (data.credits) claudeResetCounts.value = { ...claudeResetCounts.value, [row.id]: data.credits.availableCount }
+        if (data.success) {
+          message.success(data.message || '已重置限额')
+          await load()
+          return
+        }
+        message.warning(data.message || data.error || '兑换未完成')
+      } catch (e) {
+        message.error(errMsg(e, '兑换重置额度失败'))
+      } finally {
+        resettingQuotaId.value = null
+      }
+    },
+  })
+}
+
 function confirmDelete(row: Account) {
   dialog.warning({
     title: '删除账户',
@@ -1631,8 +1714,8 @@ const columns = computed<TableColumn<Account>[]>(() => [
                 ])
               },
             ),
-            // Reset quota: OpenAI OAuth accounts only — consumes an upstream credit.
-            row.provider === 'openai'
+            // Reset quota: OpenAI / Claude OAuth accounts — consumes an upstream credit.
+            row.provider === 'openai' || row.provider === 'claude'
               ? h(
                   UiButton,
                   {
@@ -1640,8 +1723,8 @@ const columns = computed<TableColumn<Account>[]>(() => [
                     type: 'warning',
                     quaternary: true,
                     loading: resettingQuotaId.value === row.id,
-                    onClick: () => confirmResetQuota(row),
-                    title: '重置限额（消耗一次 reset credit）',
+                    onClick: () => row.provider === 'claude' ? openClaudeReset(row) : confirmResetQuota(row),
+                    title: row.provider === 'claude' ? '查询并兑换 Claude 原生重置额度' : '重置限额（消耗一次 reset credit）',
                   },
                   {
                     default: () => h('div', { class: 'flex items-center gap-1' }, [
@@ -2446,6 +2529,17 @@ onBeforeUnmount(() => {
   color: rgba(15, 23, 42, 0.52);
   font-size: 12px;
   line-height: 1.35;
+}
+
+:deep(.account-name-line) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+:deep(.account-name-line .account-name) {
+  min-width: 0;
 }
 
 :deep(.account-name) {

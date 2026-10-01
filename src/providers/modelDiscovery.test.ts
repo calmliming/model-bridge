@@ -125,6 +125,7 @@ describe('model discovery', () => {
       expect.arrayContaining([
         'gpt-5.5',
         'claude-fable-5-1',
+        'claude-sonnet-5-5',
         'claude-sonnet-5',
         'gemini-3.8-flash',
         'gemini-3.7-flash',
@@ -152,6 +153,7 @@ describe('model discovery', () => {
     expect(isProviderAllowed('openai', key)).toBe(true)
     expect(isProviderAllowed('deepseek', key)).toBe(false)
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
       'gpt-6-luna',
@@ -174,6 +176,7 @@ describe('model discovery', () => {
       allowedModels: ['gpt-*', 'deepseek-v4-pro']
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
       'gpt-6-luna',
@@ -211,6 +214,7 @@ describe('model discovery', () => {
       modelMappings: { 'gpt-public': 'gpt-5.4' }
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
       'gpt-6-luna',

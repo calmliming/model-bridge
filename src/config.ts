@@ -155,6 +155,25 @@ const schema = z.object({
     blankToUndefined,
     z.coerce.number().int().positive().default(10),
   ),
+  // Self-service API key creation caps per user; admin-created keys are exempt.
+  // "Active" means enabled and not expired. 0 disables the corresponding cap.
+  API_KEY_MAX_ACTIVE_PER_USER: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(0).default(200),
+  ),
+  API_KEY_MAX_CREATES_PER_HOUR: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(0).default(60),
+  ),
+  // Balance-billed requests reserve an estimated cost while in flight, so
+  // concurrent expensive calls cannot jointly overdraw a low balance. Off by
+  // default: low-balance users are then rejected earlier than before.
+  BALANCE_INFLIGHT_RESERVATION_ENABLED: z.preprocess(envBoolean, z.boolean().default(false)),
+  // Output tokens assumed for the estimate when a request sets no max tokens.
+  BALANCE_INFLIGHT_DEFAULT_OUTPUT_TOKENS: z.preprocess(
+    blankToUndefined,
+    z.coerce.number().int().min(1).max(128_000).default(8192),
+  ),
   // IANA timezone used to compute "today" boundaries for dashboard stats.
   // Defaults to Asia/Shanghai so daily figures match Beijing time regardless of
   // where the server runs. Unlike some gateways we don't crash on a bad value —

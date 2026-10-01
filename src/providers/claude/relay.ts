@@ -129,9 +129,52 @@ function normalizeMessages(messages: unknown): unknown {
   return changed ? next : messages
 }
 
-function isClaudeFable51Model(model: unknown): boolean {
-  if (typeof model !== 'string') return false
-  return /^claude-(?:fable|mythos)-5-1(?:$|-)/i.test(model.trim())
+interface ClaudeCompatRule {
+  /** Non-default temperature/top_p/top_k return 400; omitting them selects the default. */
+  stripSampling: boolean
+  /** Replacement for thinking.type=disabled; undefined omits thinking (adaptive). */
+  disabledThinking?: 'between_tools'
+  /** thinking.type=enabled with a manual budget returns 400; omit it (adaptive). */
+  dropEnabledThinking: boolean
+}
+
+// Documented migration rules for models that reject legacy request settings.
+// Forced tool_choice (any/tool) is rejected by every model listed here.
+// https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
+const SONNET_55_PATTERN = /^claude-sonnet-5[-.]5(?:$|-)/i
+const CLAUDE_COMPAT_RULES: Array<[RegExp, ClaudeCompatRule]> = [
+  [/^claude-(?:fable|mythos)-5-1(?:$|-)/i, { stripSampling: true, dropEnabledThinking: false }],
+  [SONNET_55_PATTERN, { stripSampling: true, disabledThinking: 'between_tools', dropEnabledThinking: true }],
+  [/^claude-opus-5[-.]5(?:$|-)/i, { stripSampling: false, dropEnabledThinking: true }],
+]
+
+function claudeCompatRule(model: unknown): ClaudeCompatRule | undefined {
+  if (typeof model !== 'string') return undefined
+  const id = model.trim()
+  return CLAUDE_COMPAT_RULES.find(([pattern]) => pattern.test(id))?.[1]
+}
+
+const SONNET_55_TOOLSETS = new Set(['computer_toolset_20260801', 'browser_toolset_20260801'])
+const FINE_GRAINED_TOOL_STREAMING_BETA = 'fine-grained-tool-streaming-2025-05-14'
+
+/**
+ * The legacy fine-grained streaming beta is incompatible with Sonnet 5.5's
+ * stable computer/browser toolsets; per-tool eager_input_streaming replaces it.
+ */
+function withoutConflictingToolsetBeta(beta: string, body: Record<string, unknown>): string {
+  if (typeof body.model !== 'string' || !SONNET_55_PATTERN.test(body.model.trim())) return beta
+  const usesToolset = Array.isArray(body.tools) && body.tools.some(tool =>
+    !!tool && typeof tool === 'object' && SONNET_55_TOOLSETS.has(String((tool as Record<string, unknown>).type)))
+  if (!usesToolset) return beta
+  return beta.split(',').map(token => token.trim()).filter(token => token && token !== FINE_GRAINED_TOOL_STREAMING_BETA).join(',')
+}
+
+/** between_tools only accepts low/medium/high effort. */
+function allowsBetweenTools(body: Record<string, unknown>): boolean {
+  const config = body.output_config
+  const effort = config && typeof config === 'object' && !Array.isArray(config)
+    ? (config as Record<string, unknown>).effort : undefined
+  return effort !== 'xhigh' && effort !== 'max'
 }
 
 function appendForcedToolInstruction(messages: unknown, instruction: string): unknown {
@@ -164,21 +207,28 @@ function withStrictClientTools(tools: unknown, forcedName?: string): unknown {
   })
 }
 
-/** Applies the documented Fable/Mythos 5.1 migration rules that avoid 400s. */
-function normalizeFable51Compatibility(body: Record<string, unknown>): Record<string, unknown> {
-  if (!isClaudeFable51Model(body.model)) return body
+/** Applies documented Fable 5.1 / Claude 5.5 migration rules that avoid 400s. */
+function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Record<string, unknown> {
+  const rule = claudeCompatRule(body.model)
+  if (!rule) return body
   const out: Record<string, unknown> = { ...body }
 
-  // Fable 5.1 always uses adaptive thinking and no longer accepts non-default
-  // sampling controls. Omitting these fields selects the supported defaults.
+  // These models default to adaptive thinking. A legacy disabled/manual-budget
+  // setting is mapped to the closest accepted mode instead of failing.
   const thinking = body.thinking
-  if (thinking && typeof thinking === 'object' && !Array.isArray(thinking) &&
-      (thinking as Record<string, unknown>).type === 'disabled') {
+  const thinkingType = thinking && typeof thinking === 'object' && !Array.isArray(thinking)
+    ? (thinking as Record<string, unknown>).type : undefined
+  if (thinkingType === 'disabled') {
+    if (rule.disabledThinking && allowsBetweenTools(body)) out.thinking = { type: rule.disabledThinking }
+    else delete out.thinking
+  } else if (thinkingType === 'enabled' && rule.dropEnabledThinking) {
     delete out.thinking
   }
-  delete out.temperature
-  delete out.top_p
-  delete out.top_k
+  if (rule.stripSampling) {
+    delete out.temperature
+    delete out.top_p
+    delete out.top_k
+  }
 
   const choice = body.tool_choice
   if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return out
@@ -278,7 +328,7 @@ function withSystemCacheBreakpoint(system: SystemBlock[]): SystemBlock[] {
  * now in the beta set the field is accepted upstream.)
  */
 export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
-  const compatibleBody = normalizeFable51Compatibility(body)
+  const compatibleBody = normalizeClaudeModelCompatibility(body)
   const out: Record<string, unknown> = { ...compatibleBody }
   const system = normalizeSystem(compatibleBody.system)
   // Cache the stable tools+system prefix so it can be READ across requests.
@@ -333,7 +383,7 @@ export function relayClaudeMessages(
       authorization: `Bearer ${accessToken}`,
       'anthropic-version': ANTHROPIC_VERSION,
       ...protocolHeaders,
-      'anthropic-beta': beta,
+      'anthropic-beta': withoutConflictingToolsetBeta(beta, payload),
       'content-type': 'application/json',
       'user-agent': passthrough && clientUserAgent ? clientUserAgent : USER_AGENT,
       accept: body.stream === true ? 'text/event-stream' : 'application/json',

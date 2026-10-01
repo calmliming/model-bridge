@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeOpenaiResponsesBody } from './relay'
+import { codexBetaHeader, normalizeOpenaiResponsesBody } from './relay'
+
+describe('codexBetaHeader', () => {
+  it('keeps the default when the caller sends no beta', () => {
+    expect(codexBetaHeader()).toBe('responses=experimental')
+    expect(codexBetaHeader({ 'openai-beta': ' , ' })).toBe('responses=experimental')
+  })
+  it('forwards caller tokens such as the multi-agent beta', () => {
+    expect(codexBetaHeader({ 'openai-beta': 'responses_multi_agent=v1' })).toBe('responses_multi_agent=v1')
+  })
+  it('merges repeated header values and removes duplicates', () => {
+    expect(codexBetaHeader({ 'openai-beta': ['responses_multi_agent=v1, responses=experimental', 'future=v2,responses_multi_agent=v1'] }))
+      .toBe('responses_multi_agent=v1, responses=experimental, future=v2')
+  })
+})
 
 describe('normalizeOpenaiResponsesBody', () => {
   it('adapts Astra sampling and reasoning without dropping native continuation items', () => {
@@ -14,6 +28,21 @@ describe('normalizeOpenaiResponsesBody', () => {
     expect(result).not.toHaveProperty('temperature')
     expect(result).not.toHaveProperty('top_p')
     expect(body.reasoning.effort).toBe('none')
+  })
+  it.each(['none', 'minimal'])('rejects GPT-6.1 Sol reasoning effort %s instead of raising it', effort => {
+    for (const model of ['gpt-6.1-sol', 'gpt-6-1-sol']) {
+      expect(() => normalizeOpenaiResponsesBody({ model, input: 'hi', reasoning: { effort } }))
+        .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
+    }
+  })
+  it('passes GPT-6.1 Sol supported efforts through unchanged', () => {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(normalizeOpenaiResponsesBody({ model: 'gpt-6.1-sol', input: 'hi', reasoning: { effort } }))
+        .toMatchObject({ reasoning: { effort } })
+    }
+    expect(normalizeOpenaiResponsesBody({ model: 'gpt-6.1-sol', input: 'hi' })).not.toHaveProperty('reasoning')
+    expect(normalizeOpenaiResponsesBody({ model: 'gpt-6-sol', input: 'hi', reasoning: { effort: 'none' } }))
+      .toMatchObject({ reasoning: { effort: 'none' } })
   })
   it('converts string input and applies Codex-required defaults', () => {
     const body = normalizeOpenaiResponsesBody({

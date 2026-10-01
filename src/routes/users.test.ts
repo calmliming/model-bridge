@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   config: {
     TURNSTILE_SITE_KEY: 'test-site', TURNSTILE_SECRET_KEY: 'test-secret',
     ENCRYPTION_KEY: '0'.repeat(64), STATS_TIMEZONE: 'Asia/Shanghai',
+    API_KEY_MAX_ACTIVE_PER_USER: 200, API_KEY_MAX_CREATES_PER_HOUR: 60,
   },
+  apiKeyCreationLimitError: vi.fn(),
+  createApiKey: vi.fn(),
   verifyUserCredentials: vi.fn(),
   getUserById: vi.fn(),
   isOnlinePaymentEnabled: vi.fn(),
@@ -33,6 +36,11 @@ vi.mock('../users/manager', async (original) => ({
   userFailureCategoriesToday: mocks.userFailureCategoriesToday,
 }))
 vi.mock('../auth/admin', () => ({ verifyAdminCredentials: async () => false }))
+vi.mock('../keys/manager', async (original) => ({
+  ...await original<typeof import('../keys/manager')>(),
+  apiKeyCreationLimitError: mocks.apiKeyCreationLimitError,
+  createApiKey: mocks.createApiKey,
+}))
 
 import { registerUserRoutes } from './users'
 import { registerAuthRoutes } from './auth'
@@ -155,5 +163,26 @@ describe('legacy user login security', () => {
     const blocked = await app.inject({ method: 'POST', url: '/api/users/login', payload: credentials })
     expect(blocked.statusCode).toBe(429)
     expect(mocks.verifyUserCredentials).toHaveBeenCalledTimes(10)
+  }))
+})
+
+describe('self-service API key creation limits', () => {
+  it('passes the configured limits and creates the key when allowed', () => withApp(async app => {
+    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
+    mocks.createApiKey.mockResolvedValue({ id: 'key-1', key: 'mb-secret' })
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const response = await app.inject({ method: 'POST', url: '/api/users/keys', headers: { authorization: `Bearer ${token}` }, payload: { name: 'CLI' } })
+    expect(response.statusCode).toBe(201)
+    expect(mocks.apiKeyCreationLimitError).toHaveBeenCalledWith('user-1', { maxActive: 200, maxPerHour: 60 })
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ name: 'CLI', userId: 'user-1' }))
+  }))
+
+  it('rejects creation over a limit without creating a key', () => withApp(async app => {
+    mocks.apiKeyCreationLimitError.mockResolvedValue('API Key 创建过于频繁（每小时最多 60 个），请稍后再试')
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const response = await app.inject({ method: 'POST', url: '/api/users/keys', headers: { authorization: `Bearer ${token}` }, payload: { name: 'CLI' } })
+    expect(response.statusCode).toBe(429)
+    expect(response.json().error).toContain('每小时最多 60 个')
+    expect(mocks.createApiKey).not.toHaveBeenCalled()
   }))
 })

@@ -12,7 +12,8 @@ import { convertNativeImageResponse, createNativeImagesUsageParser, createNative
 import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
-import { requireApiKey } from '../middleware/apiKeyAuth'
+import { requireApiKey, type AuthedApiKey } from '../middleware/apiKeyAuth'
+import { estimateReservationMicros, noopRelease, reserveInflightBalance, type InflightRelease } from '../wallet/inflight'
 import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
@@ -40,6 +41,8 @@ import {
   createClaudeChatCompletionsStreamTransform,
 } from '../providers/claude/chat'
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
+import { CodexCatalogError, codexClientVersion, fetchCodexManifest, filterCodexManifest } from '../providers/openai/codexCatalog'
+import { openAIAccountIdFromMetadata } from '../providers/openai/quota'
 import {
   convertOpenAIImagesSse,
   createOpenAIImagesStreamTransform,
@@ -99,7 +102,11 @@ import { createKimiResponsesStreamTransform } from '../providers/kimi/stream'
 import { mapModel as mapKimiResponsesModel } from '../providers/kimi/converter'
 import { relayAntigravity } from '../providers/antigravity/relay'
 import { messagesToGemini, prepareAntigravityGemini, AntigravityRequestError } from '../providers/antigravity/converter'
-import { createAntigravityUsageParser, parseAntigravityUsage, createAntigravityMessagesTransform, antigravitySseToMessages, antigravityJsonToMessages } from '../providers/antigravity/response'
+import {
+  createAntigravityUsageParser, parseAntigravityUsage, createAntigravityMessagesTransform, antigravitySseToMessages, antigravityJsonToMessages,
+  antigravityEmptyTranscriptReason, antigravityStreamStartVerdict,
+} from '../providers/antigravity/response'
+import { peekSseStart, sseDataEvents, type PeekVerdict } from '../providers/streamPeek'
 import { relayMiniMax, mapMiniMaxModel } from '../providers/minimax/relay'
 import * as minimaxUsage from '../providers/minimax/usage'
 import { cancelUpstreamResponse, upstreamSignal, withUpstreamSignal } from '../http/cancellation'
@@ -230,6 +237,11 @@ interface ProviderHandler {
   classifyUpstreamFailure?: (response: Response, model: string) => Promise<UpstreamFailure>
   /** Optional semantic failure policy for a buffered HTTP-200 SSE transcript. */
   classifyBufferedFailure?: (text: string, model: string) => Promise<UpstreamFailure | null>
+  /**
+   * Streaming: classifies upstream events until the first content, before any
+   * byte reaches the client, so an empty HTTP-200 reply can still be retried.
+   */
+  streamStartVerdict?: (event: unknown) => PeekVerdict
   createStreamParser(): { feed(event: unknown): void; result(): UsageData; failure?(): { code: string; message: string } | null }
   parseJsonUsage(body: unknown): UsageData
   /**
@@ -298,8 +310,9 @@ const PROVIDERS: Record<string, ProviderHandler> = {
       model: typeof body.model === 'string' ? body.model : '',
       action: 'responses',
     }),
-    callUpstream: (token, body, _ctx) => relayOpenaiResponses(token, body, {
+    callUpstream: (token, body, ctx) => relayOpenaiResponses(token, body, {
       allowImageGeneration: config.OPENAI_IMAGE_GENERATION_ENABLED,
+      clientHeaders: ctx.headers,
     }),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
@@ -376,6 +389,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: claudeUsage.parseJsonUsage,
     parseStreamEventsFrom: 'upstream',
     createStreamTransform: createAntigravityMessagesTransform,
+    streamStartVerdict: antigravityStreamStartVerdict,
+    classifyBufferedFailure: classifyAntigravityBufferedFailure,
     bufferSseResponse: antigravitySseToMessages,
     transformEventData: (data, meta) => meta ? antigravityJsonToMessages(data, meta).body : data,
   },
@@ -386,6 +401,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     normalizeModel: validateAntigravityModel,
     prepareBody: (body, ctx) => prepareAntigravityGemini(body, ctx.model),
     callUpstream: callAntigravity,
+    streamStartVerdict: antigravityStreamStartVerdict,
+    classifyBufferedFailure: classifyAntigravityBufferedFailure,
     createStreamParser: geminiUsage.createStreamParser,
     parseJsonUsage: geminiUsage.parseJsonUsage,
     transformEventData: unwrapResponseEnvelope,
@@ -722,6 +739,8 @@ interface RelayMeta {
 export interface UpstreamFailure {
   penalty: 'rate_limited' | 'error' | null
   retryable: boolean
+  /** An empty/malformed model reply, not an account fault: a retry may reuse the account. */
+  transientResponse?: boolean
   resetAt?: number | null
   /** When true the account token is permanently invalid — disable it instead of cooldown. */
   disable?: boolean
@@ -1777,8 +1796,14 @@ async function sendOpenAIStyleModelList(
     void reply.code(403).send({ error: `this API key may not use ${provider}` })
     return
   }
-  const models = listOpenAIStyleModels(await modelDiscoveryKey(request, provider), provider)
+  // Codex's model_catalog_url asks for its own manifest format.
+  const clientVersion = codexClientVersion((request.query as Record<string, unknown> | undefined)?.client_version)
   const modelId = (request.params as { model?: string })?.model
+  if (clientVersion && !modelId && (!provider || provider === 'openai')) {
+    await sendCodexModelsManifest(request, reply, clientVersion)
+    return
+  }
+  const models = listOpenAIStyleModels(await modelDiscoveryKey(request, provider), provider)
   if (modelId) {
     const model = models.find(item => item.id === modelId)
     void (model ? reply.send(model) : reply.code(404).send({ error: { code: 'model_not_found', message: 'Model not found.' } }))
@@ -1788,6 +1813,33 @@ async function sendOpenAIStyleModelList(
     object: 'list',
     data: models,
   })
+}
+
+/** Serves the Codex model manifest through one OpenAI account, filtered to the key's models. */
+async function sendCodexModelsManifest(request: FastifyRequest, reply: FastifyReply, clientVersion: string): Promise<void> {
+  const apiKey = request.apiKey!
+  if (!isProviderAllowed('openai', apiKey)) {
+    void reply.code(403).send({ error: 'this API key may not use openai' })
+    return
+  }
+  const account = await pickAccount('openai', [], null, apiKey.accountGroupId ?? null, null)
+  if (!account) {
+    void reply.code(503).send({ error: 'no openai account available for the Codex model catalog' })
+    return
+  }
+  try {
+    const token = await ensureFreshToken(account)
+    const manifest = await fetchCodexManifest({
+      accountId: account.id, token, clientVersion,
+      chatgptAccountId: openAIAccountIdFromMetadata(account.metadata),
+    })
+    void reply.header('cache-control', 'no-store').send(filterCodexManifest(manifest, model =>
+      isAllowedModel(model, apiKey.allowedModels) && isGroupModelAllowed(model, apiKey.groupAllowedModels)))
+  } catch (err) {
+    const status = err instanceof CodexCatalogError ? err.statusCode : 503
+    request.log.warn(`codex model catalog failed via ${account.id}: ${err instanceof Error ? err.message : String(err)}`)
+    void reply.code(status).send({ error: err instanceof CodexCatalogError ? err.message : 'Codex model catalog is unavailable' })
+  }
 }
 
 async function sendGeminiModelList(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -1955,32 +2007,68 @@ async function executeRelay(
     return
   }
   try {
-    const mapped = bodyWithMappedModel(body, parsed.model)
-    const mappedBody = provider.relayToRelay ? mapped : sanitizeToolSchemas(mapped)
-    const preparedBody = provider.prepareBody
-      ? provider.prepareBody(mappedBody, {
-          apiKeyId: apiKey.id,
-          userId: apiKey.userId,
-          action: parsed.action,
-          model: parsed.model,
-        })
-      : mappedBody
-    const controller = new AbortController()
-    const onClose = () => {
-      if (!reply.raw.writableEnded) controller.abort(new Error('client_disconnected'))
+    const releaseReservation = await reserveRequestBalance(apiKey, provider.id, parsed.model, body, request.headers['content-length'])
+    if (!releaseReservation) {
+      await reply.code(402).send({ error: 'insufficient balance: in-flight requests have reserved the remaining balance' })
+      return
     }
-    reply.raw.once('close', onClose)
-    if (reply.raw.destroyed) onClose()
     try {
-      await withUpstreamSignal(controller.signal, () => runRelayLoop(request, reply, provider, preparedBody, parsed))
+      const mapped = bodyWithMappedModel(body, parsed.model)
+      const mappedBody = provider.relayToRelay ? mapped : sanitizeToolSchemas(mapped)
+      const preparedBody = provider.prepareBody
+        ? provider.prepareBody(mappedBody, {
+            apiKeyId: apiKey.id,
+            userId: apiKey.userId,
+            action: parsed.action,
+            model: parsed.model,
+          })
+        : mappedBody
+      const controller = new AbortController()
+      const onClose = () => {
+        if (!reply.raw.writableEnded) controller.abort(new Error('client_disconnected'))
+      }
+      reply.raw.once('close', onClose)
+      if (reply.raw.destroyed) onClose()
+      try {
+        await withUpstreamSignal(controller.signal, () => runRelayLoop(request, reply, provider, preparedBody, parsed))
+      } finally {
+        reply.raw.off('close', onClose)
+        controller.abort()
+      }
     } finally {
-      reply.raw.off('close', onClose)
-      controller.abort()
+      // Usage has been settled by now, so the wallet already reflects the charge.
+      await releaseReservation()
     }
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
     if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
   }
+}
+
+/**
+ * Reserves a balance-billed request's estimated cost while it is in flight.
+ * Returns null when other in-flight requests have reserved the balance; an
+ * unpriced model or a disabled setting admits without a reservation.
+ */
+async function reserveRequestBalance(
+  apiKey: AuthedApiKey,
+  provider: string,
+  model: string,
+  body: Record<string, unknown>,
+  contentLength: string | undefined,
+): Promise<InflightRelease | null> {
+  if (!config.BALANCE_INFLIGHT_RESERVATION_ENABLED || apiKey.billTo !== 'balance' || !apiKey.userId) return noopRelease
+  const declaredBytes = Number(contentLength)
+  const estimate = estimateReservationMicros({
+    provider,
+    model,
+    body,
+    bodyBytes: Number.isFinite(declaredBytes) && declaredBytes > 0 ? declaredBytes : JSON.stringify(body).length,
+    multiplier: apiKey.groupMultiplier ?? 1,
+    defaultOutputTokens: config.BALANCE_INFLIGHT_DEFAULT_OUTPUT_TOKENS,
+  })
+  if (estimate == null) return noopRelease
+  return reserveInflightBalance(apiKey.userId, apiKey.userBalanceMicros ?? 0, estimate)
 }
 
 /** Concurrency-gate key for a user's aggregate in-flight requests. */
@@ -2264,6 +2352,21 @@ async function runRelayLoop(
         continue
       }
 
+      // Some upstreams reply 200 with an empty stream (Antigravity's
+      // MALFORMED_FUNCTION_CALL). Read up to the first content before any byte
+      // is sent so the attempt can be retried. It is a model flake rather than
+      // an account fault, so the same account stays eligible.
+      if (wantStream && upstream.ok && provider.streamStartVerdict) {
+        const peeked = await peekSseStart(upstream, provider.streamStartVerdict, STREAM_START_PEEK_MS)
+        upstream = peeked.response
+        if (peeked.retryReason && !lastAttempt && !upstreamSignal()?.aborted) {
+          request.log.warn(`${provider.id} account ${account.id} returned an empty stream (${peeked.retryReason}); retrying`)
+          await cancelUpstreamResponse(upstream)
+          tried.pop()
+          continue
+        }
+      }
+
       // Some Responses-compatible upstreams return HTTP 200 with a semantic
       // response.failed/error event. Cache the transcript for sendBuffered(),
       // so a transient terminal can rotate accounts without teeing the body.
@@ -2280,7 +2383,7 @@ async function runRelayLoop(
             relayToRelay,
             true,
           )
-          if (retryMode === 'same-account') tried.pop()
+          if (retryMode === 'same-account' || bufferedFailure.transientResponse) tried.pop()
           await cancelUpstreamResponse(upstream)
           continue
         }
@@ -2392,6 +2495,9 @@ async function runRelayLoop(
 // Interval for keepalive comment frames on an SSE stream while the upstream is
 // silent, short enough to stay under typical reverse-proxy idle timeouts (~60s).
 const STREAM_HEARTBEAT_MS = 15_000
+// Longest wait for a stream's first content before headers are sent. Kept
+// under common reverse-proxy idle timeouts, since no heartbeat runs yet.
+const STREAM_START_PEEK_MS = 20_000
 
 export function geminiClientRejectsSseComments(headers: FastifyRequest['headers']): boolean {
   return [headers['user-agent'], headers['x-goog-api-client']].some(value => {
@@ -3349,6 +3455,12 @@ function validateAntigravityModel(model: string): string {
   const normalized = model.trim().replace(/^models\//, '')
   if (!/^(gemini|claude)-[a-z\d._-]+$/i.test(normalized)) throw new AntigravityRequestError('Antigravity requires an explicit Gemini or Claude model name')
   return normalized
+}
+
+/** A buffered Antigravity transcript with no content is retried like an empty stream. */
+async function classifyAntigravityBufferedFailure(text: string): Promise<UpstreamFailure | null> {
+  const reason = antigravityEmptyTranscriptReason(sseDataEvents(text))
+  return reason ? { penalty: null, retryable: true, transientResponse: true } : null
 }
 
 function callAntigravity(token: string, body: Record<string, unknown>, ctx: UpstreamContext): Promise<Response> {

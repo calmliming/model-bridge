@@ -196,6 +196,28 @@ describe('sanitizeGeminiBody', () => {
     expect(params).toEqual({ type: 'string' })
   })
 
+  it('turns const into a single-value enum that keeps the constraint', () => {
+    const parameters = { type: 'object', properties: {
+      kind: { const: 'search' },
+      mode: { type: 'string', enum: ['fast', 'safe'], const: 'safe' },
+      disjoint: { type: 'string', enum: ['a'], const: 'b' },
+      level: { type: 'integer', const: 3 },
+      shape: { const: { nested: true }, description: 'compound' },
+      const: { type: 'string' },
+    }, required: ['kind'] }
+    const body = { tools: [{ functionDeclarations: [{ name: 'pick', parameters }] }] }
+    const params = (sanitizeGeminiBody(body).tools as any)[0].functionDeclarations[0].parameters
+    expect(params.properties).toEqual({
+      kind: { type: 'string', enum: ['search'] },
+      mode: { type: 'string', enum: ['safe'] },
+      disjoint: { type: 'string', enum: ['b'] },
+      level: { type: 'integer' },
+      shape: { description: 'compound' },
+      const: { type: 'string' },
+    })
+    expect(parameters.properties.kind).toEqual({ const: 'search' })
+  })
+
   it('returns the body unchanged when there are no tools', () => {
     const body = { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }
     expect(sanitizeGeminiBody(body)).toBe(body)

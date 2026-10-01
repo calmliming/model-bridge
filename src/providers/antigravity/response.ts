@@ -172,3 +172,41 @@ export function antigravityJsonToMessages(body: unknown, scope: SignatureScope) 
   const transform = createAntigravityMessagesTransform(scope)
   return accumulateMessages([...transform.transform(body), ...transform.flush()], parseAntigravityUsage(body), scope.model)
 }
+
+/** What one upstream event means while waiting for a stream's first content. */
+export type StreamStartVerdict = 'continue' | 'pass' | { retry: string }
+
+/**
+ * Classifies Antigravity events before any byte reaches the client. Text
+ * (including thought text), tool calls and media are content. Signature-only
+ * parts are not: a MALFORMED_FUNCTION_CALL reply carries just a
+ * thoughtSignature, and is worth retrying while the client has seen nothing.
+ * Explicit errors, blocks and other finish reasons pass through unchanged.
+ */
+export function antigravityStreamStartVerdict(raw: unknown): StreamStartVerdict {
+  const response = object(unwrapResponseEnvelope(raw))
+  if (!response) return 'continue'
+  if (response.error || object(response.promptFeedback)?.blockReason) return 'pass'
+  const candidate = Array.isArray(response.candidates) ? object(response.candidates[0]) : null
+  const parts = object(candidate?.content)?.parts
+  for (const part of Array.isArray(parts) ? parts.map(object) : []) {
+    if (!part) continue
+    if (typeof part.text === 'string' && part.text) return 'pass'
+    if (Object.keys(part).some(key => key !== 'text' && key !== 'thought' && key !== 'thoughtSignature')) return 'pass'
+  }
+  const finishReason = candidate?.finishReason
+  if (typeof finishReason === 'string' && finishReason) {
+    return finishReason === 'MALFORMED_FUNCTION_CALL' ? { retry: finishReason } : 'pass'
+  }
+  return 'continue'
+}
+
+/** Applies the stream-start verdict to a complete transcript; null = keep it. */
+export function antigravityEmptyTranscriptReason(events: unknown[]): string | null {
+  for (const event of events) {
+    const verdict = antigravityStreamStartVerdict(event)
+    if (verdict === 'pass') return null
+    if (verdict !== 'continue') return verdict.retry
+  }
+  return 'empty_stream'
+}

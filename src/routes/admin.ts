@@ -34,6 +34,12 @@ import {
   queryOpenAIAccountQuota,
   resetOpenAIAccountQuota,
 } from '../accounts/openaiQuota'
+import {
+  ClaudeResetError,
+  claudeResetOutcomeMessage,
+  queryClaudeResetCredits,
+  redeemClaudeResetCredit,
+} from '../accounts/claudeResetCredits'
 import { getProvider, isSupportedProvider } from '../providers/registry'
 import { OAuthConfigurationError } from '../providers/oauthErrors'
 import { requireAdmin } from '../middleware/adminAuth'
@@ -1612,6 +1618,42 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         }
         request.log.warn(`openai quota reset failed for ${request.params.id}`)
         return reply.code(500).send({ success: false, error: '重置限额失败' })
+      }
+    },
+  )
+
+  // ── Claude native limit resets (OAuth accounts only) ─────
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/claude/reset-credits',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      try {
+        return { success: true, credits: await queryClaudeResetCredits(request.params.id) }
+      } catch (err) {
+        if (err instanceof ClaudeResetError) {
+          return reply.code(err.statusCode).send({ success: false, error: err.message })
+        }
+        request.log.warn(`claude reset credit query failed for ${request.params.id}`)
+        return reply.code(500).send({ success: false, error: '查询重置额度失败' })
+      }
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/accounts/:id/claude/reset-credits/redeem',
+    { preHandler: requireAdmin },
+    async (request, reply) => {
+      const header = request.headers['idempotency-key']
+      const idempotencyKey = typeof header === 'string' ? header : undefined
+      try {
+        const result = await redeemClaudeResetCredit(request.params.id, idempotencyKey)
+        return { success: result.outcome === 'reset', message: claudeResetOutcomeMessage(result.outcome), ...result }
+      } catch (err) {
+        if (err instanceof ClaudeResetError) {
+          return reply.code(err.statusCode).send({ success: false, error: err.message })
+        }
+        request.log.warn(`claude reset credit redeem failed for ${request.params.id}`)
+        return reply.code(500).send({ success: false, error: '兑换重置额度失败' })
       }
     },
   )

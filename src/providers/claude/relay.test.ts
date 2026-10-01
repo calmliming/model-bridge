@@ -193,4 +193,62 @@ describe('normalizeClaudeMessagesBody', () => {
     })
     expect(body.tool_choice).toEqual({ type: 'any' })
   })
+
+  it.each(['claude-sonnet-5-5', 'claude-sonnet-5.5'])('adapts legacy controls for %s', model => {
+    const body = normalizeClaudeMessagesBody({
+      model,
+      temperature: 0.2,
+      top_p: 0.9,
+      top_k: 5,
+      thinking: { type: 'disabled' },
+      tools: [{ name: 'lookup', input_schema: { type: 'object' } }],
+      tool_choice: { type: 'any' },
+      messages: [{ role: 'user', content: 'Find the answer.' }],
+    })
+    expect(body).not.toHaveProperty('temperature')
+    expect(body).not.toHaveProperty('top_p')
+    expect(body).not.toHaveProperty('top_k')
+    expect(body.thinking).toEqual({ type: 'between_tools' })
+    expect(body.tool_choice).toEqual({ type: 'auto' })
+    expect(body.tools).toEqual([{ name: 'lookup', input_schema: { type: 'object' }, strict: true }])
+  })
+
+  it('maps Sonnet 5.5 thinking to modes its effort accepts', () => {
+    const base = { model: 'claude-sonnet-5-5', messages: [{ role: 'user', content: 'Hi' }] }
+    // between_tools only accepts up to high effort, so fall back to adaptive.
+    expect(normalizeClaudeMessagesBody({ ...base, thinking: { type: 'disabled' }, output_config: { effort: 'max' } }))
+      .not.toHaveProperty('thinking')
+    expect(normalizeClaudeMessagesBody({ ...base, thinking: { type: 'disabled' }, output_config: { effort: 'high' } }).thinking)
+      .toEqual({ type: 'between_tools' })
+    expect(normalizeClaudeMessagesBody({ ...base, thinking: { type: 'enabled', budget_tokens: 4096 } }))
+      .not.toHaveProperty('thinking')
+    for (const thinking of [{ type: 'adaptive', display: 'summarized' }, { type: 'between_tools' }]) {
+      expect(normalizeClaudeMessagesBody({ ...base, thinking }).thinking).toEqual(thinking)
+    }
+  })
+
+  it('adapts forced tools and legacy thinking for Opus 5.5 but keeps sampling', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-opus-5-5',
+      temperature: 0.2,
+      thinking: { type: 'enabled', budget_tokens: 2048 },
+      tools: [{ name: 'lookup', input_schema: { type: 'object' } }],
+      tool_choice: { type: 'tool', name: 'lookup' },
+      messages: [{ role: 'user', content: 'Find it.' }],
+    })
+    expect(body.temperature).toBe(0.2)
+    expect(body).not.toHaveProperty('thinking')
+    expect(body.tool_choice).toEqual({ type: 'auto' })
+    expect(normalizeClaudeMessagesBody({ model: 'claude-opus-5-5', thinking: { type: 'disabled' }, messages: [] }))
+      .not.toHaveProperty('thinking')
+  })
+
+  it('leaves Sonnet 5 and Opus 5 requests unchanged', () => {
+    for (const model of ['claude-sonnet-5', 'claude-opus-5']) {
+      const body = normalizeClaudeMessagesBody({
+        model, temperature: 0.2, thinking: { type: 'disabled' }, tool_choice: { type: 'any' }, messages: [],
+      })
+      expect(body).toMatchObject({ temperature: 0.2, thinking: { type: 'disabled' }, tool_choice: { type: 'any' } })
+    }
+  })
 })

@@ -24,12 +24,31 @@ describe('chatCompletionsToResponses', () => {
       instructions: 'Be brief.',
       stream: true,
       store: false,
-      temperature: 0.2,
       max_output_tokens: 64,
     })
+    // gpt-5.5 is a reasoning model: the Responses API rejects sampling params.
+    expect(out).not.toHaveProperty('temperature')
     expect(out.input).toEqual([
-      { role: 'user', content: [{ type: 'input_text', text: 'Say hi' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Say hi' }] },
     ])
+  })
+
+  it('keeps sampling params only where the target model accepts them', () => {
+    const base = { messages: [{ role: 'user', content: 'Hi' }], temperature: 0.3, top_p: 0.9 }
+    for (const model of ['gpt-5.4', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-7']) {
+      const out = chatCompletionsToResponses({ ...base, model })
+      expect(out).not.toHaveProperty('temperature')
+      expect(out).not.toHaveProperty('top_p')
+    }
+    for (const model of ['gpt-4.1', 'gpt-4o', 'gpt-image-1', 'custom-model']) {
+      expect(chatCompletionsToResponses({ ...base, model })).toMatchObject({ temperature: 0.3, top_p: 0.9 })
+    }
+    // GPT-6 Sol/Luna accept sampling controls with reasoning turned off.
+    for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+      expect(chatCompletionsToResponses({ ...base, model, reasoning_effort: 'none' })).toMatchObject({ temperature: 0.3, top_p: 0.9 })
+      expect(chatCompletionsToResponses({ ...base, model, reasoning_effort: 'low' })).not.toHaveProperty('temperature')
+    }
+    expect(chatCompletionsToResponses({ ...base, model: 'gpt-6.1-sol', reasoning_effort: 'none' })).not.toHaveProperty('temperature')
   })
 
   it('converts assistant tool calls and tool results into Responses items', () => {
@@ -91,6 +110,7 @@ describe('chatCompletionsToResponses', () => {
 
     expect(out.input).toEqual([
       {
+        type: 'message',
         role: 'user',
         content: [
           { type: 'input_text', text: 'Read this image.' },

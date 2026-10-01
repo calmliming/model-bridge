@@ -3,6 +3,7 @@ import { splitToolMedia } from '../toolMedia'
 import { randomUUID } from 'node:crypto'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 import { createFunctionCallTracker } from './toolCalls'
+import { acceptsOpenAISamplingParams } from './models'
 
 interface ChatMessage {
   role?: string
@@ -226,7 +227,7 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
   const input: Array<Record<string, unknown>> = []
 
   const pendingImages: Array<Record<string, unknown>> = []
-  const flushImages = () => { if (pendingImages.length) input.push({ role: 'user', content: pendingImages.splice(0) }) }
+  const flushImages = () => { if (pendingImages.length) input.push({ type: 'message', role: 'user', content: pendingImages.splice(0) }) }
   for (const message of messages) {
     if (message.role !== 'tool') flushImages()
     const role = typeof message.role === 'string' ? message.role : 'user'
@@ -255,7 +256,9 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
     const contentType = responseRole === 'assistant' ? 'output_text' : 'input_text'
     const contentParts = contentToResponsesParts(message.content, contentType, responseRole === 'user')
     if (contentParts.length) {
+      // Strict Responses upstreams require the explicit item type on role messages.
       input.push({
+        type: 'message',
         role: responseRole,
         content: contentParts,
       })
@@ -279,8 +282,10 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
   }
 
   if (instructions.length) out.instructions = instructions.join('\n\n')
-  if (typeof body.temperature === 'number') out.temperature = body.temperature
-  if (typeof body.top_p === 'number') out.top_p = body.top_p
+  if (acceptsOpenAISamplingParams(body.model, body.reasoning_effort)) {
+    if (typeof body.temperature === 'number') out.temperature = body.temperature
+    if (typeof body.top_p === 'number') out.top_p = body.top_p
+  }
   if (typeof body.max_completion_tokens === 'number') {
     out.max_output_tokens = body.max_completion_tokens
   } else if (typeof body.max_tokens === 'number') {

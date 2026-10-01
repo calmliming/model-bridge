@@ -31,10 +31,18 @@ interface ClaudeStreamEvent {
   usage?: ClaudeUsage
 }
 
+const DELTA_COUNT_FIELDS = [
+  ['input_tokens', 'inputTokens'],
+  ['output_tokens', 'outputTokens'],
+  ['cache_creation_input_tokens', 'cacheCreateTokens'],
+  ['cache_read_input_tokens', 'cacheReadTokens'],
+] as const
+
 /**
- * Accumulates usage from a streamed SSE response. Claude reports the
- * input/cache counts in `message_start` and the running output count in
- * each `message_delta` (the last one is final).
+ * Accumulates usage from a streamed SSE response. `message_start` carries the
+ * initial counts and every `message_delta` carries cumulative counts (the last
+ * one is final). Converted streams, e.g. Sub2API serving a GPT account over
+ * Messages, report input 0 at start and the real input/cache only in the delta.
  */
 export function createStreamParser() {
   const usage = emptyUsage()
@@ -44,8 +52,16 @@ export function createStreamParser() {
       const e = event as ClaudeStreamEvent
       if (e?.type === 'message_start' && e.message?.usage) {
         Object.assign(usage, mapUsage(e.message.usage))
-      } else if (e?.type === 'message_delta' && typeof e.usage?.output_tokens === 'number') {
-        usage.outputTokens = e.usage.output_tokens
+      } else if (e?.type === 'message_delta' && e.usage) {
+        for (const [field, key] of DELTA_COUNT_FIELDS) {
+          const value = e.usage[field]
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) continue
+          // Cumulative counts never shrink: a 0 after a positive count is a
+          // placeholder. Cache buckets are not subtracted from input either;
+          // providers disagree on whether input_tokens already includes them.
+          if (value === 0 && usage[key] > 0) continue
+          usage[key] = value
+        }
       }
     },
     result(): UsageData {

@@ -55,7 +55,7 @@ it('preserves tool image batches on Chat to Responses', () => {
   expect(body.input).toEqual([
     { type: 'function_call_output', call_id: 'a', output: 'screenshot' },
     { type: 'function_call_output', call_id: 'b', output: 'result' },
-    { role: 'user', content: [{ type: 'input_image', image_url: url, detail: 'high' }] },
+    { type: 'message', role: 'user', content: [{ type: 'input_image', image_url: url, detail: 'high' }] },
   ])
 })
 it('preserves ordinary and tool images on Chat to Claude', () => {

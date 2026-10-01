@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import type { IncomingHttpHeaders } from 'node:http'
 import { sanitizeToolSchemas } from '../toolSchema'
 import { chatCompletionsToResponses } from './chat'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
+import { isGpt61SolModel } from './models'
+import { ProviderRequestError } from '../requestError'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
@@ -11,6 +14,7 @@ const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 //   - 400s on `max_output_tokens` and `parallel_tool_calls`
 // Reverse-engineered; update here if OpenAI changes the requirements.
 const DEFAULT_INSTRUCTIONS = 'You are Codex, a helpful AI coding assistant.'
+const DEFAULT_OPENAI_BETA = 'responses=experimental'
 const FORBIDDEN_FIELDS = ['max_output_tokens', 'parallel_tool_calls'] as const
 const IMAGE_GENERATION_TOOL_TYPE = 'image_generation'
 const EMPTY_TOOL_PARAMETERS = { type: 'object', properties: {} }
@@ -126,17 +130,40 @@ export function normalizeOpenaiResponsesBody(
       if (effort === 'none' || effort === 'minimal') out.reasoning = { ...reasoning, effort: 'low' }
     }
   }
+  if (isGpt61SolModel(out.model)) {
+    // Reject rather than silently raising the effort: a higher effort costs
+    // the caller more than the request asked for.
+    const reasoning = out.reasoning
+    const effort = reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
+      ? (reasoning as Record<string, unknown>).effort : undefined
+    if (effort === 'none' || effort === 'minimal') {
+      throw new ProviderRequestError('unsupported_reasoning_effort',
+        `gpt-6.1-sol does not support reasoning effort "${effort}"; use low, medium, high, xhigh or max`)
+    }
+  }
   if (out.instructions == null || out.instructions === '') {
     out.instructions = DEFAULT_INSTRUCTIONS
   }
   return out
 }
 
+/**
+ * Codex declares Responses features such as `responses_multi_agent=v1` through
+ * OpenAI-Beta. Forward the caller's tokens as sent (deduplicated) so those
+ * features reach the backend; callers without the header keep the default.
+ */
+export function codexBetaHeader(headers: IncomingHttpHeaders = {}): string {
+  const raw = headers['openai-beta']
+  const values = Array.isArray(raw) ? raw : raw ? [raw] : []
+  const tokens = [...new Set(values.flatMap(value => value.split(',')).map(token => token.trim()).filter(Boolean))]
+  return tokens.length ? tokens.join(', ') : DEFAULT_OPENAI_BETA
+}
+
 /** Relays a /v1/responses request to the Codex backend with a ChatGPT OAuth token. */
 export function relayOpenaiResponses(
   accessToken: string,
   body: Record<string, unknown>,
-  options: { allowImageGeneration?: boolean } = {},
+  options: { allowImageGeneration?: boolean; clientHeaders?: IncomingHttpHeaders } = {},
 ): Promise<Response> {
   return fetchWithConnectTimeout(CODEX_RESPONSES_URL, {
     method: 'POST',
@@ -145,7 +172,7 @@ export function relayOpenaiResponses(
       'content-type': 'application/json',
       accept: 'text/event-stream',
       'user-agent': CODEX_USER_AGENT,
-      'openai-beta': 'responses=experimental',
+      'openai-beta': codexBetaHeader(options.clientHeaders),
       originator: CODEX_ORIGINATOR,
       session_id: randomUUID(),
     },
@@ -165,7 +192,7 @@ export function relayOpenaiImageResponses(
       'content-type': 'application/json',
       accept: 'text/event-stream',
       'user-agent': CODEX_USER_AGENT,
-      'openai-beta': 'responses=experimental',
+      'openai-beta': DEFAULT_OPENAI_BETA,
       originator: CODEX_ORIGINATOR,
       session_id: randomUUID(),
     },

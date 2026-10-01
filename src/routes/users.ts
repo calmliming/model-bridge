@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, updateApiKey } from '../keys/manager'
+import { config } from '../config'
+import { apiKeyCreationLimitError, createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, updateApiKey } from '../keys/manager'
 import { normalizeModelMappings } from '../keys/modelMapping'
 import { groupExists, listGroups } from '../accounts/groups'
 import { requireUser } from '../middleware/userAuth'
@@ -332,6 +333,11 @@ export function registerUserRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'account group not found' })
     }
     const user = request.currentUser!
+    const limitError = await apiKeyCreationLimitError(user.id, {
+      maxActive: config.API_KEY_MAX_ACTIVE_PER_USER,
+      maxPerHour: config.API_KEY_MAX_CREATES_PER_HOUR,
+    })
+    if (limitError) return reply.code(429).send({ error: limitError })
     return reply.code(201).send(await createApiKey({
       ...body.data,
       userId: user.id,

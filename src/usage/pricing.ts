@@ -2,6 +2,7 @@ import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
 import { IMAGE_25_MODELS, isImage25Model } from '../providers/openai/imageModels'
+import { isGpt61SolModel } from '../providers/openai/models'
 import { roundUsd } from '../wallet/money'
 
 /** USD price per 1M tokens, by model tier. */
@@ -203,10 +204,11 @@ const OPENAI_GPT56_LUNA: TierPrice = {
 // roughly half the price — and in Luna's case a tenth — rather than a new
 // capability tier: Artificial Analysis measured Intelligence/Coding scores
 // level with gpt-5.6 while cost per task fell ~50% (Sol) and ~60% (Luna).
-// Cache economics are unchanged from gpt-5.6: reads at 0.1× input, writes at
-// 1.25× input. Deliberately its own constant so a later gpt-5.6 price change
-// cannot silently move gpt-6 billing.
-// https://artificialanalysis.ai/articles/gpt-6-sol-and-luna-push-the-cost-efficiency-frontier
+// Official model pages: cached input is 10% of input, cache writes 1.25×.
+// Deliberately its own constant so a later gpt-5.6 price change cannot
+// silently move gpt-6 billing.
+// https://developers.openai.com/api/docs/models/gpt-6-sol
+// https://developers.openai.com/api/docs/models/gpt-6-luna
 const OPENAI_GPT6_SOL: TierPrice = {
   input: 2,
   output: 10,
@@ -217,7 +219,16 @@ const OPENAI_GPT6_LUNA: TierPrice = {
   input: 0.1,
   output: 0.5,
   cacheWrite: 0.125,
-  cacheRead: 0.05
+  cacheRead: 0.01
+}
+// GPT-6.1 Sol (public 2026-09-29). Same input/output as gpt-6 Sol, but cached
+// input halves to $0.10. Cache writes stay at 1.25× input.
+// https://developers.openai.com/api/docs/models/gpt-6.1-sol
+const OPENAI_GPT61_SOL: TierPrice = {
+  input: 2,
+  output: 10,
+  cacheWrite: 2.5,
+  cacheRead: 0.1
 }
 // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
 const OPENAI_ASTRA: TierPrice = {
@@ -271,6 +282,9 @@ const OPENAI_IMAGE_MINI: TierPrice = {
 
 function openaiPrice(model: string): TierPrice {
   if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
+  // "gpt-6.1-sol" misses the gpt-6 branch below ("." after the 6), and the
+  // dashed "gpt-6-1-sol" would hit it and bill the older cache-read rate.
+  if (isGpt61SolModel(model)) return OPENAI_GPT61_SOL
   // gpt-6 Sol/Luna must be matched before the gpt-5.6 branch below: their ids
   // contain neither "5.6" nor "5-6", so without this they would fall all the
   // way through to the generic OPENAI_GPT5 tier and under-bill every request
@@ -698,6 +712,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
+  { provider: 'openai', model: 'gpt-6.1-sol', price: OPENAI_GPT61_SOL },
   { provider: 'openai', model: 'gpt-6-sol', price: OPENAI_GPT6_SOL },
   { provider: 'openai', model: 'gpt-6-luna', price: OPENAI_GPT6_LUNA },
   { provider: 'openai', model: 'gpt-5.6-sol', price: OPENAI_GPT56_SOL },
@@ -831,7 +846,7 @@ const SEED_ROWS: SeedRow[] = [
  * One-time corrections for existing databases that were seeded with stale
  * generic-tier defaults. Each correction only fires when the row still holds
  * the old value — admin-customised prices are left untouched. Runs once,
- * gated by the `pricing_seed_v8` settings flag.
+ * gated by the `pricing_seed_v9` settings flag.
  */
 interface SeedCorrection {
   provider: string
@@ -956,6 +971,13 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'mimo-v2.5',
     from: XIAOMI_STALE_TIERS.standard,
     to: XIAOMI_TIERS.standard
+  },
+  // gpt-6 Luna was seeded with cached input at 0.05; the official rate is 0.01.
+  {
+    provider: 'openai',
+    model: 'gpt-6-luna',
+    from: { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.05 },
+    to: OPENAI_GPT6_LUNA
   }
 ]
 
@@ -1070,7 +1092,7 @@ export async function initPricing(): Promise<void> {
   }
 
   // Correct stale defaults exactly once (preserves admin customisations).
-  const corrected = await pool.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'pricing_seed_v8'`)
+  const corrected = await pool.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'pricing_seed_v9'`)
   if (corrected.rows[0]?.value !== '1') {
     for (const fix of SEED_CORRECTIONS) {
       await pool.query(
@@ -1096,7 +1118,7 @@ export async function initPricing(): Promise<void> {
       )
     }
     await pool.query(
-      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v8', '1')
+      `INSERT INTO settings (key, value) VALUES ('pricing_seed_v9', '1')
        ON CONFLICT (key) DO UPDATE SET value = '1'`
     )
   }
@@ -1126,7 +1148,8 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // short-circuited here.
   const normalizedModel = model.toLowerCase()
   if (
-    (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) || isImage25Model(normalizedModel)) &&
+    (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) ||
+      isGpt61SolModel(normalizedModel) || isImage25Model(normalizedModel)) &&
     (provider === 'openai' || provider === 'sub2api')
   ) {
     return builtinPrice(provider, model, atMs)
@@ -1161,13 +1184,15 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const effortPrices = override?.effortPrices as Record<string, TierPrice> | undefined
   const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
   if (!base) return null
-  const astra = (provider === 'openai' || provider === 'sub2api') && /^gpt-6-astra(?:$|-)/i.test(model)
+  // Every GPT-6 family model page (Astra, Sol, Luna, 6.1 Sol) documents the
+  // same 272K long-context step and Fast 2× / Flex 0.5× tier factors.
+  const gpt6 = (provider === 'openai' || provider === 'sub2api') && /^gpt-6(?:$|[.-])/i.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
   const grok47 = (provider === 'grok' || provider === 'sub2api') && /^grok-4[.-]7(?:$|-)/i.test(model)
   const longContext =
     override?.longContext !== undefined
       ? override.longContext
-      : astra
+      : gpt6
         ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
         : minimaxM3
           ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 }
@@ -1180,11 +1205,12 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
   const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
-  // Astra and MiniMax M3 have verified default factors. Other models retain
-  // the gateway's base-price policy unless the operator supplies a tier rule.
+  // The GPT-6 family and MiniMax M3 have verified default factors. Other
+  // models retain the gateway's base-price policy unless the operator supplies
+  // a tier rule.
   const tierMultiplier =
     configuredMultiplier ??
-    (minimaxM3 && tier === 'priority' ? 1.5 : astra && (tier === 'fast' || tier === 'priority') ? 2 : astra && tier === 'flex' ? 0.5 : 1)
+    (minimaxM3 && tier === 'priority' ? 1.5 : gpt6 && (tier === 'fast' || tier === 'priority') ? 2 : gpt6 && tier === 'flex' ? 0.5 : 1)
   const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
   const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
   return {

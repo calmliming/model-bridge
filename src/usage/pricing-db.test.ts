@@ -8,7 +8,21 @@ vi.mock('../db/index', () => ({
   pool: { query: mocks.query },
 }))
 
-import { loadPricing, resolvePrice } from './pricing'
+import { initPricing, loadPricing, resolvePrice } from './pricing'
+
+describe('one-time seed corrections', () => {
+  it('corrects only the old seeded gpt-6 Luna cache price under a new version flag', async () => {
+    mocks.query.mockReset()
+    mocks.query.mockResolvedValue({ rows: [] })
+    await initPricing()
+    const calls = mocks.query.mock.calls as Array<[string, unknown[]?]>
+    const luna = calls.find(([sql, values]) => sql.startsWith('UPDATE model_pricing') && values?.[1] === 'gpt-6-luna')
+    // to (input, output, cacheWrite, cacheRead) then the exact old tuple to match.
+    expect(luna?.[1]).toEqual(['openai', 'gpt-6-luna', 0.1, 0.5, 0.125, 0.01, 0.1, 0.5, 0.125, 0.05])
+    expect(calls.some(([sql]) => sql.includes("'pricing_seed_v9'"))).toBe(true)
+    expect(calls.some(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === 'gpt-6.1-sol' && values?.[6] === 0.1)).toBe(true)
+  })
+})
 
 function priceRow(model: string, input: number, output: number, cacheRead: number, provider = 'deepseek') {
   return {
@@ -77,6 +91,19 @@ describe('scheduled database price overrides', () => {
     mocks.query.mockResolvedValue({ rows: [priceRow('gpt', 1.25, 10, 0.125, 'openai')] })
     await loadPricing()
     expect(resolvePrice('openai', 'gpt-6-astra')).toMatchObject({ input: 10, output: 50, cacheWrite: 12.5 })
+  })
+  it('does not bill GPT-6.1 Sol at the generic GPT fallback before its seed row exists', async () => {
+    mocks.query.mockResolvedValue({ rows: [priceRow('gpt', 1.25, 10, 0.125, 'openai'), priceRow('gpt-6-sol', 2, 10, 0.2, 'openai')] })
+    await loadPricing()
+    for (const model of ['gpt-6.1-sol', 'gpt-6-1-sol', 'gpt-6.1-sol-high']) {
+      expect(resolvePrice('openai', model)).toMatchObject({ input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 })
+    }
+    expect(resolvePrice('openai', 'gpt-6-sol')).toMatchObject({ cacheRead: 0.2 })
+  })
+  it('keeps an administrator-edited GPT-6.1 Sol row', async () => {
+    mocks.query.mockResolvedValue({ rows: [priceRow('gpt-6.1-sol', 3, 12, 0.3, 'openai')] })
+    await loadPricing()
+    expect(resolvePrice('openai', 'gpt-6.1-sol')).toMatchObject({ input: 3, output: 12, cacheRead: 0.3 })
   })
   const peakTime = Date.parse('2026-08-24T01:00:00Z')
 
