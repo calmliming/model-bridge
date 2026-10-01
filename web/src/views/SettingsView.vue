@@ -632,7 +632,7 @@ function confirmSystemUpdate() {
   padding: 12px;
 }
 
-:global(.dark) .update-version-item {
+.dark .update-version-item {
   border-color: rgb(55 65 81);
 }
 
@@ -664,11 +664,11 @@ function confirmSystemUpdate() {
   font-size: 11px;
 }
 
-:global(.dark) .update-version-item strong {
+.dark .update-version-item strong {
   color: white;
 }
 
-:global(.dark) .update-version-item small {
+.dark .update-version-item small {
   color: rgb(156 163 175);
 }
 
@@ -677,7 +677,7 @@ function confirmSystemUpdate() {
   padding-top: 16px;
 }
 
-:global(.dark) .update-task {
+.dark .update-task {
   border-color: rgb(55 65 81);
 }
 

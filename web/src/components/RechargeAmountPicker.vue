@@ -28,9 +28,9 @@ label:focus-within { outline: 2px solid #0d9488; outline-offset: 3px; }
 strong { font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
 span, p { font-size: 11px; color: #6c8179; }
 p { margin: 12px 0 20px; line-height: 1.8; }
-:global(.dark) label { border-color: #3a504a; background: #162b29; }
-:global(.dark) label.selected { border-color: #55b7a6; background: #1b3932; }
-:global(.dark) span, :global(.dark) p { color: #a7bfb6; }
+.dark label { border-color: #3a504a; background: #162b29; }
+.dark label.selected { border-color: #55b7a6; background: #1b3932; }
+.dark span, .dark p { color: #a7bfb6; }
 @media (max-width: 360px) { .recharge-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (prefers-reduced-motion: reduce) { label { transition: none; } }
 </style>

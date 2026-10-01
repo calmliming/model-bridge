@@ -923,13 +923,13 @@ onUnmounted(() => {
 .records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 600px), 1fr)); gap: 18px; }
 .records-grid > .card { min-width: 0; }
 .records-usage { grid-column: 1 / -1; }
-:global(.dark) .wallet-card { border-color: #315848; background: linear-gradient(145deg, #1d3d31, #20362f 72%, #24332e); }
-:global(.dark) .wallet-label, :global(.dark) .wallet-hint { color: #a3c9b1; }
-:global(.dark) .wallet-card strong { color: #e0f4e7; }
-:global(.dark) .wallet-card strong.danger { color: #fca5a5; }
-:global(.dark) .subscription-empty { background: #1a3329; }
-:global(.dark) .subscription-empty strong { color: #d3eddd; }
-:global(.dark) .subscription-empty p { color: #a5c2af; }
+.dark .wallet-card { border-color: #315848; background: linear-gradient(145deg, #1d3d31, #20362f 72%, #24332e); }
+.dark .wallet-label, .dark .wallet-hint { color: #a3c9b1; }
+.dark .wallet-card strong { color: #e0f4e7; }
+.dark .wallet-card strong.danger { color: #fca5a5; }
+.dark .subscription-empty { background: #1a3329; }
+.dark .subscription-empty strong { color: #d3eddd; }
+.dark .subscription-empty p { color: #a5c2af; }
 .store-intro { margin-bottom: 23px; }
 .store-intro p { font-size: 21px; font-weight: 600; letter-spacing: -.5px; margin-bottom: 8px; }
 .store-intro span, .store-footer p { font-size: 12px; color: #71837b; line-height: 1.8; }
@@ -942,11 +942,11 @@ onUnmounted(() => {
 .subscription-checkout strong { font-size: 14px; }
 .subscription-checkout p { margin-top: 6px; font-size: 12px; color: #5f7c71; }
 .subscription-checkout-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-:global(.dark) .store-intro span, :global(.dark) .store-footer p { color: #a5bcb2; }
-:global(.dark) .store-footer a, :global(.dark) .subscription-manage-link { color: #79d0b8; }
-:global(.dark) .subscription-checkout { background: #1c352e; border-color: #456e5d; }
-:global(.dark) .subscription-checkout p { color: #b7cfc1; }
-:global(.dark) .store-skeleton { background: #1c352e; }
+.dark .store-intro span, .dark .store-footer p { color: #a5bcb2; }
+.dark .store-footer a, .dark .subscription-manage-link { color: #79d0b8; }
+.dark .subscription-checkout { background: #1c352e; border-color: #456e5d; }
+.dark .subscription-checkout p { color: #b7cfc1; }
+.dark .store-skeleton { background: #1c352e; }
 .dashboard-notices {
   margin-bottom: 18px;
 }
@@ -1141,32 +1141,32 @@ onUnmounted(() => {
   margin-top: 12px;
 }
 
-:global(.dark) .notice-item {
+.dark .notice-item {
   border-color: #78350f;
   background: #451a03;
 }
 
-:global(.dark) .notice-item strong,
-:global(.dark) .failure-row strong {
+.dark .notice-item strong,
+.dark .failure-row strong {
   color: #f8fafc;
 }
 
-:global(.dark) .trend-segment button {
+.dark .trend-segment button {
   border-color: #475569;
   background: #1e293b;
   color: #cbd5e1;
 }
 
-:global(.dark) .trend-segment button.active {
+.dark .trend-segment button.active {
   @apply border-primary-600 bg-primary-900/30 text-primary-300;
 }
 
-:global(.dark) .failure-summary,
-:global(.dark) .failure-row {
+.dark .failure-summary,
+.dark .failure-row {
   border-color: #334155;
 }
 
-:global(.dark) .failure-summary span {
+.dark .failure-summary span {
   color: #cbd5e1;
 }
 
@@ -1301,15 +1301,15 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-:global(.dark) .metric-card span,
-:global(.dark) .metric-hint,
-:global(.dark) .subtext,
-:global(.dark) .sub-empty {
+.dark .metric-card span,
+.dark .metric-hint,
+.dark .subtext,
+.dark .sub-empty {
   color: #94a3b8;
 }
 
-:global(.dark) .metric-card strong,
-:global(.dark) .sub-info strong {
+.dark .metric-card strong,
+.dark .sub-info strong {
   color: #f8fafc;
 }
 
@@ -1504,27 +1504,27 @@ onUnmounted(() => {
   text-align: center;
 }
 
-:global(.dark) .checkout {
+.dark .checkout {
   background: #0f172a;
 }
 
-:global(.dark) .checkout-brand,
-:global(.dark) .checkout-notice {
+.dark .checkout-brand,
+.dark .checkout-notice {
   border-color: #334155;
   background: #1e293b;
 }
 
-:global(.dark) .checkout-brand strong,
-:global(.dark) .checkout-summary strong {
+.dark .checkout-brand strong,
+.dark .checkout-summary strong {
   color: #f8fafc;
 }
 
-:global(.dark) .checkout-brand small,
-:global(.dark) .checkout-summary span,
-:global(.dark) .checkout-summary small,
-:global(.dark) .checkout-qr-stage p,
-:global(.dark) .checkout-details dd,
-:global(.dark) .checkout-notice {
+.dark .checkout-brand small,
+.dark .checkout-summary span,
+.dark .checkout-summary small,
+.dark .checkout-qr-stage p,
+.dark .checkout-details dd,
+.dark .checkout-notice {
   color: #94a3b8;
 }
 

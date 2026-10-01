@@ -360,8 +360,8 @@ async function resendRegistration() {
 .verification-hint { margin: 0 0 18px; color: #60706b; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .verification-hint strong { color: #173d32; font-weight: 600; }
 .verification-code { font-size: 20px; letter-spacing: .2em; font-variant-numeric: tabular-nums; }
-:global(.dark) .verification-hint { color: #a9bdb4; }
-:global(.dark) .verification-hint strong { color: #e1f1e8; }
+.dark .verification-hint { color: #a9bdb4; }
+.dark .verification-hint strong { color: #e1f1e8; }
 .login-wrap {
   position: relative;
   min-height: 100vh;

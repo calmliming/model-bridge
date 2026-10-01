@@ -40,11 +40,11 @@ function resetLabel(window: SubscriptionUsageWindow) {
 .usage-meter p { font-size: 11px; line-height: 1.5; color: #688175; }
 .exhausted .meter-track span { background: #c36a32; }
 .exhausted-note { display: block; font-size: 11px; color: #a65827; margin-top: 4px; }
-:global(.dark) .usage-meter { background: #19302a; border-color: #344e44; }
-:global(.dark) .meter-heading, :global(.dark) .usage-meter p { color: #a3c1b4; }
-:global(.dark) .meter-heading strong { color: #cfe9dd; }
-:global(.dark) .meter-track { background: #355749; }
-:global(.dark) .exhausted-note { color: #efbd80; }
+.dark .usage-meter { background: #19302a; border-color: #344e44; }
+.dark .meter-heading, .dark .usage-meter p { color: #a3c1b4; }
+.dark .meter-heading strong { color: #cfe9dd; }
+.dark .meter-track { background: #355749; }
+.dark .exhausted-note { color: #efbd80; }
 @media (max-width: 700px) { .subscription-meters { grid-template-columns: 1fr; gap: 10px; } }
 @media (prefers-reduced-motion: reduce) { .meter-track span { transition: none; } }
 </style>

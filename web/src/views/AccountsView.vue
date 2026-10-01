@@ -3336,7 +3336,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .upstream-balance-detail {
+:global(.dark .upstream-balance-detail) {
   color: rgba(226, 232, 240, 0.62);
 }
 
@@ -3465,12 +3465,12 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .upstream-balance-state {
+:global(.dark .upstream-balance-state) {
   color: rgba(226, 232, 240, 0.62);
 }
 
-:global(.dark) .upstream-balance-state.is-error,
-:global(.dark) .quota-refresh-error {
+:global(.dark .upstream-balance-state.is-error),
+:global(.dark .quota-refresh-error) {
   color: #f87171;
 }
 
@@ -3769,68 +3769,68 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:global(.dark) .group-hint {
+.dark .group-hint {
   color: rgba(226, 232, 240, 0.62);
 }
 
-:global(.dark) .groups-summary,
-:global(.dark) .group-created {
+.dark .groups-summary,
+.dark .group-created {
   color: rgba(226, 232, 240, 0.45);
 }
 
-:global(.dark) .group-item,
-:global(.dark) .group-preview {
+.dark .group-item,
+.dark .group-preview {
   border-color: rgba(71, 85, 105, 0.5);
   background: rgba(30, 41, 59, 0.52);
 }
 
-:global(.dark) .group-name,
-:global(.dark) .account-group-title strong,
-:global(.dark) .group-metric strong,
-:global(.dark) .group-preview strong,
-:global(.dark) .group-empty-card strong {
+.dark .group-name,
+.dark .account-group-title strong,
+.dark .group-metric strong,
+.dark .group-preview strong,
+.dark .group-empty-card strong {
   color: #f8fafc;
 }
 
-:global(.dark) .account-group-meta {
+.dark .account-group-meta {
   color: #94a3b8;
 }
 
-:global(.dark) .group-description,
-:global(.dark) .group-empty-card {
+.dark .group-description,
+.dark .group-empty-card {
   color: rgba(226, 232, 240, 0.58);
 }
 
-:global(.dark) .group-metric {
+.dark .group-metric {
   background: rgba(15, 23, 42, 0.52);
 }
 
-:global(.dark) .group-metric span,
-:global(.dark) .group-preview span {
+.dark .group-metric span,
+.dark .group-preview span {
   color: rgba(226, 232, 240, 0.46);
 }
 
-:global(.dark) .group-empty-card {
+.dark .group-empty-card {
   border-color: rgba(71, 85, 105, 0.58);
 }
 
-:global(.dark) .bulk-actions {
+.dark .bulk-actions {
   border-color: rgba(59, 130, 246, 0.24);
   background: rgba(30, 41, 59, 0.82);
   color: rgba(226, 232, 240, 0.9);
 }
 
-:global(.dark) .bulk-edit-note {
+.dark .bulk-edit-note {
   border-color: rgba(59, 130, 246, 0.2);
   background: rgba(30, 41, 59, 0.6);
   color: rgba(226, 232, 240, 0.6);
 }
 
-:global(.dark) .bulk-summary strong {
+.dark .bulk-summary strong {
   color: #f8fafc;
 }
 
-:global(.dark) .bulk-edit-note strong {
+.dark .bulk-edit-note strong {
   color: #93c5fd;
 }
 

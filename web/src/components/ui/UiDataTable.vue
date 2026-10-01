@@ -213,15 +213,15 @@ tbody tr:hover .selection-cell {
   background: #f9fafb;
 }
 
-:global(.dark) thead .selection-cell {
+.dark thead .selection-cell {
   background: #1e293b;
 }
 
-:global(.dark) tbody .selection-cell {
+.dark tbody .selection-cell {
   background: #0f172a;
 }
 
-:global(.dark) tbody tr:hover .selection-cell {
+.dark tbody tr:hover .selection-cell {
   background: #1e293b;
 }
 

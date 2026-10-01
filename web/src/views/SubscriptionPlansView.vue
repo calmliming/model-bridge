@@ -427,10 +427,10 @@ onMounted(load)
 .plans-empty h3 { font-weight: 600; }
 .plans-empty p { margin: 10px 0 20px; color: #72827f; font-size: 13px; }
 .plan-skeleton { height: 440px; background: #e9eeec; border-radius: 18px; animation: skeleton-pulse 1.5s ease-in-out infinite; }
-:global(.dark) .waffo-status { background: #182f2a; border-color: #354a43; }
-:global(.dark) .waffo-status p, :global(.dark) .waffo-status span, :global(.dark) .catalog-heading p, :global(.dark) .catalog-footnote, :global(.dark) .plan-status { color: #a5bab3; }
-:global(.dark) .waffo-status a { color: #79d0b8; }
-:global(.dark) .plan-skeleton { background: #1d3632; }
+.dark .waffo-status { background: #182f2a; border-color: #354a43; }
+.dark .waffo-status p, .dark .waffo-status span, .dark .catalog-heading p, .dark .catalog-footnote, .dark .plan-status { color: #a5bab3; }
+.dark .waffo-status a { color: #79d0b8; }
+.dark .plan-skeleton { background: #1d3632; }
 @keyframes skeleton-pulse { 50% { opacity: .55; } }
 @media (max-width: 600px) { .catalog-heading h2 { font-size: 18px; } .toolbar-actions { width: 100%; justify-content: flex-end; } }
 @media (prefers-reduced-motion: reduce) { .plan-skeleton { animation: none; } }
