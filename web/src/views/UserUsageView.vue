@@ -7,6 +7,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
+import { formatSubscriptionUsage } from '../billing'
 
 interface UsageLog {
   subscriptionPoints: number | null
@@ -184,7 +185,7 @@ const usageColumns: TableColumn<UsageLog>[] = [
     title: '消耗',
     key: 'cost',
     width: 125,
-    render: (row) => row.subscriptionPoints != null ? `${row.subscriptionPoints.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 用量点` : formatUsd(row.cost)
+    render: (row) => row.subscriptionPoints != null ? formatSubscriptionUsage(row.subscriptionPoints) : formatUsd(row.cost)
   },
   {
     title: '首字',

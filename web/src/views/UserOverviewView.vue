@@ -13,7 +13,7 @@ import BrandLogo from '../components/BrandLogo.vue'
 import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
 import RechargeAmountPicker from '../components/RechargeAmountPicker.vue'
 import SubscriptionUsageMeters from '../components/SubscriptionUsageMeters.vue'
-import { isWaffoCheckoutUrl, type BillingPlan, type SubscriptionUsageWindow } from '../billing'
+import { formatSubscriptionUsage, isWaffoCheckoutUrl, type BillingPlan, type SubscriptionUsageWindow } from '../billing'
 
 interface UserMe {
   id: string
@@ -602,7 +602,7 @@ const usageColumns: TableColumn<UsageLog>[] = [
   { title: '时间', key: 'ts', minWidth: 140, render: (row) => formatTime(row.ts) },
   { title: '服务商', key: 'provider', width: 90 },
   { title: '模型', key: 'model', minWidth: 160, render: (row) => row.model || '—' },
-  { title: '消耗', key: 'cost', width: 115, render: (row) => row.subscriptionPoints != null ? `${row.subscriptionPoints.toLocaleString('zh-CN', { maximumFractionDigits: 2 })} 用量点` : formatUsd(row.cost) },
+  { title: '消耗', key: 'cost', width: 115, render: (row) => row.subscriptionPoints != null ? formatSubscriptionUsage(row.subscriptionPoints) : formatUsd(row.cost) },
   { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
 ]
 

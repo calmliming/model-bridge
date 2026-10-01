@@ -36,8 +36,8 @@ export function subscriptionModelMultiplier(profile: SubscriptionUsageProfile, m
 export function subscriptionUsageBands(profile: SubscriptionUsageProfile, monthlyPoints: number | null) {
   if (profile !== 'opencode-go') return []
   return [
-    { multiplier: 1, label: '1 倍扣点', examples: 'DeepSeek V4.1 Flash、MiniMax M3、Kimi K2.7 Code' },
-    { multiplier: 2, label: '2 倍扣点', examples: 'DeepSeek V4 Flash（旧型号）、Qwen3.8 Flash' },
-    { multiplier: 4, label: '4 倍扣点', examples: 'Kimi K3、Grok 4.7、GPT 6 Luna；未列模型默认同档' },
+    { multiplier: 1, label: '1 倍消耗', examples: 'DeepSeek V4.1 Flash、MiniMax M3、Kimi K2.7 Code' },
+    { multiplier: 2, label: '2 倍消耗', examples: 'DeepSeek V4 Flash（旧型号）、Qwen3.8 Flash' },
+    { multiplier: 4, label: '4 倍消耗', examples: 'Kimi K3、Grok 4.7、GPT 6 Luna；未列模型默认同档' },
   ].map(band => ({ ...band, monthlyReferenceUsd: monthlyPoints == null ? null : monthlyPoints / 1000 / band.multiplier }))
 }

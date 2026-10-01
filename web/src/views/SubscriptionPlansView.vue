@@ -4,6 +4,7 @@ import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
+import { usagePointsToUsd, usdToUsagePoints } from '../billing'
 import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 
 interface Plan {
@@ -60,10 +61,13 @@ const form = ref({
   waffoProductId: '',
   quotaMode: 'usage' as 'spend' | 'usage',
   usageProfile: 'opencode-go' as 'base' | 'opencode-go',
-  fiveHourLimitPoints: 12000 as number | null,
-  weeklyLimitPoints: 30000 as number | null,
-  monthlyLimitPoints: 60000 as number | null
+  fiveHourQuotaUsd: 12 as number | null,
+  weeklyQuotaUsd: 30 as number | null,
+  monthlyQuotaUsd: 60 as number | null
 })
+
+const pointsToUsd = (points: number | null) => points == null ? null : usagePointsToUsd(points)
+const usdToPoints = (usd: number | null) => usd == null ? null : usdToUsagePoints(usd)
 
 async function load() {
   loading.value = true
@@ -101,9 +105,9 @@ function openCreate() {
     waffoProductId: '',
     quotaMode: 'usage',
     usageProfile: 'opencode-go',
-    fiveHourLimitPoints: 12000,
-    weeklyLimitPoints: 30000,
-    monthlyLimitPoints: 60000
+    fiveHourQuotaUsd: 12,
+    weeklyQuotaUsd: 30,
+    monthlyQuotaUsd: 60
   }
   showEdit.value = true
 }
@@ -124,9 +128,9 @@ function openEdit(plan: Plan) {
     waffoProductId: plan.waffoProductId ?? '',
     quotaMode: plan.quotaMode,
     usageProfile: plan.usageProfile ?? 'base',
-    fiveHourLimitPoints: plan.fiveHourLimitPoints,
-    weeklyLimitPoints: plan.weeklyLimitPoints,
-    monthlyLimitPoints: plan.monthlyLimitPoints
+    fiveHourQuotaUsd: pointsToUsd(plan.fiveHourLimitPoints),
+    weeklyQuotaUsd: pointsToUsd(plan.weeklyLimitPoints),
+    monthlyQuotaUsd: pointsToUsd(plan.monthlyLimitPoints)
   }
   showEdit.value = true
 }
@@ -144,8 +148,8 @@ async function save() {
     message.warning('Waffo 月费必须大于 0')
     return
   }
-  if (form.value.quotaMode === 'usage' && [form.value.fiveHourLimitPoints, form.value.weeklyLimitPoints, form.value.monthlyLimitPoints].some(value => value == null || !Number.isFinite(value) || value <= 0)) {
-    message.warning('请填写大于 0 的 5 小时、周和月用量上限')
+  if (form.value.quotaMode === 'usage' && [form.value.fiveHourQuotaUsd, form.value.weeklyQuotaUsd, form.value.monthlyQuotaUsd].some(value => value == null || !Number.isFinite(value) || usdToUsagePoints(value) <= 0)) {
+    message.warning('请填写不低于 $0.01 的 5 小时、每周和每月额度')
     return
   }
   saving.value = true
@@ -163,9 +167,9 @@ async function save() {
     waffoProductId: form.value.waffoProductId.trim() || null,
     quotaMode: form.value.quotaMode,
     usageProfile: form.value.usageProfile,
-    fiveHourLimitPoints: form.value.fiveHourLimitPoints,
-    weeklyLimitPoints: form.value.weeklyLimitPoints,
-    monthlyLimitPoints: form.value.monthlyLimitPoints
+    fiveHourLimitPoints: usdToPoints(form.value.fiveHourQuotaUsd),
+    weeklyLimitPoints: usdToPoints(form.value.weeklyQuotaUsd),
+    monthlyLimitPoints: usdToPoints(form.value.monthlyQuotaUsd)
   }
   try {
     if (editing.value) {
@@ -354,16 +358,16 @@ onMounted(load)
           <UiSelect v-model:value="form.quotaMode" :options="[{ label: '加权用量 · 5 小时 / 周 / 月', value: 'usage' }, { label: '金额额度 · 日 / 周 / 30 天（兼容旧套餐）', value: 'spend' }]" />
         </UiFormItem>
         <template v-if="form.quotaMode === 'usage'">
-          <UiFormItem label="模型扣点规则">
-            <UiSelect v-model:value="form.usageProfile" :options="[{ label: '参考 Go · 不同模型按 1 / 2 / 4 倍扣点', value: 'opencode-go' }, { label: '统一模型价卡加权（原规则）', value: 'base' }]" />
+          <UiFormItem label="模型计量规则">
+            <UiSelect v-model:value="form.usageProfile" :options="[{ label: '参考 Go · 不同模型按 1 / 2 / 4 倍消耗额度', value: 'opencode-go' }, { label: '统一模型价卡加权（原规则）', value: 'base' }]" />
           </UiFormItem>
           <UiGrid :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
-            <UiGi span="3 s:1"><UiFormItem label="5 小时上限（点）"><UiInputNumber v-model:value="form.fiveHourLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
-            <UiGi span="3 s:1"><UiFormItem label="周上限（点）"><UiInputNumber v-model:value="form.weeklyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
-            <UiGi span="3 s:1"><UiFormItem label="月上限（点）"><UiInputNumber v-model:value="form.monthlyLimitPoints" :min="1" :precision="0" /></UiFormItem></UiGi>
+            <UiGi span="3 s:1"><UiFormItem label="5 小时额度（USD）"><UiInputNumber v-model:value="form.fiveHourQuotaUsd" :min="0.01" :step="0.01" /></UiFormItem></UiGi>
+            <UiGi span="3 s:1"><UiFormItem label="每周额度（USD）"><UiInputNumber v-model:value="form.weeklyQuotaUsd" :min="0.01" :step="0.01" /></UiFormItem></UiGi>
+            <UiGi span="3 s:1"><UiFormItem label="每月额度（USD）"><UiInputNumber v-model:value="form.monthlyQuotaUsd" :min="0.01" :step="0.01" /></UiFormItem></UiGi>
           </UiGrid>
-          <p v-if="form.usageProfile === 'opencode-go'" class="field-hint mb-4">以 Go 的 $10 档为参考：5 小时 12,000、周 30,000、月 60,000 点；本站 $30 / $100 档按 3 / 10 倍扩展。标准模型 $1 参考用量扣 1,000 点，其他模型按 2 / 4 倍扣点；未列模型默认 4 倍。切换规则不会自动修改上限。</p>
-          <p v-else class="field-hint mb-4">1,000 点对应模型价目表中 $1 的参考用量，不是实际采购成本或钱包余额。请结合上游成本、按量售价和实际承载量设置额度；三项上限同时生效，月额度按订阅账期重置。</p>
+          <p v-if="form.usageProfile === 'opencode-go'" class="field-hint mb-4">以 Go 的 $10 档为参考：5 小时 $12、每周 $30、每月 $60；本站 $30 / $100 档按 3 / 10 倍扩展。标准模型按价目表 1:1 消耗额度，其他模型按 2 / 4 倍消耗；未列模型默认 4 倍。切换规则不会自动修改额度。</p>
+          <p v-else class="field-hint mb-4">额度按模型价目表的参考价计算，不是实际采购成本，也不会扣减钱包余额。请结合上游成本、按量售价和实际承载量设置；三项额度同时生效，每月额度按订阅账期重置。</p>
         </template>
         <UiGrid v-else :cols="3" :x-gap="10" :y-gap="2" responsive="screen">
           <UiGi span="3 s:1">
