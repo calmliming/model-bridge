@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch, type FunctionalComponent, type VNodeChild } from 'vue'
 import { UiButton, UiInputNumber, UiSelect, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
@@ -112,6 +112,8 @@ type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'x
 const BALANCE_PROVIDER_IDS = ['sub2api', 'deepseek'] as const
 type BalanceProvider = (typeof BALANCE_PROVIDER_IDS)[number]
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
+type ViewMode = 'table' | 'card'
+type StatusFilter = 'all' | 'active' | 'rate_limited' | 'error' | 'disabled' | 'reauth'
 
 interface AccountGroup {
   provider: string
@@ -140,8 +142,17 @@ const message = useMessage()
 const dialog = useDialog()
 
 const accounts = ref<Account[]>([])
+// `loading` only covers the first fetch; later polls refresh in place and just
+// spin the toolbar refresh icon via `reloading`.
 const loading = ref(true)
+const reloading = ref(false)
+let hasLoaded = false
+let pendingLoads = 0
 const searchQuery = ref('')
+const providerFilter = ref<string>('all')
+const statusFilter = ref<StatusFilter>('all')
+const VIEW_MODE_STORAGE_KEY = 'model-bridge.accounts.view-mode'
+const viewMode = ref<ViewMode>(readStoredViewMode())
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const balanceRefreshingIds = ref<Set<string>>(new Set())
@@ -238,6 +249,29 @@ const bulkForm = ref<BulkEditForm>({
   autopausePercent: null,
 })
 
+function readStoredViewMode(): ViewMode {
+  try {
+    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+    if (stored === 'table' || stored === 'card') return stored
+  } catch {
+    // Storage may be unavailable (private mode); fall back to the layout default.
+  }
+  // The table needs ~2000px of scroll width, so narrow screens start on cards.
+  return window.matchMedia?.('(max-width: 768px)').matches ? 'card' : 'table'
+}
+
+watch(viewMode, (mode) => {
+  try {
+    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Not persisting the preference is harmless.
+  }
+})
+
+/** Renders a cell function in the template, so cards reuse the table's cell renderers. */
+const RenderCell: FunctionalComponent<{ render: () => VNodeChild }> = (props) => props.render()
+RenderCell.props = ['render']
+
 const providerLabel: Record<Provider, string> = {
   claude: 'Claude',
   openai: 'OpenAI',
@@ -282,6 +316,21 @@ const authorizeHost: Record<Provider, string> = {
   sub2api: 'sub2api',
 }
 
+// Local redirect each callback-mode OAuth provider sends the browser to. Mirrors
+// the REDIRECT_URI constants under src/providers/*/oauth.ts.
+const OAUTH_CALLBACK_URL: Partial<Record<Provider, string>> = {
+  openai: 'http://localhost:1455/auth/callback',
+  gemini: 'http://127.0.0.1:1455/oauth2callback',
+  antigravity: 'http://localhost:8085/callback',
+  grok: 'http://127.0.0.1:56121/callback',
+}
+function oauthCallbackUrl(provider: Provider): string {
+  return OAUTH_CALLBACK_URL[provider] ?? OAUTH_CALLBACK_URL.openai!
+}
+function oauthCallbackPort(provider: Provider): string {
+  return new URL(oauthCallbackUrl(provider)).port
+}
+
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
 const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api']
@@ -307,6 +356,16 @@ const statusMeta: Record<string, { label: string; type: TagType }> = {
 const bulkStatusOptions = [
   { label: '启用调度', value: 'active' },
   { label: '禁用调度', value: 'disabled' },
+]
+// Status tiles double as the status filter. "需重新授权" overlaps "已禁用"
+// because a dead refresh token auto-disables the account.
+const STATUS_FILTERS: Array<{ key: StatusFilter; label: string }> = [
+  { key: 'all', label: '全部账户' },
+  { key: 'active', label: '正常' },
+  { key: 'rate_limited', label: '限流冷却' },
+  { key: 'error', label: '异常' },
+  { key: 'disabled', label: '已禁用' },
+  { key: 'reauth', label: '需重新授权' },
 ]
 
 function isCoolingDown(row: Account) {
@@ -901,16 +960,21 @@ async function refreshStaleAccountBalances(loadedAccounts: Account[]) {
 }
 
 async function load() {
-  loading.value = true
+  if (!hasLoaded) loading.value = true
+  pendingLoads += 1
+  reloading.value = true
   try {
     const { data } = await api.get('/admin/accounts')
     accounts.value = data.accounts
+    hasLoaded = true
     pruneSelectedAccounts()
     void refreshStaleAccountBalances(accounts.value)
   } catch (e) {
     message.error(errMsg(e))
   } finally {
     loading.value = false
+    pendingLoads -= 1
+    reloading.value = pendingLoads > 0
   }
 }
 
@@ -1078,9 +1142,40 @@ function pruneSelectedAccounts() {
   selectedAccountIds.value = selectedAccountIds.value.filter((id) => ids.has(String(id)))
 }
 
-function selectAllAccounts() {
-  selectedAccountIds.value = accounts.value.map((account) => account.id)
+const selectedIdSet = computed(() => new Set(selectedAccountIdStrings.value))
+
+function isAccountSelected(row: Account): boolean {
+  return selectedIdSet.value.has(row.id)
 }
+
+function setAccountsSelected(rows: Account[], checked: boolean) {
+  const ids = new Set(selectedAccountIdStrings.value)
+  for (const row of rows) {
+    if (checked) ids.add(row.id)
+    else ids.delete(row.id)
+  }
+  selectedAccountIds.value = [...ids]
+}
+
+function isGroupSelected(group: AccountGroup): boolean {
+  return group.accounts.length > 0 && group.accounts.every(isAccountSelected)
+}
+
+/** Adds every account matching the current search and filters to the selection. */
+function selectFilteredAccounts() {
+  setAccountsSelected(filteredAccounts.value, true)
+}
+
+const allFilteredSelected = computed(
+  () => filteredAccounts.value.length > 0 && filteredAccounts.value.every(isAccountSelected),
+)
+
+// Bulk actions apply to the whole selection, including accounts a later filter
+// hid; the bar says so instead of acting on rows the operator cannot see.
+const hiddenSelectedCount = computed(() => {
+  const visible = new Set(filteredAccounts.value.map((row) => row.id))
+  return selectedAccountIdStrings.value.filter((id) => !visible.has(id)).length
+})
 
 function clearSelectedAccounts() {
   selectedAccountIds.value = []
@@ -1657,6 +1752,84 @@ function accountRowKey(row: Account) {
   return row.id
 }
 
+function renderToggle(row: Account) {
+  return h(UiSwitch, {
+    value: row.status !== 'disabled',
+    size: 'small',
+    'aria-label': `${row.name} 参与调度`,
+    onUpdateValue: () => toggle(row),
+  })
+}
+
+function renderActions(row: Account) {
+  return h(
+    UiSpace,
+    { size: 4 },
+    {
+      default: () => [
+        h(
+          UiButton,
+          {
+            size: 'small',
+            quaternary: true,
+            loading: testingId.value === row.id,
+            onClick: () => testConnectivity(row),
+            title: '测试连通性',
+          },
+          {
+            default: () => h('div', { class: 'flex items-center gap-1' }, [
+              h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
+              ]),
+              h('span', '测试')
+            ])
+          },
+        ),
+        // Reset quota: OpenAI / Claude OAuth accounts — consumes an upstream credit.
+        row.provider === 'openai' || row.provider === 'claude'
+          ? h(
+              UiButton,
+              {
+                size: 'small',
+                type: 'warning',
+                quaternary: true,
+                loading: resettingQuotaId.value === row.id,
+                onClick: () => row.provider === 'claude' ? openClaudeReset(row) : confirmResetQuota(row),
+                title: row.provider === 'claude' ? '查询并兑换 Claude 原生重置额度' : '重置限额（消耗一次 reset credit）',
+              },
+              {
+                default: () => h('div', { class: 'flex items-center gap-1' }, [
+                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
+                  ]),
+                  h('span', '重置')
+                ])
+              },
+            )
+          : null,
+        h(
+          UiButton,
+          {
+            size: 'small',
+            type: 'error',
+            quaternary: true,
+            onClick: () => confirmDelete(row),
+            title: '删除账户',
+          },
+          {
+            default: () => h('div', { class: 'flex items-center gap-1' }, [
+              h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
+                h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' })
+              ]),
+              h('span', '删除')
+            ])
+          },
+        ),
+      ],
+    },
+  )
+}
+
 const columns = computed<TableColumn<Account>[]>(() => [
   { title: '账户', key: 'name', minWidth: 200, fixed: 'left', render: renderAccount },
   { title: '分组', key: 'group', width: 240, render: renderGroupCell },
@@ -1674,90 +1847,8 @@ const columns = computed<TableColumn<Account>[]>(() => [
   { title: '优先级', key: 'weight', width: 110, render: renderPriority },
   { title: '备注', key: 'notes', minWidth: 170, render: renderNotes },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 150, render: (row) => formatTime(row.lastUsedAt) },
-  {
-    title: '调度',
-    key: 'toggle',
-    width: 86,
-    render: (row) =>
-      h(UiSwitch, {
-        value: row.status !== 'disabled',
-        size: 'small',
-        onUpdateValue: () => toggle(row),
-      }),
-  },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 180,
-    fixed: 'right',
-    render: (row) =>
-      h(
-        UiSpace,
-        { size: 4 },
-        {
-          default: () => [
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                loading: testingId.value === row.id,
-                onClick: () => testConnectivity(row),
-                title: '测试连通性',
-              },
-              {
-                default: () => h('div', { class: 'flex items-center gap-1' }, [
-                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
-                  ]),
-                  h('span', '测试')
-                ])
-              },
-            ),
-            // Reset quota: OpenAI / Claude OAuth accounts — consumes an upstream credit.
-            row.provider === 'openai' || row.provider === 'claude'
-              ? h(
-                  UiButton,
-                  {
-                    size: 'small',
-                    type: 'warning',
-                    quaternary: true,
-                    loading: resettingQuotaId.value === row.id,
-                    onClick: () => row.provider === 'claude' ? openClaudeReset(row) : confirmResetQuota(row),
-                    title: row.provider === 'claude' ? '查询并兑换 Claude 原生重置额度' : '重置限额（消耗一次 reset credit）',
-                  },
-                  {
-                    default: () => h('div', { class: 'flex items-center gap-1' }, [
-                      h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                        h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
-                      ]),
-                      h('span', '重置')
-                    ])
-                  },
-                )
-              : null,
-            h(
-              UiButton,
-              {
-                size: 'small',
-                type: 'error',
-                quaternary: true,
-                onClick: () => confirmDelete(row),
-                title: '删除账户',
-              },
-              {
-                default: () => h('div', { class: 'flex items-center gap-1' }, [
-                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' })
-                  ]),
-                  h('span', '删除')
-                ])
-              },
-            ),
-          ],
-        },
-      ),
-  },
+  { title: '调度', key: 'toggle', width: 86, render: renderToggle },
+  { title: '操作', key: 'actions', width: 180, fixed: 'right', render: renderActions },
 ])
 
 const OAUTH_TOKEN_PROVIDERS = new Set<Provider>(['claude', 'openai', 'gemini', 'antigravity'])
@@ -1779,16 +1870,73 @@ function tableScrollWidth(provider: string): number {
   return OAUTH_TOKEN_PROVIDERS.has(provider as Provider) ? 2070 : 1920
 }
 
-const accountGroups = computed<AccountGroup[]>(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  const filteredAccounts = query
-    ? accounts.value.filter(
-        (a) => a.name.toLowerCase().includes(query) || a.provider.toLowerCase().includes(query),
-      )
-    : accounts.value
+function matchesStatus(row: Account, filter: StatusFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'reauth') return Boolean(row.reauth?.required)
+  return effectiveStatus(row) === filter
+}
 
+/** Name, provider, plan, notes and group names, so the search box finds an account by any of them. */
+function accountSearchText(row: Account): string {
+  return [
+    row.name,
+    row.provider,
+    providerName(row.provider),
+    openAIPlanLabel(row.planType),
+    row.notes ?? '',
+    ...row.groups.map((group) => group.name),
+  ]
+    .join('\n')
+    .toLowerCase()
+}
+
+// Search and provider narrow the set the status tiles count; the status filter
+// then picks one tile's slice, so every tile shows what clicking it would list.
+const searchedAccounts = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return accounts.value.filter(
+    (row) =>
+      (providerFilter.value === 'all' || row.provider === providerFilter.value) &&
+      (!query || accountSearchText(row).includes(query)),
+  )
+})
+
+const filteredAccounts = computed(() =>
+  searchedAccounts.value.filter((row) => matchesStatus(row, statusFilter.value)),
+)
+
+const statusTiles = computed(() =>
+  STATUS_FILTERS.map((tile) => ({
+    ...tile,
+    count: searchedAccounts.value.filter((row) => matchesStatus(row, tile.key)).length,
+  })),
+)
+
+const providerFilterOptions = computed(() => {
+  const counts = new Map<string, number>()
+  for (const row of accounts.value) counts.set(row.provider, (counts.get(row.provider) ?? 0) + 1)
+  const providers = [...counts.keys()].sort(
+    (a, b) => providerRank(a) - providerRank(b) || providerName(a).localeCompare(providerName(b)),
+  )
+  return [
+    { label: `全部服务商（${accounts.value.length}）`, value: 'all' },
+    ...providers.map((provider) => ({ label: `${providerName(provider)}（${counts.get(provider)}）`, value: provider })),
+  ]
+})
+
+const hasActiveFilters = computed(
+  () => Boolean(searchQuery.value.trim()) || providerFilter.value !== 'all' || statusFilter.value !== 'all',
+)
+
+function clearFilters() {
+  searchQuery.value = ''
+  providerFilter.value = 'all'
+  statusFilter.value = 'all'
+}
+
+const accountGroups = computed<AccountGroup[]>(() => {
   const groups = new Map<string, Account[]>()
-  for (const account of filteredAccounts) {
+  for (const account of filteredAccounts.value) {
     const rows = groups.get(account.provider) ?? []
     rows.push(account)
     groups.set(account.provider, rows)
@@ -1803,6 +1951,13 @@ const accountGroups = computed<AccountGroup[]>(() => {
       coolingCount: rows.filter((row) => isCoolingDown(row)).length,
       disabledCount: rows.filter((row) => row.status === 'disabled').length,
     }))
+})
+
+// A provider filter whose last account was deleted would leave an empty page.
+watch(accounts, (rows) => {
+  if (providerFilter.value !== 'all' && !rows.some((row) => row.provider === providerFilter.value)) {
+    providerFilter.value = 'all'
+  }
 })
 
 function providerRank(provider: string): number {
@@ -1861,9 +2016,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <div class="page-head">
-      <div class="flex flex-1 items-center gap-3">
-        <div class="relative w-full max-w-[280px]">
+    <div class="page-head accounts-toolbar">
+      <div class="accounts-filters">
+        <div class="relative w-full sm:max-w-[280px]">
           <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
@@ -1871,13 +2026,56 @@ onBeforeUnmount(() => {
           </span>
           <input
             v-model="searchQuery"
-            type="text"
+            type="search"
             class="input !pl-9"
-            placeholder="搜索账户名称或服务商..."
+            placeholder="搜索名称、服务商、备注或分组..."
+            aria-label="搜索账户"
           />
         </div>
+        <UiSelect
+          v-model:value="providerFilter"
+          class="provider-filter"
+          :options="providerFilterOptions"
+          aria-label="按服务商筛选"
+        />
       </div>
-      <div class="flex flex-shrink-0 items-center gap-2">
+      <div class="accounts-actions">
+        <div class="view-switch" role="group" aria-label="显示方式">
+          <button
+            type="button"
+            :class="{ 'is-active': viewMode === 'table' }"
+            :aria-pressed="viewMode === 'table'"
+            title="表格视图"
+            @click="viewMode = 'table'"
+          >
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3.75 5.25h16.5M3.75 9.75h16.5M3.75 14.25h16.5M3.75 18.75h16.5" />
+            </svg>
+            <span>表格</span>
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-active': viewMode === 'card' }"
+            :aria-pressed="viewMode === 'card'"
+            title="卡片视图"
+            @click="viewMode = 'card'"
+          >
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z" />
+            </svg>
+            <span>卡片</span>
+          </button>
+        </div>
+        <UiButton secondary :disabled="reloading" title="立即刷新账户列表（每 30 秒自动刷新）" @click="load">
+          <template #default>
+            <div class="flex items-center gap-1.5">
+              <svg class="h-4 w-4" :class="{ 'animate-spin': reloading }" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 11A8 8 0 0 0 5.5 7M4 4v3.5h3.5M4 13a8 8 0 0 0 14.5 4M20 20v-3.5h-3.5" />
+              </svg>
+              <span>刷新</span>
+            </div>
+          </template>
+        </UiButton>
         <UiButton secondary @click="openGroups">
           <template #default>
             <div class="flex items-center gap-1.5">
@@ -1911,6 +2109,21 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div v-if="accounts.length" class="status-tiles" role="group" aria-label="按状态筛选">
+      <button
+        v-for="tile in statusTiles"
+        :key="tile.key"
+        type="button"
+        class="status-tile"
+        :class="[`is-${tile.key}`, { 'is-empty': tile.count === 0 }]"
+        :aria-pressed="statusFilter === tile.key"
+        @click="statusFilter = statusFilter === tile.key && tile.key !== 'all' ? 'all' : tile.key"
+      >
+        <span class="status-tile-label">{{ tile.label }}</span>
+        <strong class="status-tile-count">{{ tile.count }}</strong>
+      </button>
+    </div>
+
     <Transition name="fade">
       <div v-if="selectedCount > 0" class="bulk-actions sticky top-0 z-20 shadow-lg backdrop-blur-md">
         <div class="bulk-summary">
@@ -1918,7 +2131,17 @@ onBeforeUnmount(() => {
             {{ selectedCount }}
           </span>
           <strong>已选中账户</strong>
+          <span v-if="hiddenSelectedCount" class="bulk-hidden-hint">其中 {{ hiddenSelectedCount }} 个不在当前列表</span>
           <div class="bulk-selection-tools ml-2">
+            <UiButton
+              v-if="filteredAccounts.length && !allFilteredSelected"
+              size="tiny"
+              quaternary
+              :disabled="bulkBusy"
+              @click="selectFilteredAccounts"
+            >
+              全选当前列表（{{ filteredAccounts.length }}）
+            </UiButton>
             <UiButton size="tiny" quaternary :disabled="bulkBusy" @click="clearSelectedAccounts">取消选择</UiButton>
           </div>
         </div>
@@ -1934,7 +2157,29 @@ onBeforeUnmount(() => {
       </div>
     </Transition>
 
-    <div v-if="accountGroups.length" class="account-groups">
+    <div v-if="loading && !accounts.length" class="account-empty">
+      <span class="spinner group-loading-spinner" />
+      <p>正在加载上游账户...</p>
+    </div>
+
+    <div v-else-if="!accounts.length" class="account-empty">
+      <strong>还没有上游账户</strong>
+      <p>添加 Claude、OpenAI 等订阅或 API Key 后，它们就会参与中转调度。</p>
+      <div class="account-empty-actions">
+        <UiButton secondary @click="openBatchImport">批量导入</UiButton>
+        <UiButton type="primary" @click="openAdd">添加账户</UiButton>
+      </div>
+    </div>
+
+    <div v-else-if="!accountGroups.length" class="account-empty">
+      <strong>没有符合条件的账户</strong>
+      <p>调整搜索词、服务商或状态筛选后再试。</p>
+      <div class="account-empty-actions">
+        <UiButton secondary @click="clearFilters">清除筛选</UiButton>
+      </div>
+    </div>
+
+    <div v-else class="account-groups">
       <UiCard
         v-for="group in accountGroups"
         :key="group.provider"
@@ -1944,6 +2189,12 @@ onBeforeUnmount(() => {
       >
         <div class="account-group-head">
           <div class="account-group-title">
+            <UiCheckbox
+              v-if="viewMode === 'card'"
+              :checked="isGroupSelected(group)"
+              :aria-label="`全选 ${providerName(group.provider)} 账户`"
+              @update:checked="(checked: boolean) => setAccountsSelected(group.accounts, checked)"
+            />
             <UiTag size="small" :type="providerType(group.provider)" :bordered="false">
               {{ providerName(group.provider) }}
             </UiTag>
@@ -1956,6 +2207,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <UiDataTable
+          v-if="viewMode === 'table'"
           class="account-table"
           :columns="columnsForProvider(group.provider)"
           :data="group.accounts"
@@ -1966,22 +2218,81 @@ onBeforeUnmount(() => {
           :bordered="false"
           :scroll-x="tableScrollWidth(group.provider)"
         />
+        <div v-else class="account-card-grid">
+          <article
+            v-for="account in group.accounts"
+            :key="account.id"
+            class="account-card"
+            :class="[`is-${effectiveStatus(account)}`, { 'is-selected': isAccountSelected(account) }]"
+          >
+            <header class="account-card-head">
+              <UiCheckbox
+                :checked="isAccountSelected(account)"
+                :aria-label="`选择 ${account.name}`"
+                @update:checked="(checked: boolean) => setAccountsSelected([account], checked)"
+              />
+              <div class="account-card-title">
+                <RenderCell :render="() => renderAccount(account)" />
+                <div class="account-card-badges">
+                  <RenderCell :render="() => renderStatus(account)" />
+                  <RenderCell :render="() => renderHealth(account)" />
+                </div>
+              </div>
+              <RenderCell :render="() => renderToggle(account)" />
+            </header>
+
+            <section class="account-card-section">
+              <span class="account-card-label">{{ usesBalanceProvider(account.provider) ? '余额' : '配额' }}</span>
+              <RenderCell :render="() => renderQuota(account)" />
+            </section>
+
+            <section class="account-card-section">
+              <span class="account-card-label">分组</span>
+              <RenderCell :render="() => renderGroupCell(account)" />
+            </section>
+
+            <div class="account-card-fields">
+              <label class="account-card-field">
+                <span class="account-card-label">优先级</span>
+                <RenderCell :render="() => renderPriority(account)" />
+              </label>
+              <label class="account-card-field">
+                <span class="account-card-label">并发上限</span>
+                <RenderCell :render="() => renderConcurrency(account)" />
+              </label>
+              <label class="account-card-field">
+                <span class="account-card-label">停调阈值 %</span>
+                <RenderCell :render="() => renderAutopause(account)" />
+              </label>
+            </div>
+
+            <section class="account-card-section">
+              <span class="account-card-label">备注</span>
+              <RenderCell :render="() => renderNotes(account)" />
+            </section>
+
+            <dl class="account-card-meta">
+              <div>
+                <dt>最后使用</dt>
+                <dd>{{ account.lastUsedAt ? formatRelativePast(account.lastUsedAt) : '从未使用' }}</dd>
+              </div>
+              <div v-if="OAUTH_TOKEN_PROVIDERS.has(account.provider as Provider)">
+                <dt>令牌刷新</dt>
+                <dd>{{ formatShortTime(account.tokenExpiresAt) }}</dd>
+              </div>
+              <div>
+                <dt>添加于</dt>
+                <dd>{{ formatShortTime(account.createdAt) }}</dd>
+              </div>
+            </dl>
+
+            <footer class="account-card-actions">
+              <RenderCell :render="() => renderActions(account)" />
+            </footer>
+          </article>
+        </div>
       </UiCard>
     </div>
-
-    <UiCard v-else class="table-card account-table-shell" :bordered="false" :padding="false">
-      <UiDataTable
-        class="account-table"
-        :columns="columns"
-        :data="accounts"
-        :loading="loading"
-        selectable
-        v-model:checked-row-keys="selectedAccountIds"
-        :row-key="accountRowKey"
-        :bordered="false"
-        :scroll-x="2070"
-      />
-    </UiCard>
 
     <UiModal v-model:show="showAdd" title="添加上游账户" :width="520">
       <div v-if="step === 'name'">
@@ -1998,6 +2309,7 @@ onBeforeUnmount(() => {
               <UiRadioButton value="qwen">Tongyi Qwen</UiRadioButton>
               <UiRadioButton value="kimi">Kimi (Moonshot)</UiRadioButton>
               <UiRadioButton value="minimax">MiniMax</UiRadioButton>
+              <UiRadioButton value="grok">Grok (xAI)</UiRadioButton>
               <UiRadioButton value="sub2api">Sub2API</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>
@@ -2063,10 +2375,10 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <UiText depth="3">
-            　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 {{ form.provider === 'antigravity' ? '8085' : '1455' }} 端口（如本地部署），授权会自动完成。
+            　完成授权后，浏览器会自动跳转。如果本机能访问服务器的 {{ oauthCallbackPort(form.provider) }} 端口（如本地部署），授权会自动完成。
           </UiText>
           <UiText depth="3" style="display: block; margin-top: 6px; font-size: 12px">
-            （Antigravity 回调端口为 8085，其他服务商为 1455；远程或 Docker 部署可复制完整回调 URL 到下方完成授权）
+            （{{ providerLabel[form.provider] }} 的回调地址为 {{ oauthCallbackUrl(form.provider) }}；远程或 Docker 部署可复制完整回调 URL 到下方完成授权）
           </UiText>
           <UiDivider style="margin: 18px 0">远程部署 / 手动完成</UiDivider>
 
@@ -2075,7 +2387,7 @@ onBeforeUnmount(() => {
           </UiText>
           <UiInput
             v-model:value="pasteCallbackUrl"
-            :placeholder="form.provider === 'antigravity' ? 'http://localhost:8085/callback?code=...&amp;state=...' : 'http://localhost:1455/auth/callback?code=...&amp;state=...'"
+            :placeholder="`${oauthCallbackUrl(form.provider)}?code=...&amp;state=...`"
             style="margin-top: 8px"
           />
           <UiText depth="3" style="display: block; margin-top: 4px; font-size: 12px">
@@ -2379,6 +2691,399 @@ onBeforeUnmount(() => {
   gap: 14px;
 }
 
+.accounts-toolbar {
+  align-items: flex-start;
+}
+
+.accounts-filters {
+  display: flex;
+  flex: 1 1 380px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.provider-filter {
+  width: 200px;
+}
+
+.accounts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.view-switch button:hover {
+  color: #0f172a;
+}
+
+.view-switch button.is-active {
+  background: #fff;
+  color: #2563eb;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(37, 99, 235, 0.18);
+}
+
+.view-switch button:focus-visible,
+.status-tile:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.5);
+  outline-offset: 2px;
+}
+
+/* ---- Status tiles (also the status filter) ---- */
+.status-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.status-tile {
+  --tile-accent: #2563eb;
+  --tile-soft: rgba(239, 246, 255, 0.9);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 14px 10px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.status-tile::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--tile-accent);
+}
+
+.status-tile.is-active { --tile-accent: #10b981; --tile-soft: rgba(236, 253, 245, 0.9); }
+.status-tile.is-rate_limited { --tile-accent: #f59e0b; --tile-soft: rgba(255, 251, 235, 0.95); }
+.status-tile.is-error { --tile-accent: #ef4444; --tile-soft: rgba(254, 242, 242, 0.95); }
+.status-tile.is-disabled { --tile-accent: #94a3b8; --tile-soft: rgba(241, 245, 249, 0.95); }
+.status-tile.is-reauth { --tile-accent: #e11d48; --tile-soft: rgba(255, 241, 242, 0.95); }
+
+.status-tile:hover {
+  border-color: var(--tile-accent);
+}
+
+.status-tile[aria-pressed='true'] {
+  border-color: var(--tile-accent);
+  background: var(--tile-soft);
+  box-shadow: 0 0 0 1px var(--tile-accent);
+}
+
+.status-tile-label {
+  overflow: hidden;
+  max-width: 100%;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-tile-count {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-tile.is-empty .status-tile-count {
+  color: #cbd5e1;
+}
+
+/* ---- Empty / loading states ---- */
+.account-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 52px 20px;
+  border: 1px dashed rgba(148, 163, 184, 0.42);
+  border-radius: 12px;
+  background: #fff;
+  color: rgba(15, 23, 42, 0.56);
+  font-size: 13px;
+  text-align: center;
+}
+
+.account-empty strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.account-empty p {
+  margin: 0;
+}
+
+.account-empty-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---- Card view ---- */
+.account-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+  padding: 2px 14px 14px;
+}
+
+.account-card {
+  --card-accent: #10b981;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 14px 12px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: inset 3px 0 0 var(--card-accent), 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.account-card.is-rate_limited { --card-accent: #f59e0b; }
+.account-card.is-error { --card-accent: #ef4444; }
+.account-card.is-disabled {
+  --card-accent: #cbd5e1;
+  background: rgba(248, 250, 252, 0.85);
+}
+
+.account-card:hover {
+  border-color: rgba(37, 99, 235, 0.32);
+  box-shadow: inset 3px 0 0 var(--card-accent), 0 6px 18px rgba(15, 23, 42, 0.07);
+}
+
+.account-card.is-selected {
+  border-color: #2563eb;
+  background: rgba(239, 246, 255, 0.55);
+  box-shadow: inset 3px 0 0 var(--card-accent), 0 0 0 1px #2563eb;
+}
+
+.account-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.account-card-head > :first-child {
+  margin-top: 3px;
+}
+
+.account-card-title {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* renderStatus stacks its tags for narrow table cells; cards have room in a row. */
+.account-card-badges :deep(.flex-col) {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.account-card-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-card-label {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.account-card-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.account-card-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.account-card :deep(.priority-input),
+.account-card :deep(.concurrency-input),
+.account-card :deep(.autopause-input),
+.account-card :deep(.notes-input) {
+  width: 100%;
+}
+
+/* Match the number inputs beside it instead of the compact table-cell height. */
+.account-card :deep(.notes-input) {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.account-card :deep(.concurrency-cell) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.account-card :deep(.group-select) {
+  width: 100%;
+  min-width: 0;
+}
+
+.account-card :deep(.quota-cell) {
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.account-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.32);
+  font-size: 12px;
+}
+
+.account-card-meta div {
+  display: flex;
+  gap: 6px;
+}
+
+.account-card-meta dt {
+  color: #94a3b8;
+}
+
+.account-card-meta dd {
+  margin: 0;
+  color: #334155;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.dark .view-switch {
+  border-color: rgba(71, 85, 105, 0.6);
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.dark .view-switch button {
+  color: #94a3b8;
+}
+
+.dark .view-switch button:hover {
+  color: #f1f5f9;
+}
+
+.dark .view-switch button.is-active {
+  background: rgba(30, 41, 59, 0.95);
+  color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.dark .status-tile,
+.dark .account-empty,
+.dark .account-card {
+  border-color: rgba(71, 85, 105, 0.55);
+  background: rgba(30, 41, 59, 0.55);
+}
+
+.dark .status-tile[aria-pressed='true'] {
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.dark .status-tile-label,
+.dark .account-card-label,
+.dark .account-card-meta dt {
+  color: #94a3b8;
+}
+
+.dark .status-tile-count,
+.dark .account-empty strong,
+.dark .account-card-meta dd {
+  color: #f1f5f9;
+}
+
+.dark .status-tile.is-empty .status-tile-count {
+  color: #475569;
+}
+
+.dark .account-empty {
+  color: rgba(226, 232, 240, 0.6);
+}
+
+.dark .account-card.is-disabled {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.dark .account-card.is-selected {
+  border-color: #60a5fa;
+  background: rgba(30, 58, 138, 0.22);
+  box-shadow: inset 3px 0 0 var(--card-accent), 0 0 0 1px #60a5fa;
+}
+
+.dark .account-card :deep(.quota-cell) {
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.dark .account-card-meta {
+  border-color: rgba(71, 85, 105, 0.55);
+}
+
 .bulk-actions {
   display: flex;
   align-items: center;
@@ -2414,6 +3119,12 @@ onBeforeUnmount(() => {
   color: #0f172a;
   font-size: 13px;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.bulk-hidden-hint {
+  color: #b45309;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -3123,7 +3834,44 @@ onBeforeUnmount(() => {
   color: #93c5fd;
 }
 
+@media (max-width: 1100px) {
+  .status-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
+  .status-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .status-tile {
+    padding: 7px 8px 7px 12px;
+  }
+
+  .status-tile-count {
+    font-size: 17px;
+  }
+
+  .accounts-filters,
+  .accounts-actions {
+    flex-basis: 100%;
+  }
+
+  .provider-filter {
+    width: 100%;
+  }
+
+  .account-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 2px 10px 10px;
+  }
+
+  .account-card-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .bulk-actions {
     align-items: stretch;
     flex-direction: column;
