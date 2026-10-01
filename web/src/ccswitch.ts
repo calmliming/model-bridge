@@ -95,10 +95,10 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     vendor: 'Xiaomi',
     endpoint: (origin) => origin,
     models: {
-      model: 'mimo-v2.5-pro',
-      sonnetModel: 'mimo-v2.5-pro',
-      haikuModel: 'mimo-v2.5',
-      opusModel: 'mimo-v2.5-pro',
+      model: 'mimo-v2.6-pro',
+      sonnetModel: 'mimo-v2.6-pro',
+      haikuModel: 'mimo-v2.6-flash',
+      opusModel: 'mimo-v2.6-pro',
     },
     provider: 'xiaomi',
   },
@@ -108,7 +108,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI · MiMo',
     vendor: 'Xiaomi',
     endpoint: (origin) => origin,
-    models: { model: 'mimo-v2.5-pro' },
+    models: { model: 'mimo-v2.6-pro' },
     provider: 'xiaomi',
   },
   {

@@ -130,12 +130,22 @@ describe('model discovery', () => {
         'gemini-3.8-flash',
         'gemini-3.7-flash',
         'gemini-3.6-flash',
-        'mimo-v2.5-pro',
+        'mimo-v2.6-pro',
+        'mimo-v2.6-flash',
+        'mimo-v2.6-pro-ultraspeed',
         'glm-5.3',
+        'glm-5.3-flashx',
         'qwen3.8-max',
+        'qwen3.8-flash',
+        'kimi-k2.7-code-highspeed',
         'deepseek-v4-pro'
       ])
     )
+    // Retired for ChatGPT-signed-in Codex, or (MiMo V2.5) going offline without
+    // a reroute: none of them may be advertised any more.
+    for (const retired of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'mimo-v2.5-pro', 'mimo-v2.5']) {
+      expect(models).not.toContain(retired)
+    }
     expect(models).not.toEqual(
       expect.arrayContaining([
         'claude-mythos-5-1',
@@ -161,10 +171,6 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-spark',
       'gpt-image-2',
       ...image25Models
     ])
@@ -184,10 +190,6 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-spark',
       'gpt-image-2',
       ...image25Models,
       'deepseek-v4-pro'
@@ -222,10 +224,6 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-spark',
       'gpt-image-2',
       ...image25Models,
       'gpt-public'
@@ -234,7 +232,7 @@ describe('model discovery', () => {
 
   it('discovers Kimi Code K3 aliases for Kimi-scoped keys', () => {
     const key = { allowedProviders: ['kimi'] as const, allowedModels: null }
-    expect(listModelIdsForKey(key)).toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'])
+    expect(listModelIdsForKey(key)).toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'])
   })
 
   it('returns Gemini API model objects', () => {

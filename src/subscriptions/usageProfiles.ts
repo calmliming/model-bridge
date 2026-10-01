@@ -18,7 +18,7 @@ export function subscriptionModelMultiplier(profile: SubscriptionUsageProfile, m
     /^deepseek-(?:v4[.-]1-flash|flash|chat|reasoner)(?:$|-)/,
     /^glm-5[.-]3-flash(?:$|-)/,
     /^glm-5[.-]2(?:$|-)/,
-    /^kimi-k2[.-](?:7-code|6)(?:$|-)/,
+    /^kimi-k2[.-](?:7-code(?!-highspeed)|6)(?:$|-)/,
     /^longcat-2[.-]0(?:$|-)/,
     /^mimo-v2[.-]6-flash(?:$|-)/,
     /^mimo-v2[.-]5$/,

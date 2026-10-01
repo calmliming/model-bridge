@@ -318,6 +318,19 @@ describe('grok (xAI) pricing', () => {
 })
 
 describe('Kimi Code pricing', () => {
+  it('prices the K2.7 Code highspeed lane at twice the standard K2 tier', () => {
+    expect(resolvePrice('kimi', 'kimi-k2.7-code-highspeed')).toMatchObject({
+      input: 1.82,
+      output: 7.56,
+      cacheRead: 0.364
+    })
+    expect(resolvePrice('kimi', 'kimi-k2.7-code')).toMatchObject({
+      input: 0.91,
+      output: 3.78,
+      cacheRead: 0.182
+    })
+  })
+
   it('prices Kimi Code K3 aliases as the Kimi K3 tier', () => {
     for (const model of ['k3', 'k3-256k', 'kimi-code/k3']) {
       expect(resolvePrice('sub2api', model)).toMatchObject({
@@ -435,6 +448,27 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
     })
   })
 
+  it('prices MiMo V2.6 at the V2.5 rates and UltraSpeed at 10x Pro', () => {
+    expect(resolvePrice('xiaomi', 'mimo-v2.6-pro')).toMatchObject({
+      input: 0.435,
+      output: 0.87,
+      cacheRead: 0.0036
+    })
+    expect(resolvePrice('xiaomi', 'mimo-v2.6-flash')).toMatchObject({
+      input: 0.14,
+      output: 0.28,
+      cacheRead: 0.0028
+    })
+    // "ultraspeed" also contains "pro"; it must not fall into the Pro tier.
+    for (const provider of ['xiaomi', 'sub2api']) {
+      expect(resolvePrice(provider, 'mimo-v2.6-pro-ultraspeed')).toMatchObject({
+        input: 4.35,
+        output: 8.7,
+        cacheRead: 0.036
+      })
+    }
+  })
+
   it('uses Xiaomi MiMo V2.5 overseas list prices', () => {
     expect(resolvePrice('xiaomi', 'mimo-v2.5-pro')).toMatchObject({
       input: 0.435,
@@ -459,6 +493,14 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
       output: 0.392,
       cacheRead: 0.0322
     })
+    // FlashX shares Flash's weights but is billed at ¥2 / ¥7 (cache-hit ¥0.57).
+    for (const provider of ['zhipu', 'sub2api']) {
+      expect(resolvePrice(provider, 'glm-5.3-flashx')).toMatchObject({
+        input: 0.28,
+        output: 0.98,
+        cacheRead: 0.0798
+      })
+    }
     expect(resolvePrice('zhipu', 'glm-5.2')).toMatchObject({
       input: 1.12,
       output: 3.92,
@@ -482,6 +524,14 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
       output: 0.112,
       cacheRead: 0.0056
     })
+    // Qwen 3.8 Flash (¥0.8 / ¥2.7, cache-hit ¥0.1) is ~4x the 3.7 Flash tier.
+    for (const model of ['qwen3.8-flash', 'qwen3-8-flash']) {
+      expect(resolvePrice('qwen', model)).toMatchObject({
+        input: 0.112,
+        output: 0.378,
+        cacheRead: 0.014
+      })
+    }
   })
 
   it('routes the same current models through Sub2API pricing', () => {

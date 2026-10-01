@@ -198,14 +198,17 @@ const commonModelOptions = [
   'deepseek-flash',
   'deepseek-v4-pro',
   'mimo-*',
-  'mimo-v2.5-pro',
-  'mimo-v2.5',
+  'mimo-v2.6-pro',
+  'mimo-v2.6-flash',
+  'mimo-v2.6-pro-ultraspeed',
   'glm-*',
   'glm-5.3',
   'glm-5.3-flash',
+  'glm-5.3-flashx',
   'glm-5.2',
   'qwen*',
   'qwen3.8-max',
+  'qwen3.8-flash',
   'qwen3.7-plus',
   'qwen3.7-flash',
   'minimax-*',
@@ -213,12 +216,13 @@ const commonModelOptions = [
   'kimi-*',
   'kimi-k3',
   'kimi-k2.7-code',
+  'kimi-k2.7-code-highspeed',
   'sub2api-*'
 ].map((value) => ({ label: value, value }))
 
 const commonMappingOptions = [
-  'gpt-public=gpt-5.4',
-  'gpt-fast=gpt-5.4-mini',
+  'gpt-public=gpt-6.1-sol',
+  'gpt-fast=gpt-6-luna',
   'deepseek-pro=deepseek-v4-pro',
   'deepseek-fast=deepseek-flash',
   'glm-pro=glm-5.3',
@@ -1107,7 +1111,7 @@ onMounted(() => {
           <UiSelect v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
         </UiFormItem>
         <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-5.4" />
+          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-6.1-sol" />
         </UiFormItem>
         <UiFormItem label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="form.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />
@@ -1263,7 +1267,7 @@ onMounted(() => {
           <UiSelect v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
         </UiFormItem>
         <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-5.4" />
+          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-6.1-sol" />
         </UiFormItem>
         <UiFormItem label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="editForm.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />

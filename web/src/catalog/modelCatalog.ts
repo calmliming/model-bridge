@@ -465,55 +465,10 @@ export const MODEL_CATALOG: PlazaModel[] = [
     provider: 'openai',
     categories: ['chat', 'reasoning', 'multimodal'],
     tags: ['多模态', '推理'],
-    description: 'OpenAI 上一代旗舰多模态模型，综合推理、文本与图像理解能力领先。',
+    description: 'OpenAI 上一代旗舰多模态模型，综合推理、文本与图像理解能力领先。ChatGPT 账号自 2026-10-14 起停用，届时只能通过 API Key 上游调用。',
     context: '256K',
     inputPrice: 5,
     outputPrice: 30
-  },
-  {
-    id: 'gpt-5.4',
-    name: 'GPT-5.4',
-    provider: 'openai',
-    categories: ['chat', 'reasoning'],
-    tags: ['通用', '稳定'],
-    description: '通用主力模型，覆盖大多数对话与推理任务，稳定可靠。',
-    context: '256K',
-    inputPrice: 2.5,
-    outputPrice: 15
-  },
-  {
-    id: 'gpt-5.4-mini',
-    name: 'GPT-5.4 Mini',
-    provider: 'openai',
-    categories: ['chat', 'lightweight'],
-    tags: ['轻量', '低成本', '高速'],
-    description: '小尺寸高速模型，适合大批量、低成本的对话与分类任务。',
-    context: '128K',
-    inputPrice: 0.25,
-    outputPrice: 2
-  },
-  {
-    id: 'gpt-5.3-codex',
-    name: 'GPT-5.3 Codex',
-    provider: 'openai',
-    categories: ['code', 'reasoning'],
-    tags: ['代码', 'Agent', 'Codex CLI'],
-    description: '面向编程与 Agent 的专用模型，深度适配 Codex CLI 工作流。',
-    context: '256K',
-    inputPrice: 1.5,
-    outputPrice: 12
-  },
-  {
-    id: 'gpt-5.3-codex-spark',
-    name: 'GPT-5.3 Codex Spark',
-    provider: 'openai',
-    categories: ['code', 'reasoning', 'lightweight'],
-    tags: ['代码', '低延迟', 'Codex CLI'],
-    description: 'Codex Spark 的高吞吐模型，适合交互式编码和高并发 Agent 请求。',
-    context: '272K',
-    inputPrice: 1.75,
-    outputPrice: 14,
-    cacheReadPrice: 0.175
   },
 
   // --- Google / Gemini -----------------------------------------------------
@@ -641,13 +596,14 @@ export const MODEL_CATALOG: PlazaModel[] = [
     badge: 'recommended'
   },
   // --- 小米 MiMo -----------------------------------------------------------
+  // V2.5 于 2026-10-21 下线且不自动转发，V2.6 沿用 V2.5 的价格。
   {
-    id: 'mimo-v2.5-pro',
-    name: 'MiMo V2.5 Pro',
+    id: 'mimo-v2.6-pro',
+    name: 'MiMo V2.6 Pro',
     provider: 'xiaomi',
-    categories: ['chat', 'reasoning'],
-    tags: ['旗舰', 'Agent', '长程推理'],
-    description: '小米 MiMo 当前旗舰，适合复杂推理、长文档与可持续近千轮工具调用的 Agent 任务。',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最新旗舰', 'Agent', '全模态'],
+    description: '小米 MiMo 最新开源旗舰，支持文本、图像、视频与音频输入，适合复杂推理、编程与长程 Agent 任务。',
     context: '1M',
     inputPrice: 0.435,
     outputPrice: 0.87,
@@ -655,16 +611,29 @@ export const MODEL_CATALOG: PlazaModel[] = [
     badge: 'recommended'
   },
   {
-    id: 'mimo-v2.5',
-    name: 'MiMo V2.5',
+    id: 'mimo-v2.6-flash',
+    name: 'MiMo V2.6 Flash',
     provider: 'xiaomi',
     categories: ['chat', 'reasoning', 'multimodal', 'lightweight'],
-    tags: ['全模态', 'Agent', '低成本'],
-    description: '原生理解文本、图像、视频与音频的全模态模型，适合多模态 Agent 与高吞吐任务。',
+    tags: ['多模态', '高速', '低成本'],
+    description: 'V2.6 系列的高效档，适合多模态理解、高吞吐对话与轻量 Agent 任务。',
     context: '1M',
     inputPrice: 0.14,
     outputPrice: 0.28,
-    cacheReadPrice: 0.0028
+    cacheReadPrice: 0.0028,
+    badge: 'new'
+  },
+  {
+    id: 'mimo-v2.6-pro-ultraspeed',
+    name: 'MiMo V2.6 Pro UltraSpeed',
+    provider: 'xiaomi',
+    categories: ['chat', 'reasoning', 'code'],
+    tags: ['极速', '与 Pro 同权重', '高价'],
+    description: '与 V2.6 Pro 同一模型的高速推理档，输出速度显著提升，单价为 Pro 的 10 倍，适合对延迟极敏感的交互场景。',
+    context: '1M',
+    inputPrice: 4.35,
+    outputPrice: 8.7,
+    cacheReadPrice: 0.036
   },
 
   // --- 智谱 GLM ------------------------------------------------------------
@@ -692,6 +661,18 @@ export const MODEL_CATALOG: PlazaModel[] = [
     inputPrice: 0.112,
     outputPrice: 0.392,
     cacheReadPrice: 0.0322,
+  },
+  {
+    id: 'glm-5.3-flashx',
+    name: 'GLM-5.3-FlashX',
+    provider: 'zhipu',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['高速', '200 tokens/s', '原生多模态'],
+    description: '与 GLM-5.3-Flash 同一模型的高速版，输出最高约 200 tokens/s，适合实时交互；Coding Plan 暂不包含。',
+    context: '1M',
+    inputPrice: 0.28,
+    outputPrice: 0.98,
+    cacheReadPrice: 0.0798,
     badge: 'new'
   },
   {
@@ -720,6 +701,19 @@ export const MODEL_CATALOG: PlazaModel[] = [
     outputPrice: 5.04,
     cacheReadPrice: 0.21,
     badge: 'recommended'
+  },
+  {
+    id: 'qwen3.8-flash',
+    name: 'Qwen3.8 Flash',
+    provider: 'qwen',
+    categories: ['chat', 'code', 'reasoning', 'multimodal', 'lightweight'],
+    tags: ['新架构', '多模态', '高性价比'],
+    description: '通义千问新一代 Flash，采用 Qwen4 预览架构，支持文本、图像与视频理解，默认开启思考。',
+    context: '1M',
+    inputPrice: 0.112,
+    outputPrice: 0.378,
+    cacheReadPrice: 0.014,
+    badge: 'new'
   },
   {
     id: 'qwen3.7-plus',
@@ -821,6 +815,18 @@ export const MODEL_CATALOG: PlazaModel[] = [
     outputPrice: 3.78
   },
   {
+    id: 'kimi-k2.7-code-highspeed',
+    name: 'Kimi K2.7 Code 高速版',
+    provider: 'kimi',
+    categories: ['code', 'reasoning'],
+    tags: ['编码', '高速', 'Agent'],
+    description: 'K2.7 Code 的高速推理档，输出约 180 tokens/s，单价为标准版的 2 倍，适合实时交互式编码。',
+    context: '256K',
+    inputPrice: 1.82,
+    outputPrice: 7.56,
+    cacheReadPrice: 0.364
+  },
+  {
     id: 'kimi-k2.6',
     name: 'Kimi K2.6',
     provider: 'kimi',
@@ -871,17 +877,29 @@ export const MODEL_CATALOG: PlazaModel[] = [
 
   // --- xAI Grok ------------------------------------------------------------
   {
-    id: 'grok-4.6',
-    name: 'Grok 4.6',
+    id: 'grok-4.7',
+    name: 'Grok 4.7',
     provider: 'grok',
-    categories: ['chat', 'reasoning'],
-    tags: ['旗舰', '推理', '实时信息'],
-    description: 'xAI 当前旗舰，长程推理与实时信息结合最好的一代，适合复杂分析与调研类任务。',
-    context: '256K',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最新旗舰', '编码', '图像输入'],
+    description: 'xAI 当前旗舰，面向编码与知识工作，支持函数调用、结构化输出和 low 至 xhigh 四档推理强度。',
+    context: '500K',
     inputPrice: 2,
     outputPrice: 6,
     cacheReadPrice: 0.5,
     badge: 'new'
+  },
+  {
+    id: 'grok-4.6',
+    name: 'Grok 4.6',
+    provider: 'grok',
+    categories: ['chat', 'reasoning'],
+    tags: ['上一代旗舰', '推理', '实时信息'],
+    description: 'xAI 上一代旗舰，长程推理与实时信息结合出色，适合复杂分析与调研类任务。',
+    context: '256K',
+    inputPrice: 2,
+    outputPrice: 6,
+    cacheReadPrice: 0.5
   },
   {
     id: 'grok-4.5',

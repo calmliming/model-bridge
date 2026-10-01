@@ -193,7 +193,7 @@ npm start
 账户（Claude 用粘贴 code，OpenAI / Gemini 用浏览器回调，DeepSeek / Xiaomi MiMo 填 API key）。
 
 API Key 可按需限制服务商/模型、绑定账号分组、设置限速/并发/成本配额，也可配置
-`gpt-public=gpt-5.4` 这类模型映射。模型映射是客户端可见的别名：
+`gpt-public=gpt-6.1-sol` 这类模型映射。模型映射是客户端可见的别名：
 `GET /v1/models` 会展示别名，实际请求上游时改写为映射后的模型。
 
 ### 账号池调度
@@ -345,7 +345,7 @@ Xiaomi MiMo 的接法和 DeepSeek 一样：后台添加 Xiaomi MiMo 账户并填
 ```toml
 [profiles.model-bridge-mimo]
 model_provider = "model-bridge-mimo"
-model = "mimo-v2.5-pro"   # 或 "mimo-v2.5"
+model = "mimo-v2.6-pro"   # 或 "mimo-v2.6-flash"
 
 [model_providers.model-bridge-mimo]
 name = "model-bridge-mimo"
@@ -360,7 +360,7 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge-mimo
 ```
 
-以 `mimo-` 开头的模型名会透传，其它模型会改写为 `mimo-v2.5-pro`；Responses
+以 `mimo-` 开头的模型名会透传，其它模型会改写为 `mimo-v2.6-pro`；Responses
 入口同样始终以 SSE 返回，用量记在 `provider=xiaomi` 下。
 
 ### Cherry Studio

@@ -21,6 +21,12 @@ describe('one-time seed corrections', () => {
     expect(luna?.[1]).toEqual(['openai', 'gpt-6-luna', 0.1, 0.5, 0.125, 0.01, 0.1, 0.5, 0.125, 0.05])
     expect(calls.some(([sql]) => sql.includes("'pricing_seed_v9'"))).toBe(true)
     expect(calls.some(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === 'gpt-6.1-sol' && values?.[6] === 0.1)).toBe(true)
+    // New discoverable models get exact rows at their own list price.
+    const seeded = (model: string) => calls.find(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === model)?.[1]
+    expect(seeded('mimo-v2.6-pro-ultraspeed')?.slice(3, 7)).toEqual([4.35, 8.7, 0, 0.036])
+    expect(seeded('qwen3.8-flash')?.slice(3, 7)).toEqual([0.112, 0.378, 0, 0.014])
+    expect(seeded('glm-5.3-flashx')?.slice(3, 7)).toEqual([0.28, 0.98, 0, 0.0798])
+    expect(seeded('kimi-k2.7-code-highspeed')?.slice(3, 7)).toEqual([1.82, 7.56, 0, 0.364])
   })
 })
 
@@ -159,6 +165,29 @@ describe('scheduled database price overrides', () => {
       output: 14,
       cacheRead: 0.175,
     })
+  })
+
+  it('does not bill paid faster lanes at their cheaper sibling rows', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [
+        priceRow('mimo-v2.6-pro', 0.435, 0.87, 0.0036, 'xiaomi'),
+        priceRow('glm-5.3-flash', 0.112, 0.392, 0.0322, 'zhipu'),
+        priceRow('kimi-k2.7-code', 0.91, 3.78, 0.182, 'kimi'),
+      ],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('xiaomi', 'mimo-v2.6-pro-ultraspeed')).toMatchObject({ input: 4.35, output: 8.7, cacheRead: 0.036 })
+    expect(resolvePrice('zhipu', 'glm-5.3-flashx')).toMatchObject({ input: 0.28, output: 0.98, cacheRead: 0.0798 })
+    expect(resolvePrice('kimi', 'kimi-k2.7-code-highspeed')).toMatchObject({ input: 1.82, output: 7.56, cacheRead: 0.364 })
+    // The sibling rows themselves still apply.
+    expect(resolvePrice('xiaomi', 'mimo-v2.6-pro')).toMatchObject({ input: 0.435 })
+  })
+
+  it('keeps an administrator-edited faster-lane row', async () => {
+    mocks.query.mockResolvedValue({ rows: [priceRow('glm-5.3-flashx', 0.5, 1.5, 0.1, 'zhipu')] })
+    await loadPricing()
+    expect(resolvePrice('zhipu', 'glm-5.3-flashx')).toMatchObject({ input: 0.5, output: 1.5, cacheRead: 0.1 })
   })
 
   it('does not let seeded Gemini rows freeze the promotional price', async () => {

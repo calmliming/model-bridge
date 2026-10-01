@@ -3,14 +3,15 @@ import { mapModel, responsesToChatCompletions } from './converter'
 
 describe('xiaomi mapModel', () => {
   it('passes through mimo-* model names', () => {
-    expect(mapModel('mimo-v2.5-pro')).toBe('mimo-v2.5-pro')
+    expect(mapModel('mimo-v2.6-pro-ultraspeed')).toBe('mimo-v2.6-pro-ultraspeed')
+    expect(mapModel('mimo-v2.6-flash')).toBe('mimo-v2.6-flash')
     expect(mapModel('mimo-v2.5')).toBe('mimo-v2.5')
   })
 
-  it('rewrites unknown / Codex model names to the flagship', () => {
-    expect(mapModel('gpt-5.5')).toBe('mimo-v2.5-pro')
-    expect(mapModel('')).toBe('mimo-v2.5-pro')
-    expect(mapModel(undefined)).toBe('mimo-v2.5-pro')
+  it('rewrites unknown / Codex model names to the V2.6 flagship', () => {
+    expect(mapModel('gpt-5.5')).toBe('mimo-v2.6-pro')
+    expect(mapModel('')).toBe('mimo-v2.6-pro')
+    expect(mapModel(undefined)).toBe('mimo-v2.6-pro')
   })
 })
 

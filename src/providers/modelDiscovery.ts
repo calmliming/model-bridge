@@ -48,11 +48,10 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.6-luna',
+    // gpt-5.4 / gpt-5.4-mini (2026-08-31), gpt-5.3-codex and gpt-5.3-codex-spark
+    // (2026-09-14) left ChatGPT-signed-in Codex; gpt-5.5 follows on 2026-10-14.
+    // Their pricing rows stay so API-key upstreams and past usage still bill.
     'gpt-5.5',
-    'gpt-5.4',
-    'gpt-5.4-mini',
-    'gpt-5.3-codex',
-    'gpt-5.3-codex-spark',
     'gpt-image-2',
     ...IMAGE_25_MODELS
   ],
@@ -67,13 +66,14 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
     'gemini-2.5-flash'
   ],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
-  xiaomi: ['mimo-v2.5-pro', 'mimo-v2.5'],
-  zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2'],
-  qwen: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash'],
+  // MiMo V2.5 goes offline on 2026-10-21 without rerouting; V2.6 replaces it.
+  xiaomi: ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
+  zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
+  qwen: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'qwen3.7-flash'],
   // Kimi Code exposes the K3 model under short aliases as well as the
   // provider-qualified name. Keep them discoverable so a Composite-style key
   // can route the same identifiers that Sub2API v0.1.183 accepts.
-  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
+  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
   grok: ['grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
 }

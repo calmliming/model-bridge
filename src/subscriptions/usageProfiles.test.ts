@@ -15,7 +15,7 @@ describe('OpenCode Go benchmark', () => {
     ['deepseek-flash', 1], ['deepseek-v4.1-flash', 1], ['deepseek-v4-flash', 2],
     ['deepseek-v4-flash-vision-exp', 4], ['deepseek-v4-pro', 4],
     ['glm-5.3-flash', 1], ['glm-5.3', 4], ['glm-5.2', 1],
-    ['kimi-k2.7-code', 1], ['kimi-k3', 4],
+    ['kimi-k2.7-code', 1], ['kimi-k2.7-code-highspeed', 4], ['kimi-k3', 4], ['glm-5.3-flashx', 4],
     ['mimo-v2.5', 1], ['mimo-v2.5-pro', 4], ['mimo-v2.6-flash', 1], ['mimo-v2.6-pro', 4],
     ['MiniMax-M3', 1], ['qwen3.7-plus', 1], ['qwen3.8-flash', 2], ['qwen3.8-max', 4],
     ['gpt-6-luna', 4], ['grok-4.7', 4], ['claude-sonnet-5', 4], ['unlisted-model', 4],

@@ -75,17 +75,6 @@ describe('DeepSeek catalog pricing schedule', () => {
   })
 })
 
-describe('Codex Spark catalog', () => {
-  it('uses the dedicated Spark price card', () => {
-    expect(model('gpt-5.3-codex-spark')).toMatchObject({
-      provider: 'openai',
-      inputPrice: 1.75,
-      outputPrice: 14,
-      cacheReadPrice: 0.175
-    })
-  })
-})
-
 describe('current provider model catalog', () => {
   it('exposes Astra with verified base prices and image input capability', () => {
     expect(model('gpt-6-astra')).toMatchObject({
@@ -145,14 +134,22 @@ describe('current provider model catalog', () => {
   })
 
   it('shows current Xiaomi and GLM capabilities and context lengths', () => {
-    expect(model('mimo-v2.5-pro')).toMatchObject({
+    expect(model('mimo-v2.6-pro')).toMatchObject({
       context: '1M',
       inputPrice: 0.435,
-      outputPrice: 0.87
+      outputPrice: 0.87,
+      badge: 'recommended'
     })
-    expect(model('mimo-v2.5')).toMatchObject({
+    expect(model('mimo-v2.6-flash')).toMatchObject({
       context: '1M',
+      inputPrice: 0.14,
+      outputPrice: 0.28,
       categories: expect.arrayContaining(['multimodal'])
+    })
+    expect(model('mimo-v2.6-pro-ultraspeed')).toMatchObject({
+      inputPrice: 4.35,
+      outputPrice: 8.7,
+      cacheReadPrice: 0.036
     })
     expect(model('glm-5.3')).toMatchObject({
       context: '1M',
@@ -162,12 +159,42 @@ describe('current provider model catalog', () => {
       context: '1M',
       categories: expect.arrayContaining(['multimodal'])
     })
+    expect(model('glm-5.3-flashx')).toMatchObject({
+      context: '1M',
+      inputPrice: 0.28,
+      outputPrice: 0.98,
+      cacheReadPrice: 0.0798
+    })
+  })
+
+  it('shows the faster or newer lanes at their own list prices', () => {
+    expect(model('qwen3.8-flash')).toMatchObject({
+      context: '1M',
+      inputPrice: 0.112,
+      outputPrice: 0.378,
+      cacheReadPrice: 0.014,
+      categories: expect.arrayContaining(['multimodal'])
+    })
+    expect(model('kimi-k2.7-code-highspeed')).toMatchObject({
+      inputPrice: 1.82,
+      outputPrice: 7.56,
+      cacheReadPrice: 0.364
+    })
+    expect(model('grok-4.7')).toMatchObject({
+      context: '500K',
+      inputPrice: 2,
+      outputPrice: 6,
+      cacheReadPrice: 0.5
+    })
   })
 
   it('does not advertise retired aliases, restricted models, or shut-down previews', () => {
     expect(MODEL_CATALOG.some((item) => item.id === 'deepseek-reasoner')).toBe(false)
     expect(MODEL_CATALOG.some((item) => item.id === 'claude-mythos-5-1')).toBe(false)
     expect(MODEL_CATALOG.some((item) => item.id === 'gemini-3-pro-preview')).toBe(false)
-    expect(MODEL_CATALOG.some((item) => item.id === 'qwen3.8-flash')).toBe(false)
+    // Gone from ChatGPT-signed-in Codex, or (MiMo V2.5) offline on 2026-10-21.
+    for (const retired of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'mimo-v2.5-pro', 'mimo-v2.5']) {
+      expect(MODEL_CATALOG.some((item) => item.id === retired)).toBe(false)
+    }
   })
 })

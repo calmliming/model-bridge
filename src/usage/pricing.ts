@@ -466,12 +466,14 @@ function deepseekPrice(model: string, atMs: number): TierPrice {
   return period === 'pre-schedule' ? DEEPSEEK_PRE_SCHEDULE_TIERS[tier] : DEEPSEEK_SCHEDULED_TIERS[period][tier]
 }
 
-// Xiaomi MiMo V2.5 overseas list prices (per 1M tokens, 2026-08-06). MiMo has
-// no separate cache-write fee — cacheWrite is 0; cacheRead is the published
-// cached-input price.
-const XIAOMI_TIERS: Record<'standard' | 'pro', TierPrice> = {
+// Xiaomi MiMo overseas list prices (per 1M tokens). MiMo has no separate
+// cache-write fee — cacheWrite is 0; cacheRead is the published cached-input
+// price. V2.6 (2026-09-22) keeps the V2.5 prices: Pro = V2.5 Pro, Flash = V2.5.
+// Pro UltraSpeed is the same Pro weights on a faster lane at 10× the Pro price.
+const XIAOMI_TIERS: Record<'standard' | 'pro' | 'ultraspeed', TierPrice> = {
   standard: { input: 0.14, output: 0.28, cacheWrite: 0, cacheRead: 0.0028 },
-  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.0036 }
+  pro: { input: 0.435, output: 0.87, cacheWrite: 0, cacheRead: 0.0036 },
+  ultraspeed: { input: 4.35, output: 8.7, cacheWrite: 0, cacheRead: 0.036 }
 }
 
 const XIAOMI_STALE_TIERS: Record<'standard' | 'pro', TierPrice> = {
@@ -480,16 +482,21 @@ const XIAOMI_STALE_TIERS: Record<'standard' | 'pro', TierPrice> = {
 }
 
 function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
-  // mimo-v2.5-pro (and legacy mimo-v2-pro) → pro; mimo-v2.5 / flash / omni → standard
-  return model.toLowerCase().includes('pro') ? 'pro' : 'standard'
+  // mimo-v2.6-pro-ultraspeed → ultraspeed (must precede the plain "pro" test);
+  // mimo-v2.6-pro / mimo-v2.5-pro → pro; flash / mimo-v2.5 / omni → standard
+  const m = model.toLowerCase()
+  if (m.includes('ultraspeed')) return 'ultraspeed'
+  return m.includes('pro') ? 'pro' : 'standard'
 }
 
 // Zhipu GLM list prices (per 1M tokens), quoted in CNY on the BigModel pricing
 // page and converted to USD. GLM has no separate cache-write fee — cacheWrite
 // is 0; cacheRead is the cache-hit input price. GLM-5.3 is the current 1M
-// flagship; GLM-5.3-Flash is the low-cost native-multimodal tier. Older tiers
-// remain available for callers that explicitly request their model IDs.
-const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flagship', TierPrice> = {
+// flagship; GLM-5.3-Flash is the low-cost native-multimodal tier and
+// GLM-5.3-FlashX (2026-09-18) the same weights served at up to 200 tokens/s
+// for ¥2 / ¥7 (cache-hit ¥0.57). Older tiers remain available for callers that
+// explicitly request their model IDs.
+const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flashx53' | 'flagship', TierPrice> = {
   balanced: {
     input: cny(2),
     output: cny(8),
@@ -509,6 +516,7 @@ const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flagshi
     cacheWrite: 0,
     cacheRead: cny(0.23)
   },
+  flashx53: { input: cny(2), output: cny(7), cacheWrite: 0, cacheRead: cny(0.57) },
   flagship: {
     input: cny(8),
     output: cny(28),
@@ -519,6 +527,7 @@ const ZHIPU_TIERS: Record<'balanced' | 'legacy' | 'turbo' | 'flash53' | 'flagshi
 
 function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
   const m = model.toLowerCase()
+  if (m.includes('5.3-flashx')) return 'flashx53'
   if (m.includes('5.3-flash')) return 'flash53'
   if (m.includes('5.3') || m.includes('5.2')) return 'flagship'
   if (m.includes('5-turbo') || m.includes('5v-turbo')) return 'turbo'
@@ -529,9 +538,11 @@ function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
 // Qwen (通义千问 / 阿里百炼) list prices (per 1M tokens), quoted in CNY on the
 // Bailian pricing page and converted to USD. No separate cache-write fee —
 // cacheWrite 0; cacheRead is the published cache-hit input rate. Qwen 3.8 Max
-// is the current flagship, Qwen 3.7 Plus the balanced Agent tier, and Qwen 3.7
-// Flash the low-cost tier. Legacy rows stay available for explicit old IDs.
-const QWEN_TIERS: Record<'max38' | 'plus37' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus', TierPrice> = {
+// is the current flagship, Qwen 3.7 Plus the balanced Agent tier, Qwen 3.8
+// Flash the new multimodal Flash (¥0.8 / ¥2.7 since 2026-08-27, cache-hit
+// ¥0.1) and Qwen 3.7 Flash the cheapest tier. Legacy rows stay available for
+// explicit old IDs.
+const QWEN_TIERS: Record<'max38' | 'plus37' | 'flash38' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus', TierPrice> = {
   max38: {
     input: cny(12),
     output: cny(36),
@@ -539,6 +550,7 @@ const QWEN_TIERS: Record<'max38' | 'plus37' | 'flash37' | 'legacyCoder' | 'legac
     cacheRead: cny(1.5)
   },
   plus37: { input: cny(2), output: cny(8), cacheWrite: 0, cacheRead: cny(0.4) },
+  flash38: { input: cny(0.8), output: cny(2.7), cacheWrite: 0, cacheRead: cny(0.1) },
   flash37: {
     input: cny(0.2),
     output: cny(0.8),
@@ -570,6 +582,7 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
   if (m.includes('coder')) return 'legacyCoder'
   if (m === 'qwen-max' || m.startsWith('qwen-max-')) return 'legacyMax'
   if (m === 'qwen-plus' || m.startsWith('qwen-plus-')) return 'legacyPlus'
+  if (/qwen3[.-]8-flash/.test(m)) return 'flash38'
   if (m.includes('flash')) return 'flash37'
   if (m.includes('plus')) return 'plus37'
   return 'max38'
@@ -580,16 +593,21 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
 // fee — cacheWrite is 0; cacheRead is the cache-hit input price. kimi-k3 is the
 // 1M-context flagship (¥20 / ¥100, cache-hit ¥2); the k2 family (k2.7-code /
 // k2.6 / k2.5, and the retiring moonshot-v1-*) is the cheaper tier
-// (¥6.5 / ¥27, cache-hit ~¥1.3).
-const KIMI_TIERS: Record<'k3' | 'k2', TierPrice> = {
+// (¥6.5 / ¥27, cache-hit ~¥1.3). kimi-k2.7-code-highspeed serves K2.7 Code
+// faster at twice that (¥13 / ¥54, cache-hit ¥2.6).
+const KIMI_TIERS: Record<'k3' | 'k2' | 'k2Highspeed', TierPrice> = {
   k3: { input: cny(20), output: cny(100), cacheWrite: 0, cacheRead: cny(2) },
-  k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) }
+  k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) },
+  k2Highspeed: { input: cny(13), output: cny(54), cacheWrite: 0, cacheRead: cny(2.6) }
 }
 
 function kimiTier(model: string): keyof typeof KIMI_TIERS {
-  // kimi-k3 (incl. the kimi-k3[1m] 1M-context form) → flagship; everything else
-  // (kimi-k2.x, moonshot-v1-*) → the cheaper k2 tier.
-  return model.toLowerCase().includes('k3') ? 'k3' : 'k2'
+  // kimi-k3 (incl. the kimi-k3[1m] 1M-context form) → flagship; the k2
+  // highspeed lane → its own tier; everything else (kimi-k2.x, moonshot-v1-*)
+  // → the cheaper k2 tier.
+  const m = model.toLowerCase()
+  if (m.includes('k3')) return 'k3'
+  return m.includes('highspeed') ? 'k2Highspeed' : 'k2'
 }
 
 // xAI (Grok) list prices per 1M tokens. No separate cache-write fee —
@@ -800,10 +818,16 @@ const SEED_ROWS: SeedRow[] = [
     model: 'deepseek-reasoner',
     price: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
   },
+  { provider: 'xiaomi', model: 'mimo-v2.6-pro', price: XIAOMI_TIERS.pro },
+  { provider: 'xiaomi', model: 'mimo-v2.6-flash', price: XIAOMI_TIERS.standard },
+  // Exact row: the DB substring pass would otherwise bill it as mimo-v2.6-pro.
+  { provider: 'xiaomi', model: 'mimo-v2.6-pro-ultraspeed', price: XIAOMI_TIERS.ultraspeed },
   { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
   { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
   { provider: 'zhipu', model: 'glm-5.3', price: ZHIPU_TIERS.flagship },
   { provider: 'zhipu', model: 'glm-5.3-flash', price: ZHIPU_TIERS.flash53 },
+  // Exact row: the DB substring pass would otherwise bill it as glm-5.3-flash.
+  { provider: 'zhipu', model: 'glm-5.3-flashx', price: ZHIPU_TIERS.flashx53 },
   { provider: 'zhipu', model: 'glm-5.2', price: ZHIPU_TIERS.flagship },
   { provider: 'zhipu', model: 'glm-5v-turbo', price: ZHIPU_TIERS.turbo },
   { provider: 'zhipu', model: 'glm-5-turbo', price: ZHIPU_TIERS.turbo },
@@ -814,6 +838,7 @@ const SEED_ROWS: SeedRow[] = [
   // builtin fallback prices other qwen-* variants (turbo/flash/long/3-max) more
   // accurately than a broad substring row would.
   { provider: 'qwen', model: 'qwen3.8-max', price: QWEN_TIERS.max38 },
+  { provider: 'qwen', model: 'qwen3.8-flash', price: QWEN_TIERS.flash38 },
   { provider: 'qwen', model: 'qwen3.7-plus', price: QWEN_TIERS.plus37 },
   { provider: 'qwen', model: 'qwen3.7-flash', price: QWEN_TIERS.flash37 },
   {
@@ -832,6 +857,8 @@ const SEED_ROWS: SeedRow[] = [
   })),
   { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
   { provider: 'kimi', model: 'kimi-k2.7-code', price: KIMI_TIERS.k2 },
+  // Exact row: the DB substring pass would otherwise bill it as kimi-k2.7-code.
+  { provider: 'kimi', model: 'kimi-k2.7-code-highspeed', price: KIMI_TIERS.k2Highspeed },
   { provider: 'kimi', model: 'kimi-k2.6', price: KIMI_TIERS.k2 },
   // Grok (xAI) — exact rows for the discoverable models; grokPrice() covers
   // other grok-* variants via substring tiers.
@@ -1126,6 +1153,8 @@ export async function initPricing(): Promise<void> {
   await loadPricing()
 }
 
+const FAST_LANE_MODEL = /^(?:mimo-v2[.-]6-pro-ultraspeed|glm-5[.-]3-flashx|kimi-k2[.-]7-code-highspeed)(?:$|-)/
+
 /**
  * Resolves the price for (provider, model). Checks the DB cache first
  * (exact match, then the most specific prefix/substring alias — e.g.
@@ -1154,6 +1183,11 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   ) {
     return builtinPrice(provider, model, atMs)
   }
+  // The same holds for paid faster lanes whose ids extend a cheaper sibling's
+  // id: without their own row, the substring pass below would bill
+  // mimo-v2.6-pro-ultraspeed as mimo-v2.6-pro (1/10), glm-5.3-flashx as
+  // glm-5.3-flash and kimi-k2.7-code-highspeed as kimi-k2.7-code.
+  if (FAST_LANE_MODEL.test(normalizedModel)) return builtinPrice(provider, model, atMs)
 
   // 2) substring match — DB might hold "deepseek-v4-flash" while the incoming
   //    model is "deepseek-v4-flash-thinking", or hold "opus" while incoming is

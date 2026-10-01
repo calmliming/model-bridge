@@ -47,13 +47,14 @@ export interface ChatCompletionsRequest {
 /**
  * Codex defaults to model names like `gpt-5.5` which MiMo does not
  * recognise. Rewrite anything that doesn't already look like a MiMo model
- * to `mimo-v2.5-pro` (the coding/agentic flagship). Anything starting with
- * `mimo-` is passed through, so users can set `model="mimo-v2.5"` for the
- * cheaper multimodal variant in their Codex config.
+ * to `mimo-v2.6-pro` (the coding/agentic flagship; V2.5 goes offline on
+ * 2026-10-21 without rerouting). Anything starting with `mimo-` is passed
+ * through, so users can set `model="mimo-v2.6-flash"` for the cheaper
+ * multimodal variant in their Codex config.
  */
 export function mapModel(input: unknown): string {
-  if (typeof input !== 'string' || !input) return 'mimo-v2.5-pro'
-  return input.startsWith('mimo-') ? input : 'mimo-v2.5-pro'
+  if (typeof input !== 'string' || !input) return 'mimo-v2.6-pro'
+  return input.startsWith('mimo-') ? input : 'mimo-v2.6-pro'
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

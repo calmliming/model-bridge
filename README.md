@@ -137,7 +137,7 @@ browser callback for OpenAI/Gemini, API key for DeepSeek/Xiaomi MiMo).
 
 API keys can optionally restrict providers/models, bind to an account group,
 set rate/concurrency/cost limits, and define model mappings such as
-`gpt-public=gpt-5.4`. Model mappings are client-facing aliases:
+`gpt-public=gpt-6.1-sol`. Model mappings are client-facing aliases:
 `GET /v1/models` lists the alias, while relay requests are sent upstream with
 the mapped model.
 
@@ -306,7 +306,7 @@ the dashboard with its API key, then use `/api/xiaomi/v1/messages`,
 ```toml
 [profiles.model-bridge-mimo]
 model_provider = "model-bridge-mimo"
-model = "mimo-v2.5-pro"   # or "mimo-v2.5"
+model = "mimo-v2.6-pro"   # or "mimo-v2.6-flash"
 
 [model_providers.model-bridge-mimo]
 name = "model-bridge-mimo"
@@ -322,7 +322,7 @@ codex --profile model-bridge-mimo
 ```
 
 Model names starting with `mimo-` are passed through; everything else is
-rewritten to `mimo-v2.5-pro`. The Responses endpoint always streams and usage
+rewritten to `mimo-v2.6-pro`. The Responses endpoint always streams and usage
 is recorded under `provider=xiaomi`.
 
 ### Cherry Studio
