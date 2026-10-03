@@ -47,7 +47,10 @@ onUnmounted(() => {
   if (priceClockTimer) clearInterval(priceClockTimer)
 })
 
-const providerList = Object.values(PROVIDERS)
+// Vendor filter chips. Media models are our own listed inventory rather than a
+// third-party vendor, so the Model Bridge brand gets no chip: those models stay
+// reachable under 全部 and the image / video categories.
+const providerList = Object.values(PROVIDERS).filter((provider) => provider.id !== 'modelbridge')
 
 const categoryTabs = [{ key: 'all', label: '全部' }, ...CATEGORIES]
 const categoryLabel = (key: string) => CATEGORIES.find((c) => c.key === key)?.label ?? key
