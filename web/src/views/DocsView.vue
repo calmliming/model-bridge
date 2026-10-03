@@ -86,7 +86,7 @@ const isSecureContext = computed(() => {
         <li>将账号与调用 Key 绑定到同一分组，并为调用 Key 开启 GrsAI 权限。</li>
         <li>图片使用 <code class="code-inline">/api/media/v1/images/generations</code> 或 <code class="code-inline">/api/media/v1/images/edits</code>；视频提交到 <code class="code-inline">/api/media/v1/videos</code> 后使用返回的 id 查询结果。</li>
       </ol>
-      <p class="doc-p mt-3">模型广场展示各型号及价格。<a class="text-primary-600 hover:underline" href="/docs/api#media-generation">查看参数、调用示例与在线图片调试</a>。</p>
+      <p class="doc-p mt-3">模型广场展示各型号及价格。<a class="text-primary-600 hover:underline" href="/docs/api#video-generation">查看文本、图片与视频接口的参数、调用示例与在线调试</a>。</p>
     </UiCard>
 
     <UiCard title="通过 Sub2API 接入 Antigravity（反重力）">
