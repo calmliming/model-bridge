@@ -26,13 +26,48 @@ const menuIconPaths = {
 } as const
 
 type MenuIcon = keyof typeof menuIconPaths
-const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = [
-  { to: '/app', key: 'user-overview', label: '概览', icon: 'overview' },
-  { to: '/app/models', key: 'user-models', label: '模型广场', icon: 'models' },
-  { to: '/app/keys', key: 'user-keys', label: 'API Keys', icon: 'keys' },
-  { to: '/app/usage', key: 'user-usage', label: '用量流水', icon: 'usage' },
-  { to: '/app/logs', key: 'user-logs', label: '调用日志', icon: 'docs' },
-  { to: '/docs/api', key: 'user-api-docs', label: 'API 文档', icon: 'docs' },
+
+interface MenuItem {
+  to: string
+  key: string
+  label: string
+  icon: MenuIcon
+}
+
+interface MenuGroup {
+  /** 稳定 id，作为分组标题的 DOM id 供 aria-labelledby 引用。 */
+  id: string
+  label: string
+  items: MenuItem[]
+}
+
+/** 用户中心侧边栏分组：先总览，再接入与消费记录，最后帮助文档。 */
+const menuGroups: MenuGroup[] = [
+  {
+    id: 'overview',
+    label: '总览',
+    items: [
+      { to: '/app', key: 'user-overview', label: '概览', icon: 'overview' },
+      { to: '/app/models', key: 'user-models', label: '模型广场', icon: 'models' },
+    ],
+  },
+  {
+    id: 'access',
+    label: '接入与用量',
+    items: [
+      { to: '/app/keys', key: 'user-keys', label: 'API Keys', icon: 'keys' },
+      { to: '/app/usage', key: 'user-usage', label: '用量流水', icon: 'usage' },
+      { to: '/app/logs', key: 'user-logs', label: '调用日志', icon: 'docs' },
+    ],
+  },
+  {
+    id: 'help',
+    label: '帮助与文档',
+    items: [
+      // 复用公开的 API 文档路由（name: api-docs），侧边栏 key 必须与路由名一致才能高亮。
+      { to: '/docs/api', key: 'api-docs', label: 'API 文档', icon: 'docs' },
+    ],
+  },
 ]
 
 const titleMap: Record<string, string> = {
@@ -41,7 +76,7 @@ const titleMap: Record<string, string> = {
   'user-keys': 'API Keys',
   'user-usage': '用量流水',
   'user-logs': '调用日志',
-  'user-api-docs': 'API 文档',
+  'api-docs': 'API 文档',
 }
 
 const subtitleMap: Record<string, string> = {
@@ -50,7 +85,7 @@ const subtitleMap: Record<string, string> = {
   'user-keys': '管理您的 API Key 和调用入口。',
   'user-usage': '查看请求消耗、账单扣费和钱包流水。',
   'user-logs': '查看调用日志、图片视频生成进度和模型厂家。',
-  'user-api-docs': '查看图片生成与编辑接口、参数和调用示例。',
+  'api-docs': '查看图片生成与编辑接口、参数和调用示例。',
 }
 
 const activeKey = computed(() => route.name as string)
@@ -160,27 +195,46 @@ function logout() {
         </button>
       </div>
 
-      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4 pt-2" aria-label="用户菜单">
-        <RouterLink
-          v-for="item in menu"
-          :key="item.key"
-          :to="item.to"
-          class="group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
-          :title="sidebarCollapsed ? item.label : undefined"
-          :class="
-            [
-              activeKey === item.key
-                ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
-              sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
-            ]
-          "
+      <nav
+        class="flex-1 overflow-y-auto px-3 pb-4 pt-3"
+        :class="sidebarCollapsed ? 'lg:space-y-3' : 'space-y-5'"
+        aria-label="用户菜单"
+      >
+        <div
+          v-for="group in menuGroups"
+          :key="group.id"
+          class="space-y-1"
+          role="group"
+          :aria-labelledby="`user-menu-group-${group.id}`"
         >
-          <svg class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <path v-for="path in menuIconPaths[item.icon]" :key="path" stroke-linecap="round" stroke-linejoin="round" :d="path" />
-          </svg>
-          <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
-        </RouterLink>
+          <div
+            :id="`user-menu-group-${group.id}`"
+            class="px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500"
+            :class="sidebarCollapsed && 'lg:hidden'"
+          >
+            {{ group.label }}
+          </div>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.key"
+            :to="item.to"
+            class="group flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+            :title="sidebarCollapsed ? item.label : undefined"
+            :class="
+              [
+                activeKey === item.key
+                  ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
+                sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
+              ]
+            "
+          >
+            <svg class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path v-for="path in menuIconPaths[item.icon]" :key="path" stroke-linecap="round" stroke-linejoin="round" :d="path" />
+            </svg>
+            <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
+          </RouterLink>
+        </div>
       </nav>
 
       <div class="m-4 flex items-center gap-3 rounded-2xl border border-gray-100 bg-gray-50/80 p-3 dark:border-dark-700 dark:bg-dark-800/60" :class="sidebarCollapsed && 'lg:justify-center lg:px-2'" :title="sidebarCollapsed ? (auth.username ?? '钱包账户') : undefined">

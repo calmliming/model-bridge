@@ -57,23 +57,89 @@ const menuIconPaths = {
 
 type MenuIcon = keyof typeof menuIconPaths
 
-const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = [
-  { to: '/overview', key: 'overview', label: '仪表盘', icon: 'overview' },
-  { to: '/models', key: 'models', label: '模型广场', icon: 'models' },
-  { to: '/model-catalog', key: 'model-catalog', label: '动态模型', icon: 'models' },
-  { to: '/channel-health', key: 'channel-health', label: '渠道健康', icon: 'stats' },
-  { to: '/logs', key: 'logs', label: '调用日志', icon: 'docs' },
-  { to: '/accounts', key: 'accounts', label: '上游账户', icon: 'accounts' },
-  { to: '/account-groups', key: 'account-groups', label: '分组管理', icon: 'account-groups' },
-  { to: '/keys', key: 'keys', label: 'API Keys', icon: 'keys' },
-  { to: '/users', key: 'users', label: '用户钱包', icon: 'users' },
-  { to: '/payments', key: 'payments', label: '充值订单', icon: 'payments' },
-  { to: '/redeem-codes', key: 'redeem-codes', label: '兑换码', icon: 'redeem-codes' },
-  { to: '/subscription-plans', key: 'subscription-plans', label: '订阅套餐', icon: 'subscription-plans' },
-  { to: '/stats', key: 'stats', label: '用量统计', icon: 'stats' },
-  { to: '/docs', key: 'docs', label: '使用文档', icon: 'docs' },
-  { to: '/docs/api', key: 'api-docs', label: 'API 文档', icon: 'api-docs' },
-  { to: '/settings', key: 'settings', label: '设置', icon: 'settings' },
+interface MenuItem {
+  to: string
+  key: string
+  label: string
+  icon: MenuIcon
+}
+
+interface MenuGroup {
+  /** 稳定 id，作为分组标题的 DOM id 供 aria-labelledby 引用。 */
+  id: string
+  label: string
+  items: MenuItem[]
+}
+
+/**
+ * 管理端侧边栏分组：先看板，再资源与调度、访问与计费，最后分析、帮助和系统设置。
+ * 分组顺序即展示顺序，组内顺序即菜单顺序。
+ */
+const menuGroups: MenuGroup[] = [
+  {
+    id: 'overview',
+    label: '概览',
+    items: [
+      { to: '/overview', key: 'overview', label: '仪表盘', icon: 'overview' },
+      { to: '/models', key: 'models', label: '模型广场', icon: 'models' },
+    ],
+  },
+  {
+    id: 'resources',
+    label: '服务与模型',
+    items: [
+      { to: '/model-catalog', key: 'model-catalog', label: '动态模型', icon: 'models' },
+      { to: '/channel-health', key: 'channel-health', label: '渠道健康', icon: 'stats' },
+    ],
+  },
+  {
+    id: 'scheduling',
+    label: '账号与调度',
+    items: [
+      { to: '/accounts', key: 'accounts', label: '上游账户', icon: 'accounts' },
+      { to: '/account-groups', key: 'account-groups', label: '分组管理', icon: 'account-groups' },
+    ],
+  },
+  {
+    id: 'access',
+    label: '访问与用户',
+    items: [
+      { to: '/keys', key: 'keys', label: 'API Keys', icon: 'keys' },
+      { to: '/users', key: 'users', label: '用户钱包', icon: 'users' },
+    ],
+  },
+  {
+    id: 'billing',
+    label: '计费与套餐',
+    items: [
+      { to: '/payments', key: 'payments', label: '充值订单', icon: 'payments' },
+      { to: '/redeem-codes', key: 'redeem-codes', label: '兑换码', icon: 'redeem-codes' },
+      { to: '/subscription-plans', key: 'subscription-plans', label: '订阅套餐', icon: 'subscription-plans' },
+    ],
+  },
+  {
+    id: 'insights',
+    label: '数据分析',
+    items: [
+      { to: '/logs', key: 'logs', label: '调用日志', icon: 'docs' },
+      { to: '/stats', key: 'stats', label: '用量统计', icon: 'stats' },
+    ],
+  },
+  {
+    id: 'help',
+    label: '文档与支持',
+    items: [
+      { to: '/docs', key: 'docs', label: '使用文档', icon: 'docs' },
+      { to: '/docs/api', key: 'api-docs', label: 'API 文档', icon: 'api-docs' },
+    ],
+  },
+  {
+    id: 'system',
+    label: '系统',
+    items: [
+      { to: '/settings', key: 'settings', label: '设置', icon: 'settings' },
+    ],
+  },
 ]
 
 const titleMap: Record<string, string> = {
@@ -240,47 +306,63 @@ function logout() {
         </button>
       </div>
 
-      <div class="px-5 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500" :class="sidebarCollapsed && 'lg:hidden'">
-        管理
-      </div>
-      <nav class="flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label="管理菜单">
-        <RouterLink
-          v-for="item in menu"
-          :key="item.key"
-          :to="item.to"
-          class="group relative flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
-          :title="sidebarCollapsed ? item.label : undefined"
-          :class="
-            [
-              activeKey === item.key
-                ? 'bg-primary-50 text-primary-600 shadow-sm shadow-primary-500/10 dark:bg-primary-900/20 dark:text-primary-300'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
-              sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
-            ]
-          "
+      <nav
+        class="flex-1 overflow-y-auto px-3 pb-4 pt-2"
+        :class="sidebarCollapsed ? 'lg:space-y-3' : 'space-y-5'"
+        aria-label="管理菜单"
+      >
+        <div
+          v-for="group in menuGroups"
+          :key="group.id"
+          class="space-y-1"
+          role="group"
+          :aria-labelledby="`admin-menu-group-${group.id}`"
         >
           <div
-            v-if="activeKey === item.key"
-            class="absolute left-0 h-5 w-1 rounded-r-full bg-primary-500 transition-all"
-          />
-          <svg
-            class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="1.5"
-            aria-hidden="true"
+            :id="`admin-menu-group-${group.id}`"
+            class="px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-500"
+            :class="sidebarCollapsed && 'lg:hidden'"
           >
-            <path
-              v-for="path in menuIconPaths[item.icon]"
-              :key="path"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              :d="path"
+            {{ group.label }}
+          </div>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.key"
+            :to="item.to"
+            class="group relative flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
+            :title="sidebarCollapsed ? item.label : undefined"
+            :class="
+              [
+                activeKey === item.key
+                  ? 'bg-primary-50 text-primary-600 shadow-sm shadow-primary-500/10 dark:bg-primary-900/20 dark:text-primary-300'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white',
+                sidebarCollapsed ? 'lg:justify-center lg:px-2' : '',
+              ]
+            "
+          >
+            <div
+              v-if="activeKey === item.key"
+              class="absolute left-0 h-5 w-1 rounded-r-full bg-primary-500 transition-all"
             />
-          </svg>
-          <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
-        </RouterLink>
+            <svg
+              class="h-5 w-5 flex-shrink-0 transition-transform group-hover:scale-110"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              stroke-width="1.5"
+              aria-hidden="true"
+            >
+              <path
+                v-for="path in menuIconPaths[item.icon]"
+                :key="path"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                :d="path"
+              />
+            </svg>
+            <span class="truncate" :class="sidebarCollapsed && 'lg:hidden'">{{ item.label }}</span>
+          </RouterLink>
+        </div>
       </nav>
 
       <div
