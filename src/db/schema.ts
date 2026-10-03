@@ -1,4 +1,5 @@
 import { bigint, boolean, doublePrecision, index, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 const epochMs = (name: string) =>
   bigint(name, { mode: 'number' })
@@ -313,6 +314,8 @@ export const usageLogs = pgTable('usage_logs', {
   imageCount: bigint('image_count', { mode: 'number' }).notNull().default(0),
   imageSize: text('image_size'),
   imageModel: text('image_model'),
+  videoSeconds: doublePrecision('video_seconds').notNull().default(0),
+  videoResolution: text('video_resolution'),
   cost: doublePrecision('cost').notNull().default(0), // amount charged to the user (base_cost × group multiplier)
   baseCost: doublePrecision('base_cost').notNull().default(0), // list-price cost before markup
   billTo: text('bill_to').notNull().default('balance'), // subscription | balance — which budget paid
@@ -345,7 +348,29 @@ export const modelPricing = pgTable('model_pricing', {
   imageInputPrice: doublePrecision('image_input_price').notNull().default(0),
   imageCacheReadPrice: doublePrecision('image_cache_read_price'),
   imageOutputPrice: doublePrecision('image_output_price').notNull().default(0),
+  imageRequestPrice: doublePrecision('image_request_price'),
+  videoSecond480Price: doublePrecision('video_second_480_price'),
+  videoSecond768Price: doublePrecision('video_second_768_price'),
+  videoSecond1080Price: doublePrecision('video_second_1080_price'),
 })
+
+/** Supplier tasks survive restarts; ownership and billing stay on our server. */
+export const mediaTasks = pgTable('media_tasks', {
+  id: text('id').primaryKey(), upstreamId: text('upstream_id'),
+  apiKeyId: text('api_key_id').notNull(), userId: text('user_id').notNull(), accountId: text('account_id').notNull(),
+  baseUrl: text('base_url').notNull(), model: text('model').notNull(), requestedModel: text('requested_model').notNull(),
+  kind: text('kind').notNull(), status: text('status').notNull(), progress: doublePrecision('progress').notNull().default(0),
+  results: jsonb('results').notNull().default([]), error: text('error'), requestInput: text('request_input'),
+  requestParams: jsonb('request_params').notNull(), billing: jsonb('billing').notNull(),
+  estimatedMicros: bigint('estimated_micros', { mode: 'number' }).notNull(),
+  settled: boolean('settled').notNull().default(false), nextPollAt: bigint('next_poll_at', { mode: 'number' }).notNull(),
+  pollingUntil: bigint('polling_until', { mode: 'number' }).notNull().default(0),
+  createdAt: epochMs('created_at'), updatedAt: epochMs('updated_at'),
+}, table => ({
+  pending: index('media_tasks_pending').on(table.nextPollAt).where(sql`${table.settled} = FALSE`),
+  owner: index('media_tasks_owner').on(table.userId, table.apiKeyId),
+  account: index('media_tasks_account').on(table.accountId).where(sql`${table.settled} = FALSE`),
+}))
 
 /** Transient state for an in-progress OAuth authorization. */
 export const oauthSessions = pgTable('oauth_sessions', {

@@ -4,6 +4,8 @@ import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
 import { IMAGE_25_MODELS } from './openai/imageModels'
 import { isForwardableDeepseekModel } from './deepseek/converter'
+import { GRSAI_MODELS } from './grsai/models'
+import { publicModelProvider } from './publicIdentity'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -38,7 +40,7 @@ const CREATED_AT = 1_704_067_200
 // key pins an exact allowedModels allow-list). Keep the current flagship of
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
-const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, string[]> = {
+const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grsai'>, string[]> = {
   claude: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
     'gpt-6.1-sol',
@@ -80,6 +82,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity'>, stri
 
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   ...NATIVE_MODELS,
+  grsai: GRSAI_MODELS,
   antigravity: [...NATIVE_MODELS.gemini, ...NATIVE_MODELS.claude],
   // Sub2API is an aggregator upstream that forwards model names verbatim and
   // has access to every model, so its discovery list is the union of all
@@ -99,11 +102,13 @@ const PROVIDERS: ProviderId[] = [
   'kimi',
   'minimax',
   'grok',
-  'sub2api'
+  'sub2api',
+  'grsai'
 ]
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
+  if (lower === 'minimax-h3' || lower === 'gpt-image-2-vip' || lower === 'gpt-image-2.5') return 'grsai'
   if (lower.startsWith('claude-')) return 'claude'
   if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) return 'openai'
   if (lower.startsWith('gemini-')) return 'gemini'
@@ -163,6 +168,7 @@ function includeCustomAllowedModels(ids: string[], key: ModelDiscoveryKey, provi
       continue
     }
     const inferred = inferProvider(mapRequestedModel(model, key.modelMappings))
+    if (providers.includes('grsai') && GRSAI_MODELS.includes(mapRequestedModel(model, key.modelMappings))) { ids.push(model); continue }
     if (inferred) {
       if (providers.includes(inferred) && (!requested || requested === inferred)) ids.push(model)
       continue
@@ -180,6 +186,7 @@ function includeMappedModels(ids: string[], key: ModelDiscoveryKey, providers: P
       continue
     }
     const provider = inferProvider(to)
+    if (providers.includes('grsai') && GRSAI_MODELS.includes(to)) { ids.push(from); continue }
     if (provider) {
       if (providers.includes(provider) && (!requested || requested === provider)) ids.push(from)
       continue
@@ -211,7 +218,7 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
     ]) {
       const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
       if (provider === 'antigravity' && targetProvider && !['gemini', 'claude'].includes(targetProvider)) continue
-      if (provider !== 'sub2api' && provider !== 'antigravity' && targetProvider && !providers.includes(targetProvider)) continue
+      if (provider !== 'sub2api' && provider !== 'antigravity' && provider !== 'grsai' && targetProvider && !providers.includes(targetProvider)) continue
       if (isAllowedModel(model, key.allowedModels) && !ids.includes(model)) ids.push(model)
     }
   }
@@ -240,7 +247,7 @@ export function listOpenAIStyleModels(key: ModelDiscoveryKey, requested?: Provid
       id,
       object: 'model',
       created: CREATED_AT,
-      owned_by: inferProvider(target) ?? requested ?? 'model-bridge',
+      owned_by: publicModelProvider(routeProvider === 'grsai' ? 'grsai' : inferProvider(target) ?? requested ?? 'model-bridge', target),
       type: 'model',
       display_name: id === target ? (capability?.display_name ?? displayName(id)) : displayName(id)
     }

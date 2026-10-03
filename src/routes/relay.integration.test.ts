@@ -170,6 +170,44 @@ async function withRelay(run: (request: (
   }
 }
 
+describe('GrsAI image relay', () => {
+  it.each([false, true])('routes supplier-only keys on the standard path, stream=%s', async stream => {
+    mocks.key.allowedProviders = ['grsai']
+    mocks.key.accountGroupId = 'image-group'
+    mocks.key.modelMappings = { picture: 'gpt-image-2.5-flare' }
+    mocks.fetch.mockImplementation(async () => Response.json({ id: 'supplier-1', status: 'succeeded', results: [{ url: 'https://files.example.com/cat.png' }] }))
+    await withRelay(async request => {
+      const response = await request({ model: 'picture', prompt: 'cat', size: '1024x1024', response_format: 'url', stream }, '/v1/images/generations')
+      expect(response.status).toBe(200)
+      expect(mocks.pickAccount.mock.calls[0]![0]).toBe('grsai')
+      expect(mocks.pickAccount.mock.calls[0]![3]).toBe('image-group')
+      expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body)).toMatchObject({ model: 'gpt-image-2.5-flare', aspectRatio: '1024x1024' })
+      expect(mocks.logs[0]![4]).toBe('grsai')
+      expect(mocks.logs[0]![16]).toBe(1)
+      expect(response.body).toContain('https://files.example.com/cat.png')
+      if (stream) expect(response.body).toContain('event: image_generation.completed')
+    })
+  })
+  it('rejects supplier access and invalid parameters before any upstream call', async () => {
+    mocks.key.allowedProviders = ['openai']
+    await withRelay(async request => {
+      expect((await request({ model: 'gpt-image-2', prompt: 'cat' }, '/api/grsai/v1/images/generations')).status).toBe(403)
+      mocks.key.allowedProviders = ['grsai']
+      expect((await request({ model: 'gpt-image-2', prompt: 'cat', n: 2 }, '/api/grsai/v1/images/generations')).status).toBe(400)
+      expect(mocks.fetch).not.toHaveBeenCalled()
+    })
+  })
+  it('does not duplicate a paid generation after a network timeout', async () => {
+    mocks.key.allowedProviders = ['grsai']
+    mocks.fetch.mockRejectedValue(new Error('request timed out'))
+    await withRelay(async request => {
+      const response = await request({ model: 'gpt-image-2', prompt: 'cat' }, '/api/grsai/v1/images/generations')
+      expect(response.status).toBe(502)
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
 const prompt = { model: 'gpt-5.4', stream: true, input: 'Hi' }
 
 describe('weighted subscription relay settlement', () => {
@@ -189,7 +227,7 @@ describe('weighted subscription relay settlement', () => {
     expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
     expect(mocks.transactions).toHaveLength(0)
     expect(mocks.balance).toBe(1000)
-    expect(mocks.logs[0]?.slice(-2)).toEqual(['sub-1', 10])
+    expect(mocks.logs[0]?.slice(37, 39)).toEqual(['sub-1', 10])
   }))
 })
 

@@ -80,6 +80,7 @@ const PROVIDER_COLOR: Record<string, string> = {
   qwen: '#06b6d4',
   kimi: '#475569',
   sub2api: '#059669',
+  grsai: '#0284c7',
 }
 
 const MODEL_COLOR = ['#2563eb', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4']

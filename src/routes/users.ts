@@ -27,6 +27,7 @@ import { getAvailableProviders } from '../payments/providers/index'
 import { isOnlinePaymentEnabled } from '../db/settings'
 import { redeemCode, RedeemError } from '../redeem/manager'
 import { checkRateLimit } from '../middleware/limits'
+import { internalKeyProviders, publicKeyProviders, publicGroupName } from '../providers/publicIdentity'
 import {
   listPlans,
   listUserSubscriptions,
@@ -34,7 +35,7 @@ import {
   SubscriptionError,
 } from '../subscriptions/manager'
 
-const providerSchema = z.enum(['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api'])
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api', 'media', 'grsai'])
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -316,12 +317,12 @@ export function registerUserRoutes(app: FastifyInstance): void {
   app.get('/api/users/account-groups', { preHandler: requireUser }, async () => {
     const groups = await listGroups()
     return {
-      groups: groups.map((g) => ({ id: g.id, name: g.name, rateMultiplier: g.rateMultiplier })),
+      groups: groups.map((g) => ({ id: g.id, name: publicGroupName(g.name), rateMultiplier: g.rateMultiplier })),
     }
   })
 
   app.get('/api/users/keys', { preHandler: requireUser }, async (request) => {
-    return { keys: await listApiKeysForUser(request.currentUser!.id) }
+    return { keys: (await listApiKeysForUser(request.currentUser!.id)).map(key => ({ ...key, allowedProviders: publicKeyProviders(key.allowedProviders) })) }
   })
 
   app.post('/api/users/keys', { preHandler: requireUser }, async (request, reply) => {
@@ -340,6 +341,7 @@ export function registerUserRoutes(app: FastifyInstance): void {
     if (limitError) return reply.code(429).send({ error: limitError })
     return reply.code(201).send(await createApiKey({
       ...body.data,
+      allowedProviders: internalKeyProviders(body.data.allowedProviders),
       userId: user.id,
       ownerLabel: user.name || user.email,
       modelMappings: normalizeModelMappings(body.data.modelMappings),
@@ -376,6 +378,7 @@ export function registerUserRoutes(app: FastifyInstance): void {
       }
       await updateApiKey(params.data.id, {
         ...body.data,
+        allowedProviders: internalKeyProviders(body.data.allowedProviders),
         modelMappings:
           'modelMappings' in body.data
             ? normalizeModelMappings(body.data.modelMappings)

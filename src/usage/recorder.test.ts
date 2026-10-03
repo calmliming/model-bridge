@@ -71,11 +71,20 @@ beforeEach(() => {
 })
 
 describe('recordUsage', () => {
+  it('does not re-charge an async task whose deterministic usage row already exists', async () => {
+    mocks.calculateUsageCost.mockReturnValue(0.21)
+    mocks.query.mockImplementation(async (sql: string) => ({ rows: sql.startsWith('SELECT id FROM usage_logs') ? [{ id: 'existing' }] : [], rowCount: 0 }))
+    await expect(recordUsage(baseRecord({ idempotencyKey: 'grsai-task:task-1' }))).resolves.toBe(true)
+    expect(mocks.query.mock.calls.some(call => /pg_advisory_xact_lock/.test(call[0]))).toBe(true)
+    expect(mocks.query.mock.calls.some(call => /INSERT INTO usage_logs/.test(call[0]))).toBe(false)
+    expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
+    expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
+  })
   it('persists the actually settled model multiplier with the usage ledger', async () => {
     mocks.calculateUsageCost.mockReturnValue(0.125)
     mocks.consumeWeightedSubscriptionUsage.mockResolvedValueOnce(500)
     await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_go', subscriptionQuotaMode: 'usage' }))).resolves.toBe(true)
-    expect(insertParams().slice(-2)).toEqual(['s_go', 500])
+    expect(insertParams().slice(37, 39)).toEqual(['s_go', 500])
     expect(JSON.parse(insertParams()[34] as string)).toMatchObject({ subscriptionPointMultiplier: 4 })
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
   })
@@ -84,7 +93,7 @@ describe('recordUsage', () => {
     await expect(recordUsage(baseRecord({ billTo: 'subscription', subscriptionId: 's_usage', subscriptionQuotaMode: 'usage', multiplier: 3 }))).resolves.toBe(true)
     expect(mocks.consumeWeightedSubscriptionUsage).toHaveBeenCalledWith(expect.anything(), 's_usage', 0.000003, expect.any(Number), 'claude-opus-4')
     expect(insertParams().slice(19, 21)).toEqual([0, 0])
-    expect(insertParams().slice(-2)).toEqual(['s_usage', 0.000003])
+    expect(insertParams().slice(37, 39)).toEqual(['s_usage', 0.000003])
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
   })
   it('meters subscription points without wallet markup, fallback or a wallet debit', async () => {
@@ -95,7 +104,7 @@ describe('recordUsage', () => {
     expect(mocks.consumeSubscriptionUsage).not.toHaveBeenCalled()
     expect(mocks.debitWalletForUsage).not.toHaveBeenCalled()
     expect(insertParams()[21]).toBe('subscription')
-    expect(insertParams().slice(-2)).toEqual(['s_usage', 125])
+    expect(insertParams().slice(37, 39)).toEqual(['s_usage', 125])
   })
   it('rolls back the entire weighted usage settlement on persistence failure', async () => {
     mocks.calculateUsageCost.mockReturnValue(1)

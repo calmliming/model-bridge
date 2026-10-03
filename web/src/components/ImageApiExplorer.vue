@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useMessage } from '../composables/useMessage'
 
 interface ImageResultRow {
@@ -12,13 +12,14 @@ const props = defineProps<{
   mode: 'generation' | 'edit'
   baseUrl: string
   apiKey: string
+  provider?: 'openai' | 'media'
 }>()
 
 const emit = defineEmits<{ (event: 'requestAuthorization'): void }>()
 const message = useMessage()
 
 const prompt = ref('')
-const model = ref(props.mode === 'edit' ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare')
+const model = ref(props.provider === 'media' ? 'gpt-image-2.5' : props.mode === 'edit' ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare')
 const quality = ref('auto')
 const background = ref('auto')
 const requestedOutputFormat = ref('png')
@@ -34,6 +35,16 @@ const elapsedMs = ref<number | null>(null)
 let requestController: AbortController | null = null
 
 const isEdit = computed(() => props.mode === 'edit')
+const isMedia = computed(() => props.provider === 'media')
+const basicImageModel = computed(() => isMedia.value && ['gpt-image-2', 'gpt-image-2.5'].includes(model.value))
+const qualityOptions = computed(() => (isMedia.value ? basicImageModel.value ? ['auto'] : model.value === 'gpt-image-2-vip' ? ['medium']
+  : model.value.endsWith('-flare') ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh', 'max']
+  : ['auto', 'low', 'medium', 'high', 'xhigh', 'max']).map(value => ({ label: value, value })))
+watch(model, () => {
+  if (!isMedia.value) return
+  quality.value = qualityOptions.value[0]!.value
+  if (basicImageModel.value) { size.value = '1024x1024'; background.value = 'auto' }
+})
 const endpoint = computed(() => `${props.baseUrl}/images/${isEdit.value ? 'edits' : 'generations'}`)
 const canSubmit = computed(() =>
   !!props.apiKey.trim() && !!prompt.value.trim() && (!isEdit.value || !!imageFile.value) && !loading.value,
@@ -89,7 +100,7 @@ const generatedCurl = computed(() => {
       `  -F "size=${size.value}" \\`,
       `  -F "quality=${quality.value}" \\`,
       `  -F "background=${background.value}" \\`,
-      `  -F "output_format=${requestedOutputFormat.value}" \\`,
+      ...(!isMedia.value ? [`  -F "output_format=${requestedOutputFormat.value}" \\`] : []),
       `  -F "response_format=${responseFormat.value}" \\`,
       `  -F "image=@./${imageFile.value?.name || 'source.png'}"`,
     ].join('\n')
@@ -102,7 +113,7 @@ const generatedCurl = computed(() => {
       model: model.value,
       prompt: prompt.value || '一只坐在窗边的橘猫',
       size: size.value,
-      quality: quality.value, background: background.value, output_format: requestedOutputFormat.value,
+      quality: quality.value, background: background.value, ...(!isMedia.value ? { output_format: requestedOutputFormat.value } : {}),
       response_format: responseFormat.value,
     }, null, 2)}'`,
   ].join('\n')
@@ -169,7 +180,7 @@ async function runTest(): Promise<void> {
       form.append('size', size.value)
       form.append('quality', quality.value)
       form.append('background', background.value)
-      form.append('output_format', requestedOutputFormat.value)
+      if (!isMedia.value) form.append('output_format', requestedOutputFormat.value)
       form.append('response_format', responseFormat.value)
       form.append('image', imageFile.value!)
       body = form
@@ -179,7 +190,7 @@ async function runTest(): Promise<void> {
         model: model.value,
         prompt: prompt.value.trim(),
         size: size.value,
-        quality: quality.value, background: background.value, output_format: requestedOutputFormat.value,
+        quality: quality.value, background: background.value, ...(!isMedia.value ? { output_format: requestedOutputFormat.value } : {}),
         response_format: responseFormat.value,
       })
     }
@@ -340,16 +351,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="field-row">
-          <label class="field-group"><span>品质</span><UiSelect v-model:value="quality" :options="['auto', 'low', 'medium', 'high', 'xhigh', 'max'].map(value => ({ label: value, value }))" /></label>
-          <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, { label: '透明（PNG/WebP）', value: 'transparent' }]" /></label>
+          <label class="field-group"><span>品质</span><UiSelect v-model:value="quality" :options="qualityOptions" /></label>
+          <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, ...(!basicImageModel ? [{ label: '透明（PNG/WebP）', value: 'transparent' }] : [])]" /></label>
         </div>
-        <label class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="['png', 'webp', 'jpeg'].map(value => ({ label: value.toUpperCase(), value }))" /></label>
+        <label v-if="!isMedia" class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="['png', 'webp', 'jpeg'].map(value => ({ label: value.toUpperCase(), value }))" /></label>
         <label class="field-group">
           <span>响应格式</span>
           <UiSelect
             v-model:value="responseFormat"
             :options="[
-              { label: 'Data URL（便于预览）', value: 'url' },
+              { label: 'URL（便于预览）', value: 'url' },
               { label: 'Base64 JSON', value: 'b64_json' },
             ]"
           />

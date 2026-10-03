@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MODEL_CATALOG, resolveModelPrice } from './src/catalog/modelCatalog'
+import { MODEL_CATALOG, PROVIDERS, resolveModelPrice } from './src/catalog/modelCatalog'
 
 function model(id: string) {
   const found = MODEL_CATALOG.find((item) => item.id === id)
@@ -76,6 +76,13 @@ describe('DeepSeek catalog pricing schedule', () => {
 })
 
 describe('current provider model catalog', () => {
+  it('lists media models once under our brand without a channel name', () => {
+    const media = MODEL_CATALOG.filter(model => model.provider === 'modelbridge')
+    expect(PROVIDERS.modelbridge.label).toBe('Model Bridge')
+    expect(media.map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2-vip', 'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'minimax-h3'])
+    expect(JSON.stringify({ models: MODEL_CATALOG, providers: PROVIDERS })).not.toMatch(/grsai|第三方供应商/i)
+    expect(new Set(MODEL_CATALOG.map(model => model.id)).size).toBe(MODEL_CATALOG.length)
+  })
   it('exposes Astra with verified base prices and image input capability', () => {
     expect(model('gpt-6-astra')).toMatchObject({
       context: '1.05M',

@@ -4,6 +4,7 @@ import { pool } from '../db/index'
 import { microsToUsd } from '../wallet/money'
 import { config } from '../config'
 import { dayKeyInTz, startOfDayMs, startOfTodayMs } from '../time'
+import { publicModelProvider } from '../providers/publicIdentity'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000
 const BCRYPT_ROUNDS = 10
@@ -66,6 +67,8 @@ export interface UserUsageLog {
   imageCount: number
   imageSize: string | null
   imageModel: string | null
+  videoSeconds: number
+  videoResolution: string | null
   cost: number
   apiKeyName: string | null
   requestInput: string | null
@@ -122,7 +125,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     subscriptionPoints: row.subscription_points == null ? null : Number(row.subscription_points),
     id: row.id as string,
     ts: Number(row.ts),
-    provider: row.provider as string,
+    provider: publicModelProvider(row.provider as string, String(row.model ?? '')),
     model: (row.model as string | null) ?? null,
     status: row.status as string,
     usageSource: typeof row.usage_source === 'string' ? row.usage_source : 'unknown',
@@ -141,6 +144,8 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     imageCount: Number(row.image_count ?? 0),
     imageSize: (row.image_size as string | null) ?? null,
     imageModel: (row.image_model as string | null) ?? null,
+    videoSeconds: Number(row.video_seconds ?? 0),
+    videoResolution: (row.video_resolution as string | null) ?? null,
     cost: Number(row.cost),
     apiKeyName: (row.api_key_name as string | null) ?? null,
     requestInput: (row.request_input as string | null) ?? null
@@ -421,7 +426,7 @@ export async function listUserUsage(
               l.input_tokens, l.output_tokens, l.reasoning_tokens, l.cache_create_tokens,
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
               l.image_cache_read_tokens,
-              l.image_count, l.image_size, l.image_model, l.cost, l.request_input, l.subscription_points,
+              l.image_count, l.image_size, l.image_model, l.video_seconds, l.video_resolution, l.cost, l.request_input, l.subscription_points,
               k.name AS api_key_name
        FROM usage_logs l
        LEFT JOIN api_keys k ON k.id = l.api_key_id

@@ -28,7 +28,7 @@ async function refreshPrices() {
   try {
     const { data } = await api.get('/auth/model-prices')
     if (stopped) return
-    livePrices.value = Object.fromEntries(data.prices.map((price: ModelTokenPrice & { model: string }) => [price.model, price]))
+    livePrices.value = Object.fromEntries(data.prices.map((price: ModelTokenPrice & { model: string; provider?: string }) => [price.model, price]))
   } catch {
     // Keep the last received catalog; initial offline rendering uses local reference prices.
   }
@@ -100,6 +100,12 @@ function badgeLabel(badge: PlazaModel['badge']): string {
 
 function callExample(model: PlazaModel): string {
   const base = 'https://your-host'
+  if ((model.imageRequestPrice != null || model.video)) {
+    const body = model.video ? { model: model.id, prompt: '电影镜头：橘猫走过雨后的花园，镜头缓慢推进', aspectRatio: 'landscape', resolution: '480p', duration: 5 }
+      : { model: model.id, prompt: '一只在窗边看雨的橘猫', size: '1024x1024', response_format: 'url' }
+    const path = model.video ? 'videos' : 'images/generations'
+    return `curl ${base}/api/media/v1/${path} \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(body, null, 2)}'${model.video ? '\n\n# 使用返回的 id 查询结果\ncurl ' + base + '/api/media/v1/videos/media_TASK_ID \\\n  -H "Authorization: Bearer mb-xxxxxxxx"' : ''}`
+  }
   if (model.image) return `curl ${base}/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ model: model.id, prompt: '一只在窗边看雨的橘猫', quality: 'high', size: '1024x1024' }, null, 2)}'`
   if (model.provider === 'claude') {
     return [
@@ -155,7 +161,7 @@ function openDetail(model: PlazaModel) {
           <span>个模型</span>
         </div>
         <div class="w-full sm:w-72">
-          <UiInput v-model:value="search" placeholder="搜索模型名称 / 厂商 / 能力" />
+          <UiInput v-model:value="search" placeholder="搜索模型名称 / 分类 / 能力" />
         </div>
       </div>
 
@@ -222,7 +228,7 @@ function openDetail(model: PlazaModel) {
     >
       <button
         v-for="model in filtered"
-        :key="model.id"
+        :key="`${model.provider}:${model.id}`"
         type="button"
         class="group flex flex-col rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md dark:border-dark-700 dark:bg-dark-900 dark:hover:border-primary-500/40"
         @click="openDetail(model)"
@@ -273,9 +279,13 @@ function openDetail(model: PlazaModel) {
 
         <div class="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-dark-800">
           <span class="text-[11px] text-gray-400 dark:text-dark-400">
-            {{ model.image ? '输出边长' : '上下文' }} <strong class="text-gray-600 dark:text-dark-200">{{ model.context }}</strong>
+            {{ model.video ? '时长' : model.image ? '输出边长' : '上下文' }} <strong class="text-gray-600 dark:text-dark-200">{{ model.context }}</strong>
           </span>
-          <span class="text-[11px] text-gray-400 dark:text-dark-400">
+          <span v-if="(model.imageRequestPrice != null || model.video)" class="text-[11px] text-gray-400 dark:text-dark-400">
+            <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(model.video ? currentPrice(model).videoSecond480Price ?? 0 : currentPrice(model).imageRequestPrice ?? 0) }}</strong>
+            {{ model.video ? '/ 秒起' : '/ 次' }}
+          </span>
+          <span v-else class="text-[11px] text-gray-400 dark:text-dark-400">
             {{ model.image ? '文本输入' : '输入' }}
             <strong class="text-gray-700 dark:text-dark-100">{{ formatPrice(currentPrice(model).inputPrice) }}</strong>
             / {{ model.image ? '图片输出' : '输出' }}
@@ -343,7 +353,15 @@ function openDetail(model: PlazaModel) {
           </UiTag>
         </div>
 
-        <div
+        <div v-if="(selected.imageRequestPrice != null || selected.video)" class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <template v-if="selected.video">
+            <div v-for="tier in [{ label: '480p', price: currentPrice(selected).videoSecond480Price }, { label: '768p', price: currentPrice(selected).videoSecond768Price }, { label: '1080p', price: currentPrice(selected).videoSecond1080Price }]" :key="tier.label" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800">
+              <div class="text-[11px] text-gray-400">{{ tier.label }} / 秒</div><div class="mt-1 text-sm font-bold">{{ formatPrice(tier.price ?? 0) }}</div>
+            </div>
+          </template>
+          <div v-else class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">成功生成 / 次</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageRequestPrice ?? 0) }}</div></div>
+        </div>
+        <div v-else
           class="grid grid-cols-2 gap-3"
           :class="currentPrice(selected).cacheReadPrice == null ? 'sm:grid-cols-3' : 'sm:grid-cols-4'"
         >

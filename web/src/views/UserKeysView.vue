@@ -104,6 +104,7 @@ const providerOptions = [
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'MiniMax', value: 'minimax' },
+  { label: 'Model Bridge（图片 / 视频）', value: 'media' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
 
@@ -118,10 +119,11 @@ const providerLabel: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
+  media: 'Model Bridge',
   sub2api: 'Sub2API',
 }
 
-const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*', 'glm-*', 'qwen*', 'kimi-*', 'sub2api-*'].map((value) => ({ label: value, value }))
+const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*', 'glm-*', 'qwen*', 'kimi-*', 'gpt-image-*', 'minimax-h3', 'sub2api-*'].map((value) => ({ label: value, value }))
 const commonMappingOptions = ['gpt-public=gpt-6.1-sol', 'deepseek-pro=deepseek-v4-pro', 'mimo-pro=mimo-v2.6-pro', 'glm-pro=glm-5.3', 'qwen-pro=qwen3.8-max', 'kimi-pro=kimi-k3'].map((value) => ({ label: value, value }))
 
 function parseMappingEntries(entries: string[]): Record<string, string> | null {

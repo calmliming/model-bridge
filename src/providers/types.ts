@@ -10,6 +10,7 @@ export type ProviderId =
   | 'minimax'
   | 'grok'
   | 'sub2api'
+  | 'grsai'
 
 /** OAuth credentials for one upstream subscription account. */
 export interface TokenSet {
@@ -56,6 +57,9 @@ export interface UsageData {
   imageSize?: string
   /** GPT Image model that produced the output. */
   imageModel?: string
+  /** Successfully generated video duration, billed per second. */
+  videoSeconds?: number
+  videoResolution?: '480p' | '768p' | '1080p'
 }
 
 export function emptyUsage(): UsageData {

@@ -12,7 +12,7 @@ const hours = ref(24), groupBy = ref('account'), provider = ref(''), groupId = r
 const groups = ref<Array<{ id: string; name: string }>>([])
 const loading = ref(false), saving = ref(false), error = ref(''), notice = ref('')
 const settings = ref<Settings>({ minSamples: 20, errorRatePercent: 10, ttftP95Ms: 10000 })
-const providers = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok', 'sub2api']
+const providers = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok', 'sub2api', 'grsai']
 let sequence = 0, timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
 const totals = computed(() => (snapshot.value?.rows ?? []).reduce((sum, row) => ({ requests: sum.requests + row.requests, eligible: sum.eligible + row.eligible, failures: sum.failures + row.failures, excluded: sum.excluded + row.excluded }), { requests: 0, eligible: 0, failures: 0, excluded: 0 }))

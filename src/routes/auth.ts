@@ -15,6 +15,8 @@ import { inferProviderForModel, listModelIdsForKey } from '../providers/modelDis
 import { resolvePrice } from '../usage/pricing'
 import { getGoogleLoginClientId } from '../auth/google'
 import { registerGoogleAuthRoutes } from './googleAuth'
+import { GRSAI_MODELS } from '../providers/grsai/models'
+import { publicModelProvider } from '../providers/publicIdentity'
 
 const loginSchema = z.object({
   account: z.string().trim().min(1),
@@ -53,12 +55,19 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const at = Date.now()
     const prices = listModelIdsForKey({ allowedProviders: null, allowedModels: null }).flatMap(model => {
       const provider = inferProviderForModel(model)
+      if (GRSAI_MODELS.includes(model)) return []
       const price = provider ? resolvePrice(provider, model, at) : null
-      return price ? [{ model, inputPrice: price.input, outputPrice: price.output, cacheReadPrice: price.cacheRead,
+      return price ? [{ model, provider, inputPrice: price.input, outputPrice: price.output, cacheReadPrice: price.cacheRead,
         ...(model.startsWith('gpt-image-') ? { imageInputPrice: price.imageInput ?? 0, imageOutputPrice: price.imageOutput ?? 0,
           imageCacheReadPrice: price.imageCacheRead ?? price.cacheRead } : {}) }] : []
     })
-    return { updatedAt: at, prices }
+    const supplierPrices = GRSAI_MODELS.map(model => {
+      const price = resolvePrice('grsai', model, at)!
+      return { model, provider: publicModelProvider('grsai', model), billingUnit: model === 'minimax-h3' ? 'second' : 'image', inputPrice: 0, outputPrice: 0,
+        imageRequestPrice: price.imageRequest, videoSecond480Price: price.videoSecond480,
+        videoSecond768Price: price.videoSecond768, videoSecond1080Price: price.videoSecond1080 }
+    })
+    return { updatedAt: at, prices: [...prices, ...supplierPrices] }
   })
   app.post('/api/auth/login', async (request, reply) => {
     const body = loginSchema.safeParse(request.body)
@@ -118,7 +127,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       registrationEnabled: await isRegistrationEnabled(),
       accounts: accountCount.value,
       requests: requestCount.value,
-      providers: providers.map((p) => p.provider),
+      providers: [...new Set(providers.flatMap(p => p.provider === 'grsai' ? ['modelbridge'] : [p.provider]))],
     }
   })
 

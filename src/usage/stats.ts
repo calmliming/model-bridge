@@ -95,6 +95,10 @@ export interface DashboardRecentLog {
   imageCount: number
   imageSize: string | null
   imageModel: string | null
+  videoSeconds: number
+  videoResolution: string | null
+  imageRequestCost: number
+  videoCost: number
   cost: number
   baseCost: number
   billTo: string
@@ -297,6 +301,11 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     imageCount: toNum(row.imagecount),
     imageSize: (row.imagesize as string | null) ?? null,
     imageModel,
+    videoSeconds: toNum(row.videoseconds),
+    videoResolution: (row.videoresolution as string | null) ?? null,
+    imageRequestCost: toNum(row.imagecount) > 0 ? price?.imageRequest ?? 0 : 0,
+    videoCost: toNum(row.videoseconds) * (row.videoresolution === '1080p' ? price?.videoSecond1080 ?? 0
+      : row.videoresolution === '768p' ? price?.videoSecond768 ?? 0 : price?.videoSecond480 ?? 0),
     cost,
     baseCost,
     billTo: (row.billto as string | null) ?? 'balance',
@@ -619,6 +628,8 @@ export async function dashboardRecentLogs(
               usage_logs.image_count AS imageCount,
               usage_logs.image_size AS imageSize,
               usage_logs.image_model AS imageModel,
+              usage_logs.video_seconds AS videoSeconds,
+              usage_logs.video_resolution AS videoResolution,
               usage_logs.cost AS cost,
               usage_logs.base_cost AS baseCost,
               usage_logs.bill_to AS billTo,

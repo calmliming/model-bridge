@@ -4,6 +4,7 @@ import { resolvePricingOverride } from './pricingOverrides'
 import { IMAGE_25_MODELS, isImage25Model } from '../providers/openai/imageModels'
 import { isGpt61SolModel } from '../providers/openai/models'
 import { roundUsd } from '../wallet/money'
+import { GRSAI_IMAGE_PRICES, GRSAI_VIDEO_PRICES, GRSAI_MODELS } from '../providers/grsai/models'
 
 /** USD price per 1M tokens, by model tier. */
 export interface TierPrice {
@@ -17,6 +18,11 @@ export interface TierPrice {
   imageOutput?: number
   /** USD per 1M cached image-input tokens. */
   imageCacheRead?: number
+  /** USD per generated image or per generated video second. */
+  imageRequest?: number
+  videoSecond480?: number
+  videoSecond768?: number
+  videoSecond1080?: number
 }
 
 // Fixed CNY→USD conversion for providers that only publish CNY list prices.
@@ -682,6 +688,12 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
 
 /** Returns the built-in fallback price for a (provider, model) pair. */
 function builtinPrice(provider: string, model: string, atMs: number): TierPrice | null {
+  if (provider === 'grsai') {
+    if (!GRSAI_MODELS.includes(model)) return null
+    return { input: 0, output: 0, cacheWrite: 0, cacheRead: 0,
+      ...(model === 'minimax-h3' ? { videoSecond480: GRSAI_VIDEO_PRICES['480p'], videoSecond768: GRSAI_VIDEO_PRICES['768p'], videoSecond1080: GRSAI_VIDEO_PRICES['1080p'] }
+        : { imageRequest: GRSAI_IMAGE_PRICES[model] }) }
+  }
   if (provider === 'claude') return claudePrice(model)
   if (provider === 'openai') return openaiPrice(model)
   if (provider === 'gemini') return geminiPrice(model, atMs)
@@ -712,6 +724,7 @@ interface SeedRow {
 }
 
 const SEED_ROWS: SeedRow[] = [
+  ...GRSAI_MODELS.map(model => ({ provider: 'grsai', model, price: builtinPrice('grsai', model, Date.now())! })),
   // Claude — generic tiers + the legacy Opus 4.1 exception.
   { provider: 'claude', model: 'opus', price: CLAUDE_OPUS_REDUCED },
   // Exact rows for the discoverable Opus models. Without them they rely on the
@@ -1061,9 +1074,14 @@ export async function loadPricing(): Promise<void> {
     image_input_price: number
     image_output_price: number
     image_cache_read_price: number | null
+    image_request_price: number | null
+    video_second_480_price: number | null
+    video_second_768_price: number | null
+    video_second_1080_price: number | null
   }>(
     `SELECT provider, model, input_price, output_price, cache_write_price, cache_read_price,
-            image_input_price, image_output_price, image_cache_read_price
+            image_input_price, image_output_price, image_cache_read_price,
+            image_request_price, video_second_480_price, video_second_768_price, video_second_1080_price
        FROM model_pricing`
   )
   priceCache.clear()
@@ -1075,6 +1093,10 @@ export async function loadPricing(): Promise<void> {
       cacheRead: Number(row.cache_read_price),
       imageInput: Number(row.image_input_price),
       imageOutput: Number(row.image_output_price),
+      ...(row.image_request_price != null ? { imageRequest: Number(row.image_request_price) } : {}),
+      ...(row.video_second_480_price != null ? { videoSecond480: Number(row.video_second_480_price) } : {}),
+      ...(row.video_second_768_price != null ? { videoSecond768: Number(row.video_second_768_price) } : {}),
+      ...(row.video_second_1080_price != null ? { videoSecond1080: Number(row.video_second_1080_price) } : {}),
       imageCacheRead:
         row.image_cache_read_price == null
           ? isImage25Model(row.model)
@@ -1100,8 +1122,9 @@ export async function initPricing(): Promise<void> {
     await pool.query(
       `INSERT INTO model_pricing
          (id, provider, model, input_price, output_price, cache_write_price, cache_read_price,
-          image_input_price, image_output_price, image_cache_read_price)
-       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+          image_input_price, image_output_price, image_cache_read_price,
+          image_request_price, video_second_480_price, video_second_768_price, video_second_1080_price)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
        WHERE NOT EXISTS (SELECT 1 FROM model_pricing WHERE provider = $2 AND model = $3)`,
       [
         `${row.provider}-${row.model}`,
@@ -1113,7 +1136,9 @@ export async function initPricing(): Promise<void> {
         row.price.cacheRead,
         row.price.imageInput ?? 0,
         row.price.imageOutput ?? 0,
-        row.price.imageCacheRead ?? null
+        row.price.imageCacheRead ?? null,
+        row.price.imageRequest ?? null, row.price.videoSecond480 ?? null,
+        row.price.videoSecond768 ?? null, row.price.videoSecond1080 ?? null,
       ]
     )
   }
@@ -1169,6 +1194,9 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // 1) exact match
   const exact = priceCache.get(cacheKey(provider, model))
   if (exact && !isManagedScheduledDefault(provider, model, exact)) return exact
+  // Supplier media variants have independent flat rates; sibling substring
+  // matches must never turn a basic request into a VIP charge.
+  if (provider === 'grsai') return builtinPrice(provider, model, atMs)
 
   // A dedicated model family must win over a broader DB substring row. This
   // matters on upgraded installations where `gpt-5.3-codex` exists but the
@@ -1260,10 +1288,10 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
 }
 
 /** Unrounded reference cost, retaining small cache/token weights for subscription metering. */
-export function calculateUsageCost(provider: string, model: string, usage: UsageData, atMs = Date.now()): number {
-  const p = resolveUsagePrice(provider, model, usage, atMs)
+export function calculateUsageCost(provider: string, model: string, usage: UsageData, atMs = Date.now(), priceSnapshot?: TierPrice): number {
+  const p = priceSnapshot ?? resolveUsagePrice(provider, model, usage, atMs)
   if (!p) return 0
-  const imagePrice = usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p
+  const imagePrice = priceSnapshot ?? (usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p)
   const cost =
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +
@@ -1273,7 +1301,10 @@ export function calculateUsageCost(provider: string, model: string, usage: Usage
       (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +
       (usage.imageOutputTokens ?? 0) * (imagePrice?.imageOutput ?? 0)) /
     1_000_000
-  return cost
+  const videoRate = usage.videoResolution === '1080p' ? p.videoSecond1080
+    : usage.videoResolution === '768p' ? p.videoSecond768 : p.videoSecond480
+  return cost + (provider === 'grsai' ? Number((usage.imageCount ?? 0) > 0) : Math.max(0, usage.imageCount ?? 0)) * (p.imageRequest ?? 0)
+    + Math.max(0, usage.videoSeconds ?? 0) * (videoRate ?? 0)
 }
 
 /** Wallet estimates retain their existing micro-USD precision. */

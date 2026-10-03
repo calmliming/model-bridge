@@ -6,11 +6,13 @@ const priceSchema = z.object({
   input: amount, output: amount, cacheWrite: amount, cacheRead: amount,
   imageInput: amount.optional(), imageOutput: amount.optional(),
   imageCacheRead: amount.optional(),
+  imageRequest: amount.optional(), videoSecond480: amount.optional(),
+  videoSecond768: amount.optional(), videoSecond1080: amount.optional(),
 }).strict()
 const schema = z.object({
   version: z.literal(1),
   rules: z.array(z.object({
-    provider: z.enum(['openai', 'claude', 'gemini', 'antigravity', 'deepseek', 'kimi', 'minimax', 'qwen', 'zhipu', 'xiaomi', 'grok', 'sub2api']),
+    provider: z.enum(['openai', 'claude', 'gemini', 'antigravity', 'deepseek', 'kimi', 'minimax', 'qwen', 'zhipu', 'xiaomi', 'grok', 'sub2api', 'grsai']),
     model: z.string().trim().min(1).max(200),
     price: priceSchema.optional(),
     longContext: z.object({

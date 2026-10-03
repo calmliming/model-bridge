@@ -56,6 +56,7 @@ export function estimateReservationMicros(input: {
 }): number | null {
   const price = resolvePrice(input.provider, input.model)
   if (!price || !(input.multiplier > 0)) return null
+  if (price.imageRequest != null) return usdToMicros(price.imageRequest * (positiveInt(input.body.n) ?? 1) * input.multiplier)
   const inputTokens = Math.min(Math.ceil(Math.max(0, input.bodyBytes) / 4), MAX_ESTIMATED_INPUT_TOKENS)
   const outputTokens = Math.min(requestedOutputTokens(input.body) ?? input.defaultOutputTokens, MAX_ESTIMATED_OUTPUT_TOKENS)
   const usd = (inputTokens * price.input + outputTokens * price.output) / 1_000_000 * input.multiplier

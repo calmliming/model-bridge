@@ -105,7 +105,7 @@ interface GroupInfo {
   createdAt: number
 }
 
-type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'sub2api'
+type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'sub2api' | 'grsai'
 // Providers whose credential can query a monetary balance, so the "余额 / 配额"
 // column shows the wallet cell instead of quota windows. Mirrors
 // `BALANCE_PROVIDERS` in src/providers/balance.ts (asserted by web/balance.test.ts).
@@ -285,8 +285,9 @@ const providerLabel: Record<Provider, string> = {
   minimax: 'MiniMax',
   grok: 'Grok (xAI)',
   sub2api: 'Sub2API',
+  grsai: 'GrsAI',
 }
-const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api']
+const providerOrder: Provider[] = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api', 'grsai']
 const providerTagType: Record<Provider, TagType> = {
   claude: 'error',
   openai: 'success',
@@ -300,6 +301,7 @@ const providerTagType: Record<Provider, TagType> = {
   minimax: 'error',
   grok: 'default',
   sub2api: 'success',
+  grsai: 'info',
 }
 const authorizeHost: Record<Provider, string> = {
   claude: 'claude.ai',
@@ -314,6 +316,7 @@ const authorizeHost: Record<Provider, string> = {
   minimax: 'platform.minimaxi.com',
   grok: 'auth.x.ai',
   sub2api: 'sub2api',
+  grsai: 'grsai.com',
 }
 
 // Local redirect each callback-mode OAuth provider sends the browser to. Mirrors
@@ -333,11 +336,12 @@ function oauthCallbackPort(provider: Provider): string {
 
 // Providers that authenticate with a plain API key (no OAuth flow). They share
 // the single-step "粘贴 API Key" form below.
-const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api']
+const API_KEY_PROVIDERS: Provider[] = ['deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'sub2api', 'grsai']
 function isApiKeyProvider(provider: Provider): boolean {
   return API_KEY_PROVIDERS.includes(provider)
 }
 const apiKeyConsoleHint: Record<string, string> = {
+  grsai: '在 grsai.com 控制台创建 API Key。支持 GPT Image 系列和 MiniMax H3 视频；Base URL 留空使用国内节点。',
   deepseek: '在 platform.deepseek.com/api_keys 创建 API Key 后粘贴到上方。',
   xiaomi: '在 platform.xiaomimimo.com 控制台「API-Keys」创建 API Key 后粘贴到上方。',
   zhipu: '在 open.bigmodel.cn 控制台「API Keys」创建 API Key 后粘贴到上方。',
@@ -1366,7 +1370,7 @@ async function finishApiKeyImport() {
       name: form.value.name.trim(),
       accessToken: apiKeyInput.value.trim(),
     }
-    if (['sub2api', 'minimax'].includes(provider) && baseUrlInput.value.trim()) payload.baseUrl = baseUrlInput.value.trim()
+    if (['sub2api', 'minimax', 'grsai'].includes(provider) && baseUrlInput.value.trim()) payload.baseUrl = baseUrlInput.value.trim()
     await api.post('/admin/accounts/import/token', payload)
     message.success(`${label} 账户已添加`)
     showAdd.value = false
@@ -2311,6 +2315,7 @@ onBeforeUnmount(() => {
               <UiRadioButton value="minimax">MiniMax</UiRadioButton>
               <UiRadioButton value="grok">Grok (xAI)</UiRadioButton>
               <UiRadioButton value="sub2api">Sub2API</UiRadioButton>
+              <UiRadioButton value="grsai">GrsAI（图片 / 视频）</UiRadioButton>
             </UiRadioGroup>
           </UiFormItem>
           <UiFormItem label="账户名称">
@@ -2328,13 +2333,13 @@ onBeforeUnmount(() => {
             />
           </UiFormItem>
           <UiFormItem
-            v-if="['sub2api', 'minimax'].includes(form.provider)"
+            v-if="['sub2api', 'minimax', 'grsai'].includes(form.provider)"
             label="Base URL"
-            :hint="form.provider === 'minimax' ? '留空使用国内站；国际站填 https://api.minimax.io。支持根地址、/v1 或 /anthropic 结尾。' : '标准中转填部署根地址；转接反重力可填 https://你的网关/antigravity，支持 Messages 和 Gemini。Google 授权及网络出口由上游管理。'"
+            :hint="form.provider === 'grsai' ? '留空使用 https://grsai.dakka.com.cn；全球节点填 https://grsaiapi.com。' : form.provider === 'minimax' ? '留空使用国内站；国际站填 https://api.minimax.io。支持根地址、/v1 或 /anthropic 结尾。' : '标准中转填部署根地址；转接反重力可填 https://你的网关/antigravity，支持 Messages 和 Gemini。Google 授权及网络出口由上游管理。'"
           >
             <UiInput
               v-model:value="baseUrlInput"
-              :placeholder="form.provider === 'minimax' ? 'https://api.minimaxi.com（可留空）' : 'https://sub2api.example.com'"
+              :placeholder="form.provider === 'grsai' ? 'https://grsai.dakka.com.cn（可留空）' : form.provider === 'minimax' ? 'https://api.minimaxi.com（可留空）' : 'https://sub2api.example.com'"
             />
           </UiFormItem>
         </UiForm>

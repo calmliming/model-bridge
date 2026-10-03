@@ -80,6 +80,15 @@ const isSecureContext = computed(() => {
       <p class="doc-p mt-2">原生入口由本项目处理 Google OAuth、刷新、模型查询和生成；下方的 Sub2API 方式仍可独立使用。</p>
     </UiCard>
 
+    <UiCard title="通过 GrsAI 接入 GPT 图片与 MiniMax H3 视频">
+      <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+        <li>在上游账户中选择 GrsAI 并填写供应商 API Key。Base URL 留空使用国内节点；全球节点填 <code class="code-inline">https://grsaiapi.com</code>。</li>
+        <li>将账号与调用 Key 绑定到同一分组，并为调用 Key 开启 GrsAI 权限。</li>
+        <li>图片使用 <code class="code-inline">/api/media/v1/images/generations</code> 或 <code class="code-inline">/api/media/v1/images/edits</code>；视频提交到 <code class="code-inline">/api/media/v1/videos</code> 后使用返回的 id 查询结果。</li>
+      </ol>
+      <p class="doc-p mt-3">模型广场展示各型号及价格。<a class="text-primary-600 hover:underline" href="/docs/api#media-generation">查看参数、调用示例与在线图片调试</a>。</p>
+    </UiCard>
+
     <UiCard title="通过 Sub2API 接入 Antigravity（反重力）">
       <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
         <li>先在上游 Sub2API 完成 Antigravity 授权，确认账号可调用，再创建对应分组的 API Key。</li>

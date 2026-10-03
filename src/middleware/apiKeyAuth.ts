@@ -61,6 +61,15 @@ export async function requireApiKey(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
+  return authenticateApiKey(request, reply, false)
+}
+
+/** Already-created tasks must remain readable after their charge exhausts a budget. */
+export async function requireApiKeyForResult(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  return authenticateApiKey(request, reply, true)
+}
+
+async function authenticateApiKey(request: FastifyRequest, reply: FastifyReply, resultOnly: boolean): Promise<void> {
   const secret = extractApiKey(request)
   if (!secret) {
     reply.code(401).send({ error: 'missing API key' })
@@ -75,7 +84,7 @@ export async function requireApiKey(
     reply.code(401).send({ error: 'API key expired' })
     return
   }
-  if (record.quotaLimit != null && record.quotaUsed >= record.quotaLimit) {
+  if (!resultOnly && record.quotaLimit != null && record.quotaUsed >= record.quotaLimit) {
     reply.code(429).send({ error: 'API key quota exceeded' })
     return
   }
@@ -99,12 +108,12 @@ export async function requireApiKey(
   // A request may settle above the balance or fall back from a subscription
   // whose remaining window cannot cover its final cost. Do not let another
   // subscription admission repeatedly incur wallet debt in that situation.
-  if (balanceMicros < 0) {
+  if (!resultOnly && balanceMicros < 0) {
     reply.code(402).send({ error: 'insufficient balance' })
     return
   }
   let subscriptionUsable = false
-  if (record.accountGroupId) {
+  if (!resultOnly && record.accountGroupId) {
     const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
     if (sub) {
       subscriptionId = sub.subscriptionId
@@ -127,7 +136,7 @@ export async function requireApiKey(
     billTo = 'subscription'
   } else if (balanceMicros > 0) {
     billTo = 'balance'
-  } else {
+  } else if (!resultOnly) {
     reply.code(402).send({ error: 'insufficient balance' })
     return
   }

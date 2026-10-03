@@ -8,8 +8,8 @@ import { useCollapsibleSidebar } from '../composables/useCollapsibleSidebar'
 import { useMessage } from '../composables/useMessage'
 import { useAuthStore } from '../stores/auth'
 
-type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'streaming' | 'errors'
-type DocIcon = DocSection
+type DocSection = 'overview' | 'authentication' | 'image-generation' | 'image-edit' | 'media-generation' | 'streaming' | 'errors'
+type DocIcon = Exclude<DocSection, 'media-generation'>
 
 interface ParameterRow {
   name: string
@@ -48,6 +48,8 @@ const baseOrigin = computed(() => {
   return window.location.origin
 })
 const apiBaseUrl = computed(() => `${baseOrigin.value}/v1`)
+const mediaImageExample = computed(() => `curl ${baseOrigin.value}/api/media/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"gpt-image-2.5","prompt":"一只橘猫在窗边看雨","size":"1024x1024","response_format":"url"}'`)
+const mediaVideoExample = computed(() => `curl ${baseOrigin.value}/api/media/v1/videos \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"minimax-h3","prompt":"电影镜头：橘猫走过雨后的花园，镜头缓慢推进","aspectRatio":"landscape","resolution":"480p","duration":5}'\n\n# 替换为提交返回的 id；running 时每 5 秒查询一次\ncurl ${baseOrigin.value}/api/media/v1/videos/media_TASK_ID \\\n  -H "Authorization: Bearer mb-xxxxxxxx"`)
 const consoleEntry = computed(() => {
   const role = auth.preferredSessionRole()
   if (role === 'admin') return { to: '/overview', title: '进入管理控制台', label: '控制台' }
@@ -86,10 +88,11 @@ const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: '图片 API',
+    label: '图片与视频 API',
     items: [
       { id: 'image-generation', label: '生成图片', icon: 'image-generation', description: '/images/generations', method: 'POST' },
       { id: 'image-edit', label: '编辑图片', icon: 'image-edit', description: '/images/edits', method: 'POST' },
+      { id: 'media-generation', label: '图片与视频', icon: 'image-generation', description: 'GPT Image 与 MiniMax H3' },
       { id: 'streaming', label: '流式响应', icon: 'streaming', description: 'SSE 事件与前端读取' },
     ],
   },
@@ -524,6 +527,34 @@ onBeforeUnmount(() => {
             <div class="section-heading"><h2>调用示例</h2><div class="language-switch"><button :class="editLanguage === 'curl' && 'active'" @click="editLanguage = 'curl'">cURL</button><button :class="editLanguage === 'javascript' && 'active'" @click="editLanguage = 'javascript'">JavaScript</button></div></div>
             <div class="code-shell"><button type="button" class="copy-code" @click="copy(editLanguage === 'curl' ? editCurl : editJavaScript)">复制代码</button><pre><code>{{ editLanguage === 'curl' ? editCurl : editJavaScript }}</code></pre></div>
           </section>
+        </section>
+
+        <section v-else-if="activeSection === 'media-generation'" class="article-body">
+          <p class="doc-copy">使用本平台 API Key 调用图片生成、编辑和视频任务。创建调用 Key 时，可按需开启图片 / 视频权限。</p>
+          <section class="article-section">
+            <h2>GPT 图片生成与编辑</h2>
+            <p class="doc-copy">使用 <code>/api/media/v1/images/generations</code> 和 <code>/api/media/v1/images/edits</code>。也提供标准 <code>/v1/images/...</code> 地址。支持 URL、base64 和 multipart 编辑，每次生成一张图片。</p>
+            <p class="doc-copy">可选模型为 <code>gpt-image-2</code>、<code>gpt-image-2-vip</code>、<code>gpt-image-2.5</code>、<code>gpt-image-2.5-flare</code> 和 <code>gpt-image-2.5-sunburst</code>。默认与 2.5 基础款支持 1K；VIP、Flare、Sunburst 支持 1K–4K。</p>
+            <p class="doc-copy">基础款质量仅支持 auto，VIP 支持 medium，Flare 支持 low / medium / high，Sunburst 额外支持 xhigh / max。推荐 <code>response_format=url</code>；<code>stream=true</code> 返回最终 completed 事件。</p>
+            <div class="code-shell"><button type="button" class="copy-code" @click="copy(mediaImageExample)">复制代码</button><pre><code>{{ mediaImageExample }}</code></pre></div>
+            <h2>在线调试图片生成</h2>
+            <ImageApiExplorer :api-key="testerApiKey" mode="generation" provider="media" :base-url="`${baseOrigin}/api/media/v1`" @request-authorization="openAuthorization" />
+            <h2>在线调试图片编辑</h2>
+            <ImageApiExplorer :api-key="testerApiKey" mode="edit" provider="media" :base-url="`${baseOrigin}/api/media/v1`" @request-authorization="openAuthorization" />
+          </section>
+          <section class="article-section">
+            <h2>MiniMax H3 视频任务</h2>
+            <p class="doc-copy">向 <code>/api/media/v1/videos</code> 提交，返回 HTTP 202 和本平台任务 id。用同一调用 Key 查询 <code>/api/media/v1/videos/:id</code>。也可使用 <code>/v1/videos</code> 与 <code>/v1/videos/:id</code>。</p>
+            <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody>
+              <tr><td><code>model</code></td><td>minimax-h3</td></tr><tr><td><code>prompt</code></td><td>必填；描述场景、镜头运动和声音</td></tr>
+              <tr><td><code>aspectRatio</code></td><td>portrait（竖屏）或 landscape（横屏）</td></tr><tr><td><code>resolution</code></td><td>480p、768p 或 1080p</td></tr>
+              <tr><td><code>duration</code></td><td>1–15 秒整数；1080p 最多 10 秒</td></tr><tr><td><code>images / audios</code></td><td>可选；最多 9 张图、3 段音频，支持 URL / base64 data URL</td></tr>
+              <tr><td><code>seed</code></td><td>可选整数，用于控制随机性</td></tr>
+            </tbody></table></div>
+            <div class="code-shell"><button type="button" class="copy-code" @click="copy(mediaVideoExample)">复制代码</button><pre><code>{{ mediaVideoExample }}</code></pre></div>
+            <p class="doc-copy">状态为 running、succeeded、failed 或 violation；成功后从 <code>results[].url</code> 获取视频。任务保存于数据库，后台自动查询并结算；重复查询只计费一次，失败或违规任务不扣生成费用。</p>
+          </section>
+          <section class="article-section"><h2>通用异步生成</h2><p class="doc-copy"><code>POST /api/media/v1/api/generate</code> 可提交上述图片或视频模型，使用参数 <code>aspectRatio</code> 和 <code>images</code>，<code>replyType</code> 仅支持 async（默认）。通过 <code>GET /api/media/v1/api/result?id=media_TASK_ID</code> 查询。返回的 id 是本平台任务 id。</p></section>
         </section>
 
         <section v-else-if="activeSection === 'streaming'" class="article-body">

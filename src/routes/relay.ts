@@ -129,6 +129,8 @@ import { recordUsage } from '../usage/recorder'
 import { emptyUsage, type UsageData } from '../providers/types'
 import { estimateResponsesInputTokens } from './inputTokens'
 import { upstreamRequestId, streamFailureDetails, redactUpstreamError } from '../http/upstreamDiagnostics'
+import { buildGrsaiImageRequest, relayGrsaiImages, grsaiImageUsage, createGrsaiImageStream } from '../providers/grsai/images'
+import { publicMediaError, publicModelProvider } from '../providers/publicIdentity'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
@@ -1441,18 +1443,12 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.openai!)
   const openaiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['openai-chat']!)
-  const openaiImagesHandler = (endpoint: OpenAIImagesEndpoint) =>
+  const openaiImagesHandler = (endpoint: OpenAIImagesEndpoint, explicitProvider?: 'openai' | 'grsai') =>
     async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      if (!config.OPENAI_IMAGE_GENERATION_ENABLED) {
-        await reply.code(403).send({
-          error: {
-            type: 'permission_error',
-            code: 'image_generation_disabled',
-            message: 'OpenAI image generation is disabled on this gateway.',
-          },
-        })
-        return
-      }
+      // A supplier-only key uses its own image pool on the standard path.
+      // Explicit provider paths always select that provider, even for shared IDs.
+      let imageProvider = explicitProvider ?? (request.apiKey!.allowedProviders?.includes('grsai')
+        && !request.apiKey!.allowedProviders.includes('openai') ? 'grsai' : 'openai')
       let body: OpenAIImagesRequestBody
       try {
         const contentType = Array.isArray(request.headers['content-type'])
@@ -1461,10 +1457,10 @@ export function registerRelayRoutes(app: FastifyInstance): void {
         body = parseOpenAIImagesRequest(request.body, contentType, endpoint, {
           deferModelValidation: true,
         })
-        validateOpenAIImagesRequestModel(
-          body,
-          mapRequestedModel(body.model, request.apiKey!.modelMappings),
-        )
+        const mapped = { ...body, model: mapRequestedModel(body.model, request.apiKey!.modelMappings) }
+        if (!explicitProvider && inferProviderForModel(mapped.model) === 'grsai') imageProvider = 'grsai'
+        if (imageProvider === 'grsai') buildGrsaiImageRequest(mapped)
+        else validateOpenAIImagesRequestModel(body, mapped.model)
       } catch (error) {
         await reply.code(400).send({
           error: {
@@ -1476,9 +1472,32 @@ export function registerRelayRoutes(app: FastifyInstance): void {
         return
       }
       const requestedModel = body.model
+      if (imageProvider === 'openai' && !config.OPENAI_IMAGE_GENERATION_ENABLED) {
+        await reply.code(403).send({ error: { type: 'permission_error', code: 'image_generation_disabled', message: 'OpenAI image generation is disabled on this gateway.' } })
+        return
+      }
       const mappedRequest: OpenAIImagesRequestBody = {
         ...body,
         model: mapRequestedModel(requestedModel, request.apiKey!.modelMappings),
+      }
+      if (imageProvider === 'grsai') {
+        const parser = () => createGrsaiImageStream(mappedRequest)
+        await executeRelay(request, reply, {
+          id: 'grsai', forceStream: false,
+          parseRoute: () => ({ model: requestedModel, action: `images.${endpoint}` }),
+          callUpstream: (token, input, ctx) => relayGrsaiImages(token, input as OpenAIImagesRequestBody, ctx.account.proxyUrl),
+          // A submission timeout can hide an accepted paid generation. Return
+          // the failure instead of automatically submitting a duplicate task.
+          classifyUpstreamFailure: async response => ({ ...(await classifyUpstreamFailure('grsai', response, mappedRequest.model)), retryable: false }),
+          createStreamParser: parser, parseJsonUsage: grsaiImageUsage,
+          parseStreamEventsFrom: 'upstream', createStreamTransform: () => {
+            const stream = parser()
+            return { transform: raw => { stream.feed(raw); return stream.transform(raw) }, flush: stream.flush,
+              status: () => stream.result().imageCount ? 'success' : 'error' }
+          },
+          summarizeRequestInput: summarizeOpenAIImagesRequest,
+        }, body)
+        return
       }
       const native = isImage25Model(mappedRequest.model)
       const provider: ProviderHandler = {
@@ -1557,8 +1576,14 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/openai/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/api/minimax/v1/responses/input_tokens', { preHandler: requireApiKey }, sendResponsesInputTokens)
   app.post('/api/openai/v1/chat/completions', { preHandler: requireApiKey }, openaiChatHandler)
-  app.post('/api/openai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations'))
-  app.post('/api/openai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits'))
+  app.post('/api/openai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'openai'))
+  app.post('/api/openai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'openai'))
+  app.post('/api/grsai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'grsai'))
+  app.post('/api/grsai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'grsai'))
+  app.get('/api/grsai/v1/models', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, 'grsai'))
+  app.post('/api/media/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'grsai'))
+  app.post('/api/media/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'grsai'))
+  app.get('/api/media/v1/models', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, 'grsai'))
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.
   app.post('/api/gemini/v1beta/models/*', { preHandler: requireApiKey }, geminiHandler)
@@ -1793,7 +1818,7 @@ async function sendOpenAIStyleModelList(
 ): Promise<void> {
   const apiKey = request.apiKey!
   if (provider && !isProviderAllowed(provider, apiKey)) {
-    void reply.code(403).send({ error: `this API key may not use ${provider}` })
+    void reply.code(403).send({ error: `this API key may not use ${publicModelProvider(provider)}` })
     return
   }
   // Codex's model_catalog_url asks for its own manifest format.
@@ -1846,7 +1871,7 @@ async function sendGeminiModelList(request: FastifyRequest, reply: FastifyReply)
   const apiKey = request.apiKey!
   const provider = geminiGatewayProvider(request)
   if (!isProviderAllowed(provider, apiKey)) {
-    void reply.code(403).send({ error: `this API key may not use ${provider}` })
+    void reply.code(403).send({ error: `this API key may not use ${publicModelProvider(provider)}` })
     return
   }
   void reply.send({ models: listGeminiModels(await modelDiscoveryKey(request, provider), provider) })
@@ -1856,7 +1881,7 @@ async function sendGeminiModel(request: FastifyRequest, reply: FastifyReply): Pr
   const apiKey = request.apiKey!
   const provider = geminiGatewayProvider(request)
   if (!isProviderAllowed(provider, apiKey)) {
-    void reply.code(403).send({ error: `this API key may not use ${provider}` })
+    void reply.code(403).send({ error: `this API key may not use ${publicModelProvider(provider)}` })
     return
   }
   const modelName = (request.params as { '*'?: string } | undefined)?.['*'] ?? ''
@@ -1970,7 +1995,7 @@ async function executeRelay(
   }
 
   if (apiKey.allowedProviders && !apiKey.allowedProviders.includes(provider.id)) {
-    await reply.code(403).send({ error: `this API key may not use ${provider.id}` })
+    await reply.code(403).send({ error: `this API key may not use ${publicModelProvider(provider.id)}` })
     return
   }
   if (!isAnyAllowedModel([route.model, mappedModel, parsed.model], apiKey.allowedModels)) {
@@ -2174,7 +2199,7 @@ async function runRelayLoop(
         sessionSource: session?.source ?? null,
       })
       await reply.code(503).send({
-        error: unavailableMessage,
+        error: publicMediaError(unavailableMessage),
       })
       return
     }
@@ -2482,7 +2507,7 @@ async function runRelayLoop(
       sessionSource: session?.source ?? null,
     })
   }
-  await reply.code(503).send({ error: `all ${provider.id} accounts failed` })
+  await reply.code(503).send({ error: `all ${publicModelProvider(provider.id)} accounts failed` })
 }
 
 /**

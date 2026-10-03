@@ -31,6 +31,13 @@ export interface OAuthProvider {
 }
 
 const registry: Record<string, OAuthProvider> = {
+  grsai: {
+    id: 'grsai', mode: 'paste',
+    generatePkce(): never { return notSupported('generatePkce') },
+    buildAuthorizeUrl(): never { return notSupported('buildAuthorizeUrl') },
+    async exchangeCode(): Promise<TokenSet> { return notSupported('exchangeCode') },
+    async refreshToken(token: string): Promise<TokenSet> { return { accessToken: token, refreshToken: '', expiresAt: 0 } },
+  },
   claude: {
     id: 'claude',
     mode: 'paste',

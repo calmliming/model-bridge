@@ -35,6 +35,8 @@ import { panelRateLimit } from './middleware/panelRateLimit'
 import { closeUpstreamDispatcher } from './http/upstream'
 import { startModelCatalogJob } from './accounts/modelCatalog'
 import { registerOperationsRoutes } from './routes/operations'
+import { registerMediaRoutes } from './routes/media'
+import { startMediaTaskJob } from './media/tasks'
 
 const SHUTDOWN_TIMEOUT_MS = 30_000
 
@@ -70,12 +72,13 @@ async function main(): Promise<void> {
   let stopTokenRefreshJob: () => Promise<void> = async () => {}
   let stopQuotaAutopauseJob: () => Promise<void> = async () => {}
   let stopModelCatalogJob: () => Promise<void> = async () => {}
+  let stopMediaTaskJob: () => Promise<void> = async () => {}
   let oauthCallbackServer: Server | null = null
   let antigravityCallbackServer: Server | null = null
 
   app.addHook('onClose', async () => {
     await stopPricingOverrideReload()
-    await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob(), stopModelCatalogJob()])
+    await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob(), stopModelCatalogJob(), stopMediaTaskJob()])
     await Promise.all([closeOauthCallbackServer(oauthCallbackServer), closeOauthCallbackServer(antigravityCallbackServer)])
     await waitForPendingUsage()
     await Promise.all([closeUpstreamDispatcher(), closeAntigravityDispatcher()])
@@ -95,6 +98,7 @@ async function main(): Promise<void> {
   registerOperationsRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
+  registerMediaRoutes(app)
   registerUsageRoutes(app)
   registerPaymentCallbackRoutes(app)
   await registerWaffoRoutes(app)
@@ -123,6 +127,7 @@ async function main(): Promise<void> {
   stopTokenRefreshJob = startTokenRefreshJob()
   stopQuotaAutopauseJob = startQuotaAutopauseJob()
   stopModelCatalogJob = startModelCatalogJob()
+  stopMediaTaskJob = startMediaTaskJob()
   // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
   // as a redirect URI, so we run a small dedicated listener on 1455.
   oauthCallbackServer = startOauthCallbackServer()

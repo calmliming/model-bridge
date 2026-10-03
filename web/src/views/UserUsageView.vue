@@ -29,6 +29,9 @@ interface UsageLog {
   imageInputTokens: number
   imageOutputTokens: number
   imageCacheReadTokens: number
+  imageCount: number
+  videoSeconds: number
+  videoResolution: string | null
   cost: number
   apiKeyName: string | null
 }
@@ -101,6 +104,7 @@ watch([dateFrom, dateEnd, failureOnly], () => {
 })
 
 function totalTokens(row: UsageLog) {
+  if (row.videoSeconds > 0 || (row.imageCount > 0 && !(row.inputTokens + row.outputTokens + row.cacheReadTokens + row.imageOutputTokens))) return h('span', { class: 'token-total' }, row.videoSeconds > 0 ? `${row.videoSeconds} 秒 · ${row.videoResolution}` : `${row.imageCount ?? 0} 张`)
   const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens + (row.imageInputTokens ?? 0) + (row.imageOutputTokens ?? 0) + (row.imageCacheReadTokens ?? 0)
   const rows: [string, number][] = [
     ['输入', row.inputTokens],
@@ -170,7 +174,7 @@ const usageColumns: TableColumn<UsageLog>[] = [
     minWidth: 130,
     render: (row) => row.apiKeyName || '—'
   },
-  { title: '服务商', key: 'provider', width: 90 },
+  { title: '服务商', key: 'provider', width: 110, render: row => row.provider === 'modelbridge' ? 'Model Bridge' : row.provider },
   {
     title: '模型',
     key: 'model',

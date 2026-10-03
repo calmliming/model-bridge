@@ -108,7 +108,7 @@ const loginSchema = z.object({
   turnstileToken: z.string().optional(),
 })
 
-const providerSchema = z.enum(['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api'])
+const providerSchema = z.enum(['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'zhipu', 'qwen', 'kimi', 'minimax', 'grok', 'sub2api', 'grsai'])
 
 function safeBaseUrl(value: string): boolean {
   try {

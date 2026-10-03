@@ -192,7 +192,9 @@ describe('model discovery', () => {
       'gpt-5.5',
       'gpt-image-2',
       ...image25Models,
-      'deepseek-v4-pro'
+      'deepseek-v4-pro',
+      'gpt-image-2-vip',
+      'gpt-image-2.5'
     ])
   })
 

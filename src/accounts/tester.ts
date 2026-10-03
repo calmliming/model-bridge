@@ -2,6 +2,7 @@ import { fetchAccountMetadata as fetchGeminiAccountMetadata } from '../providers
 import { fetchAccountMetadata as fetchAntigravityMetadata } from '../providers/antigravity/oauth'
 import { fetchAntigravityModels } from '../providers/antigravity/quota'
 import { object } from '../providers/antigravity/client'
+import { testGrsai } from '../providers/grsai/client'
 import { testMiniMax } from '../providers/minimax/relay'
 import { fetchMiniMaxQuota } from '../providers/minimax/quota'
 import { randomUUID } from 'node:crypto'
@@ -410,6 +411,10 @@ async function runProviderTest(account: AccountRow, accessToken: string): Promis
     result = { message: 'MiniMax /v1/models 端点可访问' }
   }
   else if (account.provider === 'grok') result = await testGrok(accessToken)
+  else if (account.provider === 'grsai') {
+    await testGrsai(accessToken, account.proxyUrl)
+    result = { message: 'GrsAI 结果查询端点可访问（未执行付费生成）' }
+  }
   else if (account.provider === 'sub2api') result = await testSub2Api(accessToken, account.proxyUrl)
   else throw new AccountTestError(`unsupported provider: ${account.provider}`)
 

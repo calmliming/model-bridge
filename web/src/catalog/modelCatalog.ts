@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'modelbridge'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -26,6 +26,11 @@ export interface CategoryMeta {
 }
 
 export interface PlazaModel {
+  video?: boolean
+  imageRequestPrice?: number
+  videoSecond480Price?: number
+  videoSecond768Price?: number
+  videoSecond1080Price?: number
   image?: boolean
   imageInputPrice?: number
   imageOutputPrice?: number
@@ -55,6 +60,10 @@ export interface PlazaModel {
 }
 
 export interface ModelTokenPrice {
+  imageRequestPrice?: number
+  videoSecond480Price?: number
+  videoSecond768Price?: number
+  videoSecond1080Price?: number
   imageInputPrice?: number
   imageOutputPrice?: number
   imageCacheReadPrice?: number
@@ -99,6 +108,10 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
       imageInputPrice: model.imageInputPrice,
       imageOutputPrice: model.imageOutputPrice,
       imageCacheReadPrice: model.imageCacheReadPrice,
+      imageRequestPrice: model.imageRequestPrice,
+      videoSecond480Price: model.videoSecond480Price,
+      videoSecond768Price: model.videoSecond768Price,
+      videoSecond1080Price: model.videoSecond1080Price,
       period: null
     }
   }
@@ -115,6 +128,7 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
+  modelbridge: { id: 'modelbridge', label: 'Model Bridge', initials: 'MB', chipClass: 'bg-primary-100 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300' },
   claude: {
     id: 'claude',
     label: 'Anthropic',
@@ -184,6 +198,7 @@ export const CATEGORIES: CategoryMeta[] = [
   { key: 'code', label: '代码开发' },
   { key: 'multimodal', label: '多模态' },
   { key: 'image', label: '图像生成' },
+  { key: 'video', label: '视频生成' },
   { key: 'lightweight', label: '轻量高速' }
 ]
 
@@ -220,7 +235,20 @@ function deepseekPriceSchedule(offPeak: ModelTokenPrice, peak: ModelTokenPrice, 
   }
 }
 
-export const MODEL_CATALOG: PlazaModel[] = [
+export const MODEL_CATALOG: PlazaModel[] = ([
+  ...Object.entries({ 'gpt-image-2': 0.0042, 'gpt-image-2-vip': 0.014, 'gpt-image-2.5': 0.0042,
+    'gpt-image-2.5-flare': 0.014, 'gpt-image-2.5-sunburst': 0.0168 }).map(([id, imageRequestPrice]): PlazaModel => ({
+      id, name: id.replace('gpt-image-', 'GPT Image ').replaceAll('-', ' '), provider: 'modelbridge', image: true, categories: ['image', 'multimodal'],
+      tags: ['图像生成', '按次计费', '生成 / 编辑'],
+      description: 'GPT 图片生成和编辑，支持图片接口及异步任务。成功后按次计费。',
+      context: ['gpt-image-2', 'gpt-image-2.5'].includes(id) ? '1K' : '1K–4K',
+      inputPrice: 0, outputPrice: 0, imageRequestPrice,
+    })),
+  { id: 'minimax-h3', name: 'MiniMax H3', provider: 'modelbridge', video: true,
+    categories: ['video', 'multimodal'], tags: ['文生视频', '参考图 / 音频', '异步生成'],
+    description: '支持 480p / 768p / 1080p，1–15 秒；1080p 最多 10 秒。支持最多 9 张参考图和 3 段参考音频，成功后按分辨率和时长计费。',
+    context: '1–15 秒', inputPrice: 0, outputPrice: 0,
+    videoSecond480Price: 0.007, videoSecond768Price: 0.0098, videoSecond1080Price: 0.021, badge: 'new' },
   // --- Anthropic / Claude --------------------------------------------------
   {
     id: 'claude-fable-5-1',
@@ -937,7 +965,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
     outputPrice: 2,
     cacheReadPrice: 0.2
   }
-]
+] satisfies PlazaModel[]).filter((model, index, catalog) => catalog.findIndex(candidate => candidate.id === model.id) === index)
 
 /**
  * 从模型 id 推断服务商，与服务端 inferProviderForModel 保持同一套前缀规则。
@@ -948,6 +976,7 @@ export const MODEL_CATALOG: PlazaModel[] = [
  */
 export function inferProviderFromModelId(id: string): ProviderId | null {
   const lower = id.toLowerCase()
+  if (lower === 'minimax-h3' || lower === 'gpt-image-2-vip' || lower === 'gpt-image-2.5') return 'modelbridge'
   if (lower.startsWith('claude-')) return 'claude'
   if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) return 'openai'
   if (lower.startsWith('gemini-')) return 'gemini'

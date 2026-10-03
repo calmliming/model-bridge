@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
-import { calculateUsageCost, resolvePrice, resolveUsagePrice } from './pricing'
+import { calculateUsageCost, resolvePrice, resolveUsagePrice, type TierPrice } from './pricing'
 import type { UsageData } from '../providers/types'
 import { debitWalletForUsage } from '../wallet/manager'
 import { roundUsd } from '../wallet/money'
@@ -9,6 +9,10 @@ import { consumeSubscriptionUsage, consumeWeightedSubscriptionUsage } from '../s
 import { usagePoints, type SubscriptionQuotaMode } from '../subscriptions/usageWindows'
 
 export interface UsageRecord {
+  /** Internal async-task identity; repeated settlement is a no-op. */
+  idempotencyKey?: string
+  /** Price captured at async task admission, before an administrator changes it. */
+  priceSnapshot?: TierPrice
   apiKeyId: string
   userId?: string | null
   accountId: string | null
@@ -54,10 +58,10 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const pricedAt = record.requestStartedAt ?? Date.now()
     const usage = { ...record.usage }
     if (record.reasoningEffort) usage.reasoningEffort = record.reasoningEffort
-    const unroundedCost = calculateUsageCost(record.provider, record.model, usage, pricedAt)
+    const unroundedCost = calculateUsageCost(record.provider, record.model, usage, pricedAt, record.priceSnapshot)
     const baseCost = roundUsd(unroundedCost)
-    const price = resolveUsagePrice(record.provider, record.model, usage, pricedAt)
-    const imagePrice = usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price
+    const price = record.priceSnapshot ?? resolveUsagePrice(record.provider, record.model, usage, pricedAt)
+    const imagePrice = record.priceSnapshot ?? (usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price)
     const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
     // Rounded to the wallet's unit, not finer: `cost` is also added to
     // quota_used and passed to debitWalletForUsage, so recording it at a
@@ -68,7 +72,7 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     // to the wallet when this request would cross any configured window.
     const preferredBillTo: 'subscription' | 'balance' =
       record.billTo === 'subscription' && record.subscriptionId ? 'subscription' : 'balance'
-    const id = randomBytes(12).toString('hex')
+    const id = record.idempotencyKey ? createHash('sha256').update(record.idempotencyKey).digest('hex').slice(0, 24) : randomBytes(12).toString('hex')
     const errorCode = record.errorCode?.trim().slice(0, 200) || null
     const errorMessage = record.errorMessage?.trim().slice(0, 2_000) || null
     const upstreamStatus = Number.isInteger(record.upstreamStatus) ? record.upstreamStatus! : null
@@ -76,6 +80,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
     const upstreamModel = record.upstreamModel?.trim().slice(0, 300) || null
     client = await pool.connect()
     await client.query('BEGIN')
+    if (record.idempotencyKey) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`usage:${id}`])
+      const existing = await client.query('SELECT id FROM usage_logs WHERE id = $1', [id])
+      if (existing.rows.length) { await client.query('COMMIT'); return true }
+    }
     let billTo: 'subscription' | 'balance' = preferredBillTo
     let subscriptionCharged = false
     let subscriptionPoints: number | null = null
@@ -99,10 +108,10 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
            cost, base_cost, bill_to, status, error_code, error_message, upstream_status,
            attempt_count, upstream_model, model_mismatch, latency_ms, first_token_ms, upstream_request_id,
            service_tier, reasoning_effort, billing_price, image_cache_read_tokens, usage_source,
-           subscription_id, subscription_points)
+           subscription_id, subscription_points, video_seconds, video_resolution)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-               $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)`,
+               $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)`,
       [
         id,
         record.apiKeyId,
@@ -143,6 +152,8 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
         record.usage.usageSource ?? 'unknown',
         billTo === 'subscription' ? record.subscriptionId ?? null : null,
         subscriptionPoints,
+        record.usage.videoSeconds ?? 0,
+        record.usage.videoResolution ?? null,
       ]
     )
     if (record.apiKeyId && cost > 0) {

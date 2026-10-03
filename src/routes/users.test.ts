@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   },
   apiKeyCreationLimitError: vi.fn(),
   createApiKey: vi.fn(),
+  listApiKeysForUser: vi.fn(),
+  updateApiKey: vi.fn(),
   verifyUserCredentials: vi.fn(),
   getUserById: vi.fn(),
   isOnlinePaymentEnabled: vi.fn(),
@@ -40,6 +42,8 @@ vi.mock('../keys/manager', async (original) => ({
   ...await original<typeof import('../keys/manager')>(),
   apiKeyCreationLimitError: mocks.apiKeyCreationLimitError,
   createApiKey: mocks.createApiKey,
+  listApiKeysForUser: mocks.listApiKeysForUser,
+  updateApiKey: mocks.updateApiKey,
 }))
 
 import { registerUserRoutes } from './users'
@@ -167,6 +171,22 @@ describe('legacy user login security', () => {
 })
 
 describe('self-service API key creation limits', () => {
+  it('exposes a media capability scope and stores only the original upstream permission', () => withApp(async app => {
+    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
+    mocks.createApiKey.mockResolvedValue({ id: 'key-media', key: 'mb-secret' })
+    mocks.listApiKeysForUser.mockResolvedValue([{ id: 'key-media', allowedProviders: ['grsai'] }])
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const headers = { authorization: `Bearer ${token}` }
+    const created = await app.inject({ method: 'POST', url: '/api/users/keys', headers, payload: { name: 'Images', allowedProviders: ['media'] } })
+    expect(created.statusCode).toBe(201)
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grsai'] }))
+    const listed = await app.inject({ url: '/api/users/keys', headers })
+    expect(listed.json().keys[0].allowedProviders).toEqual(['media'])
+    expect(listed.body).not.toMatch(/grsai/i)
+    const updated = await app.inject({ method: 'PATCH', url: '/api/users/keys/key-media', headers, payload: { allowedProviders: ['media'] } })
+    expect(updated.statusCode).toBe(200)
+    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-media', expect.objectContaining({ allowedProviders: ['grsai'] }), 'user-1')
+  }))
   it('passes the configured limits and creates the key when allowed', () => withApp(async app => {
     mocks.apiKeyCreationLimitError.mockResolvedValue(null)
     mocks.createApiKey.mockResolvedValue({ id: 'key-1', key: 'mb-secret' })

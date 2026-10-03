@@ -28,6 +28,15 @@ afterEach(async () => {
 })
 
 describe('pricing override file', () => {
+  it('supports supplier image-request and resolution-specific video prices', async () => {
+    await writeRules([
+      { provider: 'grsai', model: 'gpt-image-2', price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, imageRequest: 0.01 } },
+      { provider: 'grsai', model: 'minimax-h3', price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, videoSecond480: 0.02, videoSecond768: 0.03, videoSecond1080: 0.04 } },
+    ])
+    await reloadPricingOverrides(file)
+    expect(estimateCost('grsai', 'gpt-image-2', { ...emptyUsage(), imageCount: 1 })).toBe(0.01)
+    expect(estimateCost('grsai', 'minimax-h3', { ...emptyUsage(), videoSeconds: 5, videoResolution: '1080p' })).toBe(0.2)
+  })
   it('prefers exact overrides over wildcard rules and built-in prices', async () => {
     await writeRules([
       { provider: 'openai', model: 'gpt-*', price: base },

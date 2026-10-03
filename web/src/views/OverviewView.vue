@@ -78,6 +78,11 @@ interface DashboardRecentLog {
   imageInputCost: number
   imageOutputCost: number
   imageCacheReadCost: number
+  imageCount: number
+  imageRequestCost: number
+  videoSeconds: number
+  videoResolution: string | null
+  videoCost: number
   billTo: string
   inputCost: number
   outputCost: number
@@ -183,6 +188,7 @@ const providerLabels: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
+  grsai: 'GrsAI',
   sub2api: 'Sub2API',
 }
 
@@ -197,6 +203,7 @@ const providerColors: Record<string, string> = {
   qwen: '#06b6d4',
   kimi: '#475569',
   sub2api: '#059669',
+  grsai: '#0284c7',
 }
 
 interface ToneColor {
@@ -573,6 +580,7 @@ function billingLabel(row: DashboardRecentLog): string {
 }
 
 function costBreakdown(row: DashboardRecentLog): { label: string; value: string; tone?: string }[] {
+  if (row.provider === 'grsai') return [{ label: row.videoSeconds > 0 ? `视频生成 (${row.videoResolution} / ${row.videoSeconds} 秒)` : '图片生成', value: formatLogCost(row.baseCost) }]
   const rows = [
     { label: '输入费用', value: formatLogCost(row.inputCost) },
     { label: '输出费用', value: formatLogCost(row.outputCost) },
@@ -759,6 +767,8 @@ function openRequestInput(row: DashboardRecentLog) {
           <div class="min-w-0 max-xl:col-span-full">
             <div class="flex items-center gap-2 min-w-0 flex-wrap">
               <span v-if="row.usageSource === 'missing' || row.usageSource === 'partial'" class="text-xs text-amber-700">{{ usageSourceLabel(row.usageSource) }}</span>
+              <span v-if="row.videoSeconds > 0" class="text-xs font-semibold text-violet-600">视频 {{ row.videoSeconds }} 秒 · {{ row.videoResolution }}</span>
+              <span v-else-if="row.provider === 'grsai' && row.imageCount > 0" class="text-xs font-semibold text-violet-600">图片 {{ row.imageCount }} 张</span>
               <span class="inline-flex items-center gap-1 min-w-0 text-xs font-[760] whitespace-nowrap text-emerald-600">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 5v14m0 0 6-6m-6 6-6-6" />

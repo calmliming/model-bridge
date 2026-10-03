@@ -51,6 +51,7 @@ const providerLabel: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
+  grsai: 'GrsAI',
   sub2api: 'Sub2API',
 }
 
@@ -65,6 +66,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   qwen: 'info',
   kimi: 'default',
   minimax: 'error',
+  grsai: 'info',
   sub2api: 'success',
 }
 
