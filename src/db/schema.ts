@@ -1,4 +1,4 @@
-import { bigint, boolean, doublePrecision, index, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
+import { bigint, boolean, doublePrecision, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 const epochMs = (name: string) =>
@@ -370,6 +370,19 @@ export const mediaTasks = pgTable('media_tasks', {
   pending: index('media_tasks_pending').on(table.nextPollAt).where(sql`${table.settled} = FALSE`),
   owner: index('media_tasks_owner').on(table.userId, table.apiKeyId),
   account: index('media_tasks_account').on(table.accountId).where(sql`${table.settled} = FALSE`),
+}))
+
+/** Synchronous image request lifecycle; usage remains in the existing ledger. */
+export const liveRequests = pgTable('live_requests', {
+  id: text('id').primaryKey(), apiKeyId: text('api_key_id').notNull(), userId: text('user_id'),
+  provider: text('provider').notNull(), model: text('model').notNull(), requestedModel: text('requested_model').notNull(),
+  requestInput: text('request_input'), status: text('status').notNull().default('running'),
+  usageLogId: text('usage_log_id'), errorCode: text('error_code'), errorMessage: text('error_message'),
+  httpStatus: integer('http_status'), createdAt: epochMs('created_at'), finishedAt: bigint('finished_at', { mode: 'number' }),
+  leaseExpiresAt: bigint('lease_expires_at', { mode: 'number' }).notNull(),
+}, table => ({
+  owner: index('live_requests_owner').on(table.userId, table.createdAt),
+  usage: index('live_requests_usage').on(table.usageLogId),
 }))
 
 /** Transient state for an in-progress OAuth authorization. */

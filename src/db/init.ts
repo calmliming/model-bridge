@@ -356,6 +356,15 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS media_tasks_account ON media_tasks (account_id) WHERE settled = FALSE;
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key_hash ON usage_logs (session_key_hash);`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS live_requests (
+    id TEXT PRIMARY KEY, api_key_id TEXT NOT NULL, user_id TEXT,
+    provider TEXT NOT NULL, model TEXT NOT NULL, requested_model TEXT NOT NULL, request_input TEXT,
+    status TEXT NOT NULL DEFAULT 'running', usage_log_id TEXT, error_code TEXT, error_message TEXT,
+    http_status INTEGER, created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+    finished_at BIGINT, lease_expires_at BIGINT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS live_requests_owner ON live_requests (user_id, created_at);
+  CREATE INDEX IF NOT EXISTS live_requests_usage ON live_requests (usage_log_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_status_ts ON usage_logs (status, ts DESC);`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS concurrency_limit BIGINT;`)
   await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (

@@ -126,6 +126,7 @@ import {
 import { isGoogleLocationUnsupported, googleErrorMessage } from '../providers/google/errors'
 import type { ProviderId } from '../providers/types'
 import { recordUsage } from '../usage/recorder'
+import { withLiveImageRequest } from '../usage/liveRequests'
 import { emptyUsage, type UsageData } from '../providers/types'
 import { estimateResponsesInputTokens } from './inputTokens'
 import { upstreamRequestId, streamFailureDetails, redactUpstreamError } from '../http/upstreamDiagnostics'
@@ -1480,48 +1481,51 @@ export function registerRelayRoutes(app: FastifyInstance): void {
         ...body,
         model: mapRequestedModel(requestedModel, request.apiKey!.modelMappings),
       }
-      if (imageProvider === 'grsai') {
-        const parser = () => createGrsaiImageStream(mappedRequest)
-        await executeRelay(request, reply, {
-          id: 'grsai', forceStream: false,
-          parseRoute: () => ({ model: requestedModel, action: `images.${endpoint}` }),
-          callUpstream: (token, input, ctx) => relayGrsaiImages(token, input as OpenAIImagesRequestBody, ctx.account.proxyUrl),
-          // A submission timeout can hide an accepted paid generation. Return
-          // the failure instead of automatically submitting a duplicate task.
-          classifyUpstreamFailure: async response => ({ ...(await classifyUpstreamFailure('grsai', response, mappedRequest.model)), retryable: false }),
-          createStreamParser: parser, parseJsonUsage: grsaiImageUsage,
-          parseStreamEventsFrom: 'upstream', createStreamTransform: () => {
-            const stream = parser()
-            return { transform: raw => { stream.feed(raw); return stream.transform(raw) }, flush: stream.flush,
-              status: () => stream.result().imageCount ? 'success' : 'error' }
-          },
+      await withLiveImageRequest({ apiKeyId: request.apiKey!.id, userId: request.apiKey!.userId ?? null,
+        provider: imageProvider, model: mappedRequest.model, requestedModel, requestInput: summarizeOpenAIImagesRequest(body) }, async () => {
+        if (imageProvider === 'grsai') {
+          const parser = () => createGrsaiImageStream(mappedRequest)
+          await executeRelay(request, reply, {
+            id: 'grsai', forceStream: false,
+            parseRoute: () => ({ model: requestedModel, action: `images.${endpoint}` }),
+            callUpstream: (token, input, ctx) => relayGrsaiImages(token, input as OpenAIImagesRequestBody, ctx.account.proxyUrl),
+            // A submission timeout can hide an accepted paid generation. Return
+            // the failure instead of automatically submitting a duplicate task.
+            classifyUpstreamFailure: async response => ({ ...(await classifyUpstreamFailure('grsai', response, mappedRequest.model)), retryable: false }),
+            createStreamParser: parser, parseJsonUsage: grsaiImageUsage,
+            parseStreamEventsFrom: 'upstream', createStreamTransform: () => {
+              const stream = parser()
+              return { transform: raw => { stream.feed(raw); return stream.transform(raw) }, flush: stream.flush,
+                status: () => stream.result().imageCount ? 'success' : 'error' }
+            },
+            summarizeRequestInput: summarizeOpenAIImagesRequest,
+          }, body)
+          return
+        }
+        const native = isImage25Model(mappedRequest.model)
+        const provider: ProviderHandler = {
+          id: 'openai',
+          forceStream: false,
+          parseRoute: () => ({
+            model: requestedModel,
+            action: `images.${endpoint}`,
+          }),
+          callUpstream: (token, input, ctx) => relayOpenaiImages(token, input,
+            (ctx.account.metadata as { openai?: { chatgptAccountId?: string } } | null)?.openai?.chatgptAccountId),
+          classifyUpstreamFailure: (response, model) =>
+            classifyOpenAIImageUpstreamFailure(response, model),
+          classifyBufferedFailure: (text, model) =>
+            classifyBufferedOpenAIImageFailure(text, mappedRequest, model),
+          createStreamParser: () => native ? createNativeImagesUsageParser(mappedRequest) : createOpenAIImagesUsageParser(mappedRequest),
+          parseJsonUsage: () => emptyUsage(),
+          parseStreamEventsFrom: 'upstream',
+          bufferSseResponse: (text) => native ? convertNativeImageResponse(text, mappedRequest) : convertOpenAIImagesSse(text, mappedRequest),
+          ...(native ? { bufferJsonResponse: (text: string) => convertNativeImageResponse(text, mappedRequest) } : {}),
+          createStreamTransform: () => native ? createNativeImagesStreamTransform(mappedRequest) : createOpenAIImagesStreamTransform(mappedRequest),
           summarizeRequestInput: summarizeOpenAIImagesRequest,
-        }, body)
-        return
-      }
-      const native = isImage25Model(mappedRequest.model)
-      const provider: ProviderHandler = {
-        id: 'openai',
-        forceStream: false,
-        parseRoute: () => ({
-          model: requestedModel,
-          action: `images.${endpoint}`,
-        }),
-        callUpstream: (token, input, ctx) => relayOpenaiImages(token, input,
-          (ctx.account.metadata as { openai?: { chatgptAccountId?: string } } | null)?.openai?.chatgptAccountId),
-        classifyUpstreamFailure: (response, model) =>
-          classifyOpenAIImageUpstreamFailure(response, model),
-        classifyBufferedFailure: (text, model) =>
-          classifyBufferedOpenAIImageFailure(text, mappedRequest, model),
-        createStreamParser: () => native ? createNativeImagesUsageParser(mappedRequest) : createOpenAIImagesUsageParser(mappedRequest),
-        parseJsonUsage: () => emptyUsage(),
-        parseStreamEventsFrom: 'upstream',
-        bufferSseResponse: (text) => native ? convertNativeImageResponse(text, mappedRequest) : convertOpenAIImagesSse(text, mappedRequest),
-        ...(native ? { bufferJsonResponse: (text: string) => convertNativeImageResponse(text, mappedRequest) } : {}),
-        createStreamTransform: () => native ? createNativeImagesStreamTransform(mappedRequest) : createOpenAIImagesStreamTransform(mappedRequest),
-        summarizeRequestInput: summarizeOpenAIImagesRequest,
-      }
-      await executeRelay(request, reply, provider, body)
+        }
+        await executeRelay(request, reply, provider, body)
+      }, () => reply.statusCode)
     }
   const geminiHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS.gemini!)

@@ -37,6 +37,7 @@ import { startModelCatalogJob } from './accounts/modelCatalog'
 import { registerOperationsRoutes } from './routes/operations'
 import { registerMediaRoutes } from './routes/media'
 import { startMediaTaskJob } from './media/tasks'
+import { registerRequestLogRoutes } from './routes/requestLogs'
 
 const SHUTDOWN_TIMEOUT_MS = 30_000
 
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
   registerUserRoutes(app)
   registerRelayRoutes(app)
   registerMediaRoutes(app)
+  registerRequestLogRoutes(app)
   registerUsageRoutes(app)
   registerPaymentCallbackRoutes(app)
   await registerWaffoRoutes(app)

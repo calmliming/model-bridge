@@ -7,6 +7,7 @@ import { debitWalletForUsage } from '../wallet/manager'
 import { roundUsd } from '../wallet/money'
 import { consumeSubscriptionUsage, consumeWeightedSubscriptionUsage } from '../subscriptions/manager'
 import { usagePoints, type SubscriptionQuotaMode } from '../subscriptions/usageWindows'
+import { currentLiveRequestId } from './liveRequests'
 
 export interface UsageRecord {
   /** Internal async-task identity; repeated settlement is a no-op. */
@@ -53,6 +54,7 @@ const pendingUsageWrites = new Set<Promise<boolean>>()
  * success responses to clients.
  */
 async function persistUsage(record: UsageRecord): Promise<boolean> {
+  const liveRequestId = currentLiveRequestId()
   let client: PoolClient | null = null
   try {
     const pricedAt = record.requestStartedAt ?? Date.now()
@@ -167,6 +169,11 @@ async function persistUsage(record: UsageRecord): Promise<boolean> {
       if (billTo === 'balance') {
         await debitWalletForUsage(client, record.userId, id, cost)
       }
+    }
+    if (liveRequestId) {
+      await client.query(`UPDATE live_requests SET usage_log_id = $2, status = $3, error_code = $4,
+        error_message = $5, finished_at = $6 WHERE id = $1`,
+      [liveRequestId, id, record.status, errorCode, errorMessage, Date.now()])
     }
     await client.query('COMMIT')
     return true

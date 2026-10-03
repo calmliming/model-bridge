@@ -31,6 +31,7 @@ const menu: Array<{ to: string; key: string; label: string; icon: MenuIcon }> = 
   { to: '/app/models', key: 'user-models', label: '模型广场', icon: 'models' },
   { to: '/app/keys', key: 'user-keys', label: 'API Keys', icon: 'keys' },
   { to: '/app/usage', key: 'user-usage', label: '用量流水', icon: 'usage' },
+  { to: '/app/logs', key: 'user-logs', label: '调用日志', icon: 'docs' },
   { to: '/docs/api', key: 'user-api-docs', label: 'API 文档', icon: 'docs' },
 ]
 
@@ -39,6 +40,7 @@ const titleMap: Record<string, string> = {
   'user-models': '模型广场',
   'user-keys': 'API Keys',
   'user-usage': '用量流水',
+  'user-logs': '调用日志',
   'user-api-docs': 'API 文档',
 }
 
@@ -47,6 +49,7 @@ const subtitleMap: Record<string, string> = {
   'user-models': '浏览可用模型、能力分类与计费价格。',
   'user-keys': '管理您的 API Key 和调用入口。',
   'user-usage': '查看请求消耗、账单扣费和钱包流水。',
+  'user-logs': '查看调用日志、图片视频生成进度和模型厂家。',
   'user-api-docs': '查看图片生成与编辑接口、参数和调用示例。',
 }
 
