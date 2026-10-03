@@ -111,6 +111,11 @@ type Provider = 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'x
 // `BALANCE_PROVIDERS` in src/providers/balance.ts (asserted by web/balance.test.ts).
 const BALANCE_PROVIDER_IDS = ['sub2api', 'deepseek'] as const
 type BalanceProvider = (typeof BALANCE_PROVIDER_IDS)[number]
+// Providers whose upstream API exposes neither a balance nor quota endpoint, so
+// the column states that instead of a "未更新" cell with a refresh button that
+// can never fill it. Mirrors `NO_USAGE_ENDPOINT_PROVIDERS` in
+// src/providers/balance.ts (asserted by web/balance.test.ts).
+const NO_USAGE_ENDPOINT_PROVIDER_IDS = ['grsai'] as const
 type TagType = 'success' | 'warning' | 'error' | 'default' | 'info'
 type ViewMode = 'table' | 'card'
 type StatusFilter = 'all' | 'active' | 'rate_limited' | 'error' | 'disabled' | 'reauth'
@@ -442,6 +447,11 @@ function usesBalanceProvider(provider: string): provider is BalanceProvider {
   return (BALANCE_PROVIDER_IDS as readonly string[]).includes(provider)
 }
 
+/** True when the upstream publishes no balance and no quota for this provider. */
+function lacksUsageEndpoint(provider: string): boolean {
+  return (NO_USAGE_ENDPOINT_PROVIDER_IDS as readonly string[]).includes(provider)
+}
+
 function formatBalanceAmount(value: number | null | undefined, currency?: string): string {
   if (!isFiniteBalance(value)) return '—'
   const unit = currency?.trim().toUpperCase() || 'USD'
@@ -717,6 +727,20 @@ function balanceProviderLabel(provider: string): string {
 }
 
 /**
+ * GrsAI publishes only generation and result queries, so no refresh can ever
+ * fill this column. State that plainly: the row already carries a 测试连通性
+ * action in the actions column, and the cell is not the place for a second one.
+ */
+function renderNoUsageEndpoint() {
+  const hint = 'GrsAI 只提供生成与结果查询接口，未开放余额 / 积分查询；控制台数值需登录网页查看。'
+  return h('div', { class: 'quota-cell' }, [
+    h('div', { class: 'quota-line' }, [
+      h('span', { class: 'upstream-balance-state', title: hint }, '该渠道不提供余额查询'),
+    ]),
+  ])
+}
+
+/**
  * Renders the monetary wallet of a balance provider (Sub2API gateway credit or
  * DeepSeek platform balance). Providers without such an endpoint fall back to
  * the quota-window cell, so no account is left without a refresh action.
@@ -806,6 +830,7 @@ function renderResetCredits(row: Account) {
 
 function renderQuota(row: Account) {
   if (usesBalanceProvider(row.provider)) return renderAccountBalance(row)
+  if (lacksUsageEndpoint(row.provider)) return renderNoUsageEndpoint()
   const quota = row.quota
   const credits = renderResetCredits(row)
   if (!quota || !quota.windows.length) {

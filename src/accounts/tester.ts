@@ -32,6 +32,7 @@ import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
 import { fetchSub2ApiBalance } from '../providers/sub2api/balance'
 import { fetchDeepSeekBalance } from '../providers/deepseek/balance'
 import {
+  hasUpstreamUsageEndpoint,
   usesUpstreamBalance,
   type AccountBalanceInfo,
   type AccountBalanceSnapshot,
@@ -494,6 +495,13 @@ export async function refreshAccountQuota(id: string): Promise<AccountTestResult
   // needed, and an exhausted-but-valid key still reports its balance instead of
   // failing the connectivity probe.
   if (usesUpstreamBalance(account.provider)) return refreshAccountBalance(account)
+  // Providers without a usage endpoint (GrsAI) can only be probed. Say so in
+  // the result: the batch route reports this message and a bare "success" would
+  // read as "quota refreshed" while nothing was written.
+  if (!hasUpstreamUsageEndpoint(account.provider)) {
+    const result = await testAccountConnectivity(id)
+    return { ...result, message: '该渠道未提供余额 / 配额查询接口，已改为连通性检查' }
+  }
   if (account.provider !== 'minimax') return testAccountConnectivity(id)
 
   const startedAt = Date.now()

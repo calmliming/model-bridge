@@ -27,7 +27,7 @@ vi.mock('./scheduler', () => scheduler)
 vi.mock('../db/settings', () => settings)
 vi.mock('../http/upstream', () => upstream)
 
-import { testAccountConnectivity } from './tester'
+import { testAccountConnectivity, refreshAccountQuota } from './tester'
 import { resetCodexCatalogCache } from '../providers/openai/codexCatalog'
 
 function deepseekAccount(status: string, cooldownUntil: number | null) {
@@ -122,6 +122,39 @@ describe('testAccountConnectivity', () => {
 
     expect(result.success).toBe(true)
     expect(result.balance).toBeUndefined()
+    expect(manager.updateAccountMetadata).not.toHaveBeenCalled()
+  })
+})
+
+describe('refreshAccountQuota (providers without a usage endpoint)', () => {
+  const grsaiAccount = {
+    ...deepseekAccount('active', null),
+    id: 'acct-grsai',
+    provider: 'grsai',
+    name: 'GrsAI',
+    proxyUrl: 'https://grsaiapi.com',
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    manager.getAccount.mockResolvedValue(grsaiAccount)
+    manager.ensureFreshToken.mockResolvedValue('sk-grsai')
+    settings.getQuotaAutopausePercent.mockResolvedValue(100)
+  })
+
+  it('reports the missing usage endpoint instead of a bare quota success', async () => {
+    upstream.fetchWithConnectTimeout.mockResolvedValue(
+      new Response('{"error":"result not exist, valid for 2 hours"}', { status: 404 }),
+    )
+
+    const result = await refreshAccountQuota('acct-grsai')
+
+    // The probe still runs, so the admin keeps a working action on the cell.
+    expect(String(upstream.fetchWithConnectTimeout.mock.calls[0]?.[0]))
+      .toBe('https://grsaiapi.com/v1/api/result?id=model-bridge-connectivity-probe')
+    expect(result.success).toBe(true)
+    expect(result.message).toBe('该渠道未提供余额 / 配额查询接口，已改为连通性检查')
+    expect(manager.updateAccountQuota).not.toHaveBeenCalled()
     expect(manager.updateAccountMetadata).not.toHaveBeenCalled()
   })
 })

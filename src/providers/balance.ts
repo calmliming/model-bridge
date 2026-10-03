@@ -65,6 +65,28 @@ export function usesUpstreamBalance(provider: string): provider is BalanceProvid
   return (BALANCE_PROVIDERS as readonly string[]).includes(provider)
 }
 
+/**
+ * Providers whose public API exposes neither a monetary wallet nor quota
+ * windows, so the accounts table states that instead of offering a refresh
+ * action that can never produce data.
+ *
+ * GrsAI (verified 2026-10-03 against both documented nodes) publishes only
+ * `/v1/api/generate` and `/v1/api/result`: `/v1/api/balance`, `/v1/api/credits`,
+ * `/v1/api/quota`, `/v1/api/user/balance`, `/v1/dashboard/billing/*` and two
+ * dozen further candidates all answer `404 page not found`. The 余额 / 积分
+ * numbers in its console come from a login session, not from the API key we
+ * store on the account.
+ */
+export const NO_USAGE_ENDPOINT_PROVIDERS = ['grsai'] as const
+
+/**
+ * True when the upstream can report a balance or a quota for this provider.
+ * Connectivity tests stay available either way; only the usage read is absent.
+ */
+export function hasUpstreamUsageEndpoint(provider: string): boolean {
+  return !(NO_USAGE_ENDPOINT_PROVIDERS as readonly string[]).includes(provider)
+}
+
 export function finiteNumber(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
   if (typeof value !== 'string' || value.trim() === '') return undefined
