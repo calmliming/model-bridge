@@ -19,11 +19,13 @@ import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
 import { getQuotaAutopausePercent } from '../db/settings'
 import {
+  accountAvailability,
   disableAccount,
   markAccountUsed,
   penalizeAccount,
   penalizeAccountModel,
   pickAccount,
+  unavailableAccountMessage,
 } from '../accounts/scheduler'
 import {
   bindStickyAccount,
@@ -131,7 +133,7 @@ import { emptyUsage, type UsageData } from '../providers/types'
 import { estimateResponsesInputTokens } from './inputTokens'
 import { upstreamRequestId, streamFailureDetails, redactUpstreamError } from '../http/upstreamDiagnostics'
 import { buildGrsaiImageRequest, relayGrsaiImages, grsaiImageUsage, createGrsaiImageStream } from '../providers/grsai/images'
-import { publicMediaError, publicModelProvider } from '../providers/publicIdentity'
+import { publicMediaError, publicModelProvider, publicProviderLabel } from '../providers/publicIdentity'
 
 /** Max upstream accounts to try before giving up on a request. */
 const MAX_ATTEMPTS = 3
@@ -2177,9 +2179,11 @@ async function runRelayLoop(
         else await sendBuffered(reply, response, meta, provider)
         return
       }
-      const unavailableMessage = tried.length
-        ? `all ${provider.id} accounts are unavailable`
-        : `no ${provider.id} account configured`
+      // An empty pool and a cooling-down pool are different operational
+      // problems: saying "no account configured" while the account exists and
+      // is merely in cooldown sends operators to check settings that are fine.
+      const available = await accountAvailability(provider.id, tried, parsed.model)
+      const unavailableMessage = unavailableAccountMessage(publicProviderLabel(provider.id), available, tried.length)
       await recordUsage({
         apiKeyId: apiKey.id,
         userId: apiKey.userId,

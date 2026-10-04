@@ -1,13 +1,13 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { requireApiKey, requireApiKeyForResult } from '../middleware/apiKeyAuth'
 import { checkRateLimit } from '../middleware/limits'
-import { pickAccount } from '../accounts/scheduler'
+import { accountAvailability, pickAccount, unavailableAccountMessage } from '../accounts/scheduler'
 import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import { parseGrsaiGenerateRequest } from '../providers/grsai/client'
 import { ProviderRequestError } from '../providers/requestError'
 import { createMediaTask, getMediaTask, MediaTaskError, publicMediaTask, refreshMediaTask } from '../media/tasks'
-import { publicMediaError } from '../providers/publicIdentity'
+import { publicMediaError, publicProviderLabel } from '../providers/publicIdentity'
 
 export function registerMediaRoutes(app: FastifyInstance): void {
   const generate = (videoOnly: boolean) => async (request: FastifyRequest, reply: FastifyReply) => {
@@ -25,7 +25,14 @@ export function registerMediaRoutes(app: FastifyInstance): void {
       if (!isGroupModelAllowed(model, key.groupAllowedModels)) return reply.code(403).send({ error: 'model is not allowed in this group' })
       if (key.rateLimit != null && !await checkRateLimit(key.id, key.rateLimit)) return reply.code(429).send({ error: 'rate limit exceeded' })
       const account = await pickAccount('grsai', [], null, key.accountGroupId, model)
-      if (!account) return reply.code(503).send({ error: '生成服务暂不可用，请联系管理员' })
+      if (!account) {
+        // State the real reason (empty pool / cooling down / disabled) instead of
+        // a generic "unavailable", which operators read as a missing account.
+        const available = await accountAvailability('grsai', [], model)
+        return reply.code(503).send({
+          error: publicMediaError(unavailableAccountMessage(publicProviderLabel('grsai'), available, 0)),
+        })
+      }
       const task = await createMediaTask(key, account, body, requested)
       return reply.code(task.status === 'failed' || task.status === 'violation' ? 502 : 202).send(publicMediaTask(task))
     } catch (error) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { internalKeyProviders, publicKeyProviders, publicMediaError, publicModelProvider } from './publicIdentity'
+import { internalKeyProviders, publicKeyProviders, publicMediaError, publicModelProvider, publicProviderLabel } from './publicIdentity'
 
 describe('public media identity', () => {
   it('keeps concrete upstream scopes private without changing their permissions', () => {
@@ -19,5 +19,12 @@ describe('public media identity', () => {
     const message = publicMediaError('GrsAI failed at https://grsaiapi.com Bearer sk-abcdefghijkl')
     expect(message).not.toMatch(/grsai|sk-abcdefghijkl|https:/i)
     expect(publicMediaError('duration must be at most 10 seconds')).toBe('duration must be at most 10 seconds')
+  })
+  it('names a provider in Chinese for account-status messages, keeping unknown ids actionable', () => {
+    expect(publicProviderLabel('grsai')).toBe('生成服务')
+    expect(publicProviderLabel('claude')).toBe('Claude')
+    // The Chinese label must survive the gsai-name redaction applied on the way out.
+    expect(publicMediaError(`${publicProviderLabel('grsai')}账号正在冷却中`)).toBe('生成服务账号正在冷却中')
+    expect(publicProviderLabel('some-new-provider')).toBe('some-new-provider')
   })
 })

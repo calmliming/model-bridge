@@ -215,6 +215,103 @@ export function modelCooldownUntil(metadata: unknown, model: string): number | n
   return typeof family === 'number' && Number.isFinite(family) ? family : null
 }
 
+export interface AccountAvailability {
+  total: number
+  active: number
+  cooling: number
+  disabled: number
+  /** Accounts currently cooling that are also already spent for this request. */
+  coolingSticky: number
+  /** Earliest future `cooldownUntil` among cooling accounts, or null. */
+  earliestCooldownUntil: number | null
+}
+
+/**
+ * Buckets every configured account of a provider by why it is (un)available.
+ *
+ * `pickAccount` only answers yes/no, so a caller that finds nothing cannot tell
+ * an empty pool from one that is merely cooling down. Callers use this to say
+ * which one it is — reporting "no account configured" while the account is
+ * present but cooling sends operators to look at settings that are already
+ * correct. Must run after `pickAccount` so `clearExpiredAccountCooldowns` has
+ * already released expired entries.
+ *
+ * `model` adds the same model-scoped cooldown filter `pickAccount` applies.
+ */
+export async function accountAvailability(
+  provider: string,
+  exclude: string[] = [],
+  model?: string | null,
+  now = Date.now(),
+): Promise<AccountAvailability> {
+  const rows = await db
+    .select({
+      id: accounts.id,
+      status: accounts.status,
+      cooldownUntil: accounts.cooldownUntil,
+      metadata: accounts.metadata,
+    })
+    .from(accounts)
+    .where(eq(accounts.provider, provider))
+
+  const summary: AccountAvailability = {
+    total: rows.length,
+    active: 0,
+    cooling: 0,
+    disabled: 0,
+    coolingSticky: 0,
+    earliestCooldownUntil: null,
+  }
+  for (const row of rows) {
+    if (row.status === 'disabled') {
+      summary.disabled += 1
+      continue
+    }
+    const modelUntil = modelCooldownUntil(row.metadata, model ?? '') ?? 0
+    const coolingUntil = Math.max(row.cooldownUntil ?? 0, modelUntil) || null
+    if (coolingUntil && coolingUntil > now) {
+      summary.cooling += 1
+      if (exclude.includes(row.id)) summary.coolingSticky += 1
+      summary.earliestCooldownUntil = summary.earliestCooldownUntil === null
+        ? coolingUntil
+        : Math.min(summary.earliestCooldownUntil, coolingUntil)
+      continue
+    }
+    summary.active += 1
+  }
+  return summary
+}
+
+/** "（还有 42 秒）" for a cooldown that is about to expire, plus the count. */
+function coolingDetail(summary: AccountAvailability, now: number): string {
+  const seconds = summary.earliestCooldownUntil === null
+    ? null
+    : Math.max(1, Math.round((summary.earliestCooldownUntil - now) / 1000))
+  const count = `共 ${summary.cooling} 个`
+  return seconds === null ? count : `${count}，最快约 ${seconds} 秒后恢复`
+}
+
+/**
+ * Customer-facing explanation for an empty `pickAccount` result: names the
+ * provider, the reason, and when to retry, so the message never reads as
+ * operator misconfiguration when the pool is simply cooling down.
+ */
+export function unavailableAccountMessage(
+  providerLabel: string,
+  summary: AccountAvailability,
+  triedCount: number,
+  now = Date.now(),
+): string {
+  if (summary.total === 0) return `no ${providerLabel} account configured`
+  if (summary.disabled === summary.total) return `all ${providerLabel} accounts are disabled`
+  if (summary.cooling > 0 && summary.active === 0) {
+    return `${providerLabel}账号正在冷却中（${coolingDetail(summary, now)}），请稍后重试`
+  }
+  if (triedCount > 0) return `all ${providerLabel} accounts are unavailable`
+  return `no available ${providerLabel} account`
+}
+
+
 /** Shares one cooldown across Fable, Codex Spark, and GPT Image model aliases. */
 export function canonicalModelCooldownKey(model: string): string {
   const normalized = model.trim().toLowerCase()
