@@ -143,6 +143,25 @@ const MAX_ATTEMPTS = 3
 // only this brief back-off instead of the multi-minute OAuth cooldown, so a
 // single in-group sub2api account doesn't blank the pool for minutes.
 const RELAY_TO_RELAY_COOLDOWN_MS = 3_000
+
+// An upstream 5xx that names its own overload ("excessive system load", "busy")
+// is a queue state, not a credential fault: the same account serves the next
+// request a moment later. Give it a short cooldown instead of the minutes-long
+// `error` cooldown, so a single-account channel (GrsAI images) doesn't go dark
+// because the upstream generation queue was momentarily full. Markers are
+// deliberately narrow: a bare "capacity" or "load" also appears in account-level
+// quota messages, which must keep the long cooldown.
+const UPSTREAM_OVERLOAD_COOLDOWN_MS = 30_000
+const UPSTREAM_OVERLOAD_MARKERS = [
+  'excessive system load',
+  'system load',
+  'overloaded',
+  'overload',
+  'server busy',
+  'service busy',
+  'temporarily busy',
+  'try again later',
+]
 const STICKY_SLOT_POLL_MS = 250
 const RATE_LIMIT_MARKERS = [
   'rate_limit',
@@ -1149,6 +1168,16 @@ export async function classifyUpstreamFailure(
     }
   }
   if (response.status >= 500) {
+    const text = await readErrorText(response)
+    // Overload wording => the account is fine, the upstream queue is not.
+    if (upstreamReportsOverload(text)) {
+      return {
+        penalty: 'rate_limited',
+        retryable: true,
+        resetAt: Date.now() + UPSTREAM_OVERLOAD_COOLDOWN_MS,
+        modelScoped: true,
+      }
+    }
     return { penalty: 'error', retryable: true }
   }
   if (response.status === 400 || response.status === 403) {
@@ -1166,6 +1195,16 @@ export async function classifyUpstreamFailure(
     }
   }
   return { penalty: null, retryable: false }
+}
+
+/**
+ * True when a 5xx body blames the upstream's own queue rather than our account
+ * (GrsAI answers `502 {"error":"excessive system load"}` when its image workers
+ * are saturated). Exported for unit testing the short-cooldown branch.
+ */
+export function upstreamReportsOverload(text: string): boolean {
+  const lower = text.toLowerCase()
+  return UPSTREAM_OVERLOAD_MARKERS.some(marker => lower.includes(marker))
 }
 
 /** Relay gateways retry transient backend failures in place, but rotate exhausted credentials. */

@@ -16,6 +16,7 @@ import {
   responsesStreamStatus,
   shouldRetrySameRelayAccount,
   startStreamingResponse,
+  upstreamReportsOverload,
   writeSseEventBlock,
 } from './relay'
 import { parseOpenAIImagesRequest } from '../providers/openai/images'
@@ -164,6 +165,33 @@ describe('classifyUpstreamFailure model scoping', () => {
       status: 429,
       headers,
     })
+
+  it('cools an overloaded upstream briefly instead of blaming the account', async () => {
+    // GrsAI answers this when its image workers are saturated; the account is
+    // fine, so the cooldown must stay short and must not be account-wide.
+    const failure = await classifyUpstreamFailure(
+      'grsai',
+      new Response(JSON.stringify({ error: 'excessive system load' }), { status: 502 }),
+    )
+    expect(failure).toMatchObject({ penalty: 'rate_limited', retryable: true, modelScoped: true })
+    expect(failure.resetAt).toBeGreaterThan(Date.now() + 20_000)
+    expect(failure.resetAt).toBeLessThanOrEqual(Date.now() + 31_000)
+
+    for (const text of ['server busy, retry later', 'upstream overloaded', 'the service is temporarily busy']) {
+      expect(upstreamReportsOverload(text), text).toBe(true)
+    }
+    // Account-level quota wording must keep the long cooldown.
+    expect(upstreamReportsOverload('insufficient capacity for this account')).toBe(false)
+  })
+
+  it('keeps a plain 5xx account-scoped with the standard error cooldown', async () => {
+    const failure = await classifyUpstreamFailure(
+      'grsai',
+      new Response(JSON.stringify({ error: 'bad gateway' }), { status: 502 }),
+    )
+    expect(failure).toMatchObject({ penalty: 'error', retryable: true })
+    expect(failure.resetAt ?? null).toBeNull()
+  })
 
   it('marks an OpenAI 429 without Codex quota headers as model-scoped', async () => {
     const failure = await classifyUpstreamFailure('openai', rateLimited())
