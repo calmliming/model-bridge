@@ -236,12 +236,13 @@ export interface AccountAvailability {
  * correct. Must run after `pickAccount` so `clearExpiredAccountCooldowns` has
  * already released expired entries.
  *
- * `model` adds the same model-scoped cooldown filter `pickAccount` applies.
+ * `model` and `groupId` use the same model cooldown and account pool as `pickAccount`.
  */
 export async function accountAvailability(
   provider: string,
   exclude: string[] = [],
   model?: string | null,
+  groupId: string | null = null,
   now = Date.now(),
 ): Promise<AccountAvailability> {
   const rows = await db
@@ -252,7 +253,14 @@ export async function accountAvailability(
       metadata: accounts.metadata,
     })
     .from(accounts)
-    .where(eq(accounts.provider, provider))
+    .where(and(
+      eq(accounts.provider, provider),
+      groupId
+        ? inArray(accounts.id, db.select({ id: accountGroupMembers.accountId })
+          .from(accountGroupMembers).where(eq(accountGroupMembers.groupId, groupId)))
+        : notExists(db.select({ one: sql`1` }).from(accountGroupMembers)
+          .where(eq(accountGroupMembers.accountId, accounts.id))),
+    ))
 
   const summary: AccountAvailability = {
     total: rows.length,

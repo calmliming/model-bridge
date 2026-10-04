@@ -1178,6 +1178,14 @@ export async function classifyUpstreamFailure(
         modelScoped: true,
       }
     }
+    // A generation gateway timing out does not invalidate the API credential.
+    // Keep a brief model cooldown, while preserving account-level quota pauses.
+    if (provider === 'grsai' && [502, 503, 504].includes(response.status)
+      && !textLooksRateLimited(text) && !textLooksAccountBalanceExhausted(text)
+      && !/insufficient.*(?:credits|points|balance)|积分不足|余额不足/i.test(text)) {
+      return { penalty: 'error', retryable: true, modelScoped: true,
+        resetAt: Date.now() + UPSTREAM_OVERLOAD_COOLDOWN_MS }
+    }
     return { penalty: 'error', retryable: true }
   }
   if (response.status === 400 || response.status === 403) {
@@ -2221,7 +2229,7 @@ async function runRelayLoop(
       // An empty pool and a cooling-down pool are different operational
       // problems: saying "no account configured" while the account exists and
       // is merely in cooldown sends operators to check settings that are fine.
-      const available = await accountAvailability(provider.id, tried, parsed.model)
+      const available = await accountAvailability(provider.id, tried, parsed.model, apiKey.accountGroupId ?? null)
       const unavailableMessage = unavailableAccountMessage(publicProviderLabel(provider.id), available, tried.length)
       await recordUsage({
         apiKeyId: apiKey.id,

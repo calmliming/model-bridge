@@ -26,7 +26,7 @@ vi.mock('../config', async importOriginal => {
 import { db, pool } from '../db/index'
 import { initDb } from '../db/init'
 import { accounts } from '../db/schema'
-import { clearExpiredAccountCooldowns, disableAccount, markAccountUsed, penalizeAccount, penalizeAccountModel } from './scheduler'
+import { accountAvailability, clearExpiredAccountCooldowns, disableAccount, markAccountUsed, penalizeAccount, penalizeAccountModel, pickAccount } from './scheduler'
 import { createGroup, listGroups, updateGroup } from './groups'
 import { accountHealth } from './health'
 import { createApiKey, findApiKeyBySecret } from '../keys/manager'
@@ -90,6 +90,29 @@ describe.runIf(database)('upstream update database regressions', () => {
     expect((await findApiKeyBySecret(key))?.groupAllowedModels).toEqual(['MiniMax-*'])
     await updateGroup(id, { allowedModels: ['claude-*'] })
     expect((await findApiKeyBySecret(key))?.groupAllowedModels).toEqual(['claude-*'])
+  })
+
+  it('diagnoses availability within the same group or default pool as scheduling', async () => {
+    const now = Date.now()
+    const provider = `availability-${randomUUID()}`
+    const defaultId = randomUUID(), coolingId = randomUUID(), otherId = randomUUID()
+    const first = await createGroup({ name: 'availability cooling' })
+    const other = await createGroup({ name: 'availability other' })
+    const empty = await createGroup({ name: 'availability empty' })
+    await db.insert(accounts).values([
+      { id: defaultId, name: 'default', provider },
+      { id: coolingId, name: 'cooling', provider, status: 'error', cooldownUntil: now + 60_000 },
+      { id: otherId, name: 'other', provider },
+    ])
+    await setAccountGroups(coolingId, [first.id])
+    await setAccountGroups(otherId, [other.id])
+    expect((await pickAccount(provider))?.id).toBe(defaultId)
+    expect(await accountAvailability(provider, [], null, null, now)).toMatchObject({ total: 1, active: 1, cooling: 0 })
+    expect(await pickAccount(provider, [], null, first.id)).toBeNull()
+    expect(await accountAvailability(provider, [], null, first.id, now)).toMatchObject({ total: 1, active: 0, cooling: 1, earliestCooldownUntil: now + 60_000 })
+    expect((await pickAccount(provider, [], null, other.id))?.id).toBe(otherId)
+    expect(await accountAvailability(provider, [], null, other.id, now)).toMatchObject({ total: 1, active: 1, cooling: 0 })
+    expect(await accountAvailability(provider, [], null, empty.id, now)).toMatchObject({ total: 0, active: 0, cooling: 0 })
   })
 
   it('does not count client cancellation as provider health degradation', async () => {

@@ -109,7 +109,13 @@ export function parseGrsaiResult(raw: unknown): GrsaiResult {
 async function readResult(response: Response): Promise<GrsaiResult> {
   let raw: unknown
   try { raw = JSON.parse((await boundedBody(response)).toString('utf8')) }
-  catch (error) { if (error instanceof GrsaiUpstreamError) throw error; throw new GrsaiUpstreamError(502, 'GrsAI returned invalid JSON') }
+  catch (error) {
+    if (error instanceof GrsaiUpstreamError) throw error
+    // Reverse proxies often return HTML for 503/504. Preserve the HTTP status
+    // so gateway/authentication failures do not become a misleading JSON 502.
+    throw new GrsaiUpstreamError(response.ok ? 502 : response.status,
+      response.ok ? 'GrsAI returned invalid JSON' : `GrsAI returned HTTP ${response.status}`)
+  }
   // Generation failures may use HTTP 400 and still return a valid terminal task.
   if (response.ok || (raw && typeof raw === 'object' && ['failed', 'violation'].includes((raw as { status: string }).status))) return parseGrsaiResult(raw)
   const message = (raw as { error?: { message?: string } | string; msg?: string } | null)?.error

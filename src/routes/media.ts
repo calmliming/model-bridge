@@ -28,7 +28,7 @@ export function registerMediaRoutes(app: FastifyInstance): void {
       if (!account) {
         // State the real reason (empty pool / cooling down / disabled) instead of
         // a generic "unavailable", which operators read as a missing account.
-        const available = await accountAvailability('grsai', [], model)
+        const available = await accountAvailability('grsai', [], model, key.accountGroupId ?? null)
         return reply.code(503).send({
           error: publicMediaError(unavailableAccountMessage(publicProviderLabel('grsai'), available, 0)),
         })

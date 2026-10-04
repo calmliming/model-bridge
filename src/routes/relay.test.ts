@@ -186,11 +186,23 @@ describe('classifyUpstreamFailure model scoping', () => {
 
   it('keeps a plain 5xx account-scoped with the standard error cooldown', async () => {
     const failure = await classifyUpstreamFailure(
-      'grsai',
+      'openai',
       new Response(JSON.stringify({ error: 'bad gateway' }), { status: 502 }),
     )
     expect(failure).toMatchObject({ penalty: 'error', retryable: true })
     expect(failure.resetAt ?? null).toBeNull()
+  })
+
+  it('briefly cools only the image model after a GrsAI proxy failure', async () => {
+    for (const status of [502, 503, 504]) {
+      const failure = await classifyUpstreamFailure('grsai', Response.json({ error: 'bad gateway' }, { status }), 'gpt-image-2')
+      expect(failure).toMatchObject({ penalty: 'error', modelScoped: true, retryable: true })
+      expect(failure.resetAt).toBeGreaterThan(Date.now() + 20_000)
+      expect(failure.resetAt).toBeLessThanOrEqual(Date.now() + 31_000)
+    }
+    const quota = await classifyUpstreamFailure('grsai', Response.json({ error: 'insufficient credits' }, { status: 502 }))
+    expect(quota.modelScoped).not.toBe(true)
+    expect(quota.resetAt ?? null).toBeNull()
   })
 
   it('marks an OpenAI 429 without Codex quota headers as model-scoped', async () => {

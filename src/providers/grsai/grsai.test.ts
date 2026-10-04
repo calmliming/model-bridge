@@ -63,6 +63,13 @@ describe('GrsAI transport', () => {
     mocks.fetch.mockResolvedValueOnce(Response.json({ error: { message: 'Bearer sk-abcdefghijkl https://secret.example.com' } }, { status: 401 }))
     await expect(generateGrsai('secret', parseGrsaiGenerateRequest(video))).rejects.toThrow('Bearer [redacted] [redacted-url]')
   })
+  it('preserves proxy HTTP errors when the response is HTML and never retries generation', async () => {
+    for (const status of [401, 503, 504]) {
+      mocks.fetch.mockResolvedValueOnce(new Response('<!DOCTYPE html><html>proxy error</html>', { status }))
+      await expect(generateGrsai('secret', parseGrsaiGenerateRequest(video))).rejects.toMatchObject({ statusCode: status })
+    }
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+  })
   it('returns compatible URL responses and completion SSE, without downloading media', async () => {
     mocks.fetch.mockImplementation(async () => Response.json(completed))
     const json = await relayGrsaiImages('secret', image())
