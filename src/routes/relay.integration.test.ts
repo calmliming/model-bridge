@@ -1170,6 +1170,89 @@ describe('Antigravity through Sub2API', () => {
 
 
 describe('native Antigravity relay', () => {
+  const privateErrorMessage = 'Permission denied for projects/private-project-42; '
+    + 'pool-bot@private-project-42.iam.gserviceaccount.com; consumer: 123456789012; '
+    + 'project number 987654321012; https://internal.example/error?key=private-key'
+  const privateError = (code: number) => ({ error: { code, message: privateErrorMessage,
+    status: code === 429 ? 'RESOURCE_EXHAUSTED' : code === 400 ? 'INVALID_ARGUMENT' : 'PERMISSION_DENIED',
+    details: [{ metadata: { consumer: 'projects/private-project-42', serviceAccount: 'pool-bot@private-project-42.iam.gserviceaccount.com',
+      internalOnly: 'private-details-value' } }] } })
+  function expectNoAccountIdentity(text: string) {
+    for (const privateValue of ['private-project-42', 'gserviceaccount.com', '123456789012', '987654321012',
+      'internal.example', 'private-key', 'private-details-value']) expect(text).not.toContain(privateValue)
+  }
+  const errorEndpoints = [
+    { protocol: 'Messages', stream: false, url: '/api/antigravity/v1/messages' },
+    { protocol: 'Messages', stream: true, url: '/v1/messages' },
+    { protocol: 'Gemini', stream: false, url: '/api/antigravity/v1beta/models/gemini-3.8-flash:generateContent' },
+    { protocol: 'Gemini', stream: true, url: '/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse' },
+  ]
+
+  it.each(errorEndpoints.flatMap(endpoint => [400, 403, 429].map(status => ({ ...endpoint, status }))))(
+    'sanitizes HTTP $status errors for $protocol, stream=$stream', ({ protocol, stream, url, status }) => withRelay(async request => {
+      mocks.key.allowedProviders = ['antigravity']
+      mocks.accounts = [1, 2, 3].map(n => ({ id: `account-${n}`, concurrencyLimit: null, metadata: { project: 'private-project-42' } }))
+      mocks.fetch.mockImplementation(async () => Response.json(privateError(status), { status }))
+      const response = await request(protocol === 'Messages'
+        ? { model: 'claude-sonnet-5', messages: [], stream } : { contents: [], stream }, url)
+      expect(response.status).toBe(status)
+      expect(response.contentType).toContain('application/json')
+      const body = JSON.parse(response.body)
+      expect(body.error.message).toContain('Permission denied')
+      expect(body.error.details).toBeUndefined()
+      if (protocol === 'Gemini') expect(body.error).toMatchObject({ code: status, status: privateError(status).error.status })
+      else expect(body).toMatchObject({ type: 'error', error: { type: 'upstream_error', code: privateError(status).error.status } })
+      expectNoAccountIdentity(response.body)
+      expect(mocks.logs).toHaveLength(1)
+      expect(mocks.logs[0]?.[22]).toBe('error')
+      expect(mocks.logs[0]?.[25]).toBe(status)
+      expectNoAccountIdentity(String(mocks.logs[0]?.[24]))
+    }),
+  )
+
+  it('returns valid sanitized JSON for a non-JSON HTTP error on a streaming request', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'private-project-42' }
+    mocks.fetch.mockImplementation(async () => new Response(privateErrorMessage, { status: 403, headers: { 'content-type': 'text/plain' } }))
+    const response = await request({ model: 'claude-sonnet-5', messages: [], stream: true }, '/v1/messages')
+    expect(response.status).toBe(403)
+    expect(JSON.parse(response.body)).toMatchObject({ type: 'error', error: { code: 'upstream_403' } })
+    expectNoAccountIdentity(response.body)
+  }))
+
+  it.each([false, true])('sanitizes embedded Gemini errors without losing billable usage, stream=%s', stream => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'private-project-42' }
+    const response = { ...privateError(403), project: 'private-project-42',
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 5, cachedContentTokenCount: 20, thoughtsTokenCount: 3 } }
+    mocks.fetch.mockImplementation(async () => stream
+      ? new Response(`: private-project-42\n\ndata: ${JSON.stringify({ response }, null, 2).split('\n').join('\ndata: ')}\n\n`
+        + `data: malformed private-project-42 pool-bot@private-project-42.iam.gserviceaccount.com\n\n`,
+      { headers: { 'content-type': 'text/event-stream' } })
+      : Response.json({ response }))
+    const result = await request({ contents: [] }, `/api/antigravity/v1beta/models/gemini-3.8-flash:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`)
+    expect(result.status).toBe(200)
+    expect(result.body).toContain('PERMISSION_DENIED')
+    expect(result.body).not.toContain('details')
+    expectNoAccountIdentity(result.body)
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+    expect(mocks.logs[0]?.slice(9, 12)).toEqual([80, 8, 3])
+    expectNoAccountIdentity(String(mocks.logs[0]?.[24]))
+  }))
+
+  it('sanitizes a final Gemini error frame without a trailing separator', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'private-project-42' }
+    mocks.fetch.mockImplementation(async () => new Response(`data: ${JSON.stringify({ response: privateError(403) })}`,
+      { headers: { 'content-type': 'text/event-stream' } }))
+    const response = await request({ contents: [] }, '/v1beta/models/gemini-3.8-flash:streamGenerateContent')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('PERMISSION_DENIED')
+    expectNoAccountIdentity(response.body)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+
   it('provides a guarded local token preflight without consuming Google quota', () => withRelay(async request => {
     mocks.key.allowedProviders = ['antigravity']
     const result = await request({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Estimate this request' }] }, '/api/antigravity/v1/messages/count_tokens')

@@ -103,6 +103,7 @@ import * as kimiResponsesUsage from '../providers/kimi/responses-usage'
 import { createKimiResponsesStreamTransform } from '../providers/kimi/stream'
 import { mapModel as mapKimiResponsesModel } from '../providers/kimi/converter'
 import { relayAntigravity } from '../providers/antigravity/relay'
+import { antigravityClientError, sanitizeAntigravityResponse, sanitizeAntigravitySseBlock } from '../providers/antigravity/errors'
 import { messagesToGemini, prepareAntigravityGemini, AntigravityRequestError } from '../providers/antigravity/converter'
 import {
   createAntigravityUsageParser, parseAntigravityUsage, createAntigravityMessagesTransform, antigravitySseToMessages, antigravityJsonToMessages,
@@ -429,7 +430,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     classifyBufferedFailure: classifyAntigravityBufferedFailure,
     createStreamParser: geminiUsage.createStreamParser,
     parseJsonUsage: geminiUsage.parseJsonUsage,
-    transformEventData: unwrapResponseEnvelope,
+    transformEventData: sanitizeAntigravityResponse,
   },
   deepseek: {
     id: 'deepseek',
@@ -2665,6 +2666,9 @@ async function sendStreaming(
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
+  if (provider.id === 'antigravity' && !upstream.ok) {
+    return sendAntigravityUpstreamError(reply, upstream, meta, provider)
+  }
   if (provider.createStreamParser().failure && isNonStreamContentType(upstream.headers.get('content-type'))) {
     return sendBuffered(reply, upstream, meta, provider)
   }
@@ -2871,9 +2875,11 @@ async function sendStreaming(
           // Event-buffered: only emit complete events, rewriting payloads.
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
+            const block = provider.id === 'antigravity'
+              ? sanitizeAntigravitySseBlock(buffer.slice(0, sep)) : buffer.slice(0, sep)
             const wrote = rewriteAndEmit(
               downstreamClosed ? null : raw,
-              omitComments ? withoutSseComments(buffer.slice(0, sep)) : buffer.slice(0, sep),
+              omitComments ? withoutSseComments(block) : block,
               transform,
               parser,
               markFirstToken,
@@ -2930,6 +2936,7 @@ async function sendStreaming(
   // customary blank separator. Preserve that final event instead of dropping
   // it while still keeping the normal event-level write path.
   if (sseOutput && buffer.trim()) {
+    if (provider.id === 'antigravity' && !streamTransform) buffer = sanitizeAntigravitySseBlock(buffer)
     if (omitComments) buffer = withoutSseComments(buffer)
     if (streamTransform) {
       if (!emitFromStreamTransform(downstreamClosed ? null : raw, buffer, streamTransform, parser,
@@ -3138,6 +3145,34 @@ async function sendSanitizedRelayError(
   await usageWrite
 }
 
+/** Native Google errors must not expose the identities behind the account pool. */
+async function sendAntigravityUpstreamError(
+  reply: FastifyReply,
+  upstream: Response,
+  meta: RelayMeta,
+  provider: ProviderHandler,
+): Promise<void> {
+  const text = await upstream.text().catch(() => '')
+  reply.log.warn({ accountId: meta.accountId, upstreamStatus: upstream.status, upstreamError: text.slice(0, 2_000) },
+    'Antigravity upstream error')
+  let payload: unknown = text
+  try { payload = JSON.parse(text) } catch { /* Non-JSON upstream failures also need a valid error envelope. */ }
+  const body = antigravityClientError(payload, upstream.status)
+  const locationUnsupported = isGoogleLocationUnsupported(upstream.status, text)
+  if (locationUnsupported) body.error.message = googleErrorMessage(upstream.status, text)
+  const code = locationUnsupported ? 'google_location_unsupported' : body.error.status ?? `upstream_${upstream.status}`
+  await recordUsage({
+    ...meta,
+    requestStartedAt: meta.startedAt,
+    usage: { ...parseAntigravityUsage(sanitizeAntigravityResponse(payload)), usageSource: jsonUsageSource(payload) },
+    status: 'error', errorCode: code, errorMessage: body.error.message,
+    upstreamStatus: upstream.status, latencyMs: Date.now() - meta.startedAt,
+  })
+  await reply.code(upstream.status).send(provider.geminiProtocol ? body : {
+    type: 'error', error: { type: 'upstream_error', code, message: body.error.message },
+  })
+}
+
 /** Extracts a displayable error code + message from an upstream error body. */
 function extractUpstreamError(text: string, status: number): { code: string; message: string } {
   if (isGoogleLocationUnsupported(status, text)) return { code: 'google_location_unsupported', message: googleErrorMessage(status, text) }
@@ -3164,6 +3199,9 @@ async function sendBuffered(
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
+  if (provider.id === 'antigravity' && !upstream.ok) {
+    return sendAntigravityUpstreamError(reply, upstream, meta, provider)
+  }
   const contentType = upstream.headers.get('content-type') ?? 'application/json'
   const bufferResponse = contentType.includes('text/event-stream') ? provider.bufferSseResponse : provider.bufferJsonResponse
   if (bufferResponse) {
