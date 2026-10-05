@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MODEL_CATALOG, PROVIDERS, resolveModelPrice } from './src/catalog/modelCatalog'
+import { MODEL_CATALOG, PROVIDERS, resolveModelPrice, withAutoSurfacedModels } from './src/catalog/modelCatalog'
 
 function model(id: string) {
   const found = MODEL_CATALOG.find((item) => item.id === id)
@@ -76,10 +76,23 @@ describe('DeepSeek catalog pricing schedule', () => {
 })
 
 describe('current provider model catalog', () => {
-  it('lists media models once under our brand without a channel name', () => {
-    const media = MODEL_CATALOG.filter(model => model.provider === 'modelbridge')
-    expect(PROVIDERS.modelbridge.label).toBe('Model Bridge')
+  it('lists media models once by manufacturer while keeping the public supply channel', () => {
+    const media = MODEL_CATALOG.filter(model => model.channel === 'modelbridge')
     expect(media.map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2-vip', 'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'minimax-h3'])
+    expect(media.filter(model => model.image).every(model => model.provider === 'openai')).toBe(true)
+    expect(model('minimax-h3').provider).toBe('minimax')
+    expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(13)
+    expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(5)
+    expect(MODEL_CATALOG).toHaveLength(59)
+    expect(MODEL_CATALOG.filter(model => model.image)).toEqual(media.filter(model => model.image))
+    // Price refreshes must not restore native snapshots or image aliases, but
+    // discovering new text models should continue to work.
+    const refreshed = withAutoSurfacedModels(Object.fromEntries([
+      'gpt-image-2.5-flare-2026-09-08', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-3', 'gpt-new-text-model',
+    ].map(id => [id, { inputPrice: 5, outputPrice: 30 }])))
+    expect(refreshed.catalog.filter(model => model.id.startsWith('gpt-image-'))).toEqual(media.filter(model => model.image))
+    expect(refreshed.autoSurfacedIds).toEqual(['gpt-new-text-model'])
+    expect(Object.values(PROVIDERS).some(provider => provider.label === 'Model Bridge')).toBe(false)
     expect(JSON.stringify({ models: MODEL_CATALOG, providers: PROVIDERS })).not.toMatch(/grsai|第三方供应商/i)
     expect(new Set(MODEL_CATALOG.map(model => model.id)).size).toBe(MODEL_CATALOG.length)
   })

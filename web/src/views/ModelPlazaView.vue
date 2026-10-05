@@ -47,10 +47,8 @@ onUnmounted(() => {
   if (priceClockTimer) clearInterval(priceClockTimer)
 })
 
-// Vendor filter chips. Media models are our own listed inventory rather than a
-// third-party vendor, so the Model Bridge brand gets no chip: those models stay
-// reachable under 全部 and the image / video categories.
-const providerList = Object.values(PROVIDERS).filter((provider) => provider.id !== 'modelbridge')
+// Filter by model manufacturer; the supply channel is shown on media cards.
+const providerList = Object.values(PROVIDERS)
 
 const categoryTabs = [{ key: 'all', label: '全部' }, ...CATEGORIES]
 const categoryLabel = (key: string) => CATEGORIES.find((c) => c.key === key)?.label ?? key
@@ -67,7 +65,7 @@ const filtered = computed(() => {
     if (activeCategory.value !== 'all' && !m.categories.includes(activeCategory.value)) return false
     if (activeProvider.value !== 'all' && m.provider !== activeProvider.value) return false
     if (kw) {
-      const haystack = `${m.name} ${m.id} ${PROVIDERS[m.provider].label} ${m.tags.join(' ')} ${m.description}`.toLowerCase()
+      const haystack = `${m.name} ${m.id} ${PROVIDERS[m.provider].label} ${mediaBillingLabel(m)} ${m.tags.join(' ')} ${m.description}`.toLowerCase()
       if (!haystack.includes(kw)) return false
     }
     return true
@@ -99,6 +97,11 @@ function pricePeriodLabel(period: ResolvedModelPrice['period']): string {
 
 function badgeLabel(badge: PlazaModel['badge']): string {
   return badge === 'new' ? 'NEW' : '推荐'
+}
+
+function mediaBillingLabel(model: PlazaModel): string {
+  if (model.channel === 'modelbridge') return `Model Bridge · ${model.video ? '按秒计费' : '按次计费'}`
+  return ''
 }
 
 function callExample(model: PlazaModel): string {
@@ -272,6 +275,12 @@ function openDetail(model: PlazaModel) {
 
         <div class="mt-3 flex flex-wrap gap-1.5">
           <span
+            v-if="mediaBillingLabel(model)"
+            class="rounded-md bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-600 dark:bg-primary-500/10 dark:text-primary-300"
+          >
+            {{ mediaBillingLabel(model) }}
+          </span>
+          <span
             v-for="tag in model.tags"
             :key="tag"
             class="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-dark-800 dark:text-dark-300"
@@ -337,6 +346,9 @@ function openDetail(model: PlazaModel) {
         </p>
 
         <div class="flex flex-wrap gap-1.5">
+          <UiTag v-if="mediaBillingLabel(selected)" size="small" type="primary" :bordered="false">
+            {{ mediaBillingLabel(selected) }}
+          </UiTag>
           <UiTag
             v-for="cat in selected.categories"
             :key="cat"

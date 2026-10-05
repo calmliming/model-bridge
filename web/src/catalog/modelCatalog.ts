@@ -8,7 +8,7 @@
  * for a fetch that returns the same `PlazaModel` shape.
  */
 
-export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok' | 'modelbridge'
+export type ProviderId = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'minimax' | 'grok'
 
 export interface ProviderMeta {
   id: ProviderId
@@ -39,7 +39,10 @@ export interface PlazaModel {
   id: string
   /** Human-friendly display name. */
   name: string
+  /** Model manufacturer, independent of the channel serving the request. */
   provider: ProviderId
+  /** Public supply channel for the platform's listed media inventory. */
+  channel?: 'modelbridge'
   /** Category keys this model belongs to (see CATEGORIES). */
   categories: string[]
   /** Capability chips shown on the card. */
@@ -128,7 +131,6 @@ export function resolveModelPrice(model: PlazaModel, atMs = Date.now()): Resolve
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderMeta> = {
-  modelbridge: { id: 'modelbridge', label: 'Model Bridge', initials: 'MB', chipClass: 'bg-primary-100 text-primary-600 dark:bg-primary-500/15 dark:text-primary-300' },
   claude: {
     id: 'claude',
     label: 'Anthropic',
@@ -238,13 +240,13 @@ function deepseekPriceSchedule(offPeak: ModelTokenPrice, peak: ModelTokenPrice, 
 export const MODEL_CATALOG: PlazaModel[] = ([
   ...Object.entries({ 'gpt-image-2': 0.0042, 'gpt-image-2-vip': 0.014, 'gpt-image-2.5': 0.0042,
     'gpt-image-2.5-flare': 0.014, 'gpt-image-2.5-sunburst': 0.0168 }).map(([id, imageRequestPrice]): PlazaModel => ({
-      id, name: id.replace('gpt-image-', 'GPT Image ').replaceAll('-', ' '), provider: 'modelbridge', image: true, categories: ['image', 'multimodal'],
-      tags: ['图像生成', '按次计费', '生成 / 编辑'],
+      id, name: id.replace('gpt-image-', 'GPT Image ').replaceAll('-', ' '), provider: 'openai', channel: 'modelbridge', image: true, categories: ['image', 'multimodal'],
+      tags: ['图像生成', '生成 / 编辑'],
       description: 'GPT 图片生成和编辑，支持图片接口及异步任务。成功后按次计费。',
       context: ['gpt-image-2', 'gpt-image-2.5'].includes(id) ? '1K' : '1K–4K',
       inputPrice: 0, outputPrice: 0, imageRequestPrice,
     })),
-  { id: 'minimax-h3', name: 'MiniMax H3', provider: 'modelbridge', video: true,
+  { id: 'minimax-h3', name: 'MiniMax H3', provider: 'minimax', channel: 'modelbridge', video: true,
     categories: ['video', 'multimodal'], tags: ['文生视频', '参考图 / 音频', '异步生成'],
     description: '支持 480p / 768p / 1080p，1–15 秒；1080p 最多 10 秒。支持最多 9 张参考图和 3 段参考音频，成功后按分辨率和时长计费。',
     context: '1–15 秒', inputPrice: 0, outputPrice: 0,
@@ -349,57 +351,6 @@ export const MODEL_CATALOG: PlazaModel[] = ([
   },
 
   // --- OpenAI --------------------------------------------------------------
-  ...(['flare', 'sunburst'] as const).map((variant) => ({
-    id: `gpt-image-2.5-${variant}`,
-    name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'}`,
-    provider: 'openai' as const,
-    image: true,
-    categories: ['image', 'multimodal'],
-    tags: ['原生生图', '图片编辑', '透明背景'],
-    description: variant === 'flare' ? '适合快速日常生图；支持 xhigh、max 品质及自定义尺寸。' : '适合精细图片编辑；支持透明背景、xhigh 与 max 品质。',
-    context: '≤3840 px',
-    inputPrice: 5,
-    outputPrice: 0,
-    cacheReadPrice: 1.25,
-    imageInputPrice: 8,
-    imageCacheReadPrice: 2,
-    imageOutputPrice: 30,
-    badge: 'new' as const
-  })),
-  {
-    // 第一代原生图片模型，仍可选，但已被 2.5 系列取代。
-    id: 'gpt-image-2',
-    name: 'GPT Image 2',
-    provider: 'openai',
-    image: true,
-    categories: ['image', 'multimodal'],
-    tags: ['原生生图', '图片编辑'],
-    description: '第一代原生图片模型；建议优先使用 2.5 系列（Flare / Sunburst）。',
-    context: '≤3840 px',
-    inputPrice: 5,
-    outputPrice: 10,
-    cacheReadPrice: 1.25,
-    imageInputPrice: 8,
-    imageCacheReadPrice: 1.25,
-    imageOutputPrice: 30
-  },
-  // 带日期的快照别名：价格与同名的浮动别名一致，仅 id 不同。
-  ...(['flare', 'sunburst'] as const).map((variant) => ({
-    id: `gpt-image-2.5-${variant}-2026-09-08`,
-    name: `GPT Image 2.5 ${variant === 'flare' ? 'Flare' : 'Sunburst'} (2026-09-08)`,
-    provider: 'openai' as const,
-    image: true,
-    categories: ['image', 'multimodal'],
-    tags: ['快照版本', '原生生图', '可复现'],
-    description: '固定日期的快照模型，适合需要长期复现同一输出的场景；能力与浮动别名相同。',
-    context: '≤3840 px',
-    inputPrice: 5,
-    outputPrice: 0,
-    cacheReadPrice: 1.25,
-    imageInputPrice: 8,
-    imageCacheReadPrice: 2,
-    imageOutputPrice: 30
-  })),
   {
     id: 'gpt-6.1-sol',
     name: 'GPT-6.1 Sol',
@@ -968,7 +919,7 @@ export const MODEL_CATALOG: PlazaModel[] = ([
 ] satisfies PlazaModel[]).filter((model, index, catalog) => catalog.findIndex(candidate => candidate.id === model.id) === index)
 
 /**
- * 从模型 id 推断服务商，与服务端 inferProviderForModel 保持同一套前缀规则。
+ * 从模型 id 推断模型厂商，仅用于广场归类，与实际供给渠道分开。
  *
  * 广场列表来自上面的静态常量，所以上游新发布的模型不会自动出现。这个函数
  * 用于给「已定价但静态表里没有」的模型补一个服务商归属。只认前缀，
@@ -976,7 +927,6 @@ export const MODEL_CATALOG: PlazaModel[] = ([
  */
 export function inferProviderFromModelId(id: string): ProviderId | null {
   const lower = id.toLowerCase()
-  if (lower === 'minimax-h3' || lower === 'gpt-image-2-vip' || lower === 'gpt-image-2.5') return 'modelbridge'
   if (lower.startsWith('claude-')) return 'claude'
   if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) return 'openai'
   if (lower.startsWith('gemini-')) return 'gemini'
@@ -1005,7 +955,9 @@ export function withAutoSurfacedModels(
   const known = new Set(staticCatalog.map((m) => m.id))
   const extra: PlazaModel[] = []
   for (const id of Object.keys(livePrices).sort()) {
-    if (known.has(id)) continue
+    // The plaza offers the five platform-supplied image models only. Native
+    // image aliases and snapshots may have prices, but must not reappear here.
+    if (known.has(id) || id.toLowerCase().startsWith('gpt-image-')) continue
     const provider = inferProviderFromModelId(id)
     if (!provider) continue
     extra.push({

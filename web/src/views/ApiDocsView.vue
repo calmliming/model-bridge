@@ -1342,7 +1342,7 @@ anthropic-version: 2023-06-01</code></pre>
           <section class="article-section">
             <h2>响应示例</h2>
             <div class="code-shell"><button type="button" class="copy-code" @click="copy(modelsResponse)">复制 JSON</button><pre><code>{{ modelsResponse }}</code></pre></div>
-            <p class="doc-note">图片与视频模型统一归属 <code>modelbridge</code>，模型名与调用方式保持不变；具体上游渠道只在后台配置中可见。</p>
+            <p class="doc-note">图片与视频接口中的 <code>owned_by: modelbridge</code> 表示 Model Bridge 供给渠道；模型广场按模型厂商归类，GPT Image 归属 OpenAI，MiniMax H3 归属 MiniMax。模型名与调用方式保持不变。</p>
           </section>
 
           <UiAlert type="info" title="调用前需要有效额度">
