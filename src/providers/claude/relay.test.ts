@@ -85,6 +85,57 @@ describe('normalizeClaudeMessagesBody', () => {
     expect(body.system).toEqual(system)
   })
 
+  it('raises the relay breakpoint to 1h when a later message breakpoint uses 1h', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: 'client prompt',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'long doc', cache_control: { type: 'ephemeral', ttl: '1h' } }] }],
+    })
+
+    expect(body.system).toEqual([
+      { type: 'text', text: IDENTITY },
+      { type: 'text', text: 'client prompt', cache_control: { type: 'ephemeral', ttl: '1h' } },
+    ])
+  })
+
+  it('finds 1h breakpoints inside tool_result content', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: 'client prompt',
+      messages: [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1',
+        content: [{ type: 'text', text: 'result', cache_control: { type: 'ephemeral', ttl: '1h' } }] }] }],
+    })
+
+    expect((body.system as Array<Record<string, unknown>>)[1]?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' })
+  })
+
+  it('keeps the 5m relay breakpoint when only tools use 1h', () => {
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: 'client prompt',
+      tools: [{ name: 'lookup', input_schema: { type: 'object' }, cache_control: { type: 'ephemeral', ttl: '1h' } }],
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+
+    expect((body.system as Array<Record<string, unknown>>)[1]?.cache_control).toEqual({ type: 'ephemeral' })
+  })
+
+  it('does not add a fifth breakpoint when the client already uses four', () => {
+    const marked = { type: 'ephemeral' }
+    const body = normalizeClaudeMessagesBody({
+      model: 'claude-sonnet-5',
+      system: 'client prompt',
+      tools: [{ name: 'lookup', input_schema: { type: 'object' }, cache_control: marked }],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'a', cache_control: marked }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'b', cache_control: marked }] },
+        { role: 'user', content: [{ type: 'text', text: 'c', cache_control: marked }] },
+      ],
+    })
+
+    expect(body.system).toEqual([{ type: 'text', text: IDENTITY }, { type: 'text', text: 'client prompt' }])
+  })
+
   it('never places the relay breakpoint on a billing-header block', () => {
     const body = normalizeClaudeMessagesBody({
       model: 'claude-sonnet-4-5',

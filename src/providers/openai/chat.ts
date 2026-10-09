@@ -203,6 +203,15 @@ function convertChatToolCall(toolCall: ChatToolCall): Record<string, unknown> | 
   }
 }
 
+/** Chat nests a forced function as `{type, function: {name}}`; Responses expects `{type, name}`. */
+function convertToolChoice(choice: unknown): unknown {
+  if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return choice
+  const named = choice as { type?: unknown; name?: unknown; function?: { name?: unknown } }
+  if (named.type !== 'function' || typeof named.name === 'string') return choice
+  const name = named.function?.name
+  return typeof name === 'string' && name ? { type: 'function', name } : choice
+}
+
 function convertTool(tool: ChatTool): Record<string, unknown> | null {
   if (tool.type !== 'function' || !tool.function?.name) return null
   const parameters =
@@ -291,7 +300,7 @@ export function chatCompletionsToResponses(body: Record<string, unknown>): Recor
   } else if (typeof body.max_tokens === 'number') {
     out.max_output_tokens = body.max_tokens
   }
-  if (body.tool_choice != null) out.tool_choice = body.tool_choice
+  if (body.tool_choice != null) out.tool_choice = convertToolChoice(body.tool_choice)
   if (typeof body.reasoning_effort === 'string') out.reasoning = { effort: body.reasoning_effort }
   for (const field of ['service_tier', 'prompt_cache_key', 'prompt_cache_options', 'safety_identifier']) {
     if (body[field] !== undefined) out[field] = body[field]
@@ -427,6 +436,7 @@ export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTe
     const type = event.type
     if (
       type === 'response.output_text.delta' ||
+      type === 'response.refusal.delta' ||
       type === 'response.output_item.added' ||
       type === 'response.function_call_arguments.delta' ||
       type === 'response.reasoning_summary_text.delta' ||
@@ -471,6 +481,19 @@ function textFromOutputItems(output: ResponsesOutputItem[] | undefined): string 
       if (!part || typeof part !== 'object') continue
       const p = part as { text?: unknown }
       if (typeof p.text === 'string') chunks.push(p.text)
+    }
+  }
+  return chunks.join('')
+}
+
+/** Refusals arrive as `{type: 'refusal', refusal}` content parts, not output_text. */
+function refusalFromOutputItems(output: ResponsesOutputItem[] | undefined): string {
+  const chunks: string[] = []
+  for (const item of output ?? []) {
+    if (!Array.isArray(item.content)) continue
+    for (const part of item.content) {
+      const p = part as { type?: unknown; refusal?: unknown } | null
+      if (p?.type === 'refusal' && typeof p.refusal === 'string') chunks.push(p.refusal)
     }
   }
   return chunks.join('')
@@ -527,6 +550,7 @@ export function responsesSseToChatCompletion(
   let model = fallbackModel
   let created = Math.floor(Date.now() / 1000)
   let content = ''
+  let refusal = ''
   let output: ResponsesOutputItem[] | undefined
   let rawUsage: ResponsesUsage | undefined
   let failure: { code: string; message: string; httpStatus?: number } | undefined
@@ -544,10 +568,14 @@ export function responsesSseToChatCompletion(
     if (e.type === 'response.output_text.delta' && typeof e.delta === 'string') {
       content += e.delta
     }
+    if (e.type === 'response.refusal.delta' && typeof e.delta === 'string') {
+      refusal += e.delta
+    }
     if (e.type === 'response.completed' && e.response) {
       rawUsage = e.response.usage
       output = e.response.output
       if (!content) content = textFromOutputItems(e.response.output)
+      if (!refusal) refusal = refusalFromOutputItems(e.response.output)
     }
     // A mid-stream terminal failure (upstream sent 200 then failed/incomplete).
     // Capture it so we don't return an empty, successful-looking completion.
@@ -558,6 +586,7 @@ export function responsesSseToChatCompletion(
         // completion whose finish_reason says why it stopped (length / filter).
         if (!output && e.response?.output) output = e.response.output
         if (!content) content = textFromOutputItems(e.response?.output)
+        if (!refusal) refusal = refusalFromOutputItems(e.response?.output)
         incompleteFinish = finishReasonFromIncomplete(e.response?.incomplete_details?.reason)
       }
       const err = e.response?.error ?? e.error ?? (e as ResponsesStreamEvent['error'])
@@ -601,7 +630,8 @@ export function responsesSseToChatCompletion(
           index: 0,
           message: {
             role: 'assistant',
-            content: hasToolCalls && !content ? null : content,
+            content: (hasToolCalls || refusal) && !content ? null : content,
+            ...(refusal ? { refusal } : {}),
             ...(hasToolCalls ? { tool_calls: toolCalls } : {}),
           },
           finish_reason: hasToolCalls ? 'tool_calls' : (incompleteFinish ?? 'stop'),
@@ -668,6 +698,9 @@ export function createOpenaiChatCompletionsStreamTransform(): {
 
       if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
         return [chatChunk(state.id, state.created, state.model, roleDelta({ content: event.delta }), null)]
+      }
+      if (event.type === 'response.refusal.delta' && typeof event.delta === 'string') {
+        return [chatChunk(state.id, state.created, state.model, roleDelta({ refusal: event.delta }), null)]
       }
 
       if (event.type === 'response.completed') {

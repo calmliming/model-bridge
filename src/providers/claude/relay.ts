@@ -45,6 +45,9 @@ const STAINLESS_HEADERS: Record<string, string> = {
 }
 
 const CACHE_CONTROL = { type: 'ephemeral' } as const
+const LONG_CACHE_CONTROL = { type: 'ephemeral', ttl: '1h' } as const
+// Anthropic rejects a request with more than four cache_control breakpoints.
+const MAX_CACHE_BREAKPOINTS = 4
 
 // Real Claude Code (2.1.x) sends system[0] as a billing-attribution block:
 //   "x-anthropic-billing-header: cc_version=…; cc_entrypoint=cli; cch=…;"
@@ -306,17 +309,52 @@ function systemHasCacheControl(system: SystemBlock[]): boolean {
  * so a breakpoint there would never be read. Relying on top-level auto
  * cache_control instead places the only breakpoint on the volatile last
  * message, producing cache writes that are never read.
+ *
+ * The client's own tool/message breakpoints still constrain it: the total
+ * must stay within the cap, and a 1h breakpoint may not follow a 5m one.
  */
-function withSystemCacheBreakpoint(system: SystemBlock[]): SystemBlock[] {
+function withSystemCacheBreakpoint(system: SystemBlock[], body: Record<string, unknown>): SystemBlock[] {
+  const client = clientCacheBreakpoints(body)
+  if (client.count >= MAX_CACHE_BREAKPOINTS) return system
+  const cacheControl = client.messagesUseLongTtl ? LONG_CACHE_CONTROL : CACHE_CONTROL
   for (let i = system.length - 1; i >= 0; i--) {
     if (isBillingHeaderBlock(system[i])) continue
     return [
       ...system.slice(0, i),
-      { ...system[i], cache_control: CACHE_CONTROL },
+      { ...system[i], cache_control: cacheControl },
       ...system.slice(i + 1),
     ]
   }
   return system
+}
+
+function cacheControlOf(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const cacheControl = (value as Record<string, unknown>).cache_control
+  return cacheControl && typeof cacheControl === 'object' && !Array.isArray(cacheControl)
+    ? cacheControl as Record<string, unknown>
+    : null
+}
+
+/** Breakpoints the client set on tools and message blocks, including tool_result content. */
+function clientCacheBreakpoints(body: Record<string, unknown>): { count: number; messagesUseLongTtl: boolean } {
+  let count = Array.isArray(body.tools) ? body.tools.filter(tool => cacheControlOf(tool)).length : 0
+  let messagesUseLongTtl = false
+  const visit = (blocks: unknown): void => {
+    if (!Array.isArray(blocks)) return
+    for (const block of blocks) {
+      const cacheControl = cacheControlOf(block)
+      if (cacheControl) {
+        count++
+        if (cacheControl.ttl === '1h') messagesUseLongTtl = true
+      }
+      if (block && typeof block === 'object') visit((block as Record<string, unknown>).content)
+    }
+  }
+  for (const message of Array.isArray(body.messages) ? body.messages : []) {
+    if (message && typeof message === 'object') visit((message as Record<string, unknown>).content)
+  }
+  return { count, messagesUseLongTtl }
 }
 
 /**
@@ -335,7 +373,7 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
   // Skip when the client (e.g. real Claude Code) already manages its own
   // breakpoints, to avoid competing markers / exceeding the 4-breakpoint cap.
   out.system =
-    compatibleBody.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system)
+    compatibleBody.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system, compatibleBody)
   const messages = normalizeMessages(compatibleBody.messages)
   if (messages !== compatibleBody.messages) out.messages = messages
   return out

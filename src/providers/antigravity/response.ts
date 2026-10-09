@@ -5,6 +5,10 @@ import { unwrapResponseEnvelope } from '../gemini/relay'
 import { object } from './client'
 import { rememberToolSignature, type SignatureScope } from './signatures'
 
+// Anthropic always sends `signature` ("" at block start); strict clients such
+// as Grok Build reject a thinking block without the key.
+const THINKING_BLOCK_START = Object.freeze({ type: 'thinking', thinking: '', signature: '' })
+
 function usageFields(usage: UsageData): Record<string, number> {
   return { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens,
     cache_read_input_tokens: usage.cacheReadTokens, cache_creation_input_tokens: usage.cacheCreateTokens }
@@ -81,7 +85,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
             closeBlock(events)
             active = kind
             index++
-            events.push({ type: 'content_block_start', index, content_block: kind === 'thinking' ? { type: 'thinking', thinking: '' } : { type: 'text', text: '' } })
+            events.push({ type: 'content_block_start', index, content_block: kind === 'thinking' ? THINKING_BLOCK_START : { type: 'text', text: '' } })
           }
           if (typeof part.text === 'string' && part.text) events.push({ type: 'content_block_delta', index,
             delta: kind === 'thinking' ? { type: 'thinking_delta', thinking: part.text } : { type: 'text_delta', text: part.text } })
@@ -91,7 +95,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
             index++
             active = 'thinking'
             signature = sig
-            events.push({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } })
+            events.push({ type: 'content_block_start', index, content_block: THINKING_BLOCK_START })
           }
         } else if (Object.keys(part).length) {
           // Do not silently discard an image/audio/server-tool response in Messages.

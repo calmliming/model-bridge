@@ -121,6 +121,16 @@ describe('chatCompletionsToResponses', () => {
     ])
   })
 
+  it('flattens a named Chat tool_choice into the Responses shape', () => {
+    const convert = (tool_choice: unknown) =>
+      chatCompletionsToResponses({ model: 'gpt-5.5', messages: [{ role: 'user', content: 'hi' }], tool_choice }).tool_choice
+
+    expect(convert({ type: 'function', function: { name: 'lookup' } })).toEqual({ type: 'function', name: 'lookup' })
+    expect(convert({ type: 'function', name: 'lookup' })).toEqual({ type: 'function', name: 'lookup' })
+    expect(convert('required')).toBe('required')
+    expect(convert({ type: 'allowed_tools', mode: 'auto', tools: [] })).toEqual({ type: 'allowed_tools', mode: 'auto', tools: [] })
+  })
+
   it('carries chat user isolation into Responses user', () => {
     expect(chatCompletionsToResponses({
       model: 'deepseek-v4-flash',
@@ -166,6 +176,34 @@ describe('responsesSseToChatCompletion', () => {
       cacheCreateTokens: 0,
       cacheReadTokens: 1,
     })
+  })
+
+  it('keeps a streamed refusal as message.refusal', () => {
+    const sse = [
+      'data: {"type":"response.refusal.delta","delta":"I can\'t "}',
+      '',
+      'data: {"type":"response.refusal.delta","delta":"help with that."}',
+      '',
+      'data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"refusal","refusal":"I can\'t help with that."}]}],"usage":{"input_tokens":3,"output_tokens":6}}}',
+      '',
+      '',
+    ].join('\n')
+
+    expect(responsesSseToChatCompletion(sse, 'gpt-5.5').body).toMatchObject({
+      choices: [{ message: { role: 'assistant', content: null, refusal: "I can't help with that." }, finish_reason: 'stop' }],
+    })
+  })
+
+  it('recovers a refusal from the terminal output when no deltas were sent', () => {
+    const sse = [
+      'data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"refusal","refusal":"No."}]}]}}',
+      '',
+      '',
+    ].join('\n')
+
+    const message = (responsesSseToChatCompletion(sse, 'gpt-5.5').body as { choices: Array<{ message: Record<string, unknown> }> })
+      .choices[0]!.message
+    expect(message).toEqual({ role: 'assistant', content: null, refusal: 'No.' })
   })
 
   it('buffers Responses function calls into Chat Completion tool calls', () => {
@@ -329,6 +367,16 @@ describe('createOpenaiChatCompletionsStreamTransform', () => {
       choices: [{ delta: {}, finish_reason: 'stop' }],
     })
     expect(done[1]).toBe('[DONE]')
+  })
+
+  it('rewrites Responses refusal deltas into Chat refusal deltas', () => {
+    const transform = createOpenaiChatCompletionsStreamTransform()
+    const refusal = transform.transform({ type: 'response.refusal.delta', delta: 'No.' })
+    const done = transform.transform({ type: 'response.completed', response: {} })
+
+    expect(refusal[0]).toMatchObject({ choices: [{ delta: { role: 'assistant', refusal: 'No.' }, finish_reason: null }] })
+    expect(done[0]).toMatchObject({ choices: [{ delta: {}, finish_reason: 'stop' }] })
+    expect(transform.status()).toBe('success')
   })
 
   it('rewrites Responses function-call events into Chat Completions tool deltas', () => {

@@ -82,6 +82,17 @@ describe('Antigravity response lifecycle', () => {
     expect(transform.flush()).toEqual([])
   })
 
+  it('always sends the signature key on thinking blocks, even without an upstream signature', () => {
+    const transform = createAntigravityMessagesTransform(scope)
+    const events = transform.transform({ response: { candidates: [{ content: { parts: [{ text: 'unsigned', thought: true }] } }] } })
+    expect(events).toContainEqual({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } })
+
+    const result = antigravitySseToMessages(sse([
+      { candidates: [{ content: { parts: [{ text: 'unsigned', thought: true }, { text: 'done' }] }, finishReason: 'STOP' }], usageMetadata: usage },
+    ]), scope)
+    expect(result.body).toMatchObject({ content: [{ type: 'thinking', thinking: 'unsigned', signature: '' }, { type: 'text', text: 'done' }] })
+  })
+
   it('retains a terminal event without a trailing blank SSE separator', () => {
     const result = antigravitySseToMessages(sse([{ candidates: [{ content: { parts: [{ text: 'done' }] }, finishReason: 'STOP' }], usageMetadata: usage }]).trimEnd(), scope)
     expect(result.body).toMatchObject({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }] })
