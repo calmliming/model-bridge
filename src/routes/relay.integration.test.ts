@@ -692,7 +692,7 @@ describe('upstream request compatibility', () => {
   it.each([
     { provider: 'qwen', model: 'qwen3.8-max', upstream: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' },
     { provider: 'zhipu', model: 'glm-5.3', upstream: 'https://open.bigmodel.cn/api/paas/v4/chat/completions' },
-    { provider: 'xiaomi', model: 'mimo-v2.5', upstream: 'https://api.xiaomimimo.com/v1/chat/completions' },
+    { provider: 'xiaomi', model: 'mimo-v2.6-pro', upstream: 'https://api.xiaomimimo.com/v1/chat/completions' },
     { provider: 'kimi', model: 'kimi-k2.7-code', upstream: 'https://api.moonshot.cn/v1/chat/completions' },
   ])('delivers agent task bodies through the $provider Responses route', ({ provider, model, upstream }) => withRelay(async request => {
     mocks.fetch.mockImplementation(async () => sse([
@@ -738,6 +738,33 @@ describe('mapped provider dispatch', () => {
     expect(response.status).toBe(200)
     expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body).model).toBe('deepseek-flash')
     expect(mocks.logs[0]?.slice(4, 6)).toEqual(['deepseek', 'deepseek-flash'])
+  }))
+
+  it.each([
+    ['/v1/messages', 'mimo-v2.5-pro', 'mimo-v2.6-pro'], ['/api/xiaomi/v1/messages', 'mimo-v2.5', 'mimo-v2.6-flash'],
+    ['/v1/chat/completions', 'mimo-v2.5', 'mimo-v2.6-flash'], ['/api/xiaomi/v1/chat/completions', 'mimo-v2.5-pro', 'mimo-v2.6-pro'],
+    ['/v1/responses', 'mimo-v2.5-pro', 'mimo-v2.6-pro'], ['/api/xiaomi/v1/responses', 'mimo-v2.5', 'mimo-v2.6-flash'],
+  ])('forwards and bills retired MiMo names as their successor at %s', (url, model, successor) => withRelay(async request => {
+    mocks.key.allowedProviders = ['xiaomi']
+    if (url.endsWith('/messages')) {
+      mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'msg_mimo', type: 'message', role: 'assistant', model: successor,
+        content: [{ type: 'text', text: 'Hello' }], stop_reason: 'end_turn',
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { headers: { 'content-type': 'application/json' } }))
+    } else if (url.endsWith('/responses')) {
+      mocks.fetch.mockResolvedValueOnce(sse([
+        { choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] },
+        { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } },
+      ]))
+    }
+    const response = await request({
+      model, stream: false, max_tokens: 100,
+      ...(url.endsWith('/responses') ? { input: 'Hello' } : { messages: [{ role: 'user', content: 'Hello' }] }),
+    }, url)
+    expect(response.status).toBe(200)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body).model).toBe(successor)
+    expect(mocks.logs[0]?.slice(4, 6)).toEqual(['xiaomi', successor])
   }))
 
   it.each(['/v1/messages', '/v1/chat/completions', '/v1/responses'])(
@@ -1417,7 +1444,7 @@ describe('stream first-frame latency', () => {
 
 
 describe('Chat-backed Responses usage and termination', () => {
-  it.each([['kimi', 'kimi-k2.7-code'], ['qwen', 'qwen3.8-max'], ['xiaomi', 'mimo-v2.5'], ['zhipu', 'glm-5.3']])(
+  it.each([['kimi', 'kimi-k2.7-code'], ['qwen', 'qwen3.8-max'], ['xiaomi', 'mimo-v2.6-pro'], ['zhipu', 'glm-5.3']])(
     '%s requests usage and consumes the frame after finish_reason', (provider, model) => withRelay(async request => {
       mocks.fetch.mockImplementation(async (_url, init) => {
         const body = JSON.parse(init.body)

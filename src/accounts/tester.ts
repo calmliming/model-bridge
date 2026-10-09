@@ -292,7 +292,7 @@ async function testXiaomi(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      // mimo-v2.5-pro goes offline on 2026-10-21 with no reroute to a successor.
+      // mimo-v2.5-pro stops resolving on 2026-10-21; probe its V2.6 successor.
       model: 'mimo-v2.6-pro',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],

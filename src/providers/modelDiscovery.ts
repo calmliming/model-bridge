@@ -4,6 +4,7 @@ import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
 import { IMAGE_25_MODELS } from './openai/imageModels'
 import { isForwardableDeepseekModel } from './deepseek/converter'
+import { isRetiredXiaomiModel } from './xiaomi/converter'
 import { GRSAI_MODELS } from './grsai/models'
 import { publicModelProvider } from './publicIdentity'
 
@@ -68,7 +69,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
     'gemini-2.5-flash'
   ],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
-  // MiMo V2.5 goes offline on 2026-10-21 without rerouting; V2.6 replaces it.
+  // MiMo V2.5 is retired (see isRetiredXiaomiModel); V2.6 replaces it.
   xiaomi: ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
   zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
   qwen: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'qwen3.7-flash'],
@@ -200,12 +201,14 @@ export function isProviderAllowed(provider: ProviderId, key: ModelDiscoveryKey):
 }
 
 /**
- * Providers whose relay rejects names the upstream catalog may still list.
- * Applied after mappings and custom entries, using the provider that handles
- * the request. Aggregator and explicit non-DeepSeek routes keep their own rules.
+ * Providers whose upstream catalog may still list names the relay rejects or
+ * the provider has retired. Applied after mappings and custom entries, using
+ * the provider that handles the request. Aggregator routes and explicit routes
+ * to other providers keep their own rules.
  */
 const CATALOG_MODEL_FILTERS: Partial<Record<ProviderId, (model: string) => boolean>> = {
-  deepseek: isForwardableDeepseekModel
+  deepseek: isForwardableDeepseekModel,
+  xiaomi: (model) => !isRetiredXiaomiModel(model)
 }
 
 export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderId): string[] {

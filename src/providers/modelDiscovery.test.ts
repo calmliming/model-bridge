@@ -92,6 +92,26 @@ describe('model discovery', () => {
     expect(listModelIdsForKey(key)).not.toContain('deepseek-v4-flash-thinking')
   })
 
+  it('never advertises a retired MiMo model the upstream catalog still lists', () => {
+    // Xiaomi keeps V2.5 in /v1/models until it stops resolving on 2026-10-21,
+    // and the account catalog replaces the static list wholesale.
+    const key = {
+      allowedProviders: ['xiaomi', 'sub2api'],
+      allowedModels: null,
+      providerModels: { xiaomi: ['mimo-v2.6-pro', 'mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2.5-tts'] },
+      catalogModels: {
+        xiaomi: { 'mimo-v2.6-flash': { id: 'mimo-v2.6-flash' }, 'MiMo-V2.5': { id: 'MiMo-V2.5' } }
+      }
+    }
+    for (const requested of [undefined, 'xiaomi'] as const) {
+      const models = listModelIdsForKey(key, requested)
+      expect(models).toEqual(expect.arrayContaining(['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.5-tts']))
+      for (const retired of ['mimo-v2.5-pro', 'mimo-v2.5', 'MiMo-V2.5']) expect(models).not.toContain(retired)
+    }
+    // An alias whose target is retired is hidden too.
+    expect(listModelIdsForKey({ ...key, modelMappings: { 'mimo-old': 'mimo-v2.5-pro' }, allowedModels: ['mimo-old'] })).toEqual([])
+  })
+
   it('discovers cross-provider aliases under the mapped provider', () => {
     const key = {
       allowedProviders: ['openai'],
@@ -141,8 +161,8 @@ describe('model discovery', () => {
         'deepseek-v4-pro'
       ])
     )
-    // Retired for ChatGPT-signed-in Codex, or (MiMo V2.5) going offline without
-    // a reroute: none of them may be advertised any more.
+    // Retired for ChatGPT-signed-in Codex, or (MiMo V2.5) taken off the shelf
+    // by Xiaomi: none of them may be advertised any more.
     for (const retired of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'mimo-v2.5-pro', 'mimo-v2.5']) {
       expect(models).not.toContain(retired)
     }
