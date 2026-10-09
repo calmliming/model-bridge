@@ -126,7 +126,8 @@ const schema = z.object({
   // 必须显式设为 true 才能放行（用于"确实要本地连远端库"的少数场景）。
   ALLOW_REMOTE_DB: z.preprocess(envBoolean, z.boolean().default(false)),
   ADMIN_USERNAME: z.string().min(1).default('admin'),
-  ADMIN_PASSWORD: z.string().min(1).default('admin'),
+  // Validate only when creating an admin; existing deployments use the stored hash.
+  ADMIN_PASSWORD: z.preprocess(blankToUndefined, z.string().optional()),
   CLAUDE_CLI_VERSION: z.preprocess(blankToUndefined, z.string().max(30).regex(/^\d+\.\d+\.\d+$/)
     .refine((value) => {
       const [major, minor, patch] = value.split('.').map(Number)

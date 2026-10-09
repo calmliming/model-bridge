@@ -13,7 +13,7 @@
 
 2. **创建 API Key**
    - 访问管理后台：http://localhost:3000
-   - 登录（默认 admin/admin）
+   - 使用首次启动时配置的管理员凭据登录（一键安装的随机密码保存在 `.env`）
    - 进入「API Keys」页面创建一个 Key
    - 复制 Key（格式类似 `mb-xxxxx`）
 

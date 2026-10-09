@@ -31,6 +31,18 @@ describe('optional Redis configuration', () => {
   })
 })
 
+describe('initial admin password configuration', () => {
+  it.each([undefined, '', '  \t'])('does not supply a default password for %s', async value => {
+    vi.stubEnv('ADMIN_PASSWORD', value)
+    expect((await import('./config')).config.ADMIN_PASSWORD).toBeUndefined()
+  })
+
+  it('preserves an old weak environment value so existing admin deployments can start', async () => {
+    vi.stubEnv('ADMIN_PASSWORD', 'admin')
+    expect((await import('./config')).config.ADMIN_PASSWORD).toBe('admin')
+  })
+})
+
 describe('Claude CLI compatibility configuration', () => {
   it('rejects a configured version below the Fable 5.1 minimum', async () => {
     vi.stubEnv('CLAUDE_CLI_VERSION', '2.1.161')

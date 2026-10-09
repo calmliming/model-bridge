@@ -45,7 +45,7 @@ DATABASE_URL=postgres://model_bridge:${PG_PASSWORD}@postgres:5432/model_bridge
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 JWT_SECRET=$(openssl rand -hex 32)
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin
+ADMIN_PASSWORD=$(openssl rand -hex 24)
 
 # Optional Redis backend for shared rate limits, concurrency gates, and sticky sessions.
 REDIS_URL=
@@ -55,7 +55,7 @@ STICKY_SESSION_WAIT_MS=15000
 UPDATE_TOKEN=$(openssl rand -hex 32)
 EOF
   chmod 600 .env
-  echo "  → edit ADMIN_PASSWORD in .env before exposing the dashboard"
+  echo "  → a random admin password was saved as ADMIN_PASSWORD in .env"
 else
   echo "→ reusing existing .env"
   # If .env exists but lacks PG settings (upgrade from old SQLite version), top it up.
@@ -104,7 +104,7 @@ echo "→ building and starting the stack"
 echo
 echo "✔ model-bridge is up"
 echo "  dashboard:  http://localhost:3001"
-echo "  default:    admin / admin   ← change this under Settings now"
+echo "  admin:      credentials configured in .env on first install; later changes are stored in the database"
 echo "  oauth port: 1455 (browser callback for OpenAI / Google)"
 echo
 echo "Stop:   ${DC[*]} down"

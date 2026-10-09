@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { config } from '../config'
 import { pool } from '../db/index'
 import { getSetting, setSetting } from '../db/settings'
+import { adminPasswordSchema, ADMIN_PASSWORD_REQUIREMENT } from './password'
 
 const USERNAME_KEY = 'admin.username'
 const PASSWORD_HASH_KEY = 'admin.password_hash'
@@ -121,13 +122,14 @@ async function deleteEmptyAdminDuplicates(
 export async function ensureAdmin(): Promise<void> {
   let passwordHash = await getSetting(PASSWORD_HASH_KEY)
   if (!passwordHash) {
-    passwordHash = bcrypt.hashSync(config.ADMIN_PASSWORD, BCRYPT_ROUNDS)
+    const initialPassword = adminPasswordSchema.safeParse(config.ADMIN_PASSWORD)
+    if (!initialPassword.success) {
+      throw new Error(`首次创建管理员前请设置 ADMIN_PASSWORD：${ADMIN_PASSWORD_REQUIREMENT}`)
+    }
+    passwordHash = bcrypt.hashSync(initialPassword.data, BCRYPT_ROUNDS)
     await setSetting(USERNAME_KEY, config.ADMIN_USERNAME)
     await setSetting(PASSWORD_HASH_KEY, passwordHash)
     console.log(`[auth] created admin account "${config.ADMIN_USERNAME}"`)
-    if (config.ADMIN_PASSWORD === 'admin') {
-      console.warn('[auth] WARNING: admin password is the default "admin" — change it in Settings')
-    }
   }
   await ensureAdminUser(passwordHash)
 }
@@ -208,7 +210,7 @@ export async function verifyAdminCredentials(username: string, password: string)
 export async function changeAdminPassword(currentPassword: string, newPassword: string): Promise<boolean> {
   const storedHash = await getSetting(PASSWORD_HASH_KEY)
   if (!storedHash || !bcrypt.compareSync(currentPassword, storedHash)) return false
-  const nextHash = bcrypt.hashSync(newPassword, BCRYPT_ROUNDS)
+  const nextHash = bcrypt.hashSync(adminPasswordSchema.parse(newPassword), BCRYPT_ROUNDS)
   await setSetting(PASSWORD_HASH_KEY, nextHash)
   await ensureAdminUser(nextHash)
   return true

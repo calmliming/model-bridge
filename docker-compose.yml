@@ -53,7 +53,7 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CLAUDE_CLI_VERSION: ${CLAUDE_CLI_VERSION:-2.1.263}
       # Gemini account onboarding needs both variables inside the container.
       # GOOGLE_LOGIN_CLIENT_ID below only configures website user sign-in.

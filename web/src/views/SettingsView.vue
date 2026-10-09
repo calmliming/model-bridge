@@ -223,8 +223,9 @@ async function changePassword() {
     message.warning('请填写完整')
     return
   }
-  if (newPassword.value.length < 6) {
-    message.warning('新密码至少 6 位')
+  const passwordBytes = new TextEncoder().encode(newPassword.value).length
+  if (passwordBytes < 8 || passwordBytes > 72 || !newPassword.value.trim()) {
+    message.warning('新密码必须为 8–72 个 UTF-8 字节，且不能全为空白')
     return
   }
   if (newPassword.value !== confirmPassword.value) {

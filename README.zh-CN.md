@@ -32,10 +32,11 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek �
 ```bash
 # 1. 建本地配置（连本地库、本地专用密钥）
 cp .env.example .env.local
-#    然后编辑 .env.local，确认这三项：
+#    然后编辑 .env.local，确认以下配置：
 #      APP_ENV=local
 #      PORT=3003
 #      DATABASE_URL=postgresql://model_bridge:devpassword@127.0.0.1:5433/model_bridge
+#      ADMIN_PASSWORD=你设置的密码（8–72 个 UTF-8 字节）
 
 # 2. 起本地 PostgreSQL 容器（需要 Docker Desktop 已启动）
 npm run dev:db
@@ -46,8 +47,9 @@ cd web && npm install && cd ..
 npm run dev:all
 ```
 
-打开 <http://localhost:5173>，用 `.env.local` 里的 **admin / admin** 登录，然后立刻在
-**设置**页面修改密码。数据库表结构由后端启动时自动创建（幂等），无需手动跑迁移。
+打开 <http://localhost:5173>，用首次启动时 `.env.local` 配置的 `ADMIN_USERNAME` 和
+`ADMIN_PASSWORD` 登录。首次创建管理员必须设置密码；已有实例继续使用数据库中保存的凭据。
+数据库表结构由后端启动时自动创建（幂等），无需手动跑迁移。
 
 也可以分别启动：
 
@@ -126,12 +128,12 @@ npm run dev:db:reset   # 停库并删除数据卷，下次 up 是全新的空库
 ./install.sh
 ```
 
-`install.sh` 会生成带随机 `ENCRYPTION_KEY` / `JWT_SECRET` / `UPDATE_TOKEN` 的 `.env`，然后
+`install.sh` 会生成带随机 `ENCRYPTION_KEY` / `JWT_SECRET` / `UPDATE_TOKEN` / `ADMIN_PASSWORD` 的 `.env`，然后
 `docker compose up -d --build`。完成后：
 
 - 管理后台：<http://localhost:3001>
 - OAuth 回调监听：`localhost:1455`（OpenAI / Google 登录时浏览器需访问此端口）
-- 默认管理员：`admin / admin` —— 暴露后台前请在**设置**里改掉
+- 初始管理员：用户名 `admin`，随机密码保存在 `.env` 的 `ADMIN_PASSWORD` 中；已有实例保留原有管理员凭据
 
 Docker 部署会同时启动内部 `model-bridge-updater` 服务。登录后台后，可在**设置**
 页的「系统更新」卡片检查并升级到远端 `origin/main`。
@@ -382,7 +384,8 @@ codex --profile model-bridge-mimo
 
 Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 Docker 模式可
 把 `.env.example` 复制为 `.env`，`ENCRYPTION_KEY` 与 `JWT_SECRET` 在首次运行
-时自动生成。首次启动前请设置 `PG_PASSWORD` 和 `DATABASE_URL`——内置的
+时自动生成。首次启动前请设置 `PG_PASSWORD`、`DATABASE_URL` 和 8–72 个 UTF-8 字节的
+`ADMIN_PASSWORD`。内置的
 `postgres` 容器把数据存放在 `./data/pg/` 下，请备份这个目录。
 
 服务收到 `SIGTERM`/`SIGINT` 后会停止接收新请求，等待在途请求、OAuth 回调、后台任务

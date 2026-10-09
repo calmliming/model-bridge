@@ -8,6 +8,7 @@ import { config } from '../config'
 import { emailRegistrationConfigured } from '../users/registrationEmail'
 import { waffoConfiguration } from '../payments/providers/waffo'
 import { changeAdminPassword, getAdminUserId, getAdminUsername, verifyAdminCredentials } from '../auth/admin'
+import { adminPasswordSchema, ADMIN_PASSWORD_REQUIREMENT } from '../auth/password'
 import { checkLoginRateLimit, turnstileEnabled, verifyTurnstileToken } from '../auth/security'
 import { createApiKey, deleteApiKey, getApiKeySecret, listApiKeys, updateApiKey } from '../keys/manager'
 import { dashboardOverview, dashboardRecentLogs, statsSummary } from '../usage/stats'
@@ -129,7 +130,7 @@ const optionalBaseUrlSchema = z
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(6),
+  newPassword: adminPasswordSchema,
 })
 
 const inviteUserSchema = z.object({
@@ -556,7 +557,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   app.post('/api/admin/change-password', { preHandler: requireAdmin }, async (request, reply) => {
     const body = changePasswordSchema.safeParse(request.body)
     if (!body.success) {
-      return reply.code(400).send({ error: 'new password must be at least 6 characters' })
+      return reply.code(400).send({ error: `请填写当前密码；新${ADMIN_PASSWORD_REQUIREMENT}` })
     }
     if (!(await changeAdminPassword(body.data.currentPassword, body.data.newPassword))) {
       return reply.code(400).send({ error: 'current password is incorrect' })

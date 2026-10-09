@@ -29,6 +29,9 @@ daily / provider / model / key breakdowns, and a one-command Docker deploy.
 
 Requires Node.js 24.19.0 LTS (or a newer LTS release).
 
+Before the first backend start, set `ADMIN_PASSWORD` in the active environment
+file to an 8–72 byte UTF-8 password. There is no default admin password.
+
 ```bash
 # Start backend and frontend together with formatted API / WEB log prefixes.
 npm install
@@ -49,8 +52,8 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173> and log in with **admin / admin**, then change
-the password under **Settings** immediately.
+Open <http://localhost:5173> and log in with the `ADMIN_USERNAME` and
+`ADMIN_PASSWORD` configured for the first start.
 
 ## Deploy
 
@@ -61,14 +64,14 @@ the password under **Settings** immediately.
 ```
 
 `install.sh` generates a `.env` with random `ENCRYPTION_KEY` / `JWT_SECRET` /
-`UPDATE_TOKEN`,
+`UPDATE_TOKEN` and `ADMIN_PASSWORD`,
 then `docker compose up -d --build`. Once it finishes:
 
 - Dashboard: <http://localhost:3001>
 - OAuth callback listener: `localhost:1455` (browser must reach it during
   OpenAI / Google sign-in)
-- Default admin: `admin / admin` — change it under **Settings** before
-  exposing the dashboard
+- Initial admin: username `admin`; the random `ADMIN_PASSWORD` is saved in
+  `.env`. Existing installations retain their stored admin credentials.
 
 Docker deploys also start the internal `model-bridge-updater` service. After
 logging in, use the **System update** card under **Settings** to check and
@@ -346,7 +349,7 @@ lets you set the Gemini base URL) for the Gemini relay.
 For Docker deploys, `install.sh` writes everything into the host `.env`.
 For non-Docker runs, copy `.env.example` to `.env`; `ENCRYPTION_KEY` and
 `JWT_SECRET` are auto-generated on first start. Set `PG_PASSWORD` and
-`DATABASE_URL` before the first boot — the bundled `postgres` container
+`DATABASE_URL` and an 8–72 byte `ADMIN_PASSWORD` before the first boot — the bundled `postgres` container
 stores its data under `./data/pg/`, so back up that folder.
 
 On `SIGTERM`/`SIGINT`, the service stops accepting new requests and waits for

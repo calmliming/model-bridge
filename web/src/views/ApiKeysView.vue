@@ -625,6 +625,7 @@ const codexRemoteCatalog = ref(false)
 const snippets = computed(() => {
   const key = useKeySecret.value || 'mb-xxxxxxxx'
   const codexCatalogLine = codexRemoteCatalog.value ? `model_catalog_url = "${baseOrigin.value}/v1/models"\n` : ''
+  const codexFeatures = codexRemoteCatalog.value ? '\n[features]\napi_key_model_discovery = true\n' : ''
   return {
     claude: `export ANTHROPIC_BASE_URL=${baseOrigin.value}
 export ANTHROPIC_AUTH_TOKEN=${key}
@@ -644,7 +645,7 @@ name = "model-bridge"
 base_url = "${baseOrigin.value}/v1"
 ${codexCatalogLine}env_key = "MODEL_BRIDGE_API_KEY"
 wire_api = "responses"
-requires_openai_auth = false
+requires_openai_auth = false${codexFeatures}
 
 export MODEL_BRIDGE_API_KEY=${key}
 codex --profile model-bridge`,
