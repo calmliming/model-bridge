@@ -11,6 +11,25 @@ interface OutputItem { item: Row; index: number; closed: boolean; added: boolean
 const id = (prefix: string) => `${prefix}_${randomBytes(12).toString('hex')}`
 const row = (value: unknown): Row | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Row : null
 
+// Reasoning from the Chat-backed adapters is carried in encrypted_content under
+// this marker so the adapters can restore it on the next turn.
+const RELAY_REASONING_PREFIX = 'mb1:'
+
+/**
+ * Drops reasoning items stamped by this relay. Native Responses upstreams
+ * cannot decrypt the marker and reject the request (OpenAI answers
+ * invalid_encrypted_content), e.g. when a Codex session switches from Qwen to GPT.
+ */
+export function withoutRelayReasoningItems(input: unknown): unknown {
+  if (!Array.isArray(input)) return input
+  const kept = input.filter(item => {
+    const entry = row(item)
+    return !(entry?.type === 'reasoning' && typeof entry.encrypted_content === 'string' &&
+      entry.encrypted_content.startsWith(RELAY_REASONING_PREFIX))
+  })
+  return kept.length === input.length ? input : kept
+}
+
 /** Shared lifecycle for the four Chat-backed Responses adapters. Usage stays upstream-owned. */
 export function createChatResponsesStreamTransform(defaultModel: string): StreamTransform {
   const responseId = id('resp')
@@ -47,7 +66,7 @@ export function createChatResponsesStreamTransform(defaultModel: string): Stream
       const fields = { output_index: entry.index, item_id: item.id, summary_index: 0 }
       emit(out, 'response.reasoning_summary_text.done', { ...fields, text })
       emit(out, 'response.reasoning_summary_part.done', { ...fields, part: { type: 'summary_text', text } })
-      item.encrypted_content = `mb1:${Buffer.from(text, 'utf8').toString('base64')}`
+      item.encrypted_content = `${RELAY_REASONING_PREFIX}${Buffer.from(text, 'utf8').toString('base64')}`
     } else {
       const text = item.content[0].text
       const fields = { output_index: entry.index, item_id: item.id, content_index: 0 }

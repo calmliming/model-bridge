@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { withoutRelayReasoningItems } from './chatResponsesStream'
 import { createKimiResponsesStreamTransform } from './kimi/stream'
 import { createQwenResponsesStreamTransform } from './qwen/stream'
 import { createXiaomiResponsesStreamTransform } from './xiaomi/stream'
@@ -83,3 +84,26 @@ for (const [provider, create] of Object.entries({ kimi: createKimiResponsesStrea
     })
   })
 }
+
+describe('withoutRelayReasoningItems', () => {
+  it('drops the reasoning this relay stamped and keeps upstream-native reasoning', () => {
+    const transform = createQwenResponsesStreamTransform()
+    const events: any[] = [
+      ...transform.transform(chunk({ reasoning_content: 'think' })),
+      ...transform.transform(chunk({ content: 'answer' }, 'stop')),
+      ...transform.flush(),
+    ]
+    const output = events.filter(e => e.type === 'response.output_item.done').map(e => e.item)
+    const native = { type: 'reasoning', id: 'rs_native', summary: [], encrypted_content: 'gAAAA-native' }
+    const input = [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'q' }] }, ...output, native]
+
+    expect(output.find(item => item.type === 'reasoning')?.encrypted_content).toMatch(/^mb1:/)
+    expect(withoutRelayReasoningItems(input)).toEqual([input[0], output.find(item => item.type === 'message'), native])
+  })
+
+  it('returns the original input when nothing is dropped', () => {
+    const input = [{ type: 'reasoning', encrypted_content: 'gAAAA-native' }]
+    expect(withoutRelayReasoningItems(input)).toBe(input)
+    expect(withoutRelayReasoningItems('plain text')).toBe('plain text')
+  })
+})

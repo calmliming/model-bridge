@@ -4,6 +4,7 @@ import {
   GROK_RESPONSES_URL,
   GROK_USER_AGENT,
 } from './constants'
+import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 // Bare/aliased Grok names → concrete xAI model ids. Anything already concrete
@@ -301,6 +302,7 @@ export function normalizeGrokResponsesBody(
   }
   delete out.metadata
   if (Array.isArray(out.tools)) out.tools = sanitizeGrokResponsesTools(out.tools)
+  if (out.input !== undefined) out.input = withoutRelayReasoningItems(out.input)
   if (Array.isArray(out.input)) out.input = sanitizeGrokResponsesInput(out.input)
   out.stream = true
   out.store = false

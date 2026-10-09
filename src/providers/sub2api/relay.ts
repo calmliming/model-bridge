@@ -1,5 +1,6 @@
 import { fetchWithConnectTimeout } from '../../http/upstream'
 import type { IncomingHttpHeaders } from 'node:http'
+import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { claudeProtocolHeaders } from '../claude/headers'
 
 const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
@@ -111,7 +112,8 @@ export function relaySub2ApiResponses(
 ): Promise<Response> {
   const unsupported = unsupportedAntigravityProtocol(baseUrl)
   if (unsupported) return Promise.resolve(unsupported)
-  const upstreamBody = { ...body, stream: true }
+  const upstreamBody = { ...body, stream: true,
+    ...(body.input !== undefined ? { input: withoutRelayReasoningItems(body.input) } : {}) }
   return fetchWithConnectTimeout(endpoint(baseUrl, '/v1/responses'), {
     method: 'POST',
     headers: jsonHeaders(apiKey, 'text/event-stream'),

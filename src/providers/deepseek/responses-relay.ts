@@ -1,4 +1,5 @@
 import { mapResponsesModel } from './converter'
+import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/v1/responses'
@@ -11,7 +12,9 @@ const DEEPSEEK_RESPONSES_URL = 'https://api.deepseek.com/v1/responses'
 export function normalizeDeepseekResponsesBody(
   body: Record<string, unknown>,
 ): Record<string, unknown> {
-  return { ...body, model: mapResponsesModel(body.model), stream: body.stream === true }
+  const out: Record<string, unknown> = { ...body, model: mapResponsesModel(body.model), stream: body.stream === true }
+  if (body.input !== undefined) out.input = withoutRelayReasoningItems(body.input)
+  return out
 }
 
 /** Relays a Responses request to DeepSeek's native `/v1/responses` endpoint. */

@@ -43,6 +43,14 @@ describe('normalizeGrokResponsesBody', () => {
     expect(out.reasoning).toEqual({ effort: 'high' })
   })
 
+  it('drops relay-stamped reasoning before it reaches xAI', () => {
+    const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
+    const out = normalizeGrokResponsesBody({ model: 'grok-4.5', input: [
+      { type: 'reasoning', id: 'rs_qwen', summary: [], encrypted_content: 'mb1:dGhpbms=' }, user,
+    ] })
+    expect(out.input).toEqual([user])
+  })
+
   it('strips metadata after promoting a structured session to prompt_cache_key', () => {
     const out = normalizeGrokResponsesBody({
       model: 'grok-4.6',

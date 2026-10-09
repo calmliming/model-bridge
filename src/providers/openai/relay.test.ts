@@ -17,6 +17,16 @@ describe('codexBetaHeader', () => {
 })
 
 describe('normalizeOpenaiResponsesBody', () => {
+  it('drops relay-stamped reasoning that OpenAI cannot decrypt, keeping its own', () => {
+    const own = { type: 'reasoning', id: 'rs_own', summary: [], encrypted_content: 'gAAAA-openai' }
+    const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
+    const result = normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: [
+      { type: 'reasoning', id: 'rs_qwen', summary: [{ type: 'summary_text', text: 'think' }], encrypted_content: 'mb1:dGhpbms=' },
+      own, user,
+    ] })
+    expect(result.input).toEqual([own, user])
+  })
+
   it('adapts Astra sampling and reasoning without dropping native continuation items', () => {
     const input = [{ type: 'configuration_update', reasoning: { effort: 'high' } }]
     const body = { model: 'gpt-6-astra', temperature: 0.5, top_p: 0.9, top_logprobs: 3,

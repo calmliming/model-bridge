@@ -66,4 +66,12 @@ describe('normalizeDeepseekResponsesBody', () => {
     expect(init.headers).toMatchObject({ accept: 'text/event-stream' })
     expect(JSON.parse(String(init.body))).toMatchObject({ stream: true })
   })
+
+  it('drops relay-stamped reasoning before it reaches DeepSeek', () => {
+    const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
+    const out = normalizeDeepseekResponsesBody({ model: 'deepseek-v4-pro', input: [
+      { type: 'reasoning', id: 'rs_qwen', summary: [], encrypted_content: 'mb1:dGhpbms=' }, user,
+    ] })
+    expect(out.input).toEqual([user])
+  })
 })

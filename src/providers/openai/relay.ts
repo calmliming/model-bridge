@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingHttpHeaders } from 'node:http'
 import { sanitizeToolSchemas } from '../toolSchema'
+import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { chatCompletionsToResponses } from './chat'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 import { isGpt61SolModel } from './models'
@@ -119,6 +120,7 @@ export function normalizeOpenaiResponsesBody(
   if (typeof out.input === 'string') {
     out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]
   }
+  if (out.input !== undefined) out.input = withoutRelayReasoningItems(out.input)
   out.stream = true
   out.store = false
   if (typeof out.model === 'string' && /^gpt-6-astra(?:$|-)/i.test(out.model)) {

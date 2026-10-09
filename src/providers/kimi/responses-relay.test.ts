@@ -17,6 +17,14 @@ describe('native Kimi Responses', () => {
     expect(JSON.parse(fetchUpstream.mock.calls[0][1].body)).toEqual({ ...body, model: 'kimi-k3', stream: false })
     expect(fetchUpstream.mock.calls[0][1].headers.accept).toBe('application/json')
   })
+  it('drops relay-stamped reasoning from K2 turns before native K3', async () => {
+    fetchUpstream.mockResolvedValue(new Response('{}'))
+    const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
+    await relayNativeKimiResponses('secret', { model: 'k3', input: [
+      { type: 'reasoning', id: 'rs_k2', summary: [], encrypted_content: 'mb1:dGhpbms=' }, user,
+    ] })
+    expect(JSON.parse(fetchUpstream.mock.calls[0][1].body).input).toEqual([user])
+  })
   it('only chooses native Responses for the officially supported K3 model', () => {
     expect(supportsNativeKimiResponses('kimi-k3')).toBe(true)
     expect(supportsNativeKimiResponses('kimi-code/k3')).toBe(true)

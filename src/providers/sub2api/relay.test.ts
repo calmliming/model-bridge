@@ -53,3 +53,14 @@ describe('Sub2API Antigravity endpoints', () => {
     expect(upstream).not.toHaveBeenCalled()
   })
 })
+
+describe('Sub2API Responses forwarding', () => {
+  it('drops relay-stamped reasoning that the gateway cannot decrypt', async () => {
+    upstream.mockResolvedValue(new Response('{}'))
+    const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
+    await relaySub2ApiResponses('key', 'https://gateway.example', { model: 'gpt-5.5', input: [
+      { type: 'reasoning', id: 'rs_qwen', summary: [], encrypted_content: 'mb1:dGhpbms=' }, user,
+    ] })
+    expect(JSON.parse(upstream.mock.calls[0]![1].body).input).toEqual([user])
+  })
+})

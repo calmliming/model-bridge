@@ -1,5 +1,6 @@
 import { normalizeKimiChatCompletionsBody } from './chat-relay'
 import { mapModel, responsesToChatCompletions } from './converter'
+import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 
 const KIMI_CHAT_COMPLETIONS_URL = 'https://api.moonshot.cn/v1/chat/completions'
@@ -17,7 +18,8 @@ export function relayNativeKimiResponses(apiKey: string, body: Record<string, un
       authorization: `Bearer ${apiKey}`, 'content-type': 'application/json',
       accept: body.stream === true ? 'text/event-stream' : 'application/json',
     },
-    body: JSON.stringify({ ...body, model: mapModel(body.model), stream: body.stream === true }),
+    body: JSON.stringify({ ...body, model: mapModel(body.model), stream: body.stream === true,
+      ...(body.input !== undefined ? { input: withoutRelayReasoningItems(body.input) } : {}) }),
   })
 }
 
