@@ -62,10 +62,13 @@ import {
   createOpenaiChatCompletionsStreamTransform,
   inspectResponsesSseTerminalFailure,
   parseChatCompletionUsage,
+  responsesSseEmptyCompletionReason,
   responsesSseToChatCompletion,
+  responsesStreamStartVerdict,
   chatCompletionsToResponses,
 } from '../providers/openai/chat'
 import * as openaiUsage from '../providers/openai/usage'
+import { legacyFunctionCallCompletion, legacyFunctionCallStream, usesLegacyFunctions } from '../providers/legacyFunctions'
 import { relayGemini, sanitizeGeminiBody, unwrapResponseEnvelope } from '../providers/gemini/relay'
 import * as geminiUsage from '../providers/gemini/usage'
 import { relayDeepseekMessages } from '../providers/deepseek/relay'
@@ -324,8 +327,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: claudeUsage.createStreamParser,
     parseJsonUsage: claudeUsage.parseJsonUsage,
     parseStreamEventsFrom: 'upstream',
-    bufferSseResponse: (text, meta) => claudeSseToChatCompletion(text, meta.model),
-    createStreamTransform: createClaudeChatCompletionsStreamTransform,
+    bufferSseResponse: (text, meta) => legacyChatBuffered(claudeSseToChatCompletion(text, meta.model), meta),
+    createStreamTransform: meta => legacyChatStream(createClaudeChatCompletionsStreamTransform(), meta),
   },
   openai: {
     id: 'openai',
@@ -341,6 +344,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     }),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
+    streamStartVerdict: responsesStreamStartVerdict,
   },
   'openai-chat': {
     id: 'openai',
@@ -353,9 +357,11 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: parseChatCompletionUsage,
     parseStreamEventsFrom: 'upstream',
+    streamStartVerdict: responsesStreamStartVerdict,
+    classifyBufferedFailure: classifyOpenAIChatBufferedFailure,
     bufferedResponsesProtocol: true,
-    bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
-    createStreamTransform: createOpenaiChatCompletionsStreamTransform,
+    bufferSseResponse: (text, meta) => legacyChatBuffered(responsesSseToChatCompletion(text, meta.model), meta),
+    createStreamTransform: meta => legacyChatStream(createOpenaiChatCompletionsStreamTransform(), meta),
   },
   // Grok (xAI) subscription upstream. Native OpenAI Responses + Chat Completions
   // at api.x.ai, so it reuses the OpenAI usage parsers. Responses is the primary
@@ -372,6 +378,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, _ctx) => relayGrokResponses(token, body),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
+    streamStartVerdict: responsesStreamStartVerdict,
   },
   'grok-chat': {
     id: 'grok',
@@ -461,8 +468,8 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     parseJsonUsage: parseChatCompletionUsage,
     parseStreamEventsFrom: 'upstream',
     bufferedResponsesProtocol: true,
-    bufferSseResponse: (text, meta) => responsesSseToChatCompletion(text, meta.model),
-    createStreamTransform: createOpenaiChatCompletionsStreamTransform,
+    bufferSseResponse: (text, meta) => legacyChatBuffered(responsesSseToChatCompletion(text, meta.model), meta),
+    createStreamTransform: meta => legacyChatStream(createOpenaiChatCompletionsStreamTransform(), meta),
   },
   // Route key only — provider.id stays 'deepseek' so account pool, allowed-
   // provider checks, and usage records all reuse the existing deepseek setup.
@@ -759,6 +766,8 @@ interface RelayMeta {
   attemptCount: number
   upstreamRequestId?: string | null
   reasoningEffort?: string | null
+  /** The Chat caller declared legacy `functions` only and reads `function_call` back. */
+  legacyFunctionCall?: boolean
 }
 
 export interface UpstreamFailure {
@@ -2406,6 +2415,7 @@ async function runRelayLoop(
         reasoningEffort: provider === PROVIDERS['zhipu-responses'] ? zhipuResponsesEffort(body, parsed.model) ?? null
           : typeof body.reasoning_effort === 'string' ? body.reasoning_effort
           : typeof jsonRecord(body.reasoning)?.effort === 'string' ? jsonRecord(body.reasoning)!.effort as string : null,
+        legacyFunctionCall: usesLegacyFunctions(body),
       }
 
       const quota = extractAccountQuota(provider.id, upstream.headers)
@@ -2434,10 +2444,13 @@ async function runRelayLoop(
       }
 
       // Some upstreams reply 200 with an empty stream (Antigravity's
-      // MALFORMED_FUNCTION_CALL). Read up to the first content before any byte
-      // is sent so the attempt can be retried. It is a model flake rather than
-      // an account fault, so the same account stays eligible.
-      if (wantStream && upstream.ok && provider.streamStartVerdict) {
+      // MALFORMED_FUNCTION_CALL, an OpenAI/Grok response.completed with no
+      // output). Read up to the first content before any byte is sent so the
+      // attempt can be retried. It is a model flake rather than an account
+      // fault, so the same account stays eligible. A JSON body (e.g. Codex
+      // remote-compact) has no SSE events to judge and is never retried here.
+      if (wantStream && upstream.ok && provider.streamStartVerdict &&
+        !isNonStreamContentType(upstream.headers.get('content-type'))) {
         const peeked = await peekSseStart(upstream, provider.streamStartVerdict, STREAM_START_PEEK_MS)
         upstream = peeked.response
         if (peeked.retryReason && !lastAttempt && !upstreamSignal()?.aborted) {
@@ -2823,7 +2836,14 @@ async function sendStreaming(
   if (upstream.body) {
     const reader = upstream.body.getReader()
     const decoder = new TextDecoder()
+    // Time of the last downstream write. The heartbeat protects the client
+    // connection, so upstream traffic that a stream transform drops (Anthropic
+    // pings, thinking deltas) must not count: the client sees no bytes from it.
     let lastActivity = Date.now()
+    const markEmitted = () => {
+      lastActivity = Date.now()
+      markFirstToken()
+    }
     const heartbeat = sseOutput && !omitComments
       ? setInterval(() => {
           if (!downstreamClosed && Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
@@ -2841,7 +2861,6 @@ async function sendStreaming(
       readLoop: for (;;) {
         const { done, value } = await reader.read()
         if (done) break
-        lastActivity = Date.now()
         buffer += decoder.decode(value, { stream: true })
         // Normalise CRLF so SSE block splitting and multi-line data handling
         // work regardless of the upstream server's newline convention.
@@ -2859,7 +2878,7 @@ async function sendStreaming(
               streamTransform,
               parser,
               parseUpstreamStream,
-              markFirstToken,
+              markEmitted,
               streamState,
               modelAudit,
             )
@@ -2882,7 +2901,7 @@ async function sendStreaming(
               omitComments ? withoutSseComments(block) : block,
               transform,
               parser,
-              markFirstToken,
+              markEmitted,
               modelAudit,
             )
             if (!wrote) downstreamClosed = true
@@ -2903,7 +2922,7 @@ async function sendStreaming(
                 // The request close listener aborts the upstream transport.
                 downstreamClosed = true
               }
-              markFirstToken()
+              markEmitted()
               buffer = buffer.slice(sep + 2)
               if (stopAtTerminal && isResponsesTerminalBlock(block)) {
                 reachedUpstreamTerminal = true
@@ -3579,6 +3598,21 @@ function validateAntigravityModel(model: string): string {
 async function classifyAntigravityBufferedFailure(text: string): Promise<UpstreamFailure | null> {
   const reason = antigravityEmptyTranscriptReason(sseDataEvents(text))
   return reason ? { penalty: null, retryable: true, transientResponse: true } : null
+}
+
+/** Chat adapters answer a legacy `functions` caller with `function_call` instead of `tool_calls`. */
+function legacyChatBuffered<R extends { body: unknown }>(result: R, meta: RelayMeta): R {
+  return meta.legacyFunctionCall ? { ...result, body: legacyFunctionCallCompletion(result.body) } : result
+}
+
+function legacyChatStream(transform: StreamTransform, meta: RelayMeta): StreamTransform {
+  return meta.legacyFunctionCall ? legacyFunctionCallStream(transform) : transform
+}
+
+/** A buffered OpenAI transcript ending in an empty completion is retried like the stream path. */
+async function classifyOpenAIChatBufferedFailure(text: string, model: string): Promise<UpstreamFailure | null> {
+  if (responsesSseEmptyCompletionReason(text)) return { penalty: null, retryable: true, transientResponse: true }
+  return classifyBufferedResponsesFailure('openai', text, model)
 }
 
 function callAntigravity(token: string, body: Record<string, unknown>, ctx: UpstreamContext): Promise<Response> {

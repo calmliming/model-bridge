@@ -18,6 +18,9 @@ const DEFAULT_INSTRUCTIONS = 'You are Codex, a helpful AI coding assistant.'
 const DEFAULT_OPENAI_BETA = 'responses=experimental'
 const FORBIDDEN_FIELDS = ['max_output_tokens', 'parallel_tool_calls'] as const
 const IMAGE_GENERATION_TOOL_TYPE = 'image_generation'
+// Declared only so replayed web_search_call history validates; cached-only so
+// it cannot reach the live web on the caller's behalf.
+const WEB_SEARCH_HISTORY_TOOL = { type: 'web_search', external_web_access: false } as const
 const EMPTY_TOOL_PARAMETERS = { type: 'object', properties: {} }
 const RESPONSES_ITEM_ID_PREFIXES = ['fc_', 'ctc_', 'ctco_', 'tsc_', 'tso_'] as const
 
@@ -59,6 +62,31 @@ function stripImageGenerationTools(body: Record<string, unknown>): void {
     }
   }
   if (toolChoiceSelectsImageGeneration(body.tool_choice)) delete body.tool_choice
+}
+
+function isWebSearchTool(tool: unknown): boolean {
+  return !!tool && typeof tool === 'object' && stringValue((tool as Record<string, unknown>).type).startsWith('web_search')
+}
+
+/**
+ * The Codex backend fails a request whose input replays a hosted
+ * web_search_call unless web_search is declared too ("response protection is
+ * unavailable"). Codex's local compaction resends the full history with
+ * `tools: []`, so every compaction after a web search failed. Declare the
+ * cached-only tool, and keep a tool-less request tool-less via tool_choice.
+ */
+function declareWebSearchForHistory(body: Record<string, unknown>): void {
+  if (!Array.isArray(body.input)) return
+  const items = body.input.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+  if (!items.some(item => item.type === 'web_search_call')) return
+  const tools: unknown[] = Array.isArray(body.tools) ? body.tools : []
+  // Responses Lite clients declare hosted tools in an input item instead.
+  const inputTools = items.flatMap(item => item.type === 'additional_tools' && Array.isArray(item.tools) ? item.tools : [])
+  if (tools.some(isWebSearchTool) || inputTools.some(isWebSearchTool)) return
+  body.tools = [...tools, { ...WEB_SEARCH_HISTORY_TOOL }]
+  const choice = body.tool_choice
+  const choiceAllowsNone = choice == null || (typeof choice === 'string' && ['', 'auto', 'none'].includes(choice.trim().toLowerCase()))
+  if (!tools.length && !inputTools.length && choiceAllowsNone) body.tool_choice = 'none'
 }
 
 function normalizeResponseTools(body: Record<string, unknown>): void {
@@ -121,6 +149,7 @@ export function normalizeOpenaiResponsesBody(
     out.input = [{ role: 'user', content: [{ type: 'input_text', text: out.input }] }]
   }
   if (out.input !== undefined) out.input = withoutRelayReasoningItems(out.input)
+  declareWebSearchForHistory(out)
   out.stream = true
   out.store = false
   if (typeof out.model === 'string' && /^gpt-6-astra(?:$|-)/i.test(out.model)) {

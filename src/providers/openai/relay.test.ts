@@ -165,4 +165,52 @@ describe('normalizeOpenaiResponsesBody', () => {
     ])
     expect(original.input?.[0]).toEqual({ type: 'custom_tool_call', id: 'fc_custom-1', input: '{}' })
   })
+
+  describe('web_search_call history', () => {
+    const searchHistory = [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'look it up' }] },
+      { type: 'web_search_call', id: 'ws_1', status: 'completed', action: { type: 'search', query: 'q' } },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'found' }] },
+    ]
+    const cachedSearch = { type: 'web_search', external_web_access: false }
+
+    it('declares a cached-only web_search for a tool-less compaction and keeps it uncallable', () => {
+      const original = { model: 'gpt-5.5', input: searchHistory, tools: [] as unknown[] }
+      const body = normalizeOpenaiResponsesBody(original)
+      expect(body.tools).toEqual([cachedSearch])
+      expect(body.tool_choice).toBe('none')
+      expect(original.tools).toEqual([])
+    })
+
+    it.each([undefined, null, 'auto', 'none'])('pins tool_choice %s to none when no tools were declared', choice => {
+      expect(normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: searchHistory, tool_choice: choice }).tool_choice).toBe('none')
+    })
+
+    it('appends to caller tools without touching their tool_choice', () => {
+      const lookup = { type: 'function', name: 'lookup', parameters: { type: 'object', properties: {} } }
+      const body = normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: searchHistory, tools: [lookup], tool_choice: 'auto' })
+      expect(body.tools).toEqual([lookup, cachedSearch])
+      expect(body.tool_choice).toBe('auto')
+    })
+
+    it('leaves an explicit non-none tool_choice alone', () => {
+      expect(normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: searchHistory, tool_choice: 'required' }).tool_choice).toBe('required')
+    })
+
+    it.each([
+      ['top-level tools', { tools: [{ type: 'web_search_preview' }] }],
+      ['an additional_tools item', { input: [...searchHistory, { type: 'additional_tools', role: 'developer', tools: [{ type: 'web_search' }] }] }],
+    ])('does not redeclare web_search already present in %s', (_where, extra) => {
+      const body = normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: searchHistory, ...extra })
+      expect((body.tools as unknown[] | undefined)?.filter(tool => (tool as { type: string }).type.startsWith('web_search'))?.length ?? 0)
+        .toBe('tools' in extra ? 1 : 0)
+      expect(body).not.toHaveProperty('tool_choice')
+    })
+
+    it('leaves requests without web_search_call history unchanged', () => {
+      const body = normalizeOpenaiResponsesBody({ model: 'gpt-5.5', input: 'hello', tools: [] })
+      expect(body.tools).toEqual([])
+      expect(body).not.toHaveProperty('tool_choice')
+    })
+  })
 })

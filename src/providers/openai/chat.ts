@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 import { createFunctionCallTracker } from './toolCalls'
 import { acceptsOpenAISamplingParams } from './models'
+import type { PeekVerdict } from '../streamPeek'
+import { upgradeLegacyFunctionCalling } from '../legacyFunctions'
 
 interface ChatMessage {
   role?: string
@@ -230,7 +232,8 @@ function convertTool(tool: ChatTool): Record<string, unknown> | null {
  * Converts a standard OpenAI Chat Completions request into the Responses shape
  * accepted by the ChatGPT/Codex backend used by this relay.
  */
-export function chatCompletionsToResponses(body: Record<string, unknown>): Record<string, unknown> {
+export function chatCompletionsToResponses(request: Record<string, unknown>): Record<string, unknown> {
+  const body = upgradeLegacyFunctionCalling(request)
   const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : []
   const instructions: string[] = []
   const input: Array<Record<string, unknown>> = []
@@ -468,6 +471,44 @@ export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTe
         : 'Upstream response failed.'
       return { terminalType: 'error', code, message, error, hasOutput, httpStatus: explicitErrorStatus(error, event) }
     }
+  }
+  return null
+}
+
+const RESPONSES_PREAMBLE_EVENTS = new Set(['response.created', 'response.in_progress', 'response.queued'])
+
+/**
+ * OpenAI and Grok sometimes refuse silently: the stream ends with a
+ * response.completed that carries no output, no usage and no error. Relayed
+ * as-is, SDK clients accept it as an empty successful turn and never retry.
+ */
+function isEmptyResponsesCompletion(event: ResponsesStreamEvent): boolean {
+  const response = event.response
+  if (event.error || response?.error || response?.usage != null) return false
+  return !Array.isArray(response?.output) || response.output.length === 0
+}
+
+/**
+ * Classifies Responses events before any byte reaches the client (see
+ * streamPeek). Lifecycle and non-`response.*` metadata events wait for more;
+ * an empty completion is retried; content, failures and usable terminals pass.
+ */
+export function responsesStreamStartVerdict(raw: unknown): PeekVerdict {
+  const event = (raw && typeof raw === 'object' ? raw : {}) as ResponsesStreamEvent
+  const type = typeof event.type === 'string' ? event.type : ''
+  if (type === 'response.completed' || type === 'response.done') {
+    return isEmptyResponsesCompletion(event) ? { retry: 'empty_completed' } : 'pass'
+  }
+  if (RESPONSES_PREAMBLE_EVENTS.has(type) || (!type.startsWith('response.') && type !== 'error')) return 'continue'
+  return 'pass'
+}
+
+/** Applies the stream-start verdict to a buffered transcript; null = keep it. */
+export function responsesSseEmptyCompletionReason(text: string): string | null {
+  for (const event of parseResponsesSseEvents(text)) {
+    const verdict = responsesStreamStartVerdict(event)
+    if (verdict === 'pass') return null
+    if (verdict !== 'continue') return verdict.retry
   }
   return null
 }

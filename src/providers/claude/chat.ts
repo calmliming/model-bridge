@@ -13,6 +13,7 @@ import { anthropicContent } from '../toolMedia'
 
 import { randomUUID } from 'node:crypto'
 import { anthropicToolSchema } from '../toolSchema'
+import { upgradeLegacyFunctionCalling } from '../legacyFunctions'
 import { emptyUsage, type UsageData } from '../types'
 
 /** Anthropic requires max_tokens; use this when the client omits it. */
@@ -101,8 +102,9 @@ function convertToolChoice(choice: unknown): AnthropicBlock | undefined {
  * merged so the result always alternates user/assistant as Anthropic requires.
  */
 export function chatCompletionsToClaudeMessages(
-  body: Record<string, unknown>,
+  request: Record<string, unknown>,
 ): Record<string, unknown> {
+  const body = upgradeLegacyFunctionCalling(request)
   const messages = Array.isArray(body.messages) ? (body.messages as ChatMessage[]) : []
   const systemParts: string[] = []
   const anthMessages: AnthropicMessage[] = []

@@ -395,6 +395,83 @@ describe('relay settlement', () => {
   }))
 })
 
+describe('legacy Chat function calling', () => {
+  const legacyRequest = (model: string, stream: boolean) => ({
+    model, stream, max_tokens: 100,
+    functions: [{ name: 'get_weather', parameters: { type: 'object', properties: { city: { type: 'string' } } } }],
+    function_call: 'auto',
+    messages: [
+      { role: 'user', content: 'Weather in SF?' },
+      { role: 'assistant', content: null, function_call: { name: 'get_weather', arguments: '{"city":"SF"}' } },
+      { role: 'function', name: 'get_weather', content: '72F' },
+      { role: 'user', content: 'And tomorrow?' },
+    ],
+  })
+
+  const expectLegacyCall = (body: string, stream: boolean) => {
+    expect(body).not.toContain('tool_calls')
+    if (stream) {
+      expect(body).toContain('"function_call":{"name":"get_weather","arguments":""}')
+      expect(body).toContain('"finish_reason":"function_call"')
+    } else {
+      expect(JSON.parse(body)).toMatchObject({ choices: [{ finish_reason: 'function_call',
+        message: { role: 'assistant', function_call: { name: 'get_weather', arguments: '{"city":"SF"}' } } }] })
+    }
+  }
+
+  it.each([true, false])('pairs history and answers in the legacy shape through OpenAI (stream=%s)', stream => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'response.output_item.added', output_index: 0, item: { id: 'fc_1', type: 'function_call', call_id: 'call_1', name: 'get_weather', arguments: '' } },
+      { type: 'response.function_call_arguments.delta', item_id: 'fc_1', output_index: 0, delta: '{"city":"SF"}' },
+      { type: 'response.completed', response: { id: 'resp_fn', model: 'gpt-5.4', status: 'completed',
+        output: [{ type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'get_weather', arguments: '{"city":"SF"}' }],
+        usage: { input_tokens: 10, output_tokens: 5 } } },
+    ]))
+    const response = await request(legacyRequest('gpt-5.4', stream), '/v1/chat/completions')
+    expect(response.status).toBe(200)
+    const sent = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
+    expect(sent.tools).toEqual([expect.objectContaining({ type: 'function', name: 'get_weather' })])
+    expect(sent.tool_choice).toBe('auto')
+    expect(sent.input).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'function_call', call_id: 'call_legacy_1', name: 'get_weather' }),
+      expect.objectContaining({ type: 'function_call_output', call_id: 'call_legacy_1', output: '72F' }),
+    ]))
+    expectLegacyCall(response.body, stream)
+  }))
+
+  it.each([true, false])('pairs history and answers in the legacy shape through Claude (stream=%s)', stream => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'message_start', message: { id: 'msg_fn', model: 'claude-sonnet-5', usage: { input_tokens: 10 } } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: {} } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"city":"SF"}' } },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+      { type: 'message_stop' },
+    ]))
+    const response = await request(legacyRequest('claude-sonnet-5', stream), '/api/claude/v1/chat/completions')
+    expect(response.status).toBe(200)
+    const sent = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
+    expect(sent.tools).toEqual([expect.objectContaining({ name: 'get_weather' })])
+    expect(sent.messages).toEqual(expect.arrayContaining([
+      { role: 'assistant', content: [expect.objectContaining({ type: 'tool_use', id: 'call_legacy_1', name: 'get_weather', input: { city: 'SF' } })] },
+      expect.objectContaining({ role: 'user', content: expect.arrayContaining([
+        expect.objectContaining({ type: 'tool_result', tool_use_id: 'call_legacy_1', content: '72F' })]) }),
+    ]))
+    expectLegacyCall(response.body, stream)
+  }))
+
+  it('keeps tool_calls for a caller that also declares tools', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'response.completed', response: { id: 'resp_fn', model: 'gpt-5.4', status: 'completed',
+        output: [{ type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'get_weather', arguments: '{}' }],
+        usage: { input_tokens: 10, output_tokens: 5 } } },
+    ]))
+    const response = await request({ ...legacyRequest('gpt-5.4', false),
+      tools: [{ type: 'function', function: { name: 'lookup', parameters: { type: 'object', properties: {} } } }] }, '/v1/chat/completions')
+    expect(JSON.parse(response.body)).toMatchObject({ choices: [{ finish_reason: 'tool_calls',
+      message: { tool_calls: [expect.objectContaining({ function: expect.objectContaining({ name: 'get_weather' }) })] } }] })
+  }))
+})
+
 describe('Claude Chat Completions response format', () => {
   it.each([false, undefined])('returns buffered JSON for stream=%s', (stream) => withRelay(async (request) => {
     mocks.balance = 20_000
@@ -408,6 +485,46 @@ describe('Claude Chat Completions response format', () => {
     expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).stream).toBe(true)
     expect(mocks.balance).toBe(10_000)
     expect(mocks.logs[0]?.slice(9, 11)).toEqual([100, 100])
+  }))
+
+  it('keeps the client alive while the upstream only sends events the transform drops', () => withRelay(async (request) => {
+    const realSetInterval = globalThis.setInterval
+    let heartbeat: (() => void) | undefined
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, ms?: number) => {
+      if (ms !== 15_000) return realSetInterval(callback, ms)
+      heartbeat = callback
+      return realSetInterval(() => undefined, 1 << 30)
+    }) as typeof setInterval)
+    const realNow = Date.now.bind(Date)
+    let offset = 0
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset)
+    const encoder = new TextEncoder()
+    let upstream!: ReadableStreamDefaultController<Uint8Array>
+    const send = (event: unknown) => upstream.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+    mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ start(controller) { upstream = controller } }),
+      { headers: { 'content-type': 'text/event-stream' } }))
+    try {
+      const pending = request({ model: 'claude-sonnet-5', stream: true,
+        messages: [{ role: 'user', content: 'Hi' }] }, '/api/claude/v1/chat/completions')
+      await vi.waitFor(() => expect(heartbeat).toBeDefined())
+      send({ type: 'message_start', message: { id: 'msg_ping', model: 'claude-sonnet-5', usage: { input_tokens: 10 } } })
+      offset += 20_000
+      // Upstream traffic right before the tick used to suppress the keepalive.
+      send({ type: 'ping' })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      heartbeat!()
+      send({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello' } })
+      send({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } })
+      send({ type: 'message_stop' })
+      upstream.close()
+      const response = await pending
+      expect(response.status).toBe(200)
+      expect(response.body).toMatch(/^: keepalive\n\n/)
+      expect(response.body).toContain('Hello')
+    } finally {
+      interval.mockRestore()
+      now.mockRestore()
+    }
   }))
 
   it('keeps streamed Chat Completions working on the clean route', () => withRelay(async (request) => {
@@ -881,6 +998,52 @@ describe('upstream compatibility regressions', () => {
     expect(response.body).not.toContain('999')
     expect(mocks.logs).toHaveLength(1)
     expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+
+  const emptyCompleted = () => sse([
+    { type: 'response.created', response: { id: 'resp_empty', status: 'in_progress', output: [] } },
+    { type: 'response.in_progress', response: { id: 'resp_empty', status: 'in_progress', output: [] } },
+    { type: 'response.completed', response: { id: 'resp_empty', status: 'completed', output: [] } },
+  ])
+
+  it.each([
+    ['/v1/responses', true], ['/v1/responses', false],
+    ['/v1/chat/completions', true], ['/v1/chat/completions', false],
+    ['/api/grok/v1/responses', true],
+  ] as const)('retries a silent empty response.completed at %s (stream=%s)', (url, stream) => withRelay(async request => {
+    const answered = sse([
+      { type: 'response.output_text.delta', delta: 'Paid answer' },
+      { type: 'response.completed', response: { id: 'resp_test', model: 'gpt-5.4', status: 'completed',
+        output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Paid answer' }] }],
+        usage: { input_tokens: 100, output_tokens: 100 } } },
+    ])
+    mocks.fetch.mockResolvedValueOnce(emptyCompleted()).mockResolvedValueOnce(answered)
+    const model = url.includes('grok') ? 'grok-4.5' : 'gpt-5.4'
+    const response = await request({ model, stream, input: 'Hi', messages: [{ role: 'user', content: 'Hi' }] }, url)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Paid answer')
+    expect(response.body).not.toContain('resp_empty')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[26]).toBe(2) // attempt_count
+  }))
+
+  it('passes an empty response.completed through on the last attempt', () => withRelay(async request => {
+    mocks.fetch.mockImplementation(async () => emptyCompleted())
+    const response = await request(prompt)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('resp_empty')
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+  }))
+
+  it('does not retry a completion that carries usage but no output', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'response.completed',
+      response: { id: 'resp_billed', output: [], usage: { input_tokens: 100, output_tokens: 0 } } }]))
+    const response = await request(prompt)
+    expect(response.body).toContain('resp_billed')
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
   }))
 
   it('sanitizes native Messages schemas without touching tool input data', () => withRelay(async request => {
@@ -1492,8 +1655,11 @@ describe('upstream compatibility errors and usage provenance', () => {
   }))
   it('records a successful native response without usage as missing, not an estimated charge', () => withRelay(async request => {
     mocks.cost = 0
-    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'response.completed', response: { id: 'r', status: 'completed', output: [] } }]))
+    // Output without usage: an empty output would be retried as a silent refusal.
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'response.completed', response: { id: 'r', status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] }] } }]))
     await request(prompt)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
     expect(mocks.logs[0]?.[22]).toBe('success')
     expect(mocks.logs[0]?.[36]).toBe('missing')
     expect(mocks.transactions).toHaveLength(0)
