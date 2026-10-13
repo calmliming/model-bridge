@@ -13,9 +13,9 @@
 
 export type CcSwitchApp = 'claude' | 'codex' | 'gemini'
 
-// Default model for Codex CLI: gpt-5.6-sol is the recommended flagship for
-// agent coding tasks, offering the best reasoning and coding capabilities.
-export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.6-sol'
+// Pinned Codex default from the repository model catalog, shared by native
+// OpenAI and Sub2API imports.
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
 
 export interface CcSwitchTarget {
   /** Stable id, also matches the snippet tab names in the views. */
@@ -48,11 +48,10 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     vendor: 'Claude',
     endpoint: (origin) => origin,
     provider: 'claude',
-    // Claude Code defaults: Opus 5 for complex reasoning, Sonnet 5 for balanced
-    // tasks, Haiku 4.5 for lightweight work. Using latest recommended models.
+    // Latest catalog versions for the Opus, Sonnet and Haiku model slots.
     models: {
-      opusModel: 'claude-opus-5',
-      sonnetModel: 'claude-sonnet-5',
+      opusModel: 'claude-opus-5-5',
+      sonnetModel: 'claude-sonnet-5-5',
       haikuModel: 'claude-haiku-4-5',
     },
   },
@@ -143,7 +142,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     models: {
       model: 'qwen3.8-max',
       sonnetModel: 'qwen3.7-plus',
-      haikuModel: 'qwen3.7-flash',
+      haikuModel: 'qwen3.8-flash',
       opusModel: 'qwen3.8-max',
     },
     provider: 'qwen',
@@ -177,7 +176,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI · Kimi',
     vendor: 'Kimi',
     endpoint: (origin) => origin,
-    models: { model: 'kimi-k2.7-code' },
+    models: { model: 'kimi-k3' },
     provider: 'kimi',
   },
   {
@@ -205,7 +204,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Codex CLI · Sub2API',
     vendor: 'Sub2API',
     endpoint: (origin) => origin,
-    models: { model: 'gpt-5.6-sol' },
+    models: { model: OPENAI_CC_SWITCH_CODEX_MODEL },
     provider: 'sub2api',
   },
   {
