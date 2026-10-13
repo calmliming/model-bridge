@@ -23,6 +23,21 @@ describe('Sub2API Messages protocol forwarding', () => {
       'anthropic-version': 'test-version', 'anthropic-workspace-id': 'workspace-test',
     })
   })
+
+  it('forwards Claude Code identity headers once so Sub2API keeps the client cache layout', async () => {
+    upstream.mockResolvedValue(new Response('{}'))
+    await relaySub2ApiMessages('upstream-key', 'https://gateway.example', { model: 'claude-opus-5-5', messages: [] }, {
+      'user-agent': 'claude-cli/2.1.281 (external, cli)', 'x-app': 'cli', 'x-claude-code-session-id': 'cc-session',
+      'anthropic-beta': 'oauth-2025-04-20', 'x-stainless-os': 'MacOS',
+    })
+    const [, init] = upstream.mock.calls[0]!
+    expect(init.headers).toEqual({
+      authorization: 'Bearer upstream-key', 'x-api-key': 'upstream-key',
+      'content-type': 'application/json', accept: 'application/json',
+      'anthropic-version': '2023-06-01', 'anthropic-beta': 'oauth-2025-04-20',
+      'user-agent': 'claude-cli/2.1.281 (external, cli)', 'x-app': 'cli', 'x-claude-code-session-id': 'cc-session',
+    })
+  })
 })
 
 describe('Sub2API Antigravity endpoints', () => {

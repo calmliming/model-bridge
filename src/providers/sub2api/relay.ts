@@ -8,6 +8,12 @@ const DEFAULT_ANTHROPIC_VERSION = '2023-06-01'
 // backend pool. Stream responses can take longer than the default 10s connect
 // timeout, especially when upstream models are processing large contexts.
 const SUB2API_TIMEOUT_MS = 60_000
+// Sub2API skips its OAuth mimicry, which moves the client's system prompt into
+// messages and so breaks its prompt-cache prefix, only for requests it
+// recognizes as Claude Code: a claude-cli User-Agent plus a parseable
+// metadata.user_id. Releases before v0.1.166 have no body-based fallback, so
+// without these headers every proxied Claude Code turn rewrites the cache.
+const CLAUDE_CODE_IDENTITY_HEADERS = ['user-agent', 'x-app', 'x-claude-code-session-id']
 
 export function normalizeSub2ApiBaseUrl(raw: string | null | undefined): string {
   const base = raw?.trim().replace(/\/+$/, '')
@@ -62,6 +68,15 @@ function jsonHeaders(apiKey: string, accept: string): Record<string, string> {
   }
 }
 
+function claudeCodeIdentityHeaders(headers: IncomingHttpHeaders): Record<string, string> {
+  const forwarded: Record<string, string> = {}
+  for (const name of CLAUDE_CODE_IDENTITY_HEADERS) {
+    const value = headers[name]
+    if (value !== undefined) forwarded[name] = Array.isArray(value) ? value.join(',') : value
+  }
+  return forwarded
+}
+
 export function relaySub2ApiMessages(
   apiKey: string,
   baseUrl: string | null,
@@ -74,6 +89,7 @@ export function relaySub2ApiMessages(
       ...jsonHeaders(apiKey, body.stream === true ? 'text/event-stream' : 'application/json'),
       'anthropic-version': DEFAULT_ANTHROPIC_VERSION,
       ...claudeProtocolHeaders(clientHeaders),
+      ...claudeCodeIdentityHeaders(clientHeaders),
     },
     body: JSON.stringify(body),
   }, SUB2API_TIMEOUT_MS)

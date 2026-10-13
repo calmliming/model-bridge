@@ -100,6 +100,42 @@ describe('computeSessionKey', () => {
     expect(info).toMatchObject({ key: 'grok:k1:m:parent-session', source: 'metadata' })
   })
 
+  it('accepts the Claude Code session header', () => {
+    const info = computeSessionInfo('sub2api', 'k1', { 'x-claude-code-session-id': 'cc-session' }, {})
+    expect(info).toMatchObject({ key: 'sub2api:k1:h:cc-session', source: 'header' })
+  })
+
+  it.each(['claude', 'sub2api'])('uses the Claude Code metadata session for %s in both user_id formats', (provider) => {
+    const session = '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5'
+    const formats = [
+      JSON.stringify({ device_id: 'device', account_uuid: '', session_id: session }),
+      `user_${'a'.repeat(64)}_account__session_${session}`,
+    ]
+    for (const userId of formats) {
+      expect(computeSessionInfo(provider, 'k1', {}, {
+        metadata: { user_id: userId },
+        messages: [{ role: 'user', content: 'hi' }],
+      })).toMatchObject({ key: `${provider}:k1:m:${session}`, source: 'metadata' })
+    }
+  })
+
+  it('ignores Claude Code billing signatures when fingerprinting a conversation', () => {
+    const turn = (cch: string, messages: unknown[]) => ({
+      system: [
+        { type: 'text', text: `x-anthropic-billing-header: cc_version=2.1.70.abc; cc_entrypoint=cli; cch=${cch};` },
+        { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." },
+      ],
+      messages,
+    })
+    const first = [{ role: 'user', content: 'hello' }]
+    const k1 = computeSessionKey('sub2api', 'k1', {}, turn('11111', first))
+    const k2 = computeSessionKey('sub2api', 'k1', {}, turn('22222', [
+      ...first, { role: 'assistant', content: 'hi' }, { role: 'user', content: 'next' },
+    ]))
+    expect(k1).toMatch(/^sub2api:k1:f:/)
+    expect(k1).toBe(k2)
+  })
+
   it('is stable across turns of the same Anthropic conversation', () => {
     const turn1 = {
       system: 'You are a helpful assistant.',

@@ -100,8 +100,17 @@ export async function resetStickyBindings(): Promise<void> {
 /** Request headers a client may use to pin a conversation explicitly. */
 // Codex has emitted both hyphenated and underscored spellings over time. Keep
 // the hyphenated form first so the current official client signal wins when a
-// proxy happens to forward both variants.
-const SESSION_HEADERS = ['session-id', 'session_id', 'conversation_id', 'x-session-id', 'x-conversation-id']
+// proxy happens to forward both variants. Claude Code sends its own header.
+const SESSION_HEADERS = [
+  'session-id', 'session_id', 'conversation_id', 'x-session-id', 'x-conversation-id', 'x-claude-code-session-id',
+]
+
+// Claude Code's metadata.user_id before 2.1.78: user_{64hex}_account_{uuid?}_session_{uuid}.
+const LEGACY_CLAUDE_CODE_USER_ID = /^user_[a-fA-F0-9]{64}_account_[a-fA-F0-9-]*_session_([a-fA-F0-9-]{36})$/
+
+// Claude Code's leading system attribution block. Older CLIs sign the whole
+// body into its cch field, so the block changes on every turn.
+const BILLING_HEADER_PREFIX = 'x-anthropic-billing-header:'
 
 type Headers = Record<string, string | string[] | undefined>
 
@@ -141,7 +150,7 @@ function bodyPromptCacheKey(body: Record<string, unknown>): string | null {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 }
 
-/** Extracts a Grok/Codex session id nested in metadata.user_id when present. */
+/** Extracts a Grok/Codex/Claude Code session id nested in metadata.user_id when present. */
 function bodyMetadataSessionKey(body: Record<string, unknown>): string | null {
   const metadata = body.metadata
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
@@ -152,6 +161,8 @@ function bodyMetadataSessionKey(body: Record<string, unknown>): string | null {
   }
   const nested = row.user_id
   if (typeof nested !== 'string' || !nested.trim()) return null
+  const legacy = LEGACY_CLAUDE_CODE_USER_ID.exec(nested.trim())
+  if (legacy) return legacy[1]!
   try {
     const parsed = JSON.parse(nested) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
@@ -213,10 +224,18 @@ function pushIfSeed(parts: string[], name: string, value: unknown): void {
   if (normalized) parts.push(`${name}=${normalized}`)
 }
 
+function withoutBillingBlocks(system: unknown): unknown {
+  if (!Array.isArray(system)) return system
+  return system.filter((block) => {
+    const text = (block as { text?: unknown } | null)?.text
+    return !(typeof text === 'string' && text.startsWith(BILLING_HEADER_PREFIX))
+  })
+}
+
 /** Extracts the system / instruction prompt across Anthropic, OpenAI and Gemini shapes. */
 function extractSystemText(body: Record<string, unknown>): string {
   const parts = [
-    textFromContent(body.system), // Anthropic messages
+    textFromContent(withoutBillingBlocks(body.system)), // Anthropic messages
     textFromContent(body.instructions), // OpenAI Responses
     textFromContent(body.systemInstruction), // Gemini (camelCase)
     textFromContent(body.system_instruction), // Gemini (snake_case)
@@ -298,8 +317,9 @@ export function hashSessionKey(sessionKey: string): string {
 /**
  * Computes sticky-session information for a request, scoped to provider + API
  * key. Explicit session headers win; OpenAI-compatible body cache keys follow.
- * Grok additionally accepts the structured metadata session and its transient
- * conversation header before falling back to a stable content fingerprint.
+ * Claude, Sub2API, Antigravity and Grok accept a structured metadata session;
+ * Grok additionally accepts its transient conversation header. Everything else
+ * falls back to a stable content fingerprint.
  *
  * Returns null when no useful session signal can be derived, in which case the
  * caller should fall back to plain LRU scheduling (no stickiness).
@@ -329,6 +349,15 @@ export function computeSessionInfo(
     const explicitSession = bodyMetadataSessionKey(body) ?? (typeof body.sessionId === 'string' ? body.sessionId.trim() : '')
     if (explicitSession) {
       const key = `${provider}:${apiKeyId}:m:${explicitSession}`
+      return { key, source: 'metadata', hash: hashSessionKey(key) }
+    }
+  }
+  // Claude Code names its conversation in metadata.user_id on every turn,
+  // including CLIs that predate the X-Claude-Code-Session-Id header.
+  if (provider === 'claude' || provider === 'sub2api') {
+    const metadataSession = bodyMetadataSessionKey(body)
+    if (metadataSession) {
+      const key = `${provider}:${apiKeyId}:m:${metadataSession}`
       return { key, source: 'metadata', hash: hashSessionKey(key) }
     }
   }
