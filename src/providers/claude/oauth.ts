@@ -70,6 +70,7 @@ export async function exchangeCode(
   const rawCode = code.split('#')[0]?.trim() ?? code
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
     body: JSON.stringify({
       grant_type: 'authorization_code',
@@ -90,6 +91,7 @@ export async function exchangeCode(
 export async function refreshToken(refreshTokenValue: string): Promise<TokenSet> {
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'content-type': 'application/json', 'user-agent': USER_AGENT },
     body: JSON.stringify({
       grant_type: 'refresh_token',

@@ -46,6 +46,6 @@ COPY --from=web-builder /web/dist ./web/dist
 
 # 3000 = HTTP API + admin dashboard. 1455 = OAuth callback (OpenAI &
 # Google's installed-app redirects only accept loopback callbacks).
-EXPOSE 3000 1455
+EXPOSE 3000 1455 8085
 
 CMD ["node", "node_modules/tsx/dist/cli.mjs", "src/index.ts"]

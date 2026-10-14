@@ -65,14 +65,17 @@ if (isLocalDevelopment && blankToUndefined(process.env.APP_ENV) !== 'local') {
 }
 
 /**
- * Ensures a persistent secret exists. On first run the value is
- * generated and appended to the active env file so it survives restarts —
- * critical because ENCRYPTION_KEY must stay stable to decrypt stored tokens.
- * 本地写入 .env.local，线上写入 .env，两者不会互相污染。
+ * Local development may generate secrets into its persistent env file.
+ * Production must supply them explicitly: a container's writable layer is
+ * discarded on recreation, which would make stored OAuth tokens unreadable.
  */
 function ensureSecret(key: string, generate: () => string): void {
   const current = process.env[key]
   if (current && current.trim() !== '') return
+  if (process.env.NODE_ENV === 'production') {
+    console.error(`[config] production requires an explicit ${key}; generate it with "openssl rand -hex 32" and save it in the deployment environment`)
+    process.exit(1)
+  }
   const value = generate()
   process.env[key] = value
   const prefix = existsSync(ENV_PATH) ? '\n' : ''
@@ -96,6 +99,8 @@ const proxyUrlSchema = z.string().url().refine(value => {
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
+  // Docker listens on all container interfaces; its published port stays loopback-only.
+  OAUTH_CALLBACK_HOST: z.enum(['127.0.0.1', '0.0.0.0']).default('127.0.0.1'),
   DATABASE_URL: z
     .string()
     .url()

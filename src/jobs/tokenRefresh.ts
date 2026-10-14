@@ -37,7 +37,7 @@ async function refreshExpiringTokens(): Promise<void> {
     if (!account.tokenExpiresAt || account.tokenExpiresAt > threshold) continue
     if (!account.oauthRefreshToken) continue
     try {
-      await refreshAccountToken(account.id)
+      await refreshAccountToken(account.id, { onlyIfExpiring: true })
       console.log(`[token-refresh] refreshed account "${account.name}"`)
     } catch (err) {
       if (err instanceof PermanentRefreshError) {

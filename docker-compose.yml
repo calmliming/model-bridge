@@ -38,7 +38,8 @@ services:
       # OAuth callback for OpenAI (/auth/callback) and Google (/oauth2callback).
       # The browser doing the auth flow must reach this port; keep it on
       # localhost if the host is remote and you SSH-tunnel from your laptop.
-      - "1455:1455"
+      - "127.0.0.1:1455:1455"
+      - "127.0.0.1:8085:8085"
     extra_hosts:
       # Lets the app container reach services published on the Docker host, e.g.
       # a Redis instance managed by 1Panel outside this compose project.
@@ -46,12 +47,13 @@ services:
     environment:
       PORT: 3000
       HOST: 0.0.0.0
+      OAUTH_CALLBACK_HOST: 0.0.0.0
       # 显式声明生产模式。容器里 NODE_ENV=production（见 Dockerfile），
       # 所以即便 .env.local 被误带进来也不会按本地模式加载。
       APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgres://${PG_USER:-model_bridge}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_bridge}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Set ENCRYPTION_KEY in .env before starting}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env before starting}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       CLAUDE_CLI_VERSION: ${CLAUDE_CLI_VERSION:-2.1.263}
@@ -97,6 +99,10 @@ services:
       ALIPAY_SELLER_ID: ${ALIPAY_SELLER_ID:-}
       ALIPAY_SELLER_EMAIL: ${ALIPAY_SELLER_EMAIL:-}
       ALIPAY_USD_CNY_RATE: ${ALIPAY_USD_CNY_RATE:-7.20}
+      WECHAT_APP_ID: ${WECHAT_APP_ID:-}
+      WECHAT_MCH_ID: ${WECHAT_MCH_ID:-}
+      WECHAT_API_KEY: ${WECHAT_API_KEY:-}
+      WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-}
     volumes:
       # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
       # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or

@@ -132,8 +132,8 @@ async function main(): Promise<void> {
   stopMediaTaskJob = startMediaTaskJob()
   // OpenAI's OAuth public client only allows http://localhost:1455/auth/callback
   // as a redirect URI, so we run a small dedicated listener on 1455.
-  oauthCallbackServer = startOauthCallbackServer()
-  if (config.ANTIGRAVITY_OAUTH_CLIENT_SECRET) antigravityCallbackServer = startOauthCallbackServer({ port: 8085, paths: ['/callback'], provider: 'antigravity' })
+  oauthCallbackServer = startOauthCallbackServer({ host: config.OAUTH_CALLBACK_HOST })
+  if (config.ANTIGRAVITY_OAUTH_CLIENT_SECRET) antigravityCallbackServer = startOauthCallbackServer({ port: 8085, host: config.OAUTH_CALLBACK_HOST, paths: ['/callback'], provider: 'antigravity' })
 
   let shuttingDown = false
   const shutdown = async (signal: NodeJS.Signals) => {

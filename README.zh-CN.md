@@ -383,8 +383,9 @@ codex --profile model-bridge-mimo
 ## 配置
 
 Docker 部署时 `install.sh` 会把所有配置写进宿主机的 `.env`；非 Docker 模式可
-把 `.env.example` 复制为 `.env`，`ENCRYPTION_KEY` 与 `JWT_SECRET` 在首次运行
-时自动生成。首次启动前请设置 `PG_PASSWORD`、`DATABASE_URL` 和 8–72 个 UTF-8 字节的
+把 `.env.example` 复制为 `.env`。仅本地开发可自动生成 `ENCRYPTION_KEY` 与 `JWT_SECRET`；
+`NODE_ENV=production` 必须显式设置并持久保存这两个密钥，容器重建或升级时保持原值。
+首次启动前请设置 `PG_PASSWORD`、`DATABASE_URL` 和 8–72 个 UTF-8 字节的
 `ADMIN_PASSWORD`。内置的
 `postgres` 容器把数据存放在 `./data/pg/` 下，请备份这个目录。
 

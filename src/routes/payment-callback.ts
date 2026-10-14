@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { handlePaymentNotification, queryPaymentOrder } from '../payments/manager'
 import { getPaymentProvider } from '../payments/providers/index'
+import { parseWechatXml, WECHAT_XML_LIMIT } from '../payments/wechatXml'
 
 function paymentReturnHtml(title: string, message: string): string {
   return `<!doctype html>
@@ -71,37 +72,22 @@ export function registerPaymentCallbackRoutes(app: FastifyInstance): void {
   })
 
   // 微信支付回调
-  app.post('/api/payment/callback/wechat', async (request, reply) => {
-    try {
-      // 微信支付回调是 XML 格式，需要解析
-      const xmlData = request.body as string
-      const data = parseWechatXml(xmlData)
-
-      const result = await handlePaymentNotification({
-        provider: 'wechat',
-        data,
-      })
-
-      if (result.success) {
-        return reply.type('application/xml').send('<xml><return_code><![CDATA[SUCCESS]]></return_code><return_msg><![CDATA[OK]]></return_msg></xml>')
-      } else {
+  // Encapsulation keeps XML parsing local to the WeChat callback.
+  void app.register(async callback => {
+    callback.addContentTypeParser(['application/xml', 'text/xml'],
+      { parseAs: 'string', bodyLimit: WECHAT_XML_LIMIT }, (_request, body, done) => done(null, body))
+    callback.post('/api/payment/callback/wechat', { bodyLimit: WECHAT_XML_LIMIT }, async (request, reply) => {
+      try {
+        const data = parseWechatXml(request.body as string)
+        const result = await handlePaymentNotification({ provider: 'wechat', data })
+        if (result.success) {
+          return reply.type('application/xml').send('<xml><return_code><![CDATA[SUCCESS]]></return_code><return_msg><![CDATA[OK]]></return_msg></xml>')
+        }
         return reply.type('application/xml').send('<xml><return_code><![CDATA[FAIL]]></return_code><return_msg><![CDATA[处理失败]]></return_msg></xml>')
+      } catch (err) {
+        app.log.error({ err }, 'WeChat Pay callback error')
+        return reply.type('application/xml').send('<xml><return_code><![CDATA[FAIL]]></return_code><return_msg><![CDATA[系统错误]]></return_msg></xml>')
       }
-    } catch (err) {
-      app.log.error({ err }, 'WeChat Pay callback error')
-      return reply.type('application/xml').send('<xml><return_code><![CDATA[FAIL]]></return_code><return_msg><![CDATA[系统错误]]></return_msg></xml>')
-    }
+    })
   })
-}
-
-function parseWechatXml(xml: string): Record<string, string> {
-  const result: Record<string, string> = {}
-  const regex = /<(\w+)>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/\1>/g
-  let match
-
-  while ((match = regex.exec(xml)) !== null) {
-    result[match[1]!] = match[2]!
-  }
-
-  return result
 }

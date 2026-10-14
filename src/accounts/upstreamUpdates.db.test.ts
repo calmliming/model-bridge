@@ -38,6 +38,10 @@ import { initPricing, reloadPricing, resolvePrice } from '../usage/pricing'
 import { parseNativeImageUsage } from '../providers/openai/directImages'
 import { recordUsage } from '../usage/recorder'
 import { dashboardRecentLogs } from '../usage/stats'
+import { createAccount, ensureFreshToken, getAccount, refreshAccountToken } from './manager'
+import { getProvider } from '../providers/registry'
+import { decrypt, encrypt } from '../crypto'
+import { PermanentRefreshError } from './refreshErrors'
 
 describe.runIf(database)('upstream update database regressions', () => {
   beforeAll(async () => {
@@ -47,6 +51,73 @@ describe.runIf(database)('upstream update database regressions', () => {
   afterAll(async () => {
     await pool.query(`DROP SCHEMA IF EXISTS ${database!.schema} CASCADE`)
     await pool.end()
+  })
+
+  it('uses tokens committed by another replica while waiting for the account row lock', async () => {
+    const { id } = await createAccount({ provider: 'openai', name: 'refresh waiting',
+      tokens: { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: Date.now() - 1 } })
+    const refresh = vi.spyOn(getProvider('openai')!, 'refreshToken').mockRejectedValue(new Error('refresh_token_reused'))
+    const transaction = vi.spyOn(db, 'transaction')
+    const worker = await pool.connect()
+    await worker.query('BEGIN')
+    await worker.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [id])
+    const pending = refreshAccountToken(id).then(token => ({ token }), error => ({ error }))
+    try {
+      await vi.waitFor(() => expect(transaction).toHaveBeenCalled())
+      await worker.query('UPDATE accounts SET oauth_access_token = $2, oauth_refresh_token = $3, token_expires_at = $4 WHERE id = $1',
+        [id, encrypt('other-worker-access'), encrypt('other-worker-refresh'), Date.now() + 3600000])
+      await worker.query('COMMIT')
+      expect(await pending).toEqual({ token: 'other-worker-access' })
+      expect(refresh).not.toHaveBeenCalled()
+      expect((await getAccount(id))?.status).toBe('active')
+    } finally {
+      await worker.query('ROLLBACK')
+      worker.release()
+      await pending
+      await pool.query('DELETE FROM accounts WHERE id = $1', [id])
+      transaction.mockRestore()
+      refresh.mockRestore()
+    }
+  })
+
+  it('shares rotating refreshes, persists fresh metadata and ignores later stale snapshots', async () => {
+    const { id } = await createAccount({ provider: 'openai', name: 'refresh shared',
+      tokens: { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: Date.now() - 1 },
+      metadata: { quota: { updatedAt: 123 } } })
+    const snapshot = (await getAccount(id))!
+    const refresh = vi.spyOn(getProvider('openai')!, 'refreshToken').mockResolvedValue({ accessToken: 'fresh-access',
+      refreshToken: 'fresh-refresh', expiresAt: Date.now() + 3600000, metadata: { openai: { chatgptAccountId: 'identity' } } })
+    try {
+      expect(await Promise.all([ensureFreshToken(snapshot), ensureFreshToken(snapshot), refreshAccountToken(id)]))
+        .toEqual(['fresh-access', 'fresh-access', 'fresh-access'])
+      expect(await ensureFreshToken(snapshot)).toBe('fresh-access')
+      expect(refresh).toHaveBeenCalledOnce()
+      const stored = (await getAccount(id))!
+      expect(decrypt(stored.oauthRefreshToken!)).toBe('fresh-refresh')
+      expect(stored.metadata).toMatchObject({ quota: { updatedAt: 123 }, openai: { chatgptAccountId: 'identity' } })
+      expect(stored.status).toBe('active')
+    } finally {
+      await pool.query('DELETE FROM accounts WHERE id = $1', [id])
+      refresh.mockRestore()
+    }
+  })
+
+  it('commits genuine permanent refresh failures but rolls back transient failures', async () => {
+    const { id } = await createAccount({ provider: 'openai', name: 'refresh failure',
+      tokens: { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: Date.now() - 1 } })
+    const refresh = vi.spyOn(getProvider('openai')!, 'refreshToken').mockRejectedValueOnce(new Error('network unavailable'))
+      .mockRejectedValueOnce(new Error('refresh_token_reused'))
+    try {
+      await expect(refreshAccountToken(id)).rejects.toThrow('network unavailable')
+      expect((await getAccount(id))?.status).toBe('active')
+      await expect(refreshAccountToken(id)).rejects.toBeInstanceOf(PermanentRefreshError)
+      const stored = (await getAccount(id))!
+      expect(stored.status).toBe('disabled')
+      expect(stored.metadata).toMatchObject({ reauth: { required: true, reason: 'refresh_token_reused' } })
+    } finally {
+      await pool.query('DELETE FROM accounts WHERE id = $1', [id])
+      refresh.mockRestore()
+    }
   })
 
   it('replays initialization and migration while preserving group policy and partial updates', async () => {

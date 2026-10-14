@@ -75,6 +75,7 @@ export async function exchangeCode(
   })
   const res = await fetch(GROK_TOKEN_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       'user-agent': GROK_OAUTH_USER_AGENT,
@@ -96,6 +97,7 @@ export async function refreshToken(refreshTokenValue: string): Promise<TokenSet>
   })
   const res = await fetch(GROK_TOKEN_URL, {
     method: 'POST',
+    signal: AbortSignal.timeout(30_000),
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       'user-agent': GROK_OAUTH_USER_AGENT,

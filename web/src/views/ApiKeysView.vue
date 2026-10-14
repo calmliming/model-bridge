@@ -152,6 +152,7 @@ const providerOptions = [
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'MiniMax', value: 'minimax' },
+  { label: 'Grok (xAI)', value: 'grok' },
   { label: 'GrsAI（图片 / 视频）', value: 'grsai' },
   { label: 'Sub2API', value: 'sub2api' }
 ]
@@ -167,6 +168,7 @@ const providerLabel: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
+  grok: 'Grok (xAI)',
   grsai: 'GrsAI',
   sub2api: 'Sub2API'
 }
@@ -182,6 +184,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   qwen: 'info',
   kimi: 'default',
   minimax: 'error',
+  grok: 'default',
   grsai: 'info',
   sub2api: 'success'
 }

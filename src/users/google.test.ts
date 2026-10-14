@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ query: vi.fn(), release: vi.fn(), getUserById: vi.fn() }))
 vi.mock('../db/index', () => ({ pool: { connect: async () => ({ query: mocks.query, release: mocks.release }) } }))
@@ -10,7 +10,7 @@ const user = { id: 'user-1', email: 'local@example.com', name: 'Local', status: 
 const identity = { sub: 'google-1', email: 'local@example.com', name: 'Google Name' }
 let linked: Record<string, unknown> | undefined
 let existing: Record<string, unknown> | undefined
-let consumeProof: ReturnType<typeof vi.fn>
+let consumeProof: Mock<() => Promise<void>>
 beforeEach(() => {
   vi.clearAllMocks()
   linked = undefined

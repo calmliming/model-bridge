@@ -12,7 +12,9 @@ import { PermanentRefreshError } from './refreshErrors'
 const state = vi.hoisted(() => ({ account: {} as Record<string, any> }))
 
 const fakeDb = vi.hoisted(() => ({
-  select: () => ({ from: () => ({ where: async () => [state.account] }) }),
+  select: () => ({ from: () => ({ where: () => Object.assign(Promise.resolve([{ ...state.account }]), {
+    for: async () => [{ ...state.account }],
+  }) }) }),
   update: () => ({
     set: (patch: Record<string, unknown>) => ({
       where: async () => {
@@ -42,13 +44,13 @@ const scheduler = vi.hoisted(() => ({
 
 const registry = vi.hoisted(() => ({ getProvider: vi.fn() }))
 
-vi.mock('../db/index', () => ({ db: fakeDb, pool: {} }))
+vi.mock('../db/index', () => ({ db: { ...fakeDb, transaction: async (run: (store: typeof fakeDb) => unknown) => run(fakeDb) }, pool: {} }))
 vi.mock('../crypto', () => ({ encrypt: (v: string) => v, decrypt: (v: string) => v }))
 vi.mock('../providers/registry', () => registry)
 vi.mock('../middleware/limits', () => ({ currentConcurrency: vi.fn(async () => 0) }))
 vi.mock('./scheduler', () => scheduler)
 
-import { refreshAccountToken } from './manager'
+import { ensureFreshToken, refreshAccountToken } from './manager'
 
 const goodTokens = {
   accessToken: 'new-access',
@@ -91,7 +93,6 @@ describe('refreshAccountToken', () => {
 
     await expect(refreshAccountToken('acct-1')).rejects.toBeInstanceOf(PermanentRefreshError)
 
-    expect(scheduler.disableAccount).toHaveBeenCalledWith('acct-1')
     expect(state.account.status).toBe('disabled')
     expect(state.account.metadata?.reauth).toMatchObject({
       required: true,
@@ -146,5 +147,38 @@ describe('refreshAccountToken', () => {
     expect(state.account.status).toBe('active')
     expect(state.account.cooldownUntil).toBeNull()
     expect(state.account.metadata.reauth).toBeUndefined()
+  })
+
+  it('shares one rotating-token refresh across simultaneous requests and a manual refresh', async () => {
+    let finish!: () => void
+    const wait = new Promise<void>(resolve => { finish = resolve })
+    const refresh = vi.fn(async () => { await wait; return goodTokens })
+    registry.getProvider.mockReturnValue({ refreshToken: refresh })
+    const stale = { ...state.account }
+    const first = ensureFreshToken(stale as any)
+    const second = ensureFreshToken(stale as any)
+    const manual = refreshAccountToken('acct-1')
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+    finish()
+    expect(await Promise.all([first, second, manual])).toEqual(['new-access', 'new-access', 'new-access'])
+    expect(refresh).toHaveBeenCalledWith('enc-refresh')
+    expect(state.account.status).toBe('active')
+  })
+
+  it('rechecks stored expiry instead of refreshing a stale scheduler snapshot', async () => {
+    const stale = { ...state.account }
+    Object.assign(state.account, { oauthAccessToken: 'already-refreshed', tokenExpiresAt: Date.now() + 3600000 })
+    const refresh = vi.fn()
+    registry.getProvider.mockReturnValue({ refreshToken: refresh })
+    expect(await ensureFreshToken(stale as any)).toBe('already-refreshed')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('releases the shared task after a transient failure so the next call can retry', async () => {
+    const refresh = vi.fn().mockRejectedValueOnce(new Error('network failed')).mockResolvedValueOnce(goodTokens)
+    registry.getProvider.mockReturnValue({ refreshToken: refresh })
+    await expect(refreshAccountToken('acct-1')).rejects.toThrow('network failed')
+    await expect(refreshAccountToken('acct-1')).resolves.toBe('new-access')
+    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })

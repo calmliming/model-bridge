@@ -348,7 +348,9 @@ lets you set the Gemini base URL) for the Gemini relay.
 
 For Docker deploys, `install.sh` writes everything into the host `.env`.
 For non-Docker runs, copy `.env.example` to `.env`; `ENCRYPTION_KEY` and
-`JWT_SECRET` are auto-generated on first start. Set `PG_PASSWORD` and
+`JWT_SECRET` are auto-generated for local development only. With
+`NODE_ENV=production`, set both secrets explicitly and keep their values across
+container recreation or upgrades. Set `PG_PASSWORD` and
 `DATABASE_URL` and an 8–72 byte `ADMIN_PASSWORD` before the first boot — the bundled `postgres` container
 stores its data under `./data/pg/`, so back up that folder.
 

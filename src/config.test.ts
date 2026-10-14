@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { appendFileSync } from 'node:fs'
 
 vi.mock('dotenv', () => ({ config: vi.fn() }))
 vi.mock('node:fs', () => ({ appendFileSync: vi.fn(), existsSync: vi.fn() }))
@@ -66,5 +67,32 @@ describe('Google website login configuration', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('invalid environment') })
     await expect(import('./config')).rejects.toThrow('invalid environment')
+  })
+})
+
+describe('persistent production secrets', () => {
+  it.each(['ENCRYPTION_KEY', 'JWT_SECRET'])('refuses to generate a missing %s in production', async key => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv(key, '')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('missing production secret') })
+    vi.mocked(appendFileSync).mockClear()
+    await expect(import('./config')).rejects.toThrow('missing production secret')
+    expect(exit).toHaveBeenCalledWith(1)
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`explicit ${key}`))
+    expect(appendFileSync).not.toHaveBeenCalled()
+  })
+
+  it('keeps development generation and explicit production secrets', async () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('ENCRYPTION_KEY', '')
+    vi.mocked(appendFileSync).mockClear()
+    expect((await import('./config')).config.ENCRYPTION_KEY).toMatch(/^[a-f0-9]{64}$/)
+    expect(appendFileSync).toHaveBeenCalledWith('.env', expect.stringContaining('ENCRYPTION_KEY='))
+    vi.resetModules()
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.mocked(appendFileSync).mockClear()
+    expect((await import('./config')).config.JWT_SECRET).toBe('model-bridge-test-secret')
+    expect(appendFileSync).not.toHaveBeenCalled()
   })
 })

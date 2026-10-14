@@ -104,6 +104,7 @@ const providerOptions = [
   { label: 'Tongyi Qwen', value: 'qwen' },
   { label: 'Kimi (Moonshot)', value: 'kimi' },
   { label: 'MiniMax', value: 'minimax' },
+  { label: 'Grok (xAI)', value: 'grok' },
   { label: 'Model Bridge（图片 / 视频）', value: 'media' },
   { label: 'Sub2API', value: 'sub2api' },
 ]
@@ -119,6 +120,7 @@ const providerLabel: Record<string, string> = {
   qwen: 'Tongyi Qwen',
   kimi: 'Kimi (Moonshot)',
   minimax: 'MiniMax',
+  grok: 'Grok (xAI)',
   media: 'Model Bridge',
   sub2api: 'Sub2API',
 }

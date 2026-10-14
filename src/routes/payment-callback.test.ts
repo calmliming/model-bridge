@@ -35,6 +35,31 @@ beforeEach(() => {
 })
 
 describe('payment callback routes', () => {
+  it.each(['application/xml', 'text/xml; charset=utf-8'])('accepts a WeChat %s notification', async contentType => {
+    const server = await app()
+    try {
+      const response = await server.inject({ method: 'POST', url: '/api/payment/callback/wechat',
+        headers: { 'content-type': contentType }, payload: '<xml><return_code><![CDATA[SUCCESS]]></return_code><out_trade_no><![CDATA[po_1]]></out_trade_no><total_fee>7200</total_fee></xml>' })
+      expect(response.statusCode).toBe(200)
+      expect(response.headers['content-type']).toContain('application/xml')
+      expect(response.body).toContain('<return_code><![CDATA[SUCCESS]]>')
+      expect(mocks.handlePaymentNotification).toHaveBeenCalledWith({ provider: 'wechat',
+        data: { return_code: 'SUCCESS', out_trade_no: 'po_1', total_fee: '7200' } })
+    } finally { await server.close() }
+  })
+
+  it('rejects duplicate fields without processing payment and keeps XML out of Alipay routes', async () => {
+    const server = await app()
+    try {
+      const response = await server.inject({ method: 'POST', url: '/api/payment/callback/wechat',
+        headers: { 'content-type': 'application/xml' }, payload: '<xml><sign>A</sign><sign>B</sign></xml>' })
+      expect(response.body).toContain('<return_code><![CDATA[FAIL]]>')
+      expect(mocks.handlePaymentNotification).not.toHaveBeenCalled()
+      const other = await server.inject({ method: 'POST', url: '/api/payment/callback/alipay',
+        headers: { 'content-type': 'application/xml' }, payload: '<xml/>' })
+      expect(other.statusCode).toBe(415)
+    } finally { await server.close() }
+  })
   it('parses Alipay form notifications and returns exact success text', async () => {
     const server = await app()
     const response = await server.inject({

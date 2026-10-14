@@ -1,4 +1,5 @@
-import { createHash, createSign } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { buildWechatXml, parseWechatXml } from '../wechatXml'
 import type {
   CreatePaymentParams,
   CreatePaymentResult,
@@ -47,16 +48,17 @@ export class WechatPayProvider implements PaymentProvider {
     }
 
     const sign = this.sign(requestData)
-    const xml = this.buildXml({ ...requestData, sign })
+    const xml = buildWechatXml({ ...requestData, sign })
 
     const response = await fetch(`${this.apiUrl}/pay/unifiedorder`, {
       method: 'POST',
+      signal: AbortSignal.timeout(30_000),
       headers: { 'Content-Type': 'application/xml' },
       body: xml,
     })
 
     const responseText = await response.text()
-    const result = this.parseXml(responseText)
+    const result = parseWechatXml(responseText)
 
     if (result.return_code !== 'SUCCESS') {
       throw new Error(`WeChat Pay error: ${result.return_msg}`)
@@ -65,6 +67,7 @@ export class WechatPayProvider implements PaymentProvider {
     if (result.result_code !== 'SUCCESS') {
       throw new Error(`WeChat Pay error: ${result.err_code_des || result.err_code}`)
     }
+    this.assertMerchant(result)
 
     // 验证返回签名
     if (!this.verifySign(result)) {
@@ -75,6 +78,8 @@ export class WechatPayProvider implements PaymentProvider {
       providerOrderId: result.prepay_id,
       paymentUrl: result.code_url,
       qrCode: result.code_url,
+      providerAmount: (totalFee / 100).toFixed(2),
+      providerCurrency: 'CNY',
       expiresAt: Date.now() + 30 * 60_000,
     }
   }
@@ -84,6 +89,7 @@ export class WechatPayProvider implements PaymentProvider {
     if (!this.verifySign(data)) {
       throw new Error('WeChat Pay signature verification failed')
     }
+    this.assertMerchant(data)
 
     if (data.return_code !== 'SUCCESS') {
       throw new Error(`WeChat Pay notification error: ${data.return_msg}`)
@@ -111,16 +117,17 @@ export class WechatPayProvider implements PaymentProvider {
     }
 
     const sign = this.sign(requestData)
-    const xml = this.buildXml({ ...requestData, sign })
+    const xml = buildWechatXml({ ...requestData, sign })
 
     const response = await fetch(`${this.apiUrl}/pay/orderquery`, {
       method: 'POST',
+      signal: AbortSignal.timeout(30_000),
       headers: { 'Content-Type': 'application/xml' },
       body: xml,
     })
 
     const responseText = await response.text()
-    const result = this.parseXml(responseText)
+    const result = parseWechatXml(responseText)
 
     if (result.return_code !== 'SUCCESS') {
       throw new Error(`WeChat Pay query error: ${result.return_msg}`)
@@ -129,6 +136,9 @@ export class WechatPayProvider implements PaymentProvider {
     if (result.result_code !== 'SUCCESS') {
       throw new Error(`WeChat Pay query error: ${result.err_code_des || result.err_code}`)
     }
+    if (!this.verifySign(result)) throw new Error('WeChat Pay signature verification failed')
+    this.assertMerchant(result)
+    if (result.out_trade_no !== outTradeNo) throw new Error('WeChat Pay returned a different order')
 
     const status = result.trade_state === 'SUCCESS' ? 'success' : 'failed'
     const totalFee = Number(result.total_fee) / 100
@@ -163,27 +173,14 @@ export class WechatPayProvider implements PaymentProvider {
     return receivedSign === calculatedSign
   }
 
-  private buildXml(data: Record<string, unknown>): string {
-    const entries = Object.entries(data)
-      .map(([key, value]) => `<${key}><![CDATA[${value}]]></${key}>`)
-      .join('')
-    return `<xml>${entries}</xml>`
-  }
-
-  private parseXml(xml: string): Record<string, string> {
-    const result: Record<string, string> = {}
-    const regex = /<(\w+)>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/\1>/g
-    let match
-
-    while ((match = regex.exec(xml)) !== null) {
-      result[match[1]!] = match[2]!
+  private assertMerchant(data: Record<string, unknown>): void {
+    if (data.appid !== this.appId || data.mch_id !== this.mchId) {
+      throw new Error('WeChat Pay merchant does not match configuration')
     }
-
-    return result
   }
 
   private generateNonce(): string {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+    return randomBytes(16).toString('hex')
   }
 
   private parseWechatTime(timeStr: string): number {

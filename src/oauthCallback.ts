@@ -30,8 +30,9 @@ p{margin:0;opacity:.72;font-size:14px;line-height:1.7}
  * as a redirect URI, so a small dedicated server has to listen there to
  * complete the flow. Other providers using a redirect-style flow can share it.
  */
-export function startOauthCallbackServer(options: { port?: number; paths?: string[]; provider?: string } = {}): Server {
+export function startOauthCallbackServer(options: { port?: number; host?: string; paths?: string[]; provider?: string } = {}): Server {
   const port = options.port ?? 1455
+  const host = options.host ?? HOST
   const paths = options.paths ?? ['/auth/callback', '/oauth2callback']
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     if (!req.url) {
@@ -92,10 +93,10 @@ export function startOauthCallbackServer(options: { port?: number; paths?: strin
   })
   server.on('error', (err) => {
     // EADDRINUSE typically means a leftover orphan; log but don't crash.
-    console.error(`[oauth-callback] failed to bind ${HOST}:${port}: ${(err as Error).message}`)
+    console.error(`[oauth-callback] failed to bind ${host}:${port}: ${(err as Error).message}`)
   })
-  server.listen(port, HOST, () => {
-    console.log(`[oauth-callback] listening on http://${HOST}:${port}${paths[0]}`)
+  server.listen(port, host, () => {
+    console.log(`[oauth-callback] listening on http://${host}:${port}${paths[0]}`)
   })
   return server
 }

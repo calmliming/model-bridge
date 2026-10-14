@@ -1,4 +1,5 @@
 import { once } from 'node:events'
+import type { AddressInfo } from 'node:net'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ sessions: vi.fn(), createAccount: vi.fn(), exchange: vi.fn(), metadata: vi.fn() }))
@@ -45,4 +46,16 @@ describe('native Antigravity callback', () => {
     expect(response.status).toBe(500)
     expect(await response.text()).not.toContain('private database detail')
   }))
+})
+
+describe('callback listener binding', () => {
+  it.each([undefined, '0.0.0.0'])('binds the configured host (%s) and handles callbacks', async host => {
+    const server = startOauthCallbackServer({ port: 0, host })
+    if (!server.listening) await once(server, 'listening')
+    try {
+      const address = server.address() as AddressInfo
+      expect(address.address).toBe(host ?? '127.0.0.1')
+      expect((await fetch(`http://127.0.0.1:${address.port}/auth/callback?code=code&state=state`)).status).toBe(200)
+    } finally { await closeOauthCallbackServer(server) }
+  })
 })

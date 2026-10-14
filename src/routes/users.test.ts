@@ -171,6 +171,19 @@ describe('legacy user login security', () => {
 })
 
 describe('self-service API key creation limits', () => {
+  it('creates and updates a Grok-only key without widening its provider scope', () => withApp(async app => {
+    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
+    mocks.createApiKey.mockResolvedValue({ id: 'key-grok', key: 'mb-secret' })
+    const headers = { authorization: `Bearer ${app.jwt.sign({ sub: 'user-1', role: 'user' })}` }
+    const created = await app.inject({ method: 'POST', url: '/api/users/keys', headers,
+      payload: { name: 'Grok', allowedProviders: ['grok'] } })
+    expect(created.statusCode).toBe(201)
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grok'] }))
+    const updated = await app.inject({ method: 'PATCH', url: '/api/users/keys/key-grok', headers,
+      payload: { allowedProviders: ['grok'], name: 'Grok only' } })
+    expect(updated.statusCode).toBe(200)
+    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-grok', expect.objectContaining({ allowedProviders: ['grok'] }), 'user-1')
+  }))
   it('exposes a media capability scope and stores only the original upstream permission', () => withApp(async app => {
     mocks.apiKeyCreationLimitError.mockResolvedValue(null)
     mocks.createApiKey.mockResolvedValue({ id: 'key-media', key: 'mb-secret' })

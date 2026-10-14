@@ -8,7 +8,7 @@ import type { TokenSet } from '../providers/types'
 import { currentConcurrency } from '../middleware/limits'
 import { accountAutopausePercent, accountQuotaFromMetadata, type AccountQuotaSnapshot } from './quota'
 import { accountHealth, emptyHealth } from './health'
-import { clearExpiredAccountCooldowns, disableAccount } from './scheduler'
+import { clearExpiredAccountCooldowns } from './scheduler'
 import { setAccountGroups as setAccountGroupMembers } from './groups'
 import { upstreamBalanceFromMetadata } from '../providers/balance'
 import {
@@ -23,6 +23,8 @@ import { assertSafeUpstreamEgress, assertSafeUpstreamUrl } from '../http/urlGuar
 /** Refresh a token this many ms before it actually expires. */
 const REFRESH_AHEAD_MS = 5 * 60_000
 const AUTH_TAG_ERROR = 'Unsupported state or unable to authenticate data'
+type AccountStore = Pick<typeof db, 'select' | 'update'>
+const pendingTokenRefreshes = new Map<string, Promise<string>>()
 
 export interface CreateAccountInput {
   provider: string
@@ -303,8 +305,12 @@ export async function deleteAccounts(ids: string[]): Promise<AccountBatchResult>
 
 /** Updates provider-specific metadata cached on an account. */
 export async function updateAccountMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
+  return mergeAccountMetadata(db, id, metadata)
+}
+
+async function mergeAccountMetadata(store: AccountStore, id: string, metadata: Record<string, unknown>): Promise<void> {
   const patch = JSON.stringify(metadata)
-  await db.update(accounts)
+  await store.update(accounts)
     // PostgreSQL performs the same shallow merge as object spread, atomically.
     // This prevents concurrent quota, identity, and balance refreshes from
     // overwriting one another after reading an older metadata snapshot.
@@ -371,8 +377,8 @@ export async function setAccountWeight(id: string, weight: number): Promise<void
     .where(eq(accounts.id, id))
 }
 
-async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
-  await db.update(accounts)
+async function persistTokens(store: AccountStore, id: string, tokens: TokenSet): Promise<void> {
+  await store.update(accounts)
     .set({
       oauthAccessToken: encrypt(tokens.accessToken),
       oauthRefreshToken: encrypt(tokens.refreshToken),
@@ -383,20 +389,20 @@ async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
   // non-secret metadata so backfill works for accounts authorized before the
   // id_token was parsed. Skips the read/write when the refresh carried none.
   if (tokens.metadata && Object.keys(tokens.metadata).length) {
-    await updateAccountMetadata(id, tokens.metadata)
+    await mergeAccountMetadata(store, id, tokens.metadata)
   }
   // If this account was previously flagged as needing re-authorization, a
   // successful refresh means the token recovered: clear the flag and bring it
   // back into the pool. Guarded so a routine refresh of a healthy (or merely
   // rate-limited) account never touches its status.
-  const [row] = await db
+  const [row] = await store
     .select({ metadata: accounts.metadata })
     .from(accounts)
     .where(eq(accounts.id, id))
   if (reauthStateFromMetadata(row?.metadata)) {
     const metadata = metadataObject(row?.metadata)
     delete metadata.reauth
-    await db.update(accounts)
+    await store.update(accounts)
       .set({ status: 'active', cooldownUntil: null, metadata })
       .where(eq(accounts.id, id))
   }
@@ -404,40 +410,56 @@ async function persistTokens(id: string, tokens: TokenSet): Promise<void> {
 
 /**
  * Disables an account and records that it needs manual re-authorization.
- * Reuses `disableAccount` (status=disabled, cooldown cleared) so the scheduler
- * and background refresh loop both skip it, then stamps a metadata marker the
- * dashboard surfaces. A later successful refresh clears the marker (see
- * `persistTokens`).
+ * Commits the disabled status and marker with the refresh transaction. A
+ * later successful refresh clears the marker (see `persistTokens`).
  */
-async function markAccountReauthRequired(id: string, provider: string, signal: string): Promise<void> {
-  await disableAccount(id)
-  await updateAccountMetadata(id, {
+async function markAccountReauthRequired(store: AccountStore, id: string, provider: string, signal: string): Promise<void> {
+  await store.update(accounts).set({ status: 'disabled', cooldownUntil: null }).where(eq(accounts.id, id))
+  await mergeAccountMetadata(store, id, {
     reauth: { required: true, reason: signal, provider, at: Date.now() } satisfies AccountReauthState,
   })
 }
 
-/** Refreshes an account's OAuth token and persists it. Returns the new access token. */
-export async function refreshAccountToken(id: string): Promise<string> {
-  const account = await getAccount(id)
-  if (!account?.oauthRefreshToken) throw new Error('account has no refresh token')
-  const provider = getProvider(account.provider)
-  if (!provider) throw new Error(`unknown provider: ${account.provider}`)
-  try {
-    const tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
-    await persistTokens(id, tokens)
-    return tokens.accessToken
-  } catch (err) {
-    // Permanent failure (revoked grant / reused refresh token / deleted team
-    // workspace): disable the account and stop retrying. Anything else is
-    // transient (429/5xx/network) and bubbles up unchanged so callers keep
-    // their existing retry / penalize behavior.
-    const signal = matchPermanentRefreshSignal(err)
-    if (signal) {
-      await markAccountReauthRequired(id, account.provider, signal)
-      throw new PermanentRefreshError(id, signal, refreshFailureStatus(err))
+/** Share local refreshes; the row lock also serializes other replicas and jobs. */
+export function refreshAccountToken(id: string, options: { onlyIfExpiring?: boolean } = {}): Promise<string> {
+  const pending = pendingTokenRefreshes.get(id)
+  if (pending) return pending
+  const work = refreshLockedAccountToken(id, options.onlyIfExpiring === true)
+    .finally(() => pendingTokenRefreshes.delete(id))
+  pendingTokenRefreshes.set(id, work)
+  return work
+}
+
+async function refreshLockedAccountToken(id: string, onlyIfExpiring: boolean): Promise<string> {
+  const before = await getAccount(id)
+  const result = await db.transaction(async store => {
+    // Use this transaction's connection for every read/write, so waiting
+    // refreshes cannot exhaust the pool while the holder needs another slot.
+    const [account] = await store.select().from(accounts).where(eq(accounts.id, id)).for('update')
+    if (!account?.oauthRefreshToken) throw new Error('account has no refresh token')
+    const refreshedWhileWaiting = before && account.oauthAccessToken !== before.oauthAccessToken
+    const stillFresh = !account.tokenExpiresAt || account.tokenExpiresAt >= Date.now() + REFRESH_AHEAD_MS
+    if (account.oauthAccessToken && (refreshedWhileWaiting || (onlyIfExpiring && stillFresh))) {
+      return { token: decryptAccountSecret(account.oauthAccessToken) }
     }
-    throw err
-  }
+    const provider = getProvider(account.provider)
+    if (!provider) throw new Error(`unknown provider: ${account.provider}`)
+    let tokens: TokenSet
+    try {
+      tokens = await provider.refreshToken(decryptAccountSecret(account.oauthRefreshToken))
+    } catch (err) {
+      const signal = matchPermanentRefreshSignal(err)
+      if (!signal) throw err
+      await markAccountReauthRequired(store, id, account.provider, signal)
+      // Throw after the transaction commits; otherwise the disabled state
+      // would roll back along with the refresh failure.
+      return { error: new PermanentRefreshError(id, signal, refreshFailureStatus(err)) }
+    }
+    await persistTokens(store, id, tokens)
+    return { token: tokens.accessToken }
+  })
+  if (result.error) throw result.error
+  return result.token!
 }
 
 /** Returns a valid access token for an account, refreshing if near expiry. */
@@ -447,7 +469,7 @@ export async function ensureFreshToken(account: {
   tokenExpiresAt: number | null
 }): Promise<string> {
   if (account.tokenExpiresAt && account.tokenExpiresAt < Date.now() + REFRESH_AHEAD_MS) {
-    return refreshAccountToken(account.id)
+    return refreshAccountToken(account.id, { onlyIfExpiring: true })
   }
   if (!account.oauthAccessToken) throw new Error('account has no access token')
   return decryptAccountSecret(account.oauthAccessToken)
