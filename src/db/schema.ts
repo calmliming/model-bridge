@@ -372,6 +372,18 @@ export const mediaTasks = pgTable('media_tasks', {
   account: index('media_tasks_account').on(table.accountId).where(sql`${table.settled} = FALSE`),
 }))
 
+/** Leased synchronous requests share admission budgets with durable media tasks. */
+export const relayReservations = pgTable('relay_reservations', {
+  id: text('id').primaryKey(), apiKeyId: text('api_key_id').notNull(), userId: text('user_id').notNull(), accountId: text('account_id'),
+  estimatedMicros: bigint('estimated_micros', { mode: 'number' }).notNull(),
+  balanceReservedMicros: bigint('balance_reserved_micros', { mode: 'number' }).notNull(),
+  leaseExpiresAt: bigint('lease_expires_at', { mode: 'number' }).notNull(),
+}, table => ({
+  owner: index('relay_reservations_owner').on(table.userId, table.apiKeyId),
+  account: index('relay_reservations_account').on(table.accountId),
+  expiry: index('relay_reservations_expiry').on(table.leaseExpiresAt),
+}))
+
 /** Synchronous image request lifecycle; usage remains in the existing ledger. */
 export const liveRequests = pgTable('live_requests', {
   id: text('id').primaryKey(), apiKeyId: text('api_key_id').notNull(), userId: text('user_id'),

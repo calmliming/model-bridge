@@ -10,6 +10,7 @@ import { recordUsage } from '../usage/recorder'
 import { usdToMicros } from '../wallet/money'
 import { redactUpstreamError } from '../http/upstreamDiagnostics'
 import { publicMediaError } from '../providers/publicIdentity'
+import { activeRequestTotals, lockRequestAdmission } from '../usage/admission'
 
 export class MediaTaskError extends Error {
   constructor(readonly statusCode: number, message: string) { super(message) }
@@ -80,30 +81,19 @@ async function admitTask(key: AuthedApiKey, account: SelectedAccount, body: Grsa
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    // Every replica uses the same lock order. Submitting and unsettled tasks keep
-    // their slots and reservation across process restarts and failed polling.
-    for (const lock of [`media-user:${key.userId}`, `media-account:${account.id}`]) {
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [lock])
-    }
-    const active = await client.query(`SELECT
-      COUNT(*) FILTER (WHERE api_key_id = $1) AS key_count,
-      COUNT(*) FILTER (WHERE user_id = $2) AS user_count,
-      COUNT(*) FILTER (WHERE account_id = $3) AS account_count,
-      COALESCE(SUM(estimated_micros) FILTER (WHERE api_key_id = $1), 0) AS key_reserved,
-      COALESCE(SUM(estimated_micros) FILTER (WHERE user_id = $2 AND billing->>'billTo' = 'balance'), 0) AS reserved
-      FROM media_tasks WHERE settled = FALSE AND (user_id = $2 OR account_id = $3)`, [key.id, key.userId, account.id])
-    const count = active.rows[0]
+    await lockRequestAdmission(client, key.userId!, account.id)
+    const count = await activeRequestTotals(client, key.id, key.userId!, account.id)
     const quota = await client.query('SELECT quota_limit, quota_used FROM api_keys WHERE id = $1', [key.id])
     const budget = quota.rows[0]
-    if (budget?.quota_limit != null && Number(budget.quota_used) + (Number(count.key_reserved) + estimated) / 1e6 > Number(budget.quota_limit)) {
+    if (budget?.quota_limit != null && Number(budget.quota_used) + (count.keyReserved + estimated) / 1e6 > Number(budget.quota_limit)) {
       throw new MediaTaskError(429, '本次生成和正在执行的任务将超过 API Key 成本配额')
     }
-    for (const [limit, value] of [[key.concurrencyLimit, count.key_count], [key.userConcurrencyLimit, count.user_count], [account.concurrencyLimit, count.account_count]]) {
+    for (const [limit, value] of [[key.concurrencyLimit, count.keyCount], [key.userConcurrencyLimit, count.userCount], [account.concurrencyLimit, count.accountCount]]) {
       if (limit != null && Number(value) >= Number(limit)) throw new MediaTaskError(429, '生成任务并发已达到上限，请等待现有任务完成')
     }
     if (key.billTo === 'balance') {
       const wallet = await client.query('SELECT balance_micros FROM users WHERE id = $1 FOR UPDATE', [key.userId])
-      if (!wallet.rows.length || Number(wallet.rows[0].balance_micros) - Number(count.reserved) < estimated) {
+      if (!wallet.rows.length || Number(wallet.rows[0].balance_micros) - count.balanceReserved < estimated) {
         throw new MediaTaskError(402, '余额不足以支付本次生成和正在执行的任务')
       }
     }

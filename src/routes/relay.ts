@@ -13,7 +13,8 @@ import type { ServerResponse } from 'node:http'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
 import { requireApiKey, type AuthedApiKey } from '../middleware/apiKeyAuth'
-import { estimateReservationMicros, noopRelease, reserveInflightBalance, type InflightRelease } from '../wallet/inflight'
+import { estimateReservationMicros } from '../wallet/inflight'
+import { admitRelayRequest, acquireAdmittedAccount, releaseAdmittedAccount, RequestAdmissionError, withRequestAdmission, type RelayAdmission } from '../usage/admission'
 import { accountConcurrencyKey, ensureFreshToken, updateAccountQuota } from '../accounts/manager'
 import { PermanentRefreshError } from '../accounts/refreshErrors'
 import { extractAccountQuota, quotaPauseUntil, resolveAutopausePercent } from '../accounts/quota'
@@ -2095,9 +2096,16 @@ async function executeRelay(
     return
   }
   try {
-    const releaseReservation = await reserveRequestBalance(apiKey, provider.id, parsed.model, body, request.headers['content-length'])
-    if (!releaseReservation) {
-      await reply.code(402).send({ error: 'insufficient balance: in-flight requests have reserved the remaining balance' })
+    let admission: RelayAdmission
+    try {
+      admission = await reserveRequestAdmission(apiKey, provider.id, parsed.model, body, request.headers['content-length'])
+    } catch (error) {
+      if (error instanceof RequestAdmissionError) {
+        await reply.code(error.statusCode).send({ error: error.message })
+      } else {
+        request.log.error('request admission storage unavailable')
+        await reply.code(503).send({ error: 'request admission temporarily unavailable' })
+      }
       return
     }
     try {
@@ -2118,14 +2126,15 @@ async function executeRelay(
       reply.raw.once('close', onClose)
       if (reply.raw.destroyed) onClose()
       try {
-        await withUpstreamSignal(controller.signal, () => runRelayLoop(request, reply, provider, preparedBody, parsed))
+        await withRequestAdmission(admission.id, () => withUpstreamSignal(AbortSignal.any([controller.signal, admission.signal]),
+          () => runRelayLoop(request, reply, provider, preparedBody, parsed)))
       } finally {
         reply.raw.off('close', onClose)
         controller.abort()
       }
     } finally {
       // Usage has been settled by now, so the wallet already reflects the charge.
-      await releaseReservation()
+      await admission.release()
     }
   } finally {
     if (concurrencyLimit != null) await releaseSlot(apiKey.id)
@@ -2134,18 +2143,17 @@ async function executeRelay(
 }
 
 /**
- * Reserves a balance-billed request's estimated cost while it is in flight.
- * Returns null when other in-flight requests have reserved the balance; an
- * unpriced model or a disabled setting admits without a reservation.
+ * Persist relay capacity and cost estimates in the same admission pool as media.
+ * The optional balance setting retains its policy for relay-only traffic.
  */
-async function reserveRequestBalance(
+async function reserveRequestAdmission(
   apiKey: AuthedApiKey,
   provider: string,
   model: string,
   body: Record<string, unknown>,
   contentLength: string | undefined,
-): Promise<InflightRelease | null> {
-  if (!config.BALANCE_INFLIGHT_RESERVATION_ENABLED || apiKey.billTo !== 'balance' || !apiKey.userId) return noopRelease
+): Promise<RelayAdmission> {
+  if (!apiKey.userId) throw new RequestAdmissionError(401, 'API key owner is unavailable')
   const declaredBytes = Number(contentLength)
   const estimate = estimateReservationMicros({
     provider,
@@ -2155,8 +2163,10 @@ async function reserveRequestBalance(
     multiplier: apiKey.groupMultiplier ?? 1,
     defaultOutputTokens: config.BALANCE_INFLIGHT_DEFAULT_OUTPUT_TOKENS,
   })
-  if (estimate == null) return noopRelease
-  return reserveInflightBalance(apiKey.userId, apiKey.userBalanceMicros ?? 0, estimate)
+  return admitRelayRequest({ apiKeyId: apiKey.id, userId: apiKey.userId,
+    keyLimit: apiKey.concurrencyLimit, userLimit: apiKey.userConcurrencyLimit,
+    estimateMicros: estimate ?? 0, billTo: apiKey.billTo,
+    enforceBalance: config.BALANCE_INFLIGHT_RESERVATION_ENABLED })
 }
 
 /** Concurrency-gate key for a user's aggregate in-flight requests. */
@@ -2176,17 +2186,18 @@ function bodyWithMappedModel(body: Record<string, unknown>, model: string): Reco
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function acquireSlotWithStickyWait(
-  slotKey: string,
-  limit: number,
+  acquire: () => Promise<boolean>,
   waitMs: number,
 ): Promise<boolean> {
-  if (await acquireSlot(slotKey, limit)) return true
+  if (await acquire()) return true
   if (waitMs <= 0) return false
 
   const deadline = Date.now() + waitMs
   while (Date.now() < deadline) {
+    if (upstreamSignal()?.aborted) return false
     await sleep(Math.min(STICKY_SLOT_POLL_MS, Math.max(1, deadline - Date.now())))
-    if (await acquireSlot(slotKey, limit)) return true
+    if (upstreamSignal()?.aborted) return false
+    if (await acquire()) return true
   }
   return false
 }
@@ -2216,7 +2227,8 @@ async function runRelayLoop(
   // (the gateway rotates its own backends), not "blackball this credential".
   const relayToRelay = provider.relayToRelay === true
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  let attempts = 0
+  while (attempts < MAX_ATTEMPTS) {
     if (upstreamSignal()?.aborted) {
       request.log.info(`client disconnected; skipping further ${provider.id} attempts`)
       return
@@ -2255,7 +2267,7 @@ async function runRelayLoop(
         errorCode: 'no_available_account',
         errorMessage: unavailableMessage,
         upstreamStatus: 503,
-        attemptCount: Math.max(1, tried.length),
+        attemptCount: Math.max(1, attempts),
         latencyMs: 0,
         requestInput: provider.summarizeRequestInput
           ? provider.summarizeRequestInput(body)
@@ -2273,16 +2285,28 @@ async function runRelayLoop(
     const accountSlotKey = accountConcurrencyKey(account.id)
     const stickyAccountId = sessionKey ? await getStickyAccountId(sessionKey) : null
     const isStickySelection = stickyAccountId === account.id
-    const acquired =
-      accountLimit == null ||
-      (isStickySelection
-        ? await acquireSlotWithStickyWait(accountSlotKey, accountLimit, config.STICKY_SESSION_WAIT_MS)
-        : await acquireSlot(accountSlotKey, accountLimit))
+    const acquireAccountSlot = async (): Promise<boolean> => {
+      if (accountLimit != null && !await acquireSlot(accountSlotKey, accountLimit)) return false
+      try {
+        if (await acquireAdmittedAccount(account.id, accountLimit)) return true
+      } catch (error) {
+        if (accountLimit != null) await releaseSlot(accountSlotKey)
+        throw error
+      }
+      if (accountLimit != null) await releaseSlot(accountSlotKey)
+      return false
+    }
+    const acquired = isStickySelection
+      ? await acquireSlotWithStickyWait(acquireAccountSlot, config.STICKY_SESSION_WAIT_MS)
+      : await acquireAccountSlot()
     if (!acquired) {
       if (isStickySelection) stickyCapacitySpillover = true
       tried.push(account.id)
       continue
     }
+    // Capacity checks do not contact the upstream. Search past full accounts
+    // without spending the retry budget reserved for actual account attempts.
+    const attempt = attempts++
     tried.push(account.id)
 
     // Bookkeeping writes that only steer FUTURE routing (quota snapshot, LRU
@@ -2548,7 +2572,8 @@ async function runRelayLoop(
       // its own writes. On the success path the stream has already finished, so
       // this await costs nothing.
       if (deferredBookkeeping.length) await Promise.all(deferredBookkeeping)
-      if (accountLimit != null) await releaseSlot(accountSlotKey)
+      try { await releaseAdmittedAccount() }
+      finally { if (accountLimit != null) await releaseSlot(accountSlotKey) }
     }
   }
 
@@ -2567,7 +2592,7 @@ async function runRelayLoop(
       errorCode: 'all_accounts_failed',
       errorMessage: `All ${provider.id} accounts failed before a response was available.`,
       upstreamStatus: 503,
-      attemptCount: Math.max(1, tried.length),
+      attemptCount: Math.max(1, attempts),
       latencyMs: 0,
       requestInput: provider.summarizeRequestInput
         ? provider.summarizeRequestInput(body)

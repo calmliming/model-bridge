@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { config } from '../config'
-import { apiKeyCreationLimitError, createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, updateApiKey } from '../keys/manager'
+import { ApiKeyLimitError, createApiKey, deleteApiKey, getApiKeySecret, listApiKeysForUser, updateApiKey } from '../keys/manager'
+import { userPasswordSchema } from '../auth/password'
 import { normalizeModelMappings } from '../keys/modelMapping'
 import { groupExists, listGroups } from '../accounts/groups'
 import { requireUser } from '../middleware/userAuth'
@@ -45,7 +46,7 @@ const loginSchema = z.object({
 
 const acceptInviteSchema = z.object({
   token: z.string().min(1),
-  password: z.string().min(6),
+  password: userPasswordSchema,
   name: z.string().trim().min(1).optional(),
 })
 
@@ -150,7 +151,7 @@ export function registerUserRoutes(app: FastifyInstance): void {
   app.post('/api/users/invites/accept', async (request, reply) => {
     const body = acceptInviteSchema.safeParse(request.body)
     if (!body.success) {
-      return reply.code(400).send({ error: 'invalid request body' })
+      return reply.code(400).send({ error: body.error.issues.find(issue => issue.path[0] === 'password')?.message ?? 'invalid request body' })
     }
     try {
       const user = await acceptInvite(body.data)
@@ -334,18 +335,21 @@ export function registerUserRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'account group not found' })
     }
     const user = request.currentUser!
-    const limitError = await apiKeyCreationLimitError(user.id, {
-      maxActive: config.API_KEY_MAX_ACTIVE_PER_USER,
-      maxPerHour: config.API_KEY_MAX_CREATES_PER_HOUR,
-    })
-    if (limitError) return reply.code(429).send({ error: limitError })
-    return reply.code(201).send(await createApiKey({
-      ...body.data,
-      allowedProviders: internalKeyProviders(body.data.allowedProviders),
-      userId: user.id,
-      ownerLabel: user.name || user.email,
-      modelMappings: normalizeModelMappings(body.data.modelMappings),
-    }))
+    try {
+      return reply.code(201).send(await createApiKey({
+        ...body.data,
+        allowedProviders: internalKeyProviders(body.data.allowedProviders),
+        userId: user.id,
+        ownerLabel: user.name || user.email,
+        modelMappings: normalizeModelMappings(body.data.modelMappings),
+      }, {
+        maxActive: config.API_KEY_MAX_ACTIVE_PER_USER,
+        maxPerHour: config.API_KEY_MAX_CREATES_PER_HOUR,
+      }))
+    } catch (err) {
+      if (err instanceof ApiKeyLimitError) return reply.code(429).send({ error: err.message })
+      throw err
+    }
   })
 
   app.get<{ Params: { id: string } }>(
@@ -376,14 +380,22 @@ export function registerUserRoutes(app: FastifyInstance): void {
       if (body.data.accountGroupId && !(await groupExists(body.data.accountGroupId))) {
         return reply.code(400).send({ error: 'account group not found' })
       }
-      await updateApiKey(params.data.id, {
-        ...body.data,
-        allowedProviders: internalKeyProviders(body.data.allowedProviders),
-        modelMappings:
-          'modelMappings' in body.data
-            ? normalizeModelMappings(body.data.modelMappings)
-            : undefined,
-      }, request.currentUser!.id)
+      try {
+        await updateApiKey(params.data.id, {
+          ...body.data,
+          allowedProviders: internalKeyProviders(body.data.allowedProviders),
+          modelMappings:
+            'modelMappings' in body.data
+              ? normalizeModelMappings(body.data.modelMappings)
+              : undefined,
+        }, request.currentUser!.id, {
+          maxActive: config.API_KEY_MAX_ACTIVE_PER_USER,
+          maxPerHour: config.API_KEY_MAX_CREATES_PER_HOUR,
+        })
+      } catch (err) {
+        if (err instanceof ApiKeyLimitError) return reply.code(429).send({ error: err.message })
+        throw err
+      }
       return { ok: true }
     },
   )

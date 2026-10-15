@@ -41,18 +41,31 @@ export interface ApiKeyCreationLimits {
   maxPerHour: number
 }
 
+export class ApiKeyLimitError extends Error {}
+
+type KeyDb = Pick<typeof db, 'select' | 'insert' | 'update' | 'execute'>
+
+async function withUserKeyLock<T>(userId: string, operation: (tx: KeyDb) => Promise<T>): Promise<T> {
+  return db.transaction(async tx => {
+    // The same per-owner lock protects creation and inactive -> active changes,
+    // including separate server processes. Counts are read after acquiring it.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`api-keys:${userId}`}, 0))`)
+    return operation(tx)
+  }, { isolationLevel: 'read committed' })
+}
+
 /**
- * Returns why a user may not create another key, or null when allowed. A
- * limit of 0 is disabled. Concurrent requests may overshoot by a few keys;
- * the cap exists to stop runaway creation, not to be an exact quota.
+ * Returns why a user may not create another key, or null when allowed.
+ * Mutations must call this within withUserKeyLock; a zero limit is disabled.
  */
 export async function apiKeyCreationLimitError(
   userId: string,
   limits: ApiKeyCreationLimits,
   now = Date.now(),
+  connection: KeyDb = db,
 ): Promise<string | null> {
   if (limits.maxActive <= 0 && limits.maxPerHour <= 0) return null
-  const [row] = await db
+  const [row] = await connection
     .select({
       active: sql<number>`count(*) filter (where ${apiKeys.enabled} and (${apiKeys.expiresAt} is null or ${apiKeys.expiresAt} > ${now}))`,
       recent: sql<number>`count(*) filter (where ${apiKeys.createdAt} >= ${now - 3_600_000})`,
@@ -69,10 +82,21 @@ export async function apiKeyCreationLimitError(
 }
 
 /** Creates a new API key and returns its plaintext secret once. */
-export async function createApiKey(input: CreateApiKeyInput): Promise<CreatedApiKey> {
+export async function createApiKey(input: CreateApiKeyInput, limits?: ApiKeyCreationLimits): Promise<CreatedApiKey> {
+  if (limits && input.userId) {
+    return withUserKeyLock(input.userId, async tx => {
+      const error = await apiKeyCreationLimitError(input.userId!, limits, Date.now(), tx)
+      if (error) throw new ApiKeyLimitError(error)
+      return insertApiKey(input, tx)
+    })
+  }
+  return insertApiKey(input, db)
+}
+
+async function insertApiKey(input: CreateApiKeyInput, connection: KeyDb): Promise<CreatedApiKey> {
   const secret = KEY_PREFIX + randomBytes(24).toString('hex')
   const id = generateId()
-  await db.insert(apiKeys)
+  await connection.insert(apiKeys)
     .values({
       id,
       userId: input.userId ?? null,
@@ -201,6 +225,7 @@ export async function updateApiKey(
   id: string,
   patch: UpdateApiKeyPatch,
   userId?: string,
+  limits?: ApiKeyCreationLimits,
 ): Promise<void> {
   // Undefined fields mean "leave unchanged"; explicit null clears a value.
   // Panel routes can include undefined properties even for a name-only PATCH.
@@ -214,6 +239,23 @@ export async function updateApiKey(
   const where = userId
     ? and(eq(apiKeys.id, id), eq(apiKeys.userId, userId))
     : eq(apiKeys.id, id)
+  if (limits && userId) {
+    await withUserKeyLock(userId, async tx => {
+      const [current] = await tx.select({ enabled: apiKeys.enabled, expiresAt: apiKeys.expiresAt })
+        .from(apiKeys).where(where).for('update')
+      if (!current) return
+      const now = Date.now()
+      const wasActive = current.enabled && (current.expiresAt == null || current.expiresAt > now)
+      const expiresAt = changes.expiresAt === undefined ? current.expiresAt : changes.expiresAt
+      const becomesActive = (changes.enabled ?? current.enabled) && (expiresAt == null || expiresAt > now)
+      if (!wasActive && becomesActive) {
+        const error = await apiKeyCreationLimitError(userId, { ...limits, maxPerHour: 0 }, now, tx)
+        if (error) throw new ApiKeyLimitError(error)
+      }
+      await tx.update(apiKeys).set(changes).where(where)
+    })
+    return
+  }
   await db.update(apiKeys).set(changes).where(where)
 }
 

@@ -5,6 +5,7 @@ import { microsToUsd } from '../wallet/money'
 import { config } from '../config'
 import { dayKeyInTz, startOfDayMs, startOfTodayMs } from '../time'
 import { publicModelProvider } from '../providers/publicIdentity'
+import { userPasswordSchema } from '../auth/password'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000
 const BCRYPT_ROUNDS = 10
@@ -91,7 +92,7 @@ function hashToken(token: string): string {
 }
 
 function hashPassword(password: string): string {
-  return bcrypt.hashSync(password, BCRYPT_ROUNDS)
+  return bcrypt.hashSync(userPasswordSchema.parse(password), BCRYPT_ROUNDS)
 }
 
 function asUser(row: Record<string, unknown>): UserView {
@@ -230,6 +231,7 @@ export async function createUserInvite(input: { email: string; name?: string | n
 }
 
 export async function acceptInvite(input: { token: string; password: string; name?: string | null }): Promise<UserView> {
+  userPasswordSchema.parse(input.password)
   const tokenHash = hashToken(input.token.trim())
   const client = await pool.connect()
   try {

@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { config } from '../config'
+import { userPasswordSchema } from '../auth/password'
 import { pool } from '../db/index'
 import { getUserById, UserManagerError, type UserView } from './manager'
 import { emailRegistrationConfigured, sendRegistrationCode } from './registrationEmail'
@@ -53,6 +54,7 @@ async function deliverCode(email: string, id: string, code: string): Promise<voi
 }
 
 export async function beginEmailRegistration(input: { email: string; password: string; name?: string }): Promise<{ expiresAt: number; resendAfter: number }> {
+  const password = userPasswordSchema.parse(input.password)
   assertConfigured()
   const email = normalizeEmail(input.email)
   await assertEmailAvailable(email)
@@ -61,7 +63,7 @@ export async function beginEmailRegistration(input: { email: string; password: s
   await pool.query('DELETE FROM pending_user_registrations WHERE expires_at <= $1', [now])
   const id = randomBytes(16).toString('hex')
   const code = newCode()
-  const passwordHash = await bcrypt.hash(input.password, 10)
+  const passwordHash = await bcrypt.hash(password, 10)
   const expiresAt = now + CODE_TTL_MS
   const result = await pool.query<{ id: string }>(`
     INSERT INTO pending_user_registrations (email, id, name, password_hash, code_hash, expires_at, sent_at, attempts, created_at)

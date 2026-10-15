@@ -121,8 +121,11 @@ export async function pickAccount(
   // an account has no known reset time.
   if (provider === 'openai' && (await getOpenAiSchedulingStrategy()) === 'prefer_soonest_reset') {
     available.sort((a, b) => {
-      const resetDiff = soonestReset(a.metadata, now) - soonestReset(b.metadata, now)
-      if (resetDiff !== 0) return resetDiff
+      const aReset = soonestReset(a.metadata, now)
+      const bReset = soonestReset(b.metadata, now)
+      // Unknown resets are both Infinity; subtracting them would return NaN
+      // before the weight/LRU fallback gets a chance to order those accounts.
+      if (aReset !== bReset) return aReset - bReset
       const weightDiff = Math.max(1, b.effectiveWeight ?? 1) - Math.max(1, a.effectiveWeight ?? 1)
       if (weightDiff !== 0) return weightDiff
       return (a.lastUsedAt ?? 0) - (b.lastUsedAt ?? 0)

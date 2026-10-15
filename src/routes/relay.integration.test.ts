@@ -5,6 +5,7 @@ import Fastify from 'fastify'
 const mocks = vi.hoisted(() => ({
   balance: 1_000, quota: 0, logs: [] as unknown[][], transactions: [] as unknown[][],
   cost: 0.01, key: {} as Record<string, unknown>,
+  reservations: new Map<string, { apiKeyId: string; userId: string; accountId: string | null; estimated: number; balanceReserved: number; expiresAt: number }>(),
   fetch: vi.fn(), query: vi.fn(), connect: vi.fn(),
   consumeSubscriptionUsage: vi.fn(), resolveActiveSubscription: vi.fn(),
   consumeWeightedSubscriptionUsage: vi.fn(),
@@ -89,6 +90,7 @@ beforeEach(async () => {
   mocks.quota = 0
   mocks.logs = []
   mocks.transactions = []
+  mocks.reservations.clear()
   mocks.cost = 0.01
   mocks.accounts = [{ id: 'account-1', concurrencyLimit: null, metadata: null }]
   mocks.pickAccount.mockImplementation(async (_provider: string, excluded: string[]) =>
@@ -122,6 +124,7 @@ beforeEach(async () => {
     const snapshot = {
       balance: mocks.balance, quota: mocks.quota,
       logs: [...mocks.logs], transactions: [...mocks.transactions],
+      reservations: new Map(mocks.reservations),
     }
     return {
       query: async (sql: string, values: unknown[] = []) => {
@@ -132,6 +135,39 @@ beforeEach(async () => {
     }
   })
   mocks.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
+    if (sql.startsWith('WITH active AS')) {
+      const [key, user, account, now] = values
+      const active = [...mocks.reservations.values()].filter(row => row.expiresAt > Number(now))
+      const keyRows = active.filter(row => row.apiKeyId === key)
+      const userRows = active.filter(row => row.userId === user)
+      return { rows: [{ key_count: keyRows.length, user_count: userRows.length,
+        account_count: active.filter(row => row.accountId === account).length,
+        key_reserved: keyRows.reduce((sum, row) => sum + row.estimated, 0),
+        reserved: userRows.reduce((sum, row) => sum + row.balanceReserved, 0),
+        key_media_count: 0, balance_media_count: 0 }] }
+    }
+    if (sql.startsWith('INSERT INTO relay_reservations')) {
+      mocks.reservations.set(String(values[0]), { apiKeyId: String(values[1]), userId: String(values[2]), accountId: null,
+        estimated: Number(values[3]), balanceReserved: Number(values[4]), expiresAt: Number(values[5]) })
+      return { rows: [], rowCount: 1 }
+    }
+    if (sql.startsWith('DELETE FROM relay_reservations')) {
+      if (sql.includes('WHERE id =')) mocks.reservations.delete(String(values[0]))
+      else for (const [id, row] of mocks.reservations) if (row.expiresAt <= Number(values[0])) mocks.reservations.delete(id)
+      return { rows: [], rowCount: 1 }
+    }
+    if (sql.includes('(SELECT COUNT(*) FROM relay_reservations WHERE account_id')) {
+      return { rows: [{ count: [...mocks.reservations.entries()].filter(([id, row]) =>
+        row.accountId === values[0] && row.expiresAt > Number(values[1]) && id !== values[2]).length }] }
+    }
+    if (sql.startsWith('UPDATE relay_reservations')) {
+      const row = mocks.reservations.get(String(values[0]))
+      if (!row) return { rows: [], rowCount: 0 }
+      if (sql.includes('SET account_id = NULL')) row.accountId = null
+      else if (sql.includes('SET account_id = $2')) row.accountId = String(values[1])
+      else row.expiresAt = Number(values[1])
+      return { rows: [], rowCount: 1 }
+    }
     if (sql.startsWith('INSERT INTO usage_logs')) mocks.logs.push(values)
     if (sql.startsWith('UPDATE api_keys SET quota_used')) mocks.quota += Number(values[0])
     if (sql.startsWith('SELECT balance_micros FROM users')) return { rows: [{ balance_micros: mocks.balance }] }
@@ -1154,6 +1190,41 @@ describe('upstream compatibility regressions', () => {
     mocks.penalizeAccount.mockRejectedValue(new Error('database unavailable'))
     expect((await request(prompt)).status).toBe(500)
     expect(await currentConcurrency('account:account-1')).toBe(0)
+  }))
+
+  it('reaches a fourth idle account when the first three are occupied without counting capacity checks as attempts', () => withRelay(async request => {
+    mocks.accounts = [1, 2, 3, 4].map(n => ({ id: `account-${n}`, concurrencyLimit: 1, metadata: null }))
+    const releaseResponses: Array<() => void> = []
+    mocks.fetch.mockImplementation(() => {
+      if (releaseResponses.length === 3) return Promise.resolve(openaiResponse())
+      return new Promise<Response>(resolve => releaseResponses.push(() => resolve(openaiResponse())))
+    })
+    const pending: Array<ReturnType<typeof request>> = []
+    try {
+      for (let i = 0; i < 3; i++) {
+        pending.push(request(prompt, '/v1/responses', { 'session-id': `capacity-${i}` }))
+        await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(i + 1))
+      }
+      const response = await request(prompt, '/v1/responses', { 'session-id': 'capacity-idle' })
+      expect(response.status).toBe(200)
+      expect(mocks.fetch).toHaveBeenCalledTimes(4)
+      expect(mocks.logs).toHaveLength(1)
+      expect(mocks.logs[0]?.[3]).toBe('account-4')
+      expect(mocks.logs[0]?.[26]).toBe(1)
+    } finally {
+      releaseResponses.forEach(release => release())
+      await Promise.all(pending)
+    }
+  }))
+
+  it('still stops after three failed upstream attempts when more accounts are available', () => withRelay(async request => {
+    mocks.accounts = [1, 2, 3, 4].map(n => ({ id: `account-${n}`, concurrencyLimit: 1, metadata: null }))
+    mocks.fetch.mockRejectedValue(new Error('upstream unavailable'))
+    const response = await request(prompt)
+    expect(response.status).toBe(503)
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(mocks.pickAccount).toHaveBeenCalledTimes(3)
+    expect(mocks.logs[0]?.[26]).toBe(3)
   }))
 
   it('routes K3 to native Responses and preserves the caller response format', () => withRelay(async (request) => {

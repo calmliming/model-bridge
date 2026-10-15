@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
     ENCRYPTION_KEY: '0'.repeat(64), STATS_TIMEZONE: 'Asia/Shanghai',
     API_KEY_MAX_ACTIVE_PER_USER: 200, API_KEY_MAX_CREATES_PER_HOUR: 60,
   },
-  apiKeyCreationLimitError: vi.fn(),
   createApiKey: vi.fn(),
   listApiKeysForUser: vi.fn(),
   updateApiKey: vi.fn(),
@@ -40,7 +39,6 @@ vi.mock('../users/manager', async (original) => ({
 vi.mock('../auth/admin', () => ({ verifyAdminCredentials: async () => false }))
 vi.mock('../keys/manager', async (original) => ({
   ...await original<typeof import('../keys/manager')>(),
-  apiKeyCreationLimitError: mocks.apiKeyCreationLimitError,
   createApiKey: mocks.createApiKey,
   listApiKeysForUser: mocks.listApiKeysForUser,
   updateApiKey: mocks.updateApiKey,
@@ -48,6 +46,7 @@ vi.mock('../keys/manager', async (original) => ({
 
 import { registerUserRoutes } from './users'
 import { registerAuthRoutes } from './auth'
+import { ApiKeyLimitError } from '../keys/manager'
 import { resetLimits } from '../middleware/limits'
 
 beforeEach(async () => {
@@ -172,50 +171,53 @@ describe('legacy user login security', () => {
 
 describe('self-service API key creation limits', () => {
   it('creates and updates a Grok-only key without widening its provider scope', () => withApp(async app => {
-    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
     mocks.createApiKey.mockResolvedValue({ id: 'key-grok', key: 'mb-secret' })
     const headers = { authorization: `Bearer ${app.jwt.sign({ sub: 'user-1', role: 'user' })}` }
     const created = await app.inject({ method: 'POST', url: '/api/users/keys', headers,
       payload: { name: 'Grok', allowedProviders: ['grok'] } })
     expect(created.statusCode).toBe(201)
-    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grok'] }))
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grok'] }), { maxActive: 200, maxPerHour: 60 })
     const updated = await app.inject({ method: 'PATCH', url: '/api/users/keys/key-grok', headers,
       payload: { allowedProviders: ['grok'], name: 'Grok only' } })
     expect(updated.statusCode).toBe(200)
-    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-grok', expect.objectContaining({ allowedProviders: ['grok'] }), 'user-1')
+    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-grok', expect.objectContaining({ allowedProviders: ['grok'] }), 'user-1', { maxActive: 200, maxPerHour: 60 })
   }))
   it('exposes a media capability scope and stores only the original upstream permission', () => withApp(async app => {
-    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
     mocks.createApiKey.mockResolvedValue({ id: 'key-media', key: 'mb-secret' })
     mocks.listApiKeysForUser.mockResolvedValue([{ id: 'key-media', allowedProviders: ['grsai'] }])
     const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
     const headers = { authorization: `Bearer ${token}` }
     const created = await app.inject({ method: 'POST', url: '/api/users/keys', headers, payload: { name: 'Images', allowedProviders: ['media'] } })
     expect(created.statusCode).toBe(201)
-    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grsai'] }))
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ allowedProviders: ['grsai'] }), { maxActive: 200, maxPerHour: 60 })
     const listed = await app.inject({ url: '/api/users/keys', headers })
     expect(listed.json().keys[0].allowedProviders).toEqual(['media'])
     expect(listed.body).not.toMatch(/grsai/i)
     const updated = await app.inject({ method: 'PATCH', url: '/api/users/keys/key-media', headers, payload: { allowedProviders: ['media'] } })
     expect(updated.statusCode).toBe(200)
-    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-media', expect.objectContaining({ allowedProviders: ['grsai'] }), 'user-1')
+    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-media', expect.objectContaining({ allowedProviders: ['grsai'] }), 'user-1', { maxActive: 200, maxPerHour: 60 })
   }))
   it('passes the configured limits and creates the key when allowed', () => withApp(async app => {
-    mocks.apiKeyCreationLimitError.mockResolvedValue(null)
     mocks.createApiKey.mockResolvedValue({ id: 'key-1', key: 'mb-secret' })
     const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
     const response = await app.inject({ method: 'POST', url: '/api/users/keys', headers: { authorization: `Bearer ${token}` }, payload: { name: 'CLI' } })
     expect(response.statusCode).toBe(201)
-    expect(mocks.apiKeyCreationLimitError).toHaveBeenCalledWith('user-1', { maxActive: 200, maxPerHour: 60 })
-    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ name: 'CLI', userId: 'user-1' }))
+    expect(mocks.createApiKey).toHaveBeenCalledWith(expect.objectContaining({ name: 'CLI', userId: 'user-1' }), { maxActive: 200, maxPerHour: 60 })
   }))
 
   it('rejects creation over a limit without creating a key', () => withApp(async app => {
-    mocks.apiKeyCreationLimitError.mockResolvedValue('API Key 创建过于频繁（每小时最多 60 个），请稍后再试')
+    mocks.createApiKey.mockRejectedValueOnce(new ApiKeyLimitError('API Key 创建过于频繁（每小时最多 60 个），请稍后再试'))
     const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
     const response = await app.inject({ method: 'POST', url: '/api/users/keys', headers: { authorization: `Bearer ${token}` }, payload: { name: 'CLI' } })
     expect(response.statusCode).toBe(429)
     expect(response.json().error).toContain('每小时最多 60 个')
-    expect(mocks.createApiKey).not.toHaveBeenCalled()
+  }))
+
+  it.each([{ enabled: true }, { expiresAt: null }, { expiresAt: Date.now() + 60_000 }])('returns 429 when an update restores a key above the active cap: %j', patch => withApp(async app => {
+    mocks.updateApiKey.mockRejectedValueOnce(new ApiKeyLimitError('有效 API Key 已达上限（200 个）'))
+    const token = app.jwt.sign({ sub: 'user-1', role: 'user' })
+    const response = await app.inject({ method: 'PATCH', url: '/api/users/keys/key-1', headers: { authorization: `Bearer ${token}` }, payload: patch })
+    expect(response.statusCode).toBe(429)
+    expect(mocks.updateApiKey).toHaveBeenCalledWith('key-1', expect.objectContaining(patch), 'user-1', { maxActive: 200, maxPerHour: 60 })
   }))
 })

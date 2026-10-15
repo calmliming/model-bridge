@@ -354,6 +354,14 @@ export async function initDb(): Promise<void> {
     CREATE INDEX IF NOT EXISTS media_tasks_pending ON media_tasks (next_poll_at) WHERE settled = FALSE;
     CREATE INDEX IF NOT EXISTS media_tasks_owner ON media_tasks (user_id, api_key_id);
     CREATE INDEX IF NOT EXISTS media_tasks_account ON media_tasks (account_id) WHERE settled = FALSE;
+    CREATE TABLE IF NOT EXISTS relay_reservations (
+      id TEXT PRIMARY KEY, api_key_id TEXT NOT NULL, user_id TEXT NOT NULL, account_id TEXT,
+      estimated_micros BIGINT NOT NULL, balance_reserved_micros BIGINT NOT NULL,
+      lease_expires_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS relay_reservations_owner ON relay_reservations (user_id, api_key_id);
+    CREATE INDEX IF NOT EXISTS relay_reservations_account ON relay_reservations (account_id);
+    CREATE INDEX IF NOT EXISTS relay_reservations_expiry ON relay_reservations (lease_expires_at);
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_session_key_hash ON usage_logs (session_key_hash);`)
   await pool.query(`CREATE TABLE IF NOT EXISTS live_requests (

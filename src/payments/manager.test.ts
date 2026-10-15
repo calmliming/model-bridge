@@ -134,7 +134,7 @@ describe('handlePaymentNotification', () => {
       .resolves.toMatchObject({ success: true })
     expect(mocks.applyWalletTransactionWithClient).toHaveBeenCalledOnce()
     const update = mocks.query.mock.calls.find(call => /SET status = 'paid'/.test(call[0] as string))
-    expect(update?.[0]).toContain("status IN ('pending', 'expired')")
+    expect(update?.[0]).toContain("status IN ('pending', 'expired', 'canceled')")
     expect(mocks.query).toHaveBeenCalledWith('COMMIT')
   })
 

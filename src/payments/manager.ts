@@ -378,6 +378,10 @@ export async function cancelPaymentOrder(input: {
   canceledBy: string
   note?: string | null
 }): Promise<PaymentOrderView> {
+  const order = await selectPaymentOrder(input.id)
+  if (order.provider !== 'manual') {
+    return closeOnlinePaymentOrder({ id: input.id, closedBy: input.canceledBy, note: input.note })
+  }
   const now = Date.now()
   const updated = await pool.query<Record<string, unknown>>(
     `UPDATE payment_orders
@@ -385,7 +389,7 @@ export async function cancelPaymentOrder(input: {
          note = COALESCE($1, note),
          canceled_at = $2,
          updated_at = $2
-     WHERE id = $3 AND status = 'pending'
+     WHERE id = $3 AND status = 'pending' AND provider = 'manual'
      RETURNING id, user_id, NULL::text AS user_email, NULL::text AS user_name,
                provider, status, amount_micros, provider_order_id, payment_url,
                payment_html, provider_amount, provider_currency, trade_status,
@@ -498,9 +502,9 @@ export async function handlePaymentNotification(input: {
       committed = true
       return { success: true, orderId: notification.orderId }
     }
-    // Local checkout expiry is not evidence that the provider did not receive
-    // payment. A verified late notification must still credit the order once.
-    if (order.status !== 'pending' && order.status !== 'expired') {
+    // Historical local cancellations and races with provider close are not
+    // proof that no payment occurred. Verified money received must settle once.
+    if (!['pending', 'expired', 'canceled'].includes(order.status as string)) {
       throw new PaymentOrderError('payment order cannot be settled', 409)
     }
 
@@ -522,7 +526,7 @@ export async function handlePaymentNotification(input: {
            trade_status = $3,
            paid_at = $4,
            updated_at = $4
-       WHERE id = $5 AND status IN ('pending', 'expired')`,
+       WHERE id = $5 AND status IN ('pending', 'expired', 'canceled')`,
       [
         notification.providerOrderId,
         transaction.id,
@@ -647,7 +651,7 @@ async function reconcileQueriedPayment(
       committed = true
       return asPaymentOrder({ ...order, user_email: null, user_name: null })
     }
-    if (order.status !== 'pending' && order.status !== 'expired') {
+    if (!['pending', 'expired', 'canceled'].includes(order.status as string)) {
       throw new PaymentOrderError('payment order cannot be settled', 409)
     }
 
@@ -663,7 +667,7 @@ async function reconcileQueriedPayment(
       `UPDATE payment_orders
        SET status = 'paid', provider_order_id = $1, wallet_transaction_id = $2,
            trade_status = $3, paid_at = $4, updated_at = $4
-       WHERE id = $5 AND status IN ('pending', 'expired')
+       WHERE id = $5 AND status IN ('pending', 'expired', 'canceled')
        RETURNING id, user_id, NULL::text AS user_email, NULL::text AS user_name,
                  provider, status, amount_micros, provider_order_id, payment_url,
                  payment_html, provider_amount, provider_currency, trade_status,
@@ -705,6 +709,7 @@ export async function queryPaymentOrder(input: {
 export async function closeOnlinePaymentOrder(input: {
   id: string
   closedBy: string
+  note?: string | null
 }): Promise<PaymentOrderView> {
   const order = await selectPaymentOrder(input.id)
   if (order.status !== 'pending') throw new PaymentOrderError('payment order is not pending', 409)
@@ -722,9 +727,13 @@ export async function closeOnlinePaymentOrder(input: {
                payment_html, provider_amount, provider_currency, trade_status,
                refunded_amount_micros, wallet_transaction_id, note, expires_at,
                paid_at, canceled_at, created_at, updated_at`,
-    [now, `closed by ${input.closedBy}`, input.id],
+    [now, input.note?.trim() || `closed by ${input.closedBy}`, input.id],
   )
-  if (!updated.rows[0]) throw new PaymentOrderError('payment order state changed', 409)
+  if (!updated.rows[0]) {
+    const current = await selectPaymentOrder(input.id)
+    if (current.status === 'paid' || current.status === 'canceled') return asPaymentOrder(current)
+    throw new PaymentOrderError('payment order state changed', 409)
+  }
   return asPaymentOrder(updated.rows[0])
 }
 
@@ -755,7 +764,12 @@ async function finalizeRefund(outRequestNo: string, providerResponse: Record<str
     )
     const refund = selected.rows[0]
     if (!refund) throw new PaymentOrderError('payment refund not found', 404)
-    if (refund.status === 'succeeded' && refund.wallet_transaction_id) {
+    if (refund.wallet_transaction_id) {
+      // Repair historical status regressions without charging the wallet again.
+      if (refund.status !== 'succeeded') {
+        await client.query("UPDATE payment_refunds SET status = 'succeeded', updated_at = $2 WHERE id = $1", [outRequestNo, Date.now()])
+        refund.status = 'succeeded'
+      }
       await client.query('COMMIT')
       committed = true
       return asPaymentRefund(refund)
@@ -792,6 +806,30 @@ async function finalizeRefund(outRequestNo: string, providerResponse: Record<str
   } finally {
     client.release()
   }
+}
+
+/** Late uncertain responses may never undo a committed refund settlement. */
+async function saveUnsettledRefund(
+  id: string,
+  status: 'pending' | 'unknown',
+  providerResponse?: Record<string, unknown>,
+): Promise<PaymentRefundView> {
+  const updated = await pool.query<Record<string, unknown>>(
+    `UPDATE payment_refunds SET status = $1,
+       provider_response = COALESCE($2, provider_response), updated_at = $3
+     WHERE id = $4 AND status <> 'succeeded' AND wallet_transaction_id IS NULL
+     RETURNING id, payment_order_id, status, amount_micros, provider_amount,
+               provider_currency, reason, wallet_transaction_id, created_at, updated_at`,
+    [status, providerResponse ?? null, Date.now(), id],
+  )
+  if (updated.rows[0]) return asPaymentRefund(updated.rows[0])
+  const current = await pool.query<Record<string, unknown>>(
+    `SELECT id, payment_order_id, status, amount_micros, provider_amount,
+            provider_currency, reason, wallet_transaction_id, created_at, updated_at
+     FROM payment_refunds WHERE id = $1`, [id],
+  )
+  if (!current.rows[0]) throw new PaymentOrderError('payment refund not found', 404)
+  return asPaymentRefund(current.rows[0])
 }
 
 /** Create or retry one idempotent partial/full refund. */
@@ -887,19 +925,9 @@ export async function refundPaymentOrder(input: {
       throw new PaymentOrderError('Alipay refund amount does not match the request', 409)
     }
     if (result.status === 'succeeded') return finalizeRefund(outRequestNo, result.rawData)
-    const updated = await pool.query<Record<string, unknown>>(
-      `UPDATE payment_refunds SET status = 'unknown', provider_response = $1, updated_at = $2
-       WHERE id = $3
-       RETURNING id, payment_order_id, status, amount_micros, provider_amount,
-                 provider_currency, reason, wallet_transaction_id, created_at, updated_at`,
-      [result.rawData, Date.now(), outRequestNo],
-    )
-    return asPaymentRefund(updated.rows[0]!)
+    return await saveUnsettledRefund(outRequestNo, 'unknown', result.rawData)
   } catch (error) {
-    await pool.query(
-      `UPDATE payment_refunds SET status = 'unknown', updated_at = $1 WHERE id = $2`,
-      [Date.now(), outRequestNo],
-    )
+    await saveUnsettledRefund(outRequestNo, 'unknown')
     if (error instanceof PaymentOrderError) throw error
     throw new PaymentOrderError(`Alipay refund result is unknown: ${(error as Error).message}`, 502)
   }
@@ -942,12 +970,5 @@ export async function queryPaymentRefund(input: {
     throw new PaymentOrderError('Alipay refund query amount does not match the request', 409)
   }
   if (result.status === 'succeeded') return finalizeRefund(input.outRequestNo, result.rawData)
-  const updated = await pool.query<Record<string, unknown>>(
-    `UPDATE payment_refunds SET status = $1, provider_response = $2, updated_at = $3
-     WHERE id = $4
-     RETURNING id, payment_order_id, status, amount_micros, provider_amount,
-               provider_currency, reason, wallet_transaction_id, created_at, updated_at`,
-    [result.status, result.rawData, Date.now(), input.outRequestNo],
-  )
-  return asPaymentRefund(updated.rows[0]!)
+  return saveUnsettledRefund(input.outRequestNo, result.status, result.rawData)
 }

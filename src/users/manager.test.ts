@@ -25,7 +25,8 @@ vi.mock('bcryptjs', () => ({
   },
 }))
 
-import { registerUser, userFailureCategoriesToday, userUsageDaily, userUsageSummary, UserManagerError } from './manager'
+import { acceptInvite, registerUser, verifyUserCredentials, userFailureCategoriesToday, userUsageDaily, userUsageSummary, UserManagerError } from './manager'
+import { beginEmailRegistration } from './emailRegistration'
 
 const USER_ROW = {
   id: 'u_1',
@@ -49,6 +50,22 @@ function scriptQueries(handlers: Array<{ match: RegExp; rows?: unknown[]; rowCou
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('user password persistence boundary', () => {
+  it.each(['a'.repeat(73), '汉'.repeat(25)])('rejects overlong passwords in every setting entry point before database access', async password => {
+    await expect(registerUser({ email: 'user@example.test', password })).rejects.toThrow('72')
+    await expect(acceptInvite({ token: 'invite', password })).rejects.toThrow('72')
+    await expect(beginEmailRegistration({ email: 'user@example.test', password })).rejects.toThrow('72')
+    expect(mocks.connect).not.toHaveBeenCalled()
+    expect(mocks.query).not.toHaveBeenCalled()
+  })
+
+  it('keeps login compatible with passwords accepted before the new byte limit', async () => {
+    const password = '汉'.repeat(25)
+    scriptQueries([{ match: /FROM users WHERE email/, rows: [{ ...USER_ROW, password_hash: `hashed:${password}` }] }])
+    expect(await verifyUserCredentials(USER_ROW.email, password)).toMatchObject({ id: USER_ROW.id })
+  })
 })
 
 describe('userUsageDaily', () => {

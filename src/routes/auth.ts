@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getAdminUsername, verifyAdminCredentials } from '../auth/admin'
+import { userPasswordSchema } from '../auth/password'
 import { checkLoginRateLimit, getTurnstileSiteKey, verifyTurnstileToken } from '../auth/security'
 import { UserManagerError, verifyUserCredentials, type UserView } from '../users/manager'
 import { beginEmailRegistration, resendEmailRegistrationCode, verifyEmailRegistration } from '../users/emailRegistration'
@@ -26,7 +27,7 @@ const loginSchema = z.object({
 
 const registerSchema = z.object({
   email: z.string().email().max(254),
-  password: z.string().min(6).max(128),
+  password: userPasswordSchema,
   name: z.string().trim().min(1).max(60).optional(),
   turnstileToken: z.string().optional(),
 })
@@ -140,7 +141,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
     const body = registerSchema.safeParse(request.body)
     if (!body.success) {
-      return reply.code(400).send({ error: 'invalid request body' })
+      return reply.code(400).send({ error: body.error.issues.find(issue => issue.path[0] === 'password')?.message ?? 'invalid request body' })
     }
     if (!(await verifyTurnstileToken(body.data.turnstileToken, request.ip))) {
       return reply.code(400).send({ error: '人机验证失败，请重试' })

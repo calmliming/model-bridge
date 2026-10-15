@@ -72,8 +72,9 @@ function cancelOrder(row: PaymentOrder) {
     negativeText: '返回',
     onPositiveClick: async () => {
       try {
-        await api.post(`/admin/payment-orders/${row.id}/cancel`, {})
-        message.success('已取消')
+        const { data } = await api.post(`/admin/payment-orders/${row.id}/cancel`, {})
+        if (data.order.status === 'paid') message.info('订单已付款并入账')
+        else message.success('已取消')
         await load()
       } catch (e) {
         message.error(errMsg(e, '取消失败'))

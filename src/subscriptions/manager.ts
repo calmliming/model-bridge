@@ -466,9 +466,9 @@ async function getPlan(client: Pick<PoolClient, 'query'>, id: string): Promise<R
 
 /**
  * Grants `planId` to a user inside the given transaction. If the user already
- * has an active subscription to the plan's group, its validity is extended
- * (no new row, usage windows untouched). Otherwise a fresh subscription with
- * reset windows is created. Returns the subscription id.
+ * has an active subscription to this same plan, its validity is extended
+ * (no new row, usage windows untouched). Changing plans or externally billed
+ * subscriptions requires a separate migration, not a local renewal.
  */
 async function grantSubscription(
   client: Pick<PoolClient, 'query'>,
@@ -480,19 +480,30 @@ async function grantSubscription(
 ): Promise<string> {
   const groupId = plan.group_id as string
   const validityMs = Number(plan.validity_days) * DAY_MS
-  const existing = await client.query<{ id: string; expires_at: string | number }>(
-    `SELECT id, expires_at FROM user_subscriptions
-     WHERE user_id = $1 AND group_id = $2 AND status = 'active' AND expires_at > $3
-     ORDER BY expires_at DESC LIMIT 1
-     FOR UPDATE`,
+  // A missing subscription has no row to lock. Serialize first purchases and
+  // free grants too, so competing plans cannot each create an active row.
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['subscription-grant', userId, groupId])])
+  const existing = await client.query<{ id: string; plan_id: string; expires_at: string | number; externally_billed: boolean }>(
+    `SELECT s.id, s.plan_id, s.expires_at,
+            EXISTS(SELECT 1 FROM subscription_checkouts c WHERE c.subscription_id = s.id) AS externally_billed
+     FROM user_subscriptions s
+     WHERE s.user_id = $1 AND s.group_id = $2 AND s.status = 'active' AND s.expires_at > $3
+     ORDER BY s.expires_at DESC LIMIT 1
+     FOR UPDATE OF s`,
     [userId, groupId, now],
   )
   if (existing.rows[0]) {
+    if (existing.rows[0].externally_billed) {
+      throw new SubscriptionError('该分组已有 Waffo 订阅，请通过订阅管理处理续费', 409)
+    }
+    if (existing.rows[0].plan_id !== plan.id) {
+      throw new SubscriptionError('该分组已有其他有效套餐，只能续费原套餐，请在到期后更换套餐', 409)
+    }
     const id = existing.rows[0].id
     const base = Number(existing.rows[0].expires_at)
     await client.query(
-      `UPDATE user_subscriptions SET expires_at = $1, plan_id = $2 WHERE id = $3`,
-      [base + validityMs, plan.id, id],
+      `UPDATE user_subscriptions SET expires_at = $1 WHERE id = $2`,
+      [base + validityMs, id],
     )
     return id
   }
@@ -541,6 +552,10 @@ export async function purchaseSubscription(userId: string, planIdInput: string):
     const plan = await getPlan(client, planIdInput)
     if (!plan || !plan.for_sale) throw new SubscriptionError('plan not available', 404)
     if (plan.payment_provider === 'waffo') throw new SubscriptionError('请通过 Waffo 收银台订阅该套餐', 400)
+    // Validate/grant before debiting. Both stay in this transaction, so a
+    // failed balance check rolls back the grant as well. This also keeps the
+    // subscription → wallet lock order consistent with usage settlement.
+    const id = await grantSubscription(client, userId, plan, 'purchase', null, now)
     const priceMicros = usdToMicros(Number(plan.price))
     if (priceMicros > 0) {
       const balance = await client.query<{ balance_micros: string | number }>(
@@ -559,7 +574,6 @@ export async function purchaseSubscription(userId: string, planIdInput: string):
         createdBy: 'purchase',
       })
     }
-    const id = await grantSubscription(client, userId, plan, 'purchase', null, now)
     await client.query('COMMIT')
     return { id }
   } catch (err) {
