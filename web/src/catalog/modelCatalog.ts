@@ -327,6 +327,19 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     badge: 'new'
   },
   {
+    id: 'claude-haiku-5-5',
+    name: 'Claude Haiku 5.5',
+    provider: 'claude',
+    categories: ['chat', 'lightweight', 'reasoning'],
+    tags: ['低延迟', '低成本', '自适应思考'],
+    description: '支持 1M 上下文与自适应思考的轻量模型；输入超过 100K 时，输入、输出及缓存单价均为基础价的 5 倍。',
+    context: '1M',
+    inputPrice: 0.1,
+    outputPrice: 0.5,
+    cacheReadPrice: 0.01,
+    badge: 'new'
+  },
+  {
     id: 'claude-haiku-4-5',
     name: 'Claude Haiku 4.5',
     provider: 'claude',
@@ -357,7 +370,7 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     provider: 'openai',
     categories: ['chat', 'reasoning', 'multimodal'],
     tags: ['旗舰', '缓存减半', 'Agent'],
-    description: 'GPT-6 Sol 的升级版，输入输出单价不变，缓存读取降到 $0.10/百万；推理强度支持 low 到 max。输入超过 272K 时整次请求采用长上下文费率。',
+    description: 'GPT-6 Sol 的升级版，缓存读取为 $0.10/百万，推理强度支持 low 到 max。本平台原生 OpenAI 订阅账号不收长上下文附加费；第三方 API 上游仍按其价卡执行。',
     context: '1.05M',
     inputPrice: 2,
     outputPrice: 10,
@@ -451,6 +464,20 @@ export const MODEL_CATALOG: PlazaModel[] = ([
   },
 
   // --- Google / Gemini -----------------------------------------------------
+  {
+    id: 'gemini-4-argon',
+    name: 'Gemini 4 Argon',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['旗舰', '复杂推理', 'Agent'],
+    description: '面向复杂编码、推理与多模态任务，支持 low / medium / high 思考强度和隐式缓存。当前为截至 2026-11-30 的优惠价；实际可用性取决于上游账号。',
+    context: '1M',
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.1,
+    priceChange: { effectiveAt: Date.parse('2026-12-01T00:00:00Z'), price: { inputPrice: 4, outputPrice: 20, cacheReadPrice: 0.2 } },
+    badge: 'new'
+  },
   {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash',

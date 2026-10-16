@@ -468,6 +468,7 @@ export async function initDb(): Promise<void> {
     created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
     updated_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT
   );`)
+  await pool.query(`ALTER TABLE payment_refunds ADD COLUMN IF NOT EXISTS wallet_hold_transaction_id TEXT;`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_refunds_order ON payment_refunds (payment_order_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys (user_id);`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_logs_user_id ON usage_logs (user_id);`)

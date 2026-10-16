@@ -3,6 +3,29 @@ import { emptyUsage } from '../providers/types'
 import { calculateUsageCost, estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 import { usagePoints } from '../subscriptions/usageWindows'
 
+describe('Sub2API v0.2.16 model pricing', () => {
+  it.each(['claude', 'sub2api', 'antigravity'])('prices Haiku 5.5 and its long prompts on %s', provider => {
+    const short = { ...emptyUsage(), inputTokens: 40_000, cacheReadTokens: 50_000, cacheCreateTokens: 10_000, outputTokens: 100 }
+    for (const model of ['claude-haiku-5-5', 'claude-haiku-5.5']) {
+      expect(resolveUsagePrice(provider, model, short)).toEqual({ input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 })
+      expect(resolveUsagePrice(provider, model, { ...short, cacheReadTokens: 50_001 }))
+        .toEqual({ input: 0.5, output: 2.5, cacheWrite: 0.625, cacheRead: 0.05 })
+      expect(estimateCost(provider, model, short)).toBe(0.0058)
+    }
+    expect(resolvePrice(provider, 'claude-haiku-4-5')).toMatchObject({ input: 1, output: 5 })
+  })
+  it.each(['gemini', 'sub2api', 'antigravity'])('prices Argon variants across the promo boundary on %s', provider => {
+    const boundary = Date.parse('2026-12-01T00:00:00Z')
+    for (const suffix of ['', '-high', '-low', '-medium', '-tiered']) {
+      expect(resolvePrice(provider, `gemini-4-argon${suffix}`, boundary - 1)).toMatchObject({ input: 2, output: 10, cacheRead: 0.1 })
+      expect(resolvePrice(provider, `gemini-4-argon${suffix}`, boundary)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
+    }
+    expect(resolvePrice(provider, 'gemini-4-argon-cyber-permissive', boundary - 1)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
+    expect(resolveUsagePrice(provider, 'gemini-4-argon', { ...emptyUsage(), inputTokens: 900_000 }, boundary - 1))
+      .toMatchObject({ input: 2, output: 10 })
+  })
+})
+
 describe('subscription metering precision', () => {
   it('counts a single cheap cache token before wallet rounding', () => {
     const time = Date.parse('2026-09-12T10:00:00+08:00')
@@ -153,11 +176,12 @@ describe('openai gpt-6.1 sol pricing', () => {
     expect(resolvePrice('openai', 'gpt-6-sol')).toMatchObject({ cacheRead: 0.2 })
   })
 
-  it('bills the whole request at 2× input/cache and 1.5× output above 272K input', () => {
+  it('exempts native subscription accounts while retaining the API long-context step', () => {
     const short = { ...emptyUsage(), inputTokens: 200_000, cacheReadTokens: 72_000, outputTokens: 1000 }
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', short)).toEqual(sol61)
     const long = { ...short, cacheReadTokens: 72_001 }
-    expect(resolveUsagePrice('openai', 'gpt-6.1-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheRead: 0.2 })
+    expect(resolveUsagePrice('openai', 'gpt-6.1-sol', long)).toEqual(sol61)
+    expect(resolveUsagePrice('sub2api', 'gpt-6.1-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheRead: 0.2 })
   })
 
   it('applies the official Fast and Flex factors', () => {

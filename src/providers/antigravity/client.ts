@@ -33,7 +33,10 @@ export function object(value: unknown): Record<string, unknown> | null {
 }
 
 export async function antigravityJson(token: string, action: 'loadCodeAssist' | 'onboardUser' | 'fetchAvailableModels', body: unknown): Promise<Record<string, unknown>> {
-  const response = await fetchAntigravity(`https://cloudcode-pa.googleapis.com/v1internal:${action}`, {
+  // Discovery must describe the same endpoint used for generation. OAuth
+  // onboarding remains on production, independently of the generation host.
+  const host = action === 'fetchAvailableModels' ? config.ANTIGRAVITY_API_HOST : 'cloudcode-pa.googleapis.com'
+  const response = await fetchAntigravity(`https://${host}/v1internal:${action}`, {
     method: 'POST', headers: antigravityHeaders(token), body: JSON.stringify(body), signal: AbortSignal.timeout(30_000),
   })
   if (!response.ok) throw new Error(`${action} failed (${response.status}): ${googleErrorMessage(response.status, await response.text())}`)

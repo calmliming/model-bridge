@@ -5,7 +5,22 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(), debit: vi.fn(), refund: vi.fn(), queryRefund: vi.fn(),
   closeOrder: vi.fn(), queryOrder: vi.fn(), verifyNotification: vi.fn(), provider: {} as Record<string, unknown>,
 }))
-vi.mock('../db/index', () => ({ pool: { query: mocks.query, connect: async () => ({ query: mocks.query, release() {} }) } }))
+vi.mock('../db/index', () => {
+  // Model PostgreSQL transaction locks when two refund attempts overlap.
+  let tail = Promise.resolve()
+  return { pool: { query: mocks.query, connect: async () => {
+    let unlock: (() => void) | undefined
+    return { async query(sql: string, args?: unknown[]) {
+      if (sql === 'BEGIN') {
+        const previous = tail
+        tail = new Promise<void>(resolve => { unlock = resolve })
+        await previous
+      }
+      try { return await mocks.query(sql, args) }
+      finally { if (sql === 'COMMIT' || sql === 'ROLLBACK') unlock?.() }
+    }, release() { unlock?.() } }
+  } } }
+})
 vi.mock('../wallet/manager', () => ({ applyWalletTransactionWithClient: mocks.debit }))
 vi.mock('../db/settings', () => ({ isOnlinePaymentEnabled: async () => true }))
 vi.mock('./providers/index', () => ({ getPaymentProvider: () => mocks.provider }))
@@ -43,7 +58,9 @@ function ledger(status = 'paid', refundStatus = 'unknown') {
     if (/SELECT/.test(sql) && /FROM payment_orders/.test(sql)) return row(order)
     if (/INSERT INTO payment_notification_events/.test(sql)) return { rows: [], rowCount: 1 }
     if (/UPDATE payment_refunds/.test(sql)) {
-      if (sql.includes("status = 'succeeded'")) {
+      if (sql.includes('SET wallet_hold_transaction_id')) {
+        refund.wallet_hold_transaction_id = args[0]
+      } else if (sql.includes("status = 'succeeded'")) {
         refund.status = 'succeeded'
         if (sql.includes('wallet_transaction_id = $1')) refund.wallet_transaction_id = args[0]
       } else {

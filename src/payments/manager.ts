@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import type { PoolClient } from 'pg'
 import { pool } from '../db/index'
 import { isOnlinePaymentEnabled } from '../db/settings'
 import { applyWalletTransactionWithClient } from '../wallet/manager'
@@ -748,18 +749,35 @@ function prorateProviderAmount(order: Record<string, unknown>, refundMicros: num
   return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`
 }
 
+/** Lock order: payment order -> refund -> wallet, matching final settlement. */
+async function holdRefundWallet(client: PoolClient, id: string, userId: string, amountMicros: number): Promise<void> {
+  const selected = await client.query<Record<string, unknown>>(
+    'SELECT wallet_transaction_id, wallet_hold_transaction_id FROM payment_refunds WHERE id = $1 FOR UPDATE', [id],
+  )
+  const refund = selected.rows[0]
+  if (!refund) throw new PaymentOrderError('payment refund not found', 404)
+  if (refund.wallet_transaction_id || refund.wallet_hold_transaction_id) return
+  const transaction = await applyWalletTransactionWithClient(client, {
+    userId, type: 'debit', amountMicros: -amountMicros,
+    note: `Alipay refund hold ${id}`, createdBy: 'alipay-refund',
+  })
+  await client.query('UPDATE payment_refunds SET wallet_hold_transaction_id = $1, updated_at = $2 WHERE id = $3',
+    [transaction.id, Date.now(), id])
+}
+
 async function finalizeRefund(outRequestNo: string, providerResponse: Record<string, unknown>): Promise<PaymentRefundView> {
   const client = await pool.connect()
   let committed = false
   try {
     await client.query('BEGIN')
+    await client.query('SELECT id FROM payment_orders WHERE id = (SELECT payment_order_id FROM payment_refunds WHERE id = $1) FOR UPDATE', [outRequestNo])
     const selected = await client.query<Record<string, unknown>>(
       `SELECT r.id, r.payment_order_id, r.status, r.amount_micros, r.provider_amount,
-              r.provider_currency, r.reason, r.wallet_transaction_id, r.created_at,
+              r.provider_currency, r.reason, r.wallet_transaction_id, r.wallet_hold_transaction_id, r.created_at,
               r.updated_at, o.user_id
        FROM payment_refunds r
        JOIN payment_orders o ON o.id = r.payment_order_id
-       WHERE r.id = $1 FOR UPDATE`,
+       WHERE r.id = $1 FOR UPDATE OF r`,
       [outRequestNo],
     )
     const refund = selected.rows[0]
@@ -774,13 +792,13 @@ async function finalizeRefund(outRequestNo: string, providerResponse: Record<str
       committed = true
       return asPaymentRefund(refund)
     }
-    const transaction = await applyWalletTransactionWithClient(client, {
+    const transactionId = (refund.wallet_hold_transaction_id as string | null) ?? (await applyWalletTransactionWithClient(client, {
       userId: refund.user_id as string,
       type: 'debit',
       amountMicros: -Number(refund.amount_micros),
       note: `Alipay refund ${outRequestNo}`,
       createdBy: 'alipay-refund',
-    })
+    })).id
     const now = Date.now()
     const updated = await client.query<Record<string, unknown>>(
       `UPDATE payment_refunds
@@ -789,7 +807,7 @@ async function finalizeRefund(outRequestNo: string, providerResponse: Record<str
        WHERE id = $4
        RETURNING id, payment_order_id, status, amount_micros, provider_amount,
                  provider_currency, reason, wallet_transaction_id, created_at, updated_at`,
-      [transaction.id, providerResponse, now, outRequestNo],
+      [transactionId, providerResponse, now, outRequestNo],
     )
     await client.query(
       `UPDATE payment_orders
@@ -864,7 +882,7 @@ export async function refundPaymentOrder(input: {
     const existing = await client.query<Record<string, unknown>>(
       `SELECT id, payment_order_id, status, amount_micros, provider_amount,
               provider_currency, reason, wallet_transaction_id, created_at, updated_at
-       FROM payment_refunds WHERE id = $1`,
+       FROM payment_refunds WHERE id = $1 FOR UPDATE`,
       [outRequestNo],
     )
     if (existing.rows[0]) {
@@ -899,6 +917,10 @@ export async function refundPaymentOrder(input: {
       )
       refund = asPaymentRefund(inserted.rows[0]!)
     }
+    // Keep uncertain/pending refunds deducted while the provider is contacted.
+    // Retries reuse the same hold, and success promotes it without a second debit.
+    if (!providerForOrder(order).refund) throw new PaymentOrderError('payment provider does not support refunds', 400)
+    await holdRefundWallet(client, outRequestNo, order.user_id as string, amountMicros)
     await client.query('COMMIT')
     committed = true
   } catch (error) {
@@ -941,7 +963,7 @@ export async function queryPaymentRefund(input: {
   const selected = await pool.query<Record<string, unknown>>(
     `SELECT r.id, r.payment_order_id, r.status, r.amount_micros, r.provider_amount,
             r.provider_currency, r.reason, r.wallet_transaction_id, r.created_at,
-            r.updated_at, o.provider, o.provider_order_id
+            r.updated_at, o.provider, o.provider_order_id, o.user_id
      FROM payment_refunds r
      JOIN payment_orders o ON o.id = r.payment_order_id
      WHERE r.id = $1 AND r.payment_order_id = $2`,
@@ -956,6 +978,19 @@ export async function queryPaymentRefund(input: {
   }
   const provider = providerForOrder(row)
   if (!provider.queryRefund) throw new PaymentOrderError('payment provider does not support refund queries', 400)
+  // Upgrade historical pending refunds lazily without touching completed rows.
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('SELECT id FROM payment_orders WHERE id = $1 FOR UPDATE', [input.id])
+    await holdRefundWallet(client, input.outRequestNo, row.user_id as string, refund.amountMicros)
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
   const result = await provider.queryRefund({
     orderId: input.id,
     providerOrderId: (row.provider_order_id as string | null) ?? null,

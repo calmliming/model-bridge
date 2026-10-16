@@ -136,19 +136,21 @@ interface ClaudeCompatRule {
   /** Non-default temperature/top_p/top_k return 400; omitting them selects the default. */
   stripSampling: boolean
   /** Replacement for thinking.type=disabled; undefined omits thinking (adaptive). */
-  disabledThinking?: 'between_tools'
+  disabledThinking?: 'between_tools' | 'disabled'
   /** thinking.type=enabled with a manual budget returns 400; omit it (adaptive). */
   dropEnabledThinking: boolean
+  allowForcedTools?: boolean
 }
 
 // Documented migration rules for models that reject legacy request settings.
-// Forced tool_choice (any/tool) is rejected by every model listed here.
+// Haiku 5.5 accepts forced tools; the other listed models reject them.
 // https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
 const SONNET_55_PATTERN = /^claude-sonnet-5[-.]5(?:$|-)/i
 const CLAUDE_COMPAT_RULES: Array<[RegExp, ClaudeCompatRule]> = [
   [/^claude-(?:fable|mythos)-5-1(?:$|-)/i, { stripSampling: true, dropEnabledThinking: false }],
   [SONNET_55_PATTERN, { stripSampling: true, disabledThinking: 'between_tools', dropEnabledThinking: true }],
   [/^claude-opus-5[-.]5(?:$|-)/i, { stripSampling: false, dropEnabledThinking: true }],
+  [/^claude-haiku-5[-.]5(?:$|-)/i, { stripSampling: true, disabledThinking: 'disabled', dropEnabledThinking: true, allowForcedTools: true }],
 ]
 
 function claudeCompatRule(model: unknown): ClaudeCompatRule | undefined {
@@ -165,14 +167,14 @@ const FINE_GRAINED_TOOL_STREAMING_BETA = 'fine-grained-tool-streaming-2025-05-14
  * stable computer/browser toolsets; per-tool eager_input_streaming replaces it.
  */
 function withoutConflictingToolsetBeta(beta: string, body: Record<string, unknown>): string {
-  if (typeof body.model !== 'string' || !SONNET_55_PATTERN.test(body.model.trim())) return beta
+  if (typeof body.model !== 'string' || !/^claude-(?:sonnet|haiku)-5[-.]5(?:$|-)/i.test(body.model.trim())) return beta
   const usesToolset = Array.isArray(body.tools) && body.tools.some(tool =>
     !!tool && typeof tool === 'object' && SONNET_55_TOOLSETS.has(String((tool as Record<string, unknown>).type)))
   if (!usesToolset) return beta
   return beta.split(',').map(token => token.trim()).filter(token => token && token !== FINE_GRAINED_TOOL_STREAMING_BETA).join(',')
 }
 
-/** between_tools only accepts low/medium/high effort. */
+/** Sonnet between_tools and Haiku disabled accept low/medium/high effort. */
 function allowsBetweenTools(body: Record<string, unknown>): boolean {
   const config = body.output_config
   const effort = config && typeof config === 'object' && !Array.isArray(config)
@@ -224,7 +226,8 @@ function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Recor
   if (thinkingType === 'disabled') {
     if (rule.disabledThinking && allowsBetweenTools(body)) out.thinking = { type: rule.disabledThinking }
     else delete out.thinking
-  } else if (thinkingType === 'enabled' && rule.dropEnabledThinking) {
+  } else if ((thinkingType === 'enabled' && rule.dropEnabledThinking)
+    || (thinkingType === 'between_tools' && rule.disabledThinking === 'disabled')) {
     delete out.thinking
   }
   if (rule.stripSampling) {
@@ -233,6 +236,7 @@ function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Recor
     delete out.top_k
   }
 
+  if (rule.allowForcedTools) return out
   const choice = body.tool_choice
   if (!choice || typeof choice !== 'object' || Array.isArray(choice)) return out
   const row = choice as Record<string, unknown>

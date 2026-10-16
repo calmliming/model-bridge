@@ -85,6 +85,10 @@ const CLAUDE_HAIKU: TierPrice = {
   cacheWrite: 1.25,
   cacheRead: 0.1
 }
+// Haiku 5.5: prompts above 100K use a uniform 5x step (including caches).
+// https://platform.claude.com/docs/en/models/haiku-5-5/overview
+const CLAUDE_HAIKU_55: TierPrice = { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 }
+const HAIKU_55_MODEL = /^claude-haiku-5[-.]5(?:$|-)/i
 // Fable 5 (Mythos-class flagship) — Anthropic's most capable widely released
 // model, priced above the Opus tier at 10 / 50. Claude Mythos 5 shares the
 // same list price. Official pricing confirmed 2026-07-25.
@@ -122,6 +126,7 @@ function claudePrice(model: string): TierPrice {
   if (m.includes('fable') || m.includes('mythos')) {
     return /(?:fable|mythos)-5(?:-1|\.1)(?:$|-)/.test(m) ? CLAUDE_FABLE_51 : CLAUDE_FABLE
   }
+  if (HAIKU_55_MODEL.test(m)) return CLAUDE_HAIKU_55
   if (m.includes('haiku')) return CLAUDE_HAIKU
   // Opus 5.5 must be checked before the generic opus branch below, which would
   // otherwise return the Opus 5 rate (5/25 vs the correct 4/20). isLegacyOpus
@@ -347,6 +352,11 @@ const GEMINI_FRONTIER_FLASH_STANDARD: TierPrice = {
   cacheRead: 0.15
 }
 const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
+// Argon Cyber has no introductory discount. Thinking variants share the base rate.
+const GEMINI_ARGON_PROMO: TierPrice = { input: 2, output: 10, cacheWrite: 0, cacheRead: 0.1 }
+const GEMINI_ARGON_STANDARD: TierPrice = { input: 4, output: 20, cacheWrite: 0, cacheRead: 0.2 }
+const GEMINI_ARGON_STANDARD_AT = Date.parse('2026-12-01T00:00:00Z')
+const ARGON_MODEL = /^gemini-4-argon(?:$|-)/i
 const GEMINI_35_FLASH: TierPrice = {
   input: 1.5,
   output: 9,
@@ -386,6 +396,10 @@ const GEMINI_STALE_FLASH: TierPrice = {
 
 function geminiPrice(model: string, atMs: number): TierPrice {
   const m = model.toLowerCase()
+  if (ARGON_MODEL.test(m)) {
+    return m.startsWith('gemini-4-argon-cyber-permissive') || atMs >= GEMINI_ARGON_STANDARD_AT
+      ? GEMINI_ARGON_STANDARD : GEMINI_ARGON_PROMO
+  }
   if (m.includes('2.5-pro')) return GEMINI_25_PRO
   if (m.includes('2.5-flash')) return GEMINI_25_FLASH
   if (m.includes('3.5-flash-lite')) return GEMINI_35_FLASH_LITE
@@ -739,6 +753,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'sonnet', price: CLAUDE_SONNET },
   { provider: 'claude', model: 'claude-sonnet-5', price: CLAUDE_SONNET_5 },
   { provider: 'claude', model: 'haiku', price: CLAUDE_HAIKU },
+  { provider: 'claude', model: 'claude-haiku-4-5', price: CLAUDE_HAIKU },
+  { provider: 'claude', model: 'claude-haiku-5-5', price: CLAUDE_HAIKU_55 },
   { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
@@ -770,6 +786,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
+  { provider: 'gemini', model: 'gemini-4-argon', price: GEMINI_ARGON_PROMO },
+  { provider: 'gemini', model: 'gemini-4-argon-cyber-permissive', price: GEMINI_ARGON_STANDARD },
   {
     provider: 'gemini',
     model: 'gemini-3.8-flash',
@@ -1052,6 +1070,9 @@ function isManagedScheduledDefault(provider: string, model: string, price: TierP
 
   if (provider === 'gemini') {
     const m = model.toLowerCase()
+    if (ARGON_MODEL.test(m) && !m.startsWith('gemini-4-argon-cyber-permissive')) {
+      return sameTokenPrice(price, GEMINI_ARGON_PROMO) || sameTokenPrice(price, GEMINI_ARGON_STANDARD)
+    }
     const isManagedFlash = m === 'flash' || /gemini-3\.(?:6|7|8)-flash/.test(m)
     return isManagedFlash && (sameTokenPrice(price, GEMINI_FRONTIER_FLASH_PROMO) || sameTokenPrice(price, GEMINI_FRONTIER_FLASH_STANDARD))
   }
@@ -1204,6 +1225,16 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // above remains an administrator override; only the fallback lookup is
   // short-circuited here.
   const normalizedModel = model.toLowerCase()
+  const canonicalModel = normalizedModel.replace(/^claude-haiku-5\.5(?=$|-)/, 'claude-haiku-5-5')
+    .replace(/-(?:low|medium|high|tiered)$/, '')
+  if (HAIKU_55_MODEL.test(model) || ARGON_MODEL.test(model)) {
+    const canonicalPrice = priceCache.get(cacheKey(provider, canonicalModel))
+    if (canonicalPrice && !isManagedScheduledDefault(provider, canonicalModel, canonicalPrice)) return canonicalPrice
+  }
+  // New families must not inherit a generic or sibling substring price.
+  if (HAIKU_55_MODEL.test(model)
+    && ['claude', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
+  if (ARGON_MODEL.test(model) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
   if (
     (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) ||
       isGpt61SolModel(normalizedModel) || isImage25Model(normalizedModel)) &&
@@ -1246,21 +1277,26 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const effortPrices = override?.effortPrices as Record<string, TierPrice> | undefined
   const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
   if (!base) return null
-  // Every GPT-6 family model page (Astra, Sol, Luna, 6.1 Sol) documents the
-  // same 272K long-context step and Fast 2× / Flex 0.5× tier factors.
+  // Native OpenAI accounts use subscription OAuth: GPT-6.1 Sol no longer has
+  // the model's API long-context surcharge there. Aggregator/API-key routes
+  // keep it, and an explicit operator longContext rule still takes priority.
   const gpt6 = (provider === 'openai' || provider === 'sub2api') && /^gpt-6(?:$|[.-])/i.test(model)
+  const subscriptionLongContextExempt = provider === 'openai' && isGpt61SolModel(model)
+  const haiku55 = ['claude', 'antigravity', 'sub2api'].includes(provider) && HAIKU_55_MODEL.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
   const grok47 = (provider === 'grok' || provider === 'sub2api') && /^grok-4[.-]7(?:$|-)/i.test(model)
   const longContext =
     override?.longContext !== undefined
       ? override.longContext
-      : gpt6
-        ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
-        : minimaxM3
-          ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 }
-          : grok47
-            ? { threshold: 200_000, inputMultiplier: 2, outputMultiplier: 2 }
-            : null
+      : haiku55
+        ? { threshold: 100_000, inputMultiplier: 5, outputMultiplier: 5 }
+        : gpt6 && !subscriptionLongContextExempt
+          ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
+          : minimaxM3
+            ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 }
+            : grok47
+              ? { threshold: 200_000, inputMultiplier: 2, outputMultiplier: 2 }
+              : null
   const totalInput =
     usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0) + (usage.imageCacheReadTokens ?? 0)
   const long = longContext && totalInput > longContext.threshold ? longContext : null

@@ -44,6 +44,26 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('scheduled database price overrides', () => {
+  it('seeds Haiku 5.5 without repricing older Haiku versions through substring matches', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ ...priceRow('haiku', 1, 5, 0.1, 'claude'), cache_write_price: 1.25 }] })
+    await loadPricing()
+    expect(resolvePrice('claude', 'claude-haiku-5-5')).toMatchObject({ input: 0.1, output: 0.5, cacheWrite: 0.125 })
+    mocks.query.mockResolvedValue({ rows: [priceRow('claude-haiku-5-5', 0.1, 0.5, 0.01, 'claude')] })
+    await loadPricing()
+    expect(resolvePrice('claude', 'claude-haiku-4-5')).toMatchObject({ input: 1, output: 5 })
+  })
+  it('lets Argon seed rows follow the schedule while retaining custom base and variant prices', async () => {
+    const boundary = Date.parse('2026-12-01T00:00:00Z')
+    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-4-argon', 2, 10, 0.1, 'gemini'), priceRow('gemini-4-argon-cyber-permissive', 4, 20, 0.2, 'gemini')] })
+    await loadPricing()
+    expect(resolvePrice('gemini', 'gemini-4-argon', boundary)).toMatchObject({ input: 4, output: 20 })
+    expect(resolvePrice('gemini', 'gemini-4-argon-high', boundary)).toMatchObject({ input: 4, output: 20 })
+    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-4-argon', 9, 19, 0.9, 'gemini'), priceRow('gemini-4-argon-high', 10, 20, 1, 'gemini')] })
+    await loadPricing()
+    expect(resolvePrice('gemini', 'gemini-4-argon-medium', boundary)).toMatchObject({ input: 9, output: 19 })
+    expect(resolvePrice('gemini', 'gemini-4-argon-high', boundary)).toMatchObject({ input: 10, output: 20 })
+    expect(resolvePrice('gemini', 'gemini-4-argon-cyber-permissive', boundary - 1)).toMatchObject({ input: 4, output: 20 })
+  })
   it('keeps Image 2.5 pricing independent from old broad image rows', async () => {
     mocks.query.mockResolvedValue({ rows: [{ ...priceRow('gpt-image-2', 1, 2, 0.1, 'openai'), image_input_price: 1, image_output_price: 2 }] })
     await loadPricing()

@@ -262,6 +262,7 @@ export const paymentRefunds = pgTable('payment_refunds', {
   providerCurrency: text('provider_currency').notNull().default('CNY'),
   reason: text('reason'),
   walletTransactionId: text('wallet_transaction_id'),
+  walletHoldTransactionId: text('wallet_hold_transaction_id'),
   providerResponse: jsonb('provider_response').$type<Record<string, unknown>>(),
   createdAt: epochMs('created_at'),
   updatedAt: epochMs('updated_at'),

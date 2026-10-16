@@ -264,6 +264,12 @@ describe('model discovery', () => {
     }
     expect(listGeminiModels(key)).toEqual([
       {
+        name: 'models/gemini-4-argon',
+        version: '001',
+        displayName: 'Gemini 4 Argon',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+      },
+      {
         name: 'models/gemini-3.8-flash',
         version: '001',
         displayName: 'Gemini 3.8 Flash',

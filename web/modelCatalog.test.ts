@@ -76,6 +76,12 @@ describe('DeepSeek catalog pricing schedule', () => {
 })
 
 describe('current provider model catalog', () => {
+  it('shows Haiku 5.5 and scheduled Argon pricing consistently with the backend', () => {
+    expect(model('claude-haiku-5-5')).toMatchObject({ context: '1M', inputPrice: 0.1, outputPrice: 0.5, cacheReadPrice: 0.01 })
+    const cutoff = Date.parse('2026-12-01T00:00:00Z')
+    expect(resolveModelPrice(model('gemini-4-argon'), cutoff - 1)).toMatchObject({ inputPrice: 2, outputPrice: 10, cacheReadPrice: 0.1 })
+    expect(resolveModelPrice(model('gemini-4-argon'), cutoff)).toMatchObject({ inputPrice: 4, outputPrice: 20, cacheReadPrice: 0.2 })
+  })
   it('lists media models once by manufacturer while keeping the public supply channel', () => {
     const media = MODEL_CATALOG.filter(model => model.channel === 'modelbridge')
     expect(media.map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2-vip', 'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'minimax-h3'])
@@ -83,7 +89,7 @@ describe('current provider model catalog', () => {
     expect(model('minimax-h3').provider).toBe('minimax')
     expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(13)
     expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(5)
-    expect(MODEL_CATALOG).toHaveLength(59)
+    expect(MODEL_CATALOG).toHaveLength(61)
     expect(MODEL_CATALOG.filter(model => model.image)).toEqual(media.filter(model => model.image))
     // Price refreshes must not restore native snapshots or image aliases, but
     // discovering new text models should continue to work.

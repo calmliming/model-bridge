@@ -28,6 +28,15 @@ afterEach(async () => {
 })
 
 describe('pricing override file', () => {
+  it('retains explicit long-context rules for native GPT-6.1 and Haiku 5.5', async () => {
+    await writeRules([
+      { provider: 'openai', model: 'gpt-6.1-sol', longContext: { threshold: 10, inputMultiplier: 3, outputMultiplier: 4 } },
+      { provider: 'claude', model: 'claude-haiku-5-5', longContext: null },
+    ])
+    await reloadPricingOverrides(file)
+    expect(resolveUsagePrice('openai', 'gpt-6.1-sol', { ...emptyUsage(), inputTokens: 400_000 })).toMatchObject({ input: 6, output: 40 })
+    expect(resolveUsagePrice('claude', 'claude-haiku-5-5', { ...emptyUsage(), inputTokens: 400_000 })).toMatchObject({ input: 0.1, output: 0.5 })
+  })
   it('supports supplier image-request and resolution-specific video prices', async () => {
     await writeRules([
       { provider: 'grsai', model: 'gpt-image-2', price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, imageRequest: 0.01 } },

@@ -53,6 +53,40 @@ describe.runIf(database)('payment settlement integrity in PostgreSQL', () => {
     }
   }
 
+  it('deducts a pending refund before the provider replies and retains it after a timeout', async () => {
+    const external = deferred<RefundPaymentResult>()
+    mocks.refund.mockReturnValueOnce(external.promise)
+    const pending = refundPaymentOrder({ id: 'po_1', amount: 2, outRequestNo: 'rf_hold' }).catch(error => error)
+    await vi.waitFor(() => expect(mocks.refund).toHaveBeenCalledOnce())
+    const held = await snapshot()
+    expect(held.balance).toBe(8_000_000)
+    expect(held.refunds[0]).toMatchObject({ status: 'pending', wallet_hold_transaction_id: held.transactions[0].id, wallet_transaction_id: null })
+    expect(Number(held.order.refunded_amount_micros)).toBe(0)
+    external.reject(new Error('upstream timeout'))
+    expect(await pending).toMatchObject({ statusCode: 502 })
+    expect((await snapshot()).balance).toBe(8_000_000)
+    await pool.query("UPDATE payment_refunds SET created_at=$1 WHERE id='rf_hold'", [Date.now() - 11_000])
+    mocks.queryRefund.mockResolvedValueOnce({ status: 'succeeded', providerAmount: '14.40', rawData: {} })
+    await queryPaymentRefund({ id: 'po_1', outRequestNo: 'rf_hold' })
+    const settled = await snapshot()
+    expect(settled.balance).toBe(8_000_000)
+    expect(settled.transactions).toHaveLength(1)
+    expect(settled.refunds[0].wallet_transaction_id).toBe(held.transactions[0].id)
+    expect(Number(settled.order.refunded_amount_micros)).toBe(2_000_000)
+  })
+
+  it('reserves a historical pending refund once even when concurrent queries stay uncertain', async () => {
+    await pool.query(`INSERT INTO payment_refunds (id,payment_order_id,status,amount_micros,provider_amount,created_at)
+      VALUES ('rf_old','po_1','unknown',1000000,'7.20',$1)`, [Date.now() - 11_000])
+    mocks.queryRefund.mockResolvedValue({ status: 'pending', rawData: {} })
+    await Promise.all([queryPaymentRefund({ id: 'po_1', outRequestNo: 'rf_old' }), queryPaymentRefund({ id: 'po_1', outRequestNo: 'rf_old' })])
+    const state = await snapshot()
+    expect(state.balance).toBe(9_000_000)
+    expect(state.transactions).toHaveLength(1)
+    expect(state.refunds[0].wallet_transaction_id).toBeNull()
+    expect(state.refunds[0].wallet_hold_transaction_id).toBe(state.transactions[0].id)
+  })
+
   it.each(['unknown', 'error'] as const)('settles once when an overlapping refund retry finishes with %s', async late => {
     const first = deferred<RefundPaymentResult>()
     const second = deferred<RefundPaymentResult>()
