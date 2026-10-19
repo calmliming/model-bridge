@@ -62,21 +62,21 @@ describe('startStreamingResponse', () => {
 })
 
 describe('writeSseEventBlock', () => {
-  it('writes a complete SSE event in one separately flushable response write', () => {
+  it('writes a complete SSE event in one separately flushable response write', async () => {
     const write = vi.fn(() => true)
     const raw = { destroyed: false, writableEnded: false, write } as unknown as ServerResponse
 
-    expect(writeSseEventBlock(raw, 'event: content_block_delta\ndata: {"type":"content_block_delta"}')).toBe(true)
+    expect(await writeSseEventBlock(raw, 'event: content_block_delta\ndata: {"type":"content_block_delta"}')).toBe(true)
     expect(write).toHaveBeenCalledWith(
       'event: content_block_delta\ndata: {"type":"content_block_delta"}\n\n',
     )
   })
 
-  it('does not write after the downstream response has ended', () => {
+  it('does not write after the downstream response has ended', async () => {
     const write = vi.fn(() => true)
     const raw = { destroyed: false, writableEnded: true, write } as unknown as ServerResponse
 
-    expect(writeSseEventBlock(raw, 'data: {}')).toBe(false)
+    expect(await writeSseEventBlock(raw, 'data: {}')).toBe(false)
     expect(write).not.toHaveBeenCalled()
   })
 })

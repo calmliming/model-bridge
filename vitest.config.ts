@@ -1,4 +1,6 @@
 import { defineConfig } from 'vitest/config'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 export default defineConfig({
   test: {
@@ -9,6 +11,7 @@ export default defineConfig({
       REDIS_URL: '',
       ENCRYPTION_KEY: '0'.repeat(64),
       JWT_SECRET: 'model-bridge-test-secret',
+      USAGE_OUTBOX_DIR: join(tmpdir(), `model-bridge-outbox-test-${process.pid}`),
     },
   },
 })

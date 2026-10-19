@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { config } from '../config'
+import { DurableQueue, usageOutboxNamespace } from './durableQueue'
 
 const mocks = vi.hoisted(() => {
   const query = vi.fn()
   const release = vi.fn()
   const connect = vi.fn(async () => ({ query, release }))
   return {
+    outboxDirectory: `${process.env.USAGE_OUTBOX_DIR}/recorder-${Math.random().toString(16).slice(2)}`,
     query,
     release,
     connect,
@@ -13,6 +18,11 @@ const mocks = vi.hoisted(() => {
     consumeSubscriptionUsage: vi.fn(),
     consumeWeightedSubscriptionUsage: vi.fn(),
   }
+})
+
+vi.mock('../config', async original => {
+  const module = await original<typeof import('../config')>()
+  return { ...module, config: { ...module.config, USAGE_OUTBOX_DIR: mocks.outboxDirectory } }
 })
 
 vi.mock('../db/index', () => ({
@@ -34,7 +44,7 @@ vi.mock('../subscriptions/manager', () => ({
   consumeWeightedSubscriptionUsage: mocks.consumeWeightedSubscriptionUsage,
 }))
 
-import { recordUsage, waitForPendingUsage } from './recorder'
+import { recordUsage, recordStreamUsage, replayPendingUsage, startUsageRetryJob, waitForPendingUsage } from './recorder'
 
 const USAGE = {
   inputTokens: 100,
@@ -63,11 +73,113 @@ function insertParams(): unknown[] {
   return (call?.[1] as unknown[]) ?? []
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await waitForPendingUsage()
+  await rm(mocks.outboxDirectory, { recursive: true, force: true })
   vi.clearAllMocks()
   mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
   mocks.consumeSubscriptionUsage.mockResolvedValue(true)
   mocks.consumeWeightedSubscriptionUsage.mockImplementation(async (_client, _id, points) => points)
+})
+afterAll(async () => { await rm(mocks.outboxDirectory, { recursive: true, force: true }) })
+
+describe('durable streamed usage recovery', () => {
+  const queue = new DurableQueue<any>(join(mocks.outboxDirectory, usageOutboxNamespace(config.DATABASE_URL)))
+
+  it('automatically recovers pending usage on worker startup and stops cleanly', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let stop: (() => Promise<void>) | undefined
+    try {
+      mocks.calculateUsageCost.mockReturnValue(1)
+      mocks.query.mockRejectedValueOnce(new Error('database down'))
+      expect(await recordStreamUsage(baseRecord())).toBe(false)
+      stop = await startUsageRetryJob()
+      await replayPendingUsage()
+      expect(await queue.pending()).toEqual([])
+      expect(mocks.debitWalletForUsage).toHaveBeenCalledTimes(1)
+    } finally { await stop?.(); error.mockRestore() }
+  })
+
+  it('replays a failed write after a module restart using the original price and timestamp', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mocks.calculateUsageCost.mockReturnValue(2)
+      mocks.query.mockRejectedValueOnce(new Error('database down'))
+      expect(await recordStreamUsage(baseRecord({ multiplier: 1.5 }))).toBe(false)
+      const entry = (await queue.pending())[0]!
+      expect(entry.payload.settlement.cost).toBe(3)
+      mocks.calculateUsageCost.mockReturnValue(999)
+      vi.resetModules()
+      const restarted = await import('./recorder')
+      await restarted.replayPendingUsage()
+      expect(insertParams().slice(19, 21)).toEqual([3, 2])
+      expect(insertParams()[41]).toBe(entry.payload.settlement.recordedAt)
+      expect(mocks.calculateUsageCost).toHaveBeenCalledTimes(1)
+      expect(await queue.pending()).toEqual([])
+    } finally { error.mockRestore() }
+  })
+
+  it('does not charge twice after an uncertain COMMIT response', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mocks.calculateUsageCost.mockReturnValue(2)
+      let committed = false
+      mocks.query.mockImplementation(async (sql: string) => {
+        if (sql === 'COMMIT' && !committed) { committed = true; throw new Error('connection lost after commit') }
+        return { rows: sql.startsWith('SELECT id FROM usage_logs') && committed ? [{ id: 'already-paid' }] : [], rowCount: 0 }
+      })
+      expect(await recordStreamUsage(baseRecord())).toBe(false)
+      await replayPendingUsage()
+      expect(mocks.debitWalletForUsage).toHaveBeenCalledTimes(1)
+      expect(mocks.query.mock.calls.filter(([sql]) => sql.startsWith('UPDATE api_keys'))).toHaveLength(1)
+      expect(mocks.query.mock.calls.filter(([sql]) => sql.includes('pg_advisory_xact_lock'))).toHaveLength(2)
+      expect(await queue.pending()).toEqual([])
+    } finally { error.mockRestore() }
+  })
+
+  it('backs off a failed retry and coalesces concurrent replay workers', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mocks.calculateUsageCost.mockReturnValue(1)
+      mocks.query.mockRejectedValue(new Error('database down'))
+      expect(await recordStreamUsage(baseRecord())).toBe(false)
+      const now = Date.now()
+      const first = replayPendingUsage(now)
+      expect(replayPendingUsage(now)).toBe(first)
+      await first
+      const failed = (await queue.pending(now + 30_000))[0]!
+      expect(failed.attempts).toBe(1)
+      const attempts = mocks.query.mock.calls.length
+      await replayPendingUsage(now)
+      expect(mocks.query).toHaveBeenCalledTimes(attempts)
+      mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
+      await replayPendingUsage(now + 30_000)
+      expect(await queue.pending()).toEqual([])
+      expect(mocks.debitWalletForUsage).toHaveBeenCalledTimes(1)
+    } finally { error.mockRestore() }
+  })
+
+  it('keeps buffered failures out of the retry queue because the answer may be withheld', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      mocks.calculateUsageCost.mockReturnValue(1)
+      mocks.query.mockRejectedValueOnce(new Error('database down'))
+      expect(await recordUsage(baseRecord())).toBe(false)
+      expect(await queue.pending()).toEqual([])
+    } finally { error.mockRestore() }
+  })
+
+  it('still settles immediately if the retry disk is unavailable', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await mkdir(mocks.outboxDirectory, { recursive: true })
+      await writeFile(queue.directory, 'blocked')
+      mocks.calculateUsageCost.mockReturnValue(1)
+      expect(await recordStreamUsage(baseRecord())).toBe(true)
+      expect(mocks.debitWalletForUsage).toHaveBeenCalledTimes(1)
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('write failed'), expect.any(String))
+    } finally { error.mockRestore() }
+  })
 })
 
 describe('recordUsage', () => {

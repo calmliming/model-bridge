@@ -8,17 +8,26 @@ function row(value: unknown): Row | null {
 export function createResponsesFieldNormalizer() {
   let timestamp: number | undefined
   let sequence = 0
+  let snapshot: Row = {}
+  let started = false
   const createdAt = () => timestamp ??= Math.floor(Date.now() / 1000)
   const response = (value: Row): Row => {
+    snapshot = { ...snapshot, ...value }
     if (typeof value.created_at === 'number' && Number.isFinite(value.created_at)) timestamp ??= value.created_at
     return value.created_at == null ? { ...value, created_at: createdAt() } : value
   }
   const event = (value: unknown): unknown => {
     const object = row(value)
     if (!object || typeof object.type !== 'string' || !object.type.startsWith('response.')) return value
+    if (object.type === 'response.created' || object.type === 'response.in_progress') started = true
+    if (typeof object.response_id === 'string' && object.response_id) {
+      if (!snapshot.id) snapshot.id = object.response_id
+      started = true
+    }
     let out = object
     const payload = row(object.response)
     if (payload) {
+      if (typeof payload.id === 'string' && payload.id) started = true
       const normalized = response(payload)
       if (normalized !== payload) out = { ...out, response: normalized }
     }
@@ -31,6 +40,8 @@ export function createResponsesFieldNormalizer() {
   return {
     createdAt,
     nextSequenceNumber: () => sequence,
+    errorContext: (model: string) => ({ response: { ...snapshot, model: snapshot.model || model }, started,
+      createdAt: createdAt(), sequenceNumber: sequence }),
     event,
     json(value: unknown): unknown {
       const object = row(value)

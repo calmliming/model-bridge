@@ -67,6 +67,7 @@ services:
       ANTIGRAVITY_API_HOST: ${ANTIGRAVITY_API_HOST:-daily-cloudcode-pa.googleapis.com}
       ANTIGRAVITY_PROXY_URL: ${ANTIGRAVITY_PROXY_URL:-}
       PRICING_OVERRIDE_FILE: ${PRICING_OVERRIDE_FILE:-}
+      USAGE_OUTBOX_DIR: /app/data/usage-outbox
       UPDATER_URL: http://model-bridge-updater:3002
       UPDATE_TOKEN: ${UPDATE_TOKEN:-}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
@@ -104,11 +105,8 @@ services:
       WECHAT_API_KEY: ${WECHAT_API_KEY:-}
       WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-}
     volumes:
-      # Mounted so migrate-to-pg.sh can read the legacy SQLite backup via
-      # scripts/migrate-sqlite-to-pg.ts. The app itself no longer reads or
-      # writes here — PostgreSQL data lives under ./data/pg in its own
-      # service. Read-write because SQLite WAL mode needs to create
-      # sidecar -shm/-wal files even when opened readonly.
+      # Persists encrypted usage-retry records independently of PostgreSQL;
+      # also retains legacy SQLite backups for the migration script.
       - ./data:/app/data
 
   model-bridge-updater:

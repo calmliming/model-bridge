@@ -1,5 +1,6 @@
 import { sanitizeGeminiBody } from '../gemini/relay'
 import { object } from './client'
+import { antigravityThinking } from './thinking'
 
 export class AntigravityRequestError extends Error {
   readonly statusCode = 400
@@ -95,13 +96,12 @@ export function messagesToGemini(body: Record<string, unknown>, model: string): 
   }
   const requested = typeof body.max_tokens === 'number' && Number.isFinite(body.max_tokens) && body.max_tokens > 0 ? Math.trunc(body.max_tokens) : 4096
   generationConfig.maxOutputTokens = Math.min(requested, 64000)
-  const thinking = object(body.thinking)
-  if (thinking?.type === 'disabled') generationConfig.thinkingConfig = { includeThoughts: false, thinkingBudget: 0 }
-  if (thinking?.type === 'enabled' || thinking?.type === 'adaptive') {
-    const budget = typeof thinking.budget_tokens === 'number' ? thinking.budget_tokens : 8192
-    if (!Number.isFinite(budget) || budget < 0) throw new AntigravityRequestError('Invalid thinking budget')
-    generationConfig.maxOutputTokens = Math.min(64000, Math.max(requested, Math.trunc(budget) + 1))
-    generationConfig.thinkingConfig = { includeThoughts: true, thinkingBudget: Math.min(63999, Math.trunc(budget)) }
+  const thinking = antigravityThinking(body, model)
+  if (thinking.config) {
+    generationConfig.thinkingConfig = thinking.config
+    if (typeof thinking.config.thinkingBudget === 'number' && thinking.config.thinkingBudget >= 0) {
+      generationConfig.maxOutputTokens = Math.min(64000, Math.max(requested, thinking.config.thinkingBudget + 1))
+    }
   }
   result.generationConfig = generationConfig
   const declarations: Record<string, unknown>[] = []
@@ -132,9 +132,16 @@ export function prepareAntigravityGemini(body: Record<string, unknown>, model: s
     && tools.some(tool => tool?.googleSearch || tool?.googleSearchRetrieval || tool?.codeExecution)) {
     throw new AntigravityRequestError('Antigravity cannot mix built-in tools and function declarations in one request')
   }
-  const generation = object(cleaned.generationConfig)
+  const generationKey = cleaned.generation_config && !cleaned.generationConfig ? 'generation_config' : 'generationConfig'
+  const generation = object(cleaned[generationKey])
+  const thinking = antigravityThinking(body, model)
+  if (thinking.config) {
+    const next = { ...generation, thinkingConfig: thinking.config }
+    delete (next as Record<string, unknown>).thinking_config
+    cleaned[generationKey] = next
+  }
   if (generation && typeof generation.maxOutputTokens === 'number' && generation.maxOutputTokens > 64000) {
-    cleaned.generationConfig = { ...generation, maxOutputTokens: 64000 }
+    cleaned[generationKey] = { ...object(cleaned[generationKey]), maxOutputTokens: 64000 }
   }
   const toolConfig = object(cleaned.toolConfig) ?? {}
   return { ...cleaned, toolConfig: { ...toolConfig, functionCallingConfig: object(toolConfig.functionCallingConfig) ?? { mode: 'VALIDATED' } } }

@@ -28,7 +28,7 @@ import { closeOauthCallbackServer, startOauthCallbackServer } from './oauthCallb
 import { initPaymentProviders } from './payments/providers/index'
 import { loadAlipayPaymentConfig } from './payments/config'
 import { closeRedis } from './store/redis'
-import { waitForPendingUsage } from './usage/recorder'
+import { startUsageRetryJob, waitForPendingUsage } from './usage/recorder'
 import { TRUSTED_LOCAL_PROXIES } from './http/trustProxy'
 import { warnUnsafeStoredUpstreamUrls } from './accounts/manager'
 import { panelRateLimit } from './middleware/panelRateLimit'
@@ -46,6 +46,7 @@ async function main(): Promise<void> {
   await initDb()
   await seedSubscriptionPlans()
   await initPricing()
+  const stopUsageRetryJob = await startUsageRetryJob()
   const stopPricingOverrideReload = await startPricingOverrideReload(config.PRICING_OVERRIDE_FILE)
   await ensureAdmin()
   await warnUnsafeStoredUpstreamUrls()
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
     await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob(), stopModelCatalogJob(), stopMediaTaskJob()])
     await Promise.all([closeOauthCallbackServer(oauthCallbackServer), closeOauthCallbackServer(antigravityCallbackServer)])
     await waitForPendingUsage()
+    await stopUsageRetryJob()
     await Promise.all([closeUpstreamDispatcher(), closeAntigravityDispatcher()])
     await closeRedis()
     await pool.end()

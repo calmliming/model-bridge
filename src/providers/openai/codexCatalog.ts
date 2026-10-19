@@ -11,6 +11,8 @@
 
 import { fetchWithConnectTimeout } from '../../http/upstream'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
+import { createHash } from 'node:crypto'
+import { mapRequestedModel, type ModelMappings } from '../../keys/modelMapping'
 
 const CODEX_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models'
 const MAX_MANIFEST_BYTES = 1 << 20
@@ -106,6 +108,33 @@ export function filterCodexManifest(manifest: Manifest, allowed: (model: string)
       return typeof slug === 'string' && slug.trim() !== '' && allowed(slug)
     }),
   }
+}
+
+/** Project capabilities from the actual target before checking public-name policy. */
+export function projectCodexManifest(manifest: Manifest, mappings: ModelMappings | null | undefined,
+  allowed: (model: string, target: string) => boolean): Manifest {
+  const source = new Map<string, Record<string, unknown>>()
+  for (const entry of manifest.models) {
+    if (entry && typeof entry === 'object' && typeof (entry as { slug?: unknown }).slug === 'string') {
+      const item = entry as Record<string, unknown> & { slug: string }
+      source.set(item.slug.trim().toLowerCase(), item)
+    }
+  }
+  const names = [...source.values()].map(entry => String(entry.slug))
+  names.push(...Object.keys(mappings ?? {}).filter(name => !name.includes('*')).map(name => name.trim()))
+  const seen = new Set<string>()
+  const models: unknown[] = []
+  for (const name of names) {
+    if (!name || seen.has(name.toLowerCase())) continue
+    seen.add(name.toLowerCase())
+    const target = mapRequestedModel(name, mappings)
+    const entry = source.get(target.toLowerCase())
+    if (!entry || !allowed(name, target)) continue
+    models.push(name === entry.slug ? entry : { ...entry, slug: name, display_name: name })
+  }
+  const unchanged = models.length === manifest.models.length && models.every((entry, i) => entry === manifest.models[i])
+  return { ...manifest, models, ...(!unchanged && typeof manifest.etag === 'string'
+    ? { etag: createHash('sha256').update(JSON.stringify(models)).digest('hex') } : {}) }
 }
 
 /** Test helper. */

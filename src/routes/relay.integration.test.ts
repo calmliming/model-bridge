@@ -668,6 +668,20 @@ describe('Codex remote model catalog', () => {
   }
   const manifest = { models: [{ slug: 'gpt-6-sol', display_name: 'GPT-6 Sol', priority: 1 }, { slug: 'gpt-5.4', priority: 2 }, { name: 'no-slug' }], etag: 'v1' }
 
+  it('serves a permitted public alias with the capabilities of its target and isolates policies on cached manifests', async () => {
+    mocks.key.modelMappings = { 'my-codex': 'gpt-6-sol' }
+    mocks.key.allowedModels = ['my-codex']
+    mocks.key.groupAllowedModels = ['my-codex']
+    mocks.fetch.mockImplementation(async () => Response.json(manifest))
+    const first = (await get('/v1/models?client_version=0.158.0')).json()
+    expect(first.models).toEqual([{ ...manifest.models[0], slug: 'my-codex', display_name: 'my-codex' }])
+    mocks.key.groupAllowedModels = ['gpt-6-sol']
+    const second = (await get('/v1/models?client_version=0.158.0')).json()
+    expect(second.models).toEqual([])
+    expect(second.etag).not.toBe(first.etag)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('filters stale GPT-5.5 entries after mapping without modifying the shared upstream manifest', async () => {
     const upstream = { models: [{ slug: 'gpt-5.5', priority: 1 }, { slug: 'public', priority: 2 },
       { slug: 'gpt-6.1-sol', priority: 3 }], etag: 'stale' }
@@ -675,7 +689,7 @@ describe('Codex remote model catalog', () => {
     const getCatalog = async () => (await get('/api/openai/v1/models?client_version=0.158.0')).json()
     expect((await getCatalog()).models).toEqual(upstream.models.slice(1))
     mocks.key.modelMappings = { 'gpt-5.5': 'gpt-6.1-sol', public: 'gpt-5.5' }
-    expect((await getCatalog()).models).toEqual([upstream.models[0], upstream.models[2]])
+    expect((await getCatalog()).models).toEqual([{ ...upstream.models[2], slug: 'gpt-5.5', display_name: 'gpt-5.5' }, upstream.models[2]])
     mocks.key.modelMappings = null
     expect((await getCatalog()).models).toEqual(upstream.models.slice(1))
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
@@ -687,7 +701,7 @@ describe('Codex remote model catalog', () => {
     mocks.fetch.mockImplementation(async () => new Response(JSON.stringify(manifest), { headers: { 'content-type': 'application/json' } }))
     const response = await get('/v1/models?client_version=0.158.0')
     expect(response.statusCode).toBe(200)
-    expect(response.json()).toEqual({ models: [manifest.models[0]], etag: 'v1' })
+    expect(response.json()).toEqual({ models: [manifest.models[0]], etag: expect.stringMatching(/^[a-f0-9]{64}$/) })
     const [url, init] = mocks.fetch.mock.calls[0]!
     expect(url).toBe('https://chatgpt.com/backend-api/codex/models?client_version=0.158.0')
     expect(init.headers).toMatchObject({ authorization: 'Bearer test-upstream-token', 'ChatGPT-Account-ID': 'acct-123' })
@@ -847,9 +861,11 @@ describe('Responses output field compatibility', () => {
       { type: 'response.output_text.delta', sequence_number: 11, delta: 'Partial' },
     ]))
     const output = events((await request({ model: 'gpt-6.1-sol', input: 'Hi', stream: true })).body)
-    expect(output.map(event => event.sequence_number)).toEqual([10, 11, 12, 13, 14])
+    expect(output.map(event => event.sequence_number)).toEqual([10, 11, 12])
     expect(output.filter(event => event.response).every(event => event.response.created_at === 123)).toBe(true)
     expect(output.at(-1)!.type).toBe('response.failed')
+    expect(output.at(-1)!.response).toMatchObject({ id: 'resp', model: 'gpt-6.1-sol' })
+    expect(output.filter(event => event.type === 'response.created')).toHaveLength(1)
     expect(mocks.logs[0]?.[22]).toBe('error')
   }))
 })
@@ -1248,6 +1264,34 @@ describe('upstream compatibility regressions', () => {
     const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
     expect(body.tools[0].input_schema).toEqual({ type: 'object', properties: { value: { type: 'object' } } })
     expect(body.messages).toEqual(messages)
+  }))
+
+  it.each(['low', 'medium', 'high'])('keeps Gemini %s effort consistent in the request, selected model and usage record', level => withRelay(async request => {
+    mocks.accounts[0]!.metadata = { project: 'project-1', antigravityModels: ['low', 'medium', 'high'].map(tier => ({ id: `gemini-4-argon-${tier}` })) }
+    mocks.fetch.mockResolvedValueOnce(Response.json({ response: { candidates: [{ content: { parts: [{ text: 'Hello' }] }, finishReason: 'STOP' }] } }))
+    const response = await request({ model: 'gemini-4-argon', stream: false, messages: [], thinking: { type: 'adaptive' }, output_config: { effort: level } }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(200)
+    const body = JSON.parse(mocks.fetch.mock.calls[0]![1].body)
+    expect(body.model).toBe(`gemini-4-argon-${level}`)
+    expect(body.request.generationConfig.thinkingConfig).toMatchObject({ thinkingLevel: level, includeThoughts: true })
+    expect(mocks.logs[0]?.[33]).toBe(level)
+  }))
+
+  it('rejects invalid Gemini effort before account selection', () => withRelay(async request => {
+    const response = await request({ model: 'gemini-4-argon', messages: [], output_config: { effort: 'typo' } }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(400)
+    expect(JSON.parse(response.body)).toMatchObject({ error: { code: 'unsupported_reasoning_effort' } })
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  }))
+
+  it('does not raise a requested Gemini effort when the account only offers a higher tier', () => withRelay(async request => {
+    mocks.accounts[0]!.metadata = { project: 'project-1', antigravityModels: [{ id: 'gemini-4-argon-high' }] }
+    const response = await request({ model: 'gemini-4-argon', messages: [], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } }, '/api/antigravity/v1/messages')
+    expect(response.status).toBe(400)
+    expect(JSON.parse(response.body)).toMatchObject({ error: { code: 'unsupported_reasoning_effort' } })
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
   }))
 
   it.each([false, true])('resolves native Antigravity models before stripped thinking budgets (Messages=%s)', messages => withRelay(async request => {

@@ -382,21 +382,24 @@ export function createChatCompletionStreamParser() {
  * errored or dropped before sending one, the relay emits this so Codex surfaces
  * the real failure instead of reconnecting forever.
  */
-export function buildResponsesErrorEvents(message: string, code: string, options: { createdAt?: number; sequenceNumber?: number } = {}): unknown[] {
-  const id = `resp_${randomUUID().replace(/-/g, '')}`
+export function buildResponsesErrorEvents(message: string, code: string, options: {
+  createdAt?: number; sequenceNumber?: number; response?: Record<string, unknown>; started?: boolean
+} = {}): unknown[] {
+  const id = typeof options.response?.id === 'string' && options.response.id ? options.response.id : `resp_${randomUUID().replace(/-/g, '')}`
   const created = options.createdAt ?? Math.floor(Date.now() / 1000)
   const sequence = options.sequenceNumber ?? 0
   const base = {
-    id,
     object: 'response',
-    created_at: created,
     model: '',
     output: [] as unknown[],
     parallel_tool_calls: false,
     tool_choice: 'auto',
     tools: [] as unknown[],
+    ...options.response,
+    id,
+    created_at: created,
   }
-  return [
+  const events = [
     { type: 'response.created', sequence_number: sequence, response: { ...base, status: 'in_progress' } },
     { type: 'response.in_progress', sequence_number: sequence + 1, response: { ...base, status: 'in_progress' } },
     {
@@ -405,6 +408,7 @@ export function buildResponsesErrorEvents(message: string, code: string, options
       response: { ...base, status: 'failed', error: { code, message } },
     },
   ]
+  return options.started ? events.slice(2).map(event => ({ ...event, sequence_number: sequence })) : events
 }
 
 export function parseResponsesSseEvents(text: string): unknown[] {

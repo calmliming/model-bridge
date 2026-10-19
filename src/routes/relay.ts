@@ -1,11 +1,13 @@
 import { trackUsageParser, jsonUsageSource, bufferedUsageSource } from '../providers/usageSource'
+import { writeStreamChunk } from '../http/streamWriter'
 import { zhipuResponsesEffort } from '../providers/zhipu/effort'
 import { ProviderRequestError } from '../providers/requestError'
 import type { StreamEndContext } from '../providers/chatResponsesStream'
 import { cachedAntigravityModels } from '../accounts/antigravityModels'
 import { sanitizeToolSchemas } from '../providers/toolSchema'
 import { isResponsesTerminalBlock, readResponsesSse } from '../providers/openai/sse'
-import { antigravityThinkingLevel } from '../providers/antigravity/model'
+import { antigravityThinkingLevel, resolveAntigravityModel } from '../providers/antigravity/model'
+import { antigravityThinking } from '../providers/antigravity/thinking'
 import { cachedAccountCatalogs } from '../accounts/modelCatalog'
 import { isImage25Model } from '../providers/openai/imageModels'
 import { convertNativeImageResponse, createNativeImagesUsageParser, createNativeImagesStreamTransform, parseNativeImageUsage } from '../providers/openai/directImages'
@@ -46,7 +48,7 @@ import {
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
 import { isRetiredOpenAISubscriptionModel, validateOpenAISubscriptionModel } from '../providers/openai/models'
 import { createResponsesFieldNormalizer } from '../providers/openai/responseFields'
-import { CodexCatalogError, codexClientVersion, fetchCodexManifest, filterCodexManifest } from '../providers/openai/codexCatalog'
+import { CodexCatalogError, codexClientVersion, fetchCodexManifest, projectCodexManifest } from '../providers/openai/codexCatalog'
 import { openAIAccountIdFromMetadata } from '../providers/openai/quota'
 import {
   convertOpenAIImagesSse,
@@ -134,7 +136,7 @@ import {
 } from '../providers/modelDiscovery'
 import { isGoogleLocationUnsupported, googleErrorMessage } from '../providers/google/errors'
 import type { ProviderId } from '../providers/types'
-import { recordUsage } from '../usage/recorder'
+import { recordStreamUsage, recordUsage } from '../usage/recorder'
 import { withLiveImageRequest } from '../usage/liveRequests'
 import { emptyUsage, type UsageData } from '../providers/types'
 import { estimateResponsesInputTokens } from './inputTokens'
@@ -197,6 +199,7 @@ const KIMI_CONCURRENCY_LIMIT_MESSAGE =
 interface ParsedRoute {
   model: string
   thinkingLevel?: string
+  thinkingExplicit?: boolean
   preserveModel?: boolean
   /** Logical action — `messages` / `responses` / `generateContent` / `streamGenerateContent`. */
   action: string
@@ -208,6 +211,7 @@ interface UpstreamContext {
   sessionKeyHash?: string | null
   model: string
   thinkingLevel?: string
+  thinkingExplicit?: boolean
   preserveModel?: boolean
   action: string
   account: { id: string; metadata: unknown; proxyUrl: string | null }
@@ -1926,9 +1930,9 @@ async function sendCodexModelsManifest(request: FastifyRequest, reply: FastifyRe
       accountId: account.id, token, clientVersion,
       chatgptAccountId: openAIAccountIdFromMetadata(account.metadata),
     })
-    void reply.header('cache-control', 'no-store').send(filterCodexManifest(manifest, model =>
-      isAllowedModel(model, apiKey.allowedModels) && isGroupModelAllowed(model, apiKey.groupAllowedModels)
-      && !isRetiredOpenAISubscriptionModel(mapRequestedModel(model, apiKey.modelMappings))))
+    void reply.header('cache-control', 'no-store').send(projectCodexManifest(manifest, apiKey.modelMappings, (model, target) =>
+      isAnyAllowedModel([model, target], apiKey.allowedModels) && isGroupModelAllowed(model, apiKey.groupAllowedModels)
+      && !isRetiredOpenAISubscriptionModel(target)))
   } catch (err) {
     const status = err instanceof CodexCatalogError ? err.statusCode : 503
     request.log.warn(`codex model catalog failed via ${account.id}: ${err instanceof Error ? err.message : String(err)}`)
@@ -2046,8 +2050,10 @@ async function executeRelay(
   // handler, which neither shapes the body like the other relay errors nor
   // records which model was refused.
   let normalizedModel: string
+  let thinking: ReturnType<typeof antigravityThinking> | undefined
   try {
     normalizedModel = provider.normalizeModel ? provider.normalizeModel(mappedModel) : mappedModel
+    if (provider.id === 'antigravity') thinking = antigravityThinking(body, normalizedModel)
   } catch (err) {
     if (isClientModelError(err)) {
       request.log.warn(`rejected model ${mappedModel} for provider ${provider.id}: ${err.message}`)
@@ -2060,7 +2066,8 @@ async function executeRelay(
   }
   const parsed: ParsedRoute = { ...route, model: normalizedModel,
     ...(provider.id === 'antigravity' ? {
-      thinkingLevel: antigravityThinkingLevel(body),
+      thinkingLevel: thinking!.level,
+      thinkingExplicit: thinking!.explicit,
       preserveModel: findModelMapping(route.model, apiKey.modelMappings) !== undefined,
     } : {}),
   }
@@ -2373,6 +2380,7 @@ async function runRelayLoop(
           model: parsed.model,
           action: parsed.action,
           thinkingLevel: parsed.thinkingLevel,
+          thinkingExplicit: parsed.thinkingExplicit,
           preserveModel: parsed.preserveModel,
           account: { id: account.id, metadata: account.metadata, proxyUrl: account.proxyUrl },
         })
@@ -2435,6 +2443,10 @@ async function runRelayLoop(
         }
         continue
       }
+      const forwardedModel = provider.id === 'antigravity'
+        ? resolveAntigravityModel(parsed.model, (account.metadata as { antigravityModels?: unknown } | null)?.antigravityModels,
+            parsed.thinkingLevel, parsed.preserveModel, parsed.thinkingExplicit)
+        : parsed.model
       const meta: RelayMeta = {
         apiKeyId: apiKey.id,
         userId: apiKey.userId,
@@ -2452,7 +2464,8 @@ async function runRelayLoop(
         subscriptionId: apiKey.subscriptionId, subscriptionQuotaMode: apiKey.subscriptionQuotaMode,
         attemptCount: attempt + 1,
         upstreamRequestId: upstreamRequestId(upstream.headers, (account.metadata as Record<string, unknown> | null)?.upstreamRequestIdHeader),
-        reasoningEffort: provider === PROVIDERS['zhipu-responses'] ? zhipuResponsesEffort(body, parsed.model) ?? null
+        reasoningEffort: provider.id === 'antigravity' ? antigravityThinkingLevel(body, forwardedModel)
+          : provider === PROVIDERS['zhipu-responses'] ? zhipuResponsesEffort(body, parsed.model) ?? null
           : typeof body.reasoning_effort === 'string' ? body.reasoning_effort
           : typeof jsonRecord(body.reasoning)?.effort === 'string' ? jsonRecord(body.reasoning)!.effort as string : null,
         legacyFunctionCall: usesLegacyFunctions(body),
@@ -2685,15 +2698,9 @@ function isNonStreamContentType(contentType: string | null): boolean {
  * tokens/sec from the arrival time of each streamed event, not only from the
  * final usage object.
  */
-export function writeSseEventBlock(raw: ServerResponse, block: string): boolean {
+export async function writeSseEventBlock(raw: ServerResponse, block: string): Promise<boolean> {
   if (!block.trim()) return true
-  if (raw.destroyed || raw.writableEnded) return false
-  try {
-    raw.write(`${block}\n\n`)
-    return true
-  } catch {
-    return false
-  }
+  return writeStreamChunk(raw, `${block}\n\n`, upstreamSignal())
 }
 
 /**
@@ -2749,9 +2756,9 @@ async function sendStreaming(
       message = redactUrls(message)
     }
     startStreamingResponse(raw, 200)
-    for (const event of buildResponsesErrorEvents(message, code)) writeSseData(raw, event)
+    for (const event of buildResponsesErrorEvents(message, code, { response: { model: meta.model } })) await writeSseData(raw, event)
     raw.end()
-    await recordUsage({
+    await recordStreamUsage({
       apiKeyId: meta.apiKeyId,
       userId: meta.userId,
       accountId: meta.accountId,
@@ -2799,17 +2806,17 @@ async function sendStreaming(
       const event = responseFields.event({ type, response: responseObject })
       jsonParser.feed(event)
       noteResponsesTerminal(event, jsonState)
-      writeSseData(raw, event)
+      await writeSseData(raw, event)
     } else {
       const { code, message } = extractUpstreamError(bodyText, upstream.status)
       const safeMessage = provider.relayToRelay ? redactUrls(message) : message
-      for (const event of buildResponsesErrorEvents(safeMessage, code)) {
+      for (const event of buildResponsesErrorEvents(safeMessage, code, { response: { model: meta.model } })) {
         noteResponsesTerminal(event, jsonState)
-        writeSseData(raw, event)
+        await writeSseData(raw, event)
       }
     }
     raw.end()
-    await recordUsage({
+    await recordStreamUsage({
       apiKeyId: meta.apiKeyId,
       userId: meta.userId,
       accountId: meta.accountId,
@@ -2886,16 +2893,15 @@ async function sendStreaming(
       lastActivity = Date.now()
       markFirstToken()
     }
+    let heartbeatPending = false
     const heartbeat = sseOutput && !omitComments
       ? setInterval(() => {
-          if (!downstreamClosed && Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
-            try {
-              raw.write(': keepalive\n\n')
-              lastActivity = Date.now()
-            } catch {
-              // The close listener aborts the upstream; retain usage already parsed.
-              downstreamClosed = true
-            }
+          if (!downstreamClosed && !heartbeatPending && !raw.writableNeedDrain && Date.now() - lastActivity >= STREAM_HEARTBEAT_MS) {
+            heartbeatPending = true
+            void writeStreamChunk(raw, ': keepalive\n\n', upstreamSignal()).then(wrote => {
+              if (wrote) lastActivity = Date.now()
+              else downstreamClosed = true
+            }).finally(() => { heartbeatPending = false })
           }
         }, STREAM_HEARTBEAT_MS)
       : null
@@ -2914,7 +2920,7 @@ async function sendStreaming(
           let sep: number
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
             const block = buffer.slice(0, sep)
-            const wrote = emitFromStreamTransform(
+            const wrote = await emitFromStreamTransform(
               downstreamClosed ? null : raw,
               block,
               streamTransform,
@@ -2938,7 +2944,7 @@ async function sendStreaming(
           while ((sep = buffer.indexOf('\n\n')) !== -1) {
             const block = provider.id === 'antigravity'
               ? sanitizeAntigravitySseBlock(buffer.slice(0, sep)) : buffer.slice(0, sep)
-            const wrote = rewriteAndEmit(
+            const wrote = await rewriteAndEmit(
               downstreamClosed ? null : raw,
               omitComments ? withoutSseComments(block) : block,
               transform,
@@ -2960,7 +2966,7 @@ async function sendStreaming(
             while ((sep = buffer.indexOf('\n\n')) !== -1) {
               const block = responsesProtocol ? responseFields.sseBlock(buffer.slice(0, sep)) : buffer.slice(0, sep)
               feedSseBlock(block, parser, streamState, modelAudit)
-              if (!downstreamClosed && !writeSseEventBlock(raw, omitComments ? withoutSseComments(block) : block)) {
+              if (!downstreamClosed && !await writeSseEventBlock(raw, omitComments ? withoutSseComments(block) : block)) {
                 // The request close listener aborts the upstream transport.
                 downstreamClosed = true
               }
@@ -2974,11 +2980,7 @@ async function sendStreaming(
             }
           } else if (value.byteLength > 0 && !downstreamClosed) {
             // Non-SSE error/body passthrough still needs byte fidelity.
-            try {
-              raw.write(Buffer.from(value))
-            } catch {
-              downstreamClosed = true
-            }
+            if (!await writeStreamChunk(raw, Buffer.from(value), upstreamSignal())) downstreamClosed = true
             // No SSE parsing is needed for a byte-for-byte non-stream body.
             buffer = ''
           }
@@ -3000,14 +3002,14 @@ async function sendStreaming(
     if (provider.id === 'antigravity' && !streamTransform) buffer = sanitizeAntigravitySseBlock(buffer)
     if (omitComments) buffer = withoutSseComments(buffer)
     if (streamTransform) {
-      if (!emitFromStreamTransform(downstreamClosed ? null : raw, buffer, streamTransform, parser,
+      if (!await emitFromStreamTransform(downstreamClosed ? null : raw, buffer, streamTransform, parser,
         parseUpstreamStream, markFirstToken, streamState, modelAudit)) downstreamClosed = true
     } else if (transform) {
-      if (!rewriteAndEmit(downstreamClosed ? null : raw, buffer, transform, parser, markFirstToken, modelAudit)) downstreamClosed = true
+      if (!await rewriteAndEmit(downstreamClosed ? null : raw, buffer, transform, parser, markFirstToken, modelAudit)) downstreamClosed = true
     } else {
       if (responsesProtocol) buffer = responseFields.sseBlock(buffer)
       feedSseBlock(buffer, parser, streamState, modelAudit)
-      if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
+      if (!downstreamClosed && !await writeSseEventBlock(raw, buffer)) downstreamClosed = true
       markFirstToken()
     }
   }
@@ -3016,7 +3018,7 @@ async function sendStreaming(
       if (!parseUpstreamStream && event !== '[DONE]') parser.feed(event)
       noteResponsesTerminal(event, streamState)
       markFirstToken()
-      if (!downstreamClosed && !writeSseData(raw, event)) downstreamClosed = true
+      if (!downstreamClosed && !await writeSseData(raw, event)) downstreamClosed = true
     }
   }
   // Stream ended without a terminal event (upstream dropped mid-response) —
@@ -3026,9 +3028,9 @@ async function sendStreaming(
     for (const event of buildResponsesErrorEvents(
       'Upstream stream closed before completion.',
       'upstream_stream_closed',
-      { createdAt: responseFields.createdAt(), sequenceNumber: responseFields.nextSequenceNumber() },
+      responseFields.errorContext(meta.model),
     )) {
-      if (!downstreamClosed && !writeSseData(raw, event)) downstreamClosed = true
+      if (!downstreamClosed && !await writeSseData(raw, event)) downstreamClosed = true
     }
   }
   if (!downstreamClosed && !raw.writableEnded) {
@@ -3045,7 +3047,7 @@ async function sendStreaming(
   const streamStatus = streamReadFailed || clientCanceled
     ? 'error'
     : providerFailure ? 'error' : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)
-  await recordUsage({
+  await recordStreamUsage({
     apiKeyId: meta.apiKeyId,
     userId: meta.userId,
     accountId: meta.accountId,
@@ -3489,7 +3491,7 @@ function feedSseBlock(
  * frame. Non-data lines and `[DONE]` are dropped (the downstream protocol
  * has its own completion signal). Terminal events are recorded into `state`.
  */
-function emitFromStreamTransform(
+async function emitFromStreamTransform(
   raw: ServerResponse | null,
   block: string,
   xform: StreamTransform,
@@ -3498,7 +3500,7 @@ function emitFromStreamTransform(
   onEmit: (() => void) | undefined,
   state: ResponsesStreamState,
   modelAudit?: ModelAuditState,
-): boolean {
+): Promise<boolean> {
   const dataLines: string[] = []
   for (const line of block.split('\n')) {
     const trimmed = line.trimStart()
@@ -3521,20 +3523,15 @@ function emitFromStreamTransform(
     if (!parseUpstream && event !== '[DONE]') parser.feed(event)
     noteResponsesTerminal(event, state)
     onEmit?.()
-    if (!writeSseData(raw, event)) wrote = false
+    if (!await writeSseData(raw, event)) { wrote = false; break }
   }
   return wrote
 }
 
-function writeSseData(raw: ServerResponse | null, event: unknown): boolean {
+async function writeSseData(raw: ServerResponse | null, event: unknown): Promise<boolean> {
   if (!raw) return true
   if (event === '[DONE]') {
-    try {
-      raw.write('data: [DONE]\n\n')
-      return true
-    } catch {
-      return false
-    }
+    return writeStreamChunk(raw, 'data: [DONE]\n\n', upstreamSignal())
   }
   if (
     event &&
@@ -3542,33 +3539,21 @@ function writeSseData(raw: ServerResponse | null, event: unknown): boolean {
     (event as { __modelBridgeSseEvent?: unknown }).__modelBridgeSseEvent === true
   ) {
     const named = event as { event?: unknown; data?: unknown }
-    try {
-      if (typeof named.event === 'string' && named.event.trim()) {
-        raw.write(`event: ${named.event.trim()}\n`)
-      }
-      raw.write(`data: ${JSON.stringify(named.data)}\n\n`)
-      return true
-    } catch {
-      return false
-    }
+    const prefix = typeof named.event === 'string' && named.event.trim() ? `event: ${named.event.trim()}\n` : ''
+    return writeStreamChunk(raw, `${prefix}data: ${JSON.stringify(named.data)}\n\n`, upstreamSignal())
   }
-  try {
-    raw.write(`data: ${JSON.stringify(event)}\n\n`)
-    return true
-  } catch {
-    return false
-  }
+  return writeStreamChunk(raw, `data: ${JSON.stringify(event)}\n\n`, upstreamSignal())
 }
 
 /** Transform mode: parses each event, applies transform, re-emits SSE. */
-function rewriteAndEmit(
+async function rewriteAndEmit(
   raw: ServerResponse | null,
   block: string,
   transform: (data: unknown) => unknown,
   parser: { feed(event: unknown): void },
   onEmit?: () => void,
   modelAudit?: ModelAuditState,
-): boolean {
+): Promise<boolean> {
   if (!block.trim()) return true
   const out: string[] = []
   for (const line of block.split('\n')) {
@@ -3594,12 +3579,7 @@ function rewriteAndEmit(
   }
   if (out.length > 0) onEmit?.()
   if (!raw) return true
-  try {
-    raw.write(out.join('\n') + '\n\n')
-    return true
-  } catch {
-    return false
-  }
+  return writeStreamChunk(raw, out.join('\n') + '\n\n', upstreamSignal())
 }
 
 function enforceGroupModel(model: string, request: FastifyRequest, reply: FastifyReply): boolean {
@@ -3669,7 +3649,8 @@ function callAntigravity(token: string, body: Record<string, unknown>, ctx: Upst
   if (typeof project !== 'string' || !project) throw new Error('Antigravity account is missing project metadata; refresh its quota or authorize again')
   const models = (ctx.account.metadata as { antigravityModels?: unknown } | null)?.antigravityModels
   return relayAntigravity(token, body, { apiKeyId: ctx.apiKeyId, accountId: ctx.account.id, model: ctx.model, project, action: ctx.action,
-    sessionKeyHash: ctx.sessionKeyHash, models, thinkingLevel: ctx.thinkingLevel, preserveModel: ctx.preserveModel })
+    sessionKeyHash: ctx.sessionKeyHash, models, thinkingLevel: ctx.thinkingLevel,
+    thinkingExplicit: ctx.thinkingExplicit, preserveModel: ctx.preserveModel })
 }
 
 

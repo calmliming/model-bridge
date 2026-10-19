@@ -359,6 +359,15 @@ in-flight requests, OAuth callbacks, background jobs, and usage billing writes
 before closing PostgreSQL/Redis. The shutdown timeout is fixed at 30 seconds;
 Docker Compose grants a 35-second stop grace period.
 
+Streamed usage is written to an encrypted local outbox before database settlement.
+Database failures are retried with backoff and recovered after restart using the original
+amount, usage timestamp and idempotency key, including uncertain commit outcomes.
+The default directory is `data/usage-outbox/` (`USAGE_OUTBOX_DIR`); Docker uses the existing
+`./data` mount. Preserve this directory and `ENCRYPTION_KEY` when backing up or migrating.
+Subscription windows still follow the existing locked settlement policy and are never
+rewound. The outbox cannot recover usage never observed before a process crash, or writes
+lost while both the database and outbox disk are unavailable.
+
 ### Alipay AI web application payment
 
 Wallet recharge keeps the existing Alipay QR flow and adds an official

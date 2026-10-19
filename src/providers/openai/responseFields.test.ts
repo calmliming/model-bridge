@@ -1,7 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createResponsesFieldNormalizer } from './responseFields'
+import { buildResponsesErrorEvents } from './chat'
 
 describe('Responses required output fields', () => {
+  it('ends an existing response without creating a different response identity', () => {
+    const normalizer = createResponsesFieldNormalizer()
+    normalizer.event({ type: 'response.created', sequence_number: 10, response: { id: 'upstream', model: 'actual-model', created_at: 123, tools: [{ type: 'function' }] } })
+    const events = buildResponsesErrorEvents('closed', 'upstream_stream_closed', normalizer.errorContext('requested-model'))
+    expect(events).toEqual([{ type: 'response.failed', sequence_number: 11, response: expect.objectContaining({ id: 'upstream', model: 'actual-model',
+      created_at: 123, tools: [{ type: 'function' }], status: 'failed', error: { code: 'upstream_stream_closed', message: 'closed' } }) }])
+  })
+
+  it('learns response identity from response_id on streams without a created frame', () => {
+    const normalizer = createResponsesFieldNormalizer()
+    normalizer.event({ type: 'response.output_text.delta', response_id: 'upstream', delta: 'partial', sequence_number: 4 })
+    const events = buildResponsesErrorEvents('closed', 'upstream_stream_closed', normalizer.errorContext('gpt-6.1-sol'))
+    expect(events).toEqual([{ type: 'response.failed', sequence_number: 5, response: expect.objectContaining({ id: 'upstream', model: 'gpt-6.1-sol' }) }])
+  })
+
+  it('still creates a complete error sequence when upstream never started a response', () => {
+    const normalizer = createResponsesFieldNormalizer()
+    const events = buildResponsesErrorEvents('closed', 'upstream_stream_closed', normalizer.errorContext('gpt-6.1-sol')) as Array<{ type: string; response: { id: string; model: string } }>
+    expect(events.map(event => event.type)).toEqual(['response.created', 'response.in_progress', 'response.failed'])
+    expect(new Set(events.map(event => event.response.id)).size).toBe(1)
+    expect(events.every(event => event.response.model === 'gpt-6.1-sol')).toBe(true)
+  })
+
   it('uses the first upstream timestamp and advances past existing sequence numbers', () => {
     const normalizer = createResponsesFieldNormalizer()
     const first = { type: 'response.created', sequence_number: 10, response: { id: 'r', created_at: 123 } }
