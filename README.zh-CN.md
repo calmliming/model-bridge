@@ -231,7 +231,7 @@ claude
 # ~/.codex/config.toml
 [profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-5.5"
+model = "gpt-6.1-sol"
 
 [model_providers.model-bridge]
 name = "model-bridge"

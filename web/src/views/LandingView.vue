@@ -97,7 +97,7 @@ const codeSnippets: Record<SnippetKey, string> = {
   curl: `curl https://api.model-bridge.io/v1/chat/completions \\
   -H "Authorization: Bearer $MB_KEY" \\
   -d '{
-    "model": "gpt-5.5",
+    "model": "gpt-6.1-sol",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,
   python: `import openai

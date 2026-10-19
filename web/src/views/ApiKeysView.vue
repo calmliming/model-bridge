@@ -641,7 +641,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash
 claude`,
     codex: `[profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-5.5"
+model = "gpt-6.1-sol"
 
 [model_providers.model-bridge]
 name = "model-bridge"

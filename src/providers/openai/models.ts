@@ -21,3 +21,18 @@ export function acceptsOpenAISamplingParams(model: unknown, reasoningEffort: unk
   // GPT-6 Sol/Luna accept sampling controls when reasoning is turned off.
   return reasoningEffort === 'none' && typeof model === 'string' && /^gpt-6-(?:sol|luna)(?:$|-)/i.test(model.trim())
 }
+
+/** Retirement applies to ChatGPT subscription upstreams, not API-key gateways. */
+export function isRetiredOpenAISubscriptionModel(model: string): boolean {
+  return /^gpt-5[.-]5(?:$|-)/i.test(model.trim())
+}
+
+/** Called after key/group mappings and before acquiring an upstream account. */
+export function validateOpenAISubscriptionModel(model: string): string {
+  if (isRetiredOpenAISubscriptionModel(model)) {
+    throw Object.assign(new Error('GPT-5.5 is no longer available through ChatGPT subscription accounts. Configure an explicit mapping to an available model or use an API-key upstream.'), {
+      statusCode: 404, code: 'model_not_found',
+    })
+  }
+  return model
+}

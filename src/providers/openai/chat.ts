@@ -382,9 +382,10 @@ export function createChatCompletionStreamParser() {
  * errored or dropped before sending one, the relay emits this so Codex surfaces
  * the real failure instead of reconnecting forever.
  */
-export function buildResponsesErrorEvents(message: string, code: string): unknown[] {
+export function buildResponsesErrorEvents(message: string, code: string, options: { createdAt?: number; sequenceNumber?: number } = {}): unknown[] {
   const id = `resp_${randomUUID().replace(/-/g, '')}`
-  const created = Math.floor(Date.now() / 1000)
+  const created = options.createdAt ?? Math.floor(Date.now() / 1000)
+  const sequence = options.sequenceNumber ?? 0
   const base = {
     id,
     object: 'response',
@@ -396,11 +397,11 @@ export function buildResponsesErrorEvents(message: string, code: string): unknow
     tools: [] as unknown[],
   }
   return [
-    { type: 'response.created', sequence_number: 0, response: { ...base, status: 'in_progress' } },
-    { type: 'response.in_progress', sequence_number: 1, response: { ...base, status: 'in_progress' } },
+    { type: 'response.created', sequence_number: sequence, response: { ...base, status: 'in_progress' } },
+    { type: 'response.in_progress', sequence_number: sequence + 1, response: { ...base, status: 'in_progress' } },
     {
       type: 'response.failed',
-      sequence_number: 2,
+      sequence_number: sequence + 2,
       response: { ...base, status: 'failed', error: { code, message } },
     },
   ]

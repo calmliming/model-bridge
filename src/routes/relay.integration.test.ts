@@ -668,6 +668,19 @@ describe('Codex remote model catalog', () => {
   }
   const manifest = { models: [{ slug: 'gpt-6-sol', display_name: 'GPT-6 Sol', priority: 1 }, { slug: 'gpt-5.4', priority: 2 }, { name: 'no-slug' }], etag: 'v1' }
 
+  it('filters stale GPT-5.5 entries after mapping without modifying the shared upstream manifest', async () => {
+    const upstream = { models: [{ slug: 'gpt-5.5', priority: 1 }, { slug: 'public', priority: 2 },
+      { slug: 'gpt-6.1-sol', priority: 3 }], etag: 'stale' }
+    mocks.fetch.mockImplementation(async () => Response.json(upstream))
+    const getCatalog = async () => (await get('/api/openai/v1/models?client_version=0.158.0')).json()
+    expect((await getCatalog()).models).toEqual(upstream.models.slice(1))
+    mocks.key.modelMappings = { 'gpt-5.5': 'gpt-6.1-sol', public: 'gpt-5.5' }
+    expect((await getCatalog()).models).toEqual([upstream.models[0], upstream.models[2]])
+    mocks.key.modelMappings = null
+    expect((await getCatalog()).models).toEqual(upstream.models.slice(1))
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('serves the upstream manifest filtered to the key and caches it briefly', async () => {
     mocks.key.allowedModels = ['gpt-6*']
     mocks.accounts[0]!.metadata = { openai: { chatgptAccountId: 'acct-123' } }
@@ -696,6 +709,149 @@ describe('Codex remote model catalog', () => {
     mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify(manifest)))
     expect((await get('/v1/models?client_version=0.158.0')).statusCode).toBe(200)
   })
+})
+
+describe('GPT-5.5 subscription retirement', () => {
+  it.each(['/v1/responses', '/responses', '/api/openai/v1/responses',
+    '/v1/chat/completions', '/chat/completions', '/api/openai/v1/chat/completions', '/v1/responses/input_tokens'])
+  ('rejects a mapped retired target before scheduling or reserving balance at %s', url => withRelay(async request => {
+    mocks.key.allowedProviders = ['openai']
+    mocks.key.modelMappings = { alias: ' GPT-5-5-high ' }
+    const result = await request({ model: 'alias', input: 'Hi', messages: [{ role: 'user', content: 'Hi' }], stream: true }, url)
+    expect(result.status).toBe(404)
+    expect(JSON.parse(result.body)).toMatchObject({ error: { type: 'invalid_request_error', code: 'model_not_found' } })
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.ensureFreshToken).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+    expect(mocks.query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO relay_reservations'))).toBe(false)
+    expect(mocks.logs).toHaveLength(0)
+  }))
+
+  it('rejects unmapped GPT-5.5 even for a sticky client', () => withRelay(async request => {
+    const result = await request({ model: 'gpt-5.5', stream: true, input: 'Hi' }, '/v1/responses', { session_id: 'existing-session' })
+    expect(result.status).toBe(404)
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+  }))
+
+  it.each(['/v1/responses', '/v1/chat/completions'])('allows a GPT-5.5 alias explicitly mapped to a current model at %s', url => withRelay(async request => {
+    mocks.key.modelMappings = { 'gpt-5.5': 'gpt-6.1-sol' }
+    const result = await request({ model: 'gpt-5.5', input: 'Hi', messages: [{ role: 'user', content: 'Hi' }], stream: true }, url)
+    expect(result.status).toBe(200)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).model).toBe('gpt-6.1-sol')
+  }))
+
+  it.each(['/v1/responses', '/api/sub2api/v1/responses', '/v1/chat/completions', '/api/sub2api/v1/chat/completions', '/v1/responses/input_tokens'])
+  ('keeps GPT-5.5 available for an aggregator key at %s', url => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://gateway.example.com'
+    const result = await request({ model: 'gpt-5.5', input: 'Hi', messages: [{ role: 'user', content: 'Hi' }], stream: true }, url)
+    expect(result.status).toBe(200)
+    if (!url.endsWith('input_tokens')) {
+      expect(mocks.pickAccount.mock.calls[0]![0]).toBe('sub2api')
+      expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).model).toBe('gpt-5.5')
+    }
+  }))
+
+  it('filters native model lookup and stale catalogs while retaining aggregator discovery', async () => {
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      const get = (url: string) => app.inject({ method: 'GET', url, headers: { authorization: 'Bearer mb-test' } })
+      mocks.key.allowedProviders = ['openai', 'sub2api']
+      mocks.cachedAccountCatalogs.mockResolvedValue({ providerModels: { openai: ['gpt-5.5'] }, catalogModels: {} })
+      expect((await get('/api/openai/v1/models/gpt-5.5')).statusCode).toBe(404)
+      expect((await get('/api/sub2api/v1/models/gpt-5.5')).statusCode).toBe(200)
+      expect((await get('/v1/models')).json().data.some((model: { id: string }) => model.id === 'gpt-5.5')).toBe(false)
+      mocks.key.modelMappings = { 'gpt-5.5': 'gpt-6.1-sol' }
+      expect((await get('/api/openai/v1/models/gpt-5.5')).statusCode).toBe(200)
+    } finally { await app.close() }
+  })
+})
+
+describe('Responses output field compatibility', () => {
+  function events(body: string): Array<Record<string, any>> {
+    return body.split('\n').filter(line => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map(line => JSON.parse(line.slice(6)))
+  }
+
+  const routes = [
+    ['/v1/responses', 'gpt-6.1-sol'], ['/api/grok/v1/responses', 'grok-4.7'],
+    ['/api/sub2api/v1/responses', 'gpt-5.5'], ['/api/minimax/v1/responses', 'MiniMax-M3'],
+    ['/api/kimi/v1/responses', 'kimi-k3'],
+  ] as const
+
+  it.each(routes)('repairs streamed Responses fields at %s', (url, model) => withRelay(async request => {
+    mocks.accounts[0]!.proxyUrl = url.includes('sub2api') ? 'https://gateway.example.com' : null
+    mocks.fetch.mockImplementation(async () => sse([
+      { type: 'response.created', sequence_number: 10, response: { id: 'resp', model, created_at: 123 } },
+      { type: 'response.output_text.delta', delta: 'Hello' },
+      { type: 'response.completed', response: { id: 'resp', model, created_at: null, status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'Hello' }] }], usage: { input_tokens: 50, output_tokens: 12 } } },
+    ]))
+    const result = await request({ model, stream: true, input: 'Hi' }, url)
+    expect(result.status).toBe(200)
+    const output = events(result.body)
+    expect(output.map(event => event.sequence_number)).toEqual([10, 11, 12])
+    expect(output.filter(event => event.response).map(event => event.response.created_at)).toEqual([123, 123])
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([50, 12])
+    expect(mocks.logs[0]?.[22]).toBe('success')
+  }))
+
+  it('keeps complete upstream SSE byte-for-byte', () => withRelay(async request => {
+    const block = ': ping\nevent: response.completed\nid: e1\ndata: { "type": "response.completed", "sequence_number": 17, "response": { "created_at": 123, "status": "completed", "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}] } }\n\n'
+    mocks.fetch.mockImplementation(async () => new Response(block, { headers: { 'content-type': 'text/event-stream' } }))
+    expect((await request({ model: 'gpt-6.1-sol', input: 'Hi', stream: true })).body).toBe(block)
+  }))
+
+  it('repairs fragmented SSE and the final event without a blank separator', () => withRelay(async request => {
+    const text = 'event: response.created\ndata: {"type":"response.created","response":{}}\n\n'
+      + 'event: response.completed\ndata: {"type":"response.completed","response":{"created_at":null,"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}}'
+    mocks.fetch.mockImplementation(async () => new Response(new ReadableStream({ start(controller) {
+      const bytes = new TextEncoder().encode(text)
+      for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7))
+      controller.close()
+    } }), { headers: { 'content-type': 'text/event-stream' } }))
+    const result = await request({ model: 'gpt-6.1-sol', input: 'Hi', stream: true })
+    const output = events(result.body)
+    expect(output).toHaveLength(2)
+    expect(output.map(event => event.sequence_number)).toEqual([0, 1])
+    expect(output[0]!.response.created_at).toEqual(expect.any(Number))
+    expect(output[1]!.response.created_at).toBe(output[0]!.response.created_at)
+    expect(result.body).not.toContain('upstream_stream_closed')
+  }))
+
+  it.each([false, true])('repairs native JSON and JSON-to-SSE output, stream=%s', stream => withRelay(async request => {
+    mocks.fetch.mockImplementation(async () => Response.json({ object: 'response', id: 'resp', model: 'MiniMax-M3', status: 'completed',
+      created_at: null, output: [], usage: { input_tokens: 50, output_tokens: 12 } }))
+    const result = await request({ model: 'MiniMax-M3', input: 'Hi', stream })
+    expect(result.status).toBe(200)
+    const payload = stream ? events(result.body)[0]!.response : JSON.parse(result.body)
+    expect(payload.created_at).toEqual(expect.any(Number))
+    if (stream) expect(events(result.body)[0]!.sequence_number).toBe(0)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([50, 12])
+  }))
+
+  it('keeps a complete native JSON body byte-for-byte', () => withRelay(async request => {
+    const text = '{ "object": "response", "created_at": 0, "output": [], "status": "completed" }'
+    mocks.fetch.mockImplementation(async () => new Response(text, { headers: { 'content-type': 'application/json' } }))
+    expect((await request({ model: 'MiniMax-M3', input: 'Hi', stream: false })).body).toBe(text)
+  }))
+
+  it('aligns synthesized failure timestamps and sequence numbers with an interrupted stream', () => withRelay(async request => {
+    mocks.fetch.mockImplementation(async () => sse([
+      { type: 'response.created', sequence_number: 10, response: { id: 'resp', created_at: 123 } },
+      { type: 'response.output_text.delta', sequence_number: 11, delta: 'Partial' },
+    ]))
+    const output = events((await request({ model: 'gpt-6.1-sol', input: 'Hi', stream: true })).body)
+    expect(output.map(event => event.sequence_number)).toEqual([10, 11, 12, 13, 14])
+    expect(output.filter(event => event.response).every(event => event.response.created_at === 123)).toBe(true)
+    expect(output.at(-1)!.type).toBe('response.failed')
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
 })
 
 describe('Codex request headers', () => {

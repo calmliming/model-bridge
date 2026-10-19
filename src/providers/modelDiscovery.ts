@@ -3,6 +3,7 @@ import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
 import { IMAGE_25_MODELS } from './openai/imageModels'
+import { isRetiredOpenAISubscriptionModel } from './openai/models'
 import { isForwardableDeepseekModel } from './deepseek/converter'
 import { isRetiredXiaomiModel } from './xiaomi/converter'
 import { GRSAI_MODELS } from './grsai/models'
@@ -53,7 +54,8 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
     'gpt-5.6-luna',
     // gpt-5.4 / gpt-5.4-mini (2026-08-31), gpt-5.3-codex and gpt-5.3-codex-spark
     // (2026-09-14) left ChatGPT-signed-in Codex; gpt-5.5 follows on 2026-10-14.
-    // Their pricing rows stay so API-key upstreams and past usage still bill.
+    // GPT-5.5 remains in the shared source for aggregator discovery; the native
+    // filter below rejects it after mappings. Historical pricing stays intact.
     'gpt-5.5',
     'gpt-image-2',
     ...IMAGE_25_MODELS
@@ -208,6 +210,7 @@ export function isProviderAllowed(provider: ProviderId, key: ModelDiscoveryKey):
  * to other providers keep their own rules.
  */
 const CATALOG_MODEL_FILTERS: Partial<Record<ProviderId, (model: string) => boolean>> = {
+  openai: (model) => !isRetiredOpenAISubscriptionModel(model),
   deepseek: isForwardableDeepseekModel,
   xiaomi: (model) => !isRetiredXiaomiModel(model)
 }

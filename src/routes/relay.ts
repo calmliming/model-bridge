@@ -44,6 +44,8 @@ import {
   createClaudeChatCompletionsStreamTransform,
 } from '../providers/claude/chat'
 import { relayOpenaiChatCompletions, relayOpenaiResponses } from '../providers/openai/relay'
+import { isRetiredOpenAISubscriptionModel, validateOpenAISubscriptionModel } from '../providers/openai/models'
+import { createResponsesFieldNormalizer } from '../providers/openai/responseFields'
 import { CodexCatalogError, codexClientVersion, fetchCodexManifest, filterCodexManifest } from '../providers/openai/codexCatalog'
 import { openAIAccountIdFromMetadata } from '../providers/openai/quota'
 import {
@@ -333,6 +335,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   },
   openai: {
     id: 'openai',
+    normalizeModel: validateOpenAISubscriptionModel,
     forceStream: true, // Codex backend itself rejects non-streaming.
     responsesProtocol: true,
     parseRoute: (_req, body) => ({
@@ -349,6 +352,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
   },
   'openai-chat': {
     id: 'openai',
+    normalizeModel: validateOpenAISubscriptionModel,
     forceStream: false,
     parseRoute: (_req, body) => ({
       model: typeof body.model === 'string' ? body.model : '',
@@ -1923,7 +1927,8 @@ async function sendCodexModelsManifest(request: FastifyRequest, reply: FastifyRe
       chatgptAccountId: openAIAccountIdFromMetadata(account.metadata),
     })
     void reply.header('cache-control', 'no-store').send(filterCodexManifest(manifest, model =>
-      isAllowedModel(model, apiKey.allowedModels) && isGroupModelAllowed(model, apiKey.groupAllowedModels)))
+      isAllowedModel(model, apiKey.allowedModels) && isGroupModelAllowed(model, apiKey.groupAllowedModels)
+      && !isRetiredOpenAISubscriptionModel(mapRequestedModel(model, apiKey.modelMappings))))
   } catch (err) {
     const status = err instanceof CodexCatalogError ? err.statusCode : 503
     request.log.warn(`codex model catalog failed via ${account.id}: ${err instanceof Error ? err.message : String(err)}`)
@@ -1987,6 +1992,17 @@ function sendResponsesInputTokens(request: FastifyRequest, reply: FastifyReply):
   if (inferredProvider && !sub2apiOnly && !isProviderAllowed(inferredProvider, apiKey)) {
     void reply.code(403).send({ error: `this API key may not use ${inferredProvider}` })
     return
+  }
+  if (inferredProvider === 'openai' && !sub2apiOnly) {
+    try {
+      validateOpenAISubscriptionModel(mappedModel)
+    } catch (err) {
+      if (isClientModelError(err)) {
+        void reply.code(err.statusCode).send({ error: { type: 'invalid_request_error', code: err.code, message: err.message } })
+        return
+      }
+      throw err
+    }
   }
 
   void reply.send({
@@ -2713,6 +2729,7 @@ async function sendStreaming(
   reply.hijack()
   const raw = reply.raw
   const responsesProtocol = provider.responsesProtocol === true
+  const responseFields = createResponsesFieldNormalizer()
 
   // Responses-protocol providers (Codex backend): an upstream error body is
   // usually JSON, not Responses SSE. Streaming it verbatim makes Codex reconnect
@@ -2779,7 +2796,7 @@ async function sendStreaming(
     if (responseObject) {
       const type = responseObject.status === 'failed' ? 'response.failed'
         : responseObject.status === 'incomplete' ? 'response.incomplete' : 'response.completed'
-      const event = { type, response: responseObject }
+      const event = responseFields.event({ type, response: responseObject })
       jsonParser.feed(event)
       noteResponsesTerminal(event, jsonState)
       writeSseData(raw, event)
@@ -2941,7 +2958,7 @@ async function sendStreaming(
           if (sseOutput) {
             let sep: number
             while ((sep = buffer.indexOf('\n\n')) !== -1) {
-              const block = buffer.slice(0, sep)
+              const block = responsesProtocol ? responseFields.sseBlock(buffer.slice(0, sep)) : buffer.slice(0, sep)
               feedSseBlock(block, parser, streamState, modelAudit)
               if (!downstreamClosed && !writeSseEventBlock(raw, omitComments ? withoutSseComments(block) : block)) {
                 // The request close listener aborts the upstream transport.
@@ -2988,6 +3005,7 @@ async function sendStreaming(
     } else if (transform) {
       if (!rewriteAndEmit(downstreamClosed ? null : raw, buffer, transform, parser, markFirstToken, modelAudit)) downstreamClosed = true
     } else {
+      if (responsesProtocol) buffer = responseFields.sseBlock(buffer)
       feedSseBlock(buffer, parser, streamState, modelAudit)
       if (!downstreamClosed && !writeSseEventBlock(raw, buffer)) downstreamClosed = true
       markFirstToken()
@@ -3008,6 +3026,7 @@ async function sendStreaming(
     for (const event of buildResponsesErrorEvents(
       'Upstream stream closed before completion.',
       'upstream_stream_closed',
+      { createdAt: responseFields.createdAt(), sequenceNumber: responseFields.nextSequenceNumber() },
     )) {
       if (!downstreamClosed && !writeSseData(raw, event)) downstreamClosed = true
     }
@@ -3325,6 +3344,11 @@ async function sendBuffered(
     if (provider.transformEventData) {
       json = provider.transformEventData(json, meta)
       text = JSON.stringify(json)
+    }
+    if (provider.responsesProtocol) {
+      const normalized = createResponsesFieldNormalizer().json(json)
+      if (normalized !== json) text = JSON.stringify(normalized)
+      json = normalized
     }
     usage = { ...provider.parseJsonUsage(json), usageSource: jsonUsageSource(json) }
     responseParser.feed(json)

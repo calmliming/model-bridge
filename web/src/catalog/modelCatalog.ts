@@ -457,7 +457,7 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     provider: 'openai',
     categories: ['chat', 'reasoning', 'multimodal'],
     tags: ['多模态', '推理'],
-    description: 'OpenAI 上一代旗舰多模态模型，综合推理、文本与图像理解能力领先。ChatGPT 账号自 2026-10-14 起停用，届时只能通过 API Key 上游调用。',
+    description: 'OpenAI 上一代旗舰多模态模型。ChatGPT 订阅账号已停用，可通过支持该模型的 API Key 上游调用。',
     context: '256K',
     inputPrice: 5,
     outputPrice: 30

@@ -8,6 +8,37 @@ const image25Models = [
 ]
 
 describe('model discovery', () => {
+  it('filters GPT-5.5 from static, stale, custom and mapped native subscription catalogs', () => {
+    const retired = ['gpt-5.5', 'GPT-5-5', 'gpt-5.5-2026-04-23']
+    for (const requested of [undefined, 'openai'] as const) {
+      expect(listModelIdsForKey({ allowedProviders: ['openai'], allowedModels: null }, requested)).not.toContain('gpt-5.5')
+      expect(listModelIdsForKey({ allowedProviders: ['openai'], allowedModels: retired }, requested)).toEqual([])
+      expect(listModelIdsForKey({ allowedProviders: ['openai'], allowedModels: null,
+        providerModels: { openai: retired }, catalogModels: { openai: { 'gpt-5.5': { id: 'gpt-5.5' } } },
+      }, requested)).toEqual([])
+      expect(listModelIdsForKey({ allowedProviders: ['openai'], allowedModels: ['public'],
+        modelMappings: { 'pub*': 'gpt-5.5' },
+      }, requested)).toEqual([])
+    }
+  })
+
+  it('evaluates GPT-5.5 retirement after exactly one model mapping', () => {
+    const key = { allowedProviders: ['openai'], allowedModels: ['gpt-5.5', 'alias'],
+      modelMappings: { 'gpt-5.5': 'gpt-6.1-sol', alias: 'gpt-5.5' } }
+    expect(listModelIdsForKey(key)).toEqual(['gpt-5.5'])
+    expect(listModelIdsForKey(key, 'openai')).toEqual(['gpt-5.5'])
+    expect(listModelIdsForKey({ ...key, allowedProviders: ['openai', 'sub2api'] })).toEqual(['gpt-5.5'])
+  })
+
+  it('preserves GPT-5.5 on aggregator routes, including mixed keys using an explicit route', () => {
+    expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null })).toContain('gpt-5.5')
+    const key = { allowedProviders: ['openai', 'sub2api'], allowedModels: ['gpt-5.5', 'alias'],
+      modelMappings: { alias: 'gpt-5.5' } }
+    expect(listModelIdsForKey(key)).toEqual([])
+    expect(listModelIdsForKey(key, 'openai')).toEqual([])
+    expect(listModelIdsForKey(key, 'sub2api')).toEqual(['gpt-5.5', 'alias'])
+  })
+
   it.each<{ key: ModelDiscoveryKey; expected: string[] }>([
     { key: { allowedProviders: ['deepseek'], allowedModels: ['deepseek-typo'] }, expected: [] },
     { key: { allowedProviders: ['deepseek'], allowedModels: null, groupAllowedModels: ['deepseek-typo'] }, expected: [] },
@@ -143,7 +174,7 @@ describe('model discovery', () => {
     })
     expect(models).toEqual(
       expect.arrayContaining([
-        'gpt-5.5',
+        'gpt-6.1-sol',
         'claude-fable-5-1',
         'claude-sonnet-5-5',
         'claude-sonnet-5',
@@ -163,7 +194,7 @@ describe('model discovery', () => {
     )
     // Retired for ChatGPT-signed-in Codex, or (MiMo V2.5) taken off the shelf
     // by Xiaomi: none of them may be advertised any more.
-    for (const retired of ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'mimo-v2.5-pro', 'mimo-v2.5']) {
+    for (const retired of ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'mimo-v2.5-pro', 'mimo-v2.5']) {
       expect(models).not.toContain(retired)
     }
     expect(models).not.toEqual(
@@ -190,7 +221,6 @@ describe('model discovery', () => {
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
-      'gpt-5.5',
       'gpt-image-2',
       ...image25Models
     ])
@@ -209,7 +239,6 @@ describe('model discovery', () => {
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
-      'gpt-5.5',
       'gpt-image-2',
       ...image25Models,
       'deepseek-v4-pro',
@@ -245,7 +274,6 @@ describe('model discovery', () => {
       'gpt-5.6-sol',
       'gpt-5.6-terra',
       'gpt-5.6-luna',
-      'gpt-5.5',
       'gpt-image-2',
       ...image25Models,
       'gpt-public'
