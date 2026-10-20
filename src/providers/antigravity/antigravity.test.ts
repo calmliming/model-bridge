@@ -55,6 +55,24 @@ describe('Antigravity Messages conversion', () => {
 })
 
 describe('Antigravity response lifecycle', () => {
+  it('preserves input, cache and thought usage in Messages across partial and empty snapshots', () => {
+    const transform = createAntigravityMessagesTransform(scope)
+    transform.transform({ response: { candidates: [{ content: { parts: [{ text: 'Answer' }] } }],
+      usageMetadata: { promptTokenCount: 100, cachedContentTokenCount: 40, thoughtsTokenCount: 5 } } })
+    transform.transform({ response: { usageMetadata: {} } })
+    transform.transform({ response: { candidates: [{ finishReason: 'STOP' }], usageMetadata: { candidatesTokenCount: 25 } } })
+    expect(transform.flush()).toContainEqual(expect.objectContaining({ type: 'message_delta',
+      usage: { input_tokens: 60, output_tokens: 30, cache_read_input_tokens: 40, cache_creation_input_tokens: 0 } }))
+
+    const result = antigravitySseToMessages(sse([
+      { usageMetadata: { promptTokenCount: 100, cachedContentTokenCount: 40, thoughtsTokenCount: 5 } },
+      { usageMetadata: {} },
+      { candidates: [{ content: { parts: [{ text: 'Answer' }] }, finishReason: 'STOP' }], usageMetadata: { candidatesTokenCount: 25 } },
+    ]), scope)
+    expect(result.usage).toMatchObject({ inputTokens: 60, outputTokens: 30, reasoningTokens: 5, cacheReadTokens: 40 })
+    expect(result.body).toMatchObject({ usage: { input_tokens: 60, output_tokens: 30, cache_read_input_tokens: 40 } })
+  })
+
   it('translates streamed thoughts, text, tool calls and inclusive usage into Messages', () => {
     const text = sse([
       { candidates: [{ content: { parts: [{ text: 'Think', thought: true, thoughtSignature: 'sig-thinking' }] } }], usageMetadata: { promptTokenCount: 100 } },

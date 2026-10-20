@@ -2,6 +2,7 @@ import { Agent, ProxyAgent, type Dispatcher } from 'undici'
 import { registerUpstreamResponse, upstreamSignal } from './cancellation'
 import {
   assertSafeUpstreamEgress,
+  assertSafePublicMediaEgress,
   guardedUpstreamLookup,
   isConfiguredUpstreamHost,
 } from './urlGuard'
@@ -47,14 +48,14 @@ function proxyDispatcher(url: string): ProxyAgent {
   return proxyAgent
 }
 
-/** Fetch an upstream request with a connect/header deadline, without cutting long SSE streams. */
-export async function fetchWithConnectTimeout(
+async function fetchGuarded(
   input: string | URL,
   init: RequestInit = {},
   timeoutMs = 10_000,
   dispatcher?: Dispatcher,
+  publicMedia = false,
 ): Promise<Response> {
-  const safeUrl = await assertSafeUpstreamEgress(input)
+  const safeUrl = await (publicMedia ? assertSafePublicMediaEgress(input) : assertSafeUpstreamEgress(input))
   const controller = new AbortController()
   const signals = [controller.signal, init.signal, upstreamSignal()].filter((signal): signal is AbortSignal => !!signal)
   const signal = AbortSignal.any(signals)
@@ -66,7 +67,7 @@ export async function fetchWithConnectTimeout(
     // 带 DNS 校验的 guarded dispatcher（保持 SSRF 防护）。
     const proxy = upstreamProxyUrl()
     const selected = dispatcher
-      ?? (isConfiguredUpstreamHost(safeUrl.hostname)
+      ?? (!publicMedia && isConfiguredUpstreamHost(safeUrl.hostname)
         ? undefined
         : proxy ? proxyDispatcher(proxy) : guardedDispatcher)
     const fetchInit = {
@@ -85,6 +86,21 @@ export async function fetchWithConnectTimeout(
     clearTimeout(timer)
     throw error
   }
+}
+
+/** Fetch an upstream request with a connect/header deadline, without cutting long SSE streams. */
+export function fetchWithConnectTimeout(
+  input: string | URL,
+  init: RequestInit = {},
+  timeoutMs = 10_000,
+  dispatcher?: Dispatcher,
+): Promise<Response> {
+  return fetchGuarded(input, init, timeoutMs, dispatcher)
+}
+
+/** Public-only downloads carry no supplier credentials and reject redirects. */
+export function fetchPublicMedia(input: string | URL, signal?: AbortSignal): Promise<Response> {
+  return fetchGuarded(input, { signal }, 10_000, undefined, true)
 }
 
 export async function closeUpstreamDispatcher(): Promise<void> {

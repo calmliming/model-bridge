@@ -1,4 +1,4 @@
-import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
+import { usageWithCachedInput, type UsageData } from '../types'
 import { createGeminiResponseTracker } from './responseSignal'
 
 interface GeminiUsageMetadata {
@@ -7,6 +7,19 @@ interface GeminiUsageMetadata {
   cachedContentTokenCount?: number
   thoughtsTokenCount?: number
   totalTokenCount?: number
+}
+
+const usageFields = ['promptTokenCount', 'candidatesTokenCount', 'cachedContentTokenCount',
+  'thoughtsTokenCount', 'totalTokenCount'] as const
+
+/** Snapshots may omit unchanged fields; only explicit valid counts replace them. */
+function mergeReportedUsage(reported: GeminiUsageMetadata, body: unknown): void {
+  const update = (body as { usageMetadata?: GeminiUsageMetadata } | null | undefined)?.usageMetadata
+  if (!update || typeof update !== 'object') return
+  for (const field of usageFields) {
+    const value = update[field]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) reported[field] = value
+  }
 }
 
 function mapUsage(u: GeminiUsageMetadata | undefined): UsageData {
@@ -20,25 +33,25 @@ function mapUsage(u: GeminiUsageMetadata | undefined): UsageData {
 
 /** Extracts usage from a (already-unwrapped) standard Gemini response body. */
 export function parseJsonUsage(body: unknown): UsageData {
-  const usage = (body as { usageMetadata?: GeminiUsageMetadata } | null | undefined)?.usageMetadata
-  return mapUsage(usage)
+  const reported: GeminiUsageMetadata = {}
+  mergeReportedUsage(reported, body)
+  return mapUsage(reported)
 }
 
 /**
  * Accumulates usage from a Gemini streaming response. Each chunk may carry
- * `usageMetadata`; the last one is final.
+ * `usageMetadata`; merge raw counters before splitting cache and thought usage.
  */
 export function createStreamParser() {
-  const usage = emptyUsage()
+  const reported: GeminiUsageMetadata = {}
   const tracker = createGeminiResponseTracker()
   return {
     feed(event: unknown): void {
       tracker.feed(event)
-      const u = (event as { usageMetadata?: GeminiUsageMetadata } | null | undefined)?.usageMetadata
-      if (u) Object.assign(usage, mapUsage(u))
+      mergeReportedUsage(reported, event)
     },
     result(): UsageData {
-      return { ...usage }
+      return mapUsage(reported)
     },
     failure: tracker.failure,
   }

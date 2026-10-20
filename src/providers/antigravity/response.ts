@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { emptyUsage, type UsageData } from '../types'
+import type { UsageData } from '../types'
 import * as geminiUsage from '../gemini/usage'
 import { unwrapResponseEnvelope } from '../gemini/relay'
 import { object } from './client'
@@ -33,7 +33,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
   let active: 'text' | 'thinking' | null = null
   let signature = ''
   let usedTool = false
-  let usage = emptyUsage()
+  const usageParser = geminiUsage.createStreamParser()
   const seenCalls = new Set<string>()
   const id = `msg_${randomUUID().replace(/-/g, '')}`
   const closeBlock = (events: unknown[]) => {
@@ -47,7 +47,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
     if (started) return
     started = true
     events.push({ type: 'message_start', message: { id, type: 'message', role: 'assistant', model: scope.model,
-      content: [], stop_reason: null, stop_sequence: null, usage: usageFields(usage) } })
+      content: [], stop_reason: null, stop_sequence: null, usage: usageFields(usageParser.result()) } })
   }
   return {
     transform(raw: unknown): unknown[] {
@@ -55,7 +55,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
       const response = object(unwrapResponseEnvelope(raw))
       if (!response) return []
       const events: unknown[] = []
-      if (response.usageMetadata) usage = geminiUsage.parseJsonUsage(response)
+      usageParser.feed(response)
       start(events)
       if (response.error || object(response.promptFeedback)?.blockReason) {
         failed = true
@@ -119,7 +119,7 @@ export function createAntigravityMessagesTransform(scope: SignatureScope) {
         events.push({ type: 'error', error: { type: 'upstream_error', code: finishReason || 'upstream_stream_closed',
           message: finishReason ? `Antigravity ended the response with ${finishReason}.` : 'Antigravity stream ended without a completion event.' } })
       } else {
-        events.push({ type: 'message_delta', delta: { stop_reason: usedTool ? 'tool_use' : finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn', stop_sequence: null }, usage: usageFields(usage) },
+        events.push({ type: 'message_delta', delta: { stop_reason: usedTool ? 'tool_use' : finishReason === 'MAX_TOKENS' ? 'max_tokens' : 'end_turn', stop_sequence: null }, usage: usageFields(usageParser.result()) },
           { type: 'message_stop' })
       }
       return events

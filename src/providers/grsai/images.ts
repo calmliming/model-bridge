@@ -1,4 +1,4 @@
-import { fetchWithConnectTimeout } from '../../http/upstream'
+import { fetchPublicMedia } from '../../http/upstream'
 import { redactUpstreamError } from '../../http/upstreamDiagnostics'
 import { emptyUsage, type UsageData } from '../types'
 import type { OpenAIImagesRequestBody, NamedSseEvent } from '../openai/images'
@@ -31,9 +31,8 @@ export async function relayGrsaiImages(token: string, body: OpenAIImagesRequestB
     const data: Array<{ url: string } | { b64_json: string }> = []
     for (const entry of result.results) {
       if (body.response_format === 'url') { data.push(entry); continue }
-      // The media URL is untrusted. Use the same DNS, redirect and private-network
-      // guards as upstream APIs, and never attach the supplier credential.
-      const response = await fetchWithConnectTimeout(entry.url, { signal: AbortSignal.timeout(30_000) })
+      // Media URLs are untrusted even when the API gateway is an allowed private host.
+      const response = await fetchPublicMedia(entry.url, AbortSignal.timeout(30_000))
       if (!response.ok || !(response.headers.get('content-type') ?? '').startsWith('image/')) {
         await response.body?.cancel()
         throw new GrsaiUpstreamError(502, 'Unable to download the generated image; retry with response_format=url')

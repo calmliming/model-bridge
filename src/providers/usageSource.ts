@@ -2,7 +2,8 @@ import type { UsageData, UsageSource } from './types'
 type Row = Record<string, unknown>
 const row = (v: unknown): Row | null => v && typeof v === 'object' && !Array.isArray(v) ? v as Row : null
 const countKeys = ['input_tokens', 'output_tokens', 'prompt_tokens', 'completion_tokens', 'cache_creation_input_tokens',
-  'cache_read_input_tokens', 'promptTokenCount', 'candidatesTokenCount', 'totalTokenCount', 'thoughtsTokenCount']
+  'cache_read_input_tokens', 'promptTokenCount', 'candidatesTokenCount', 'cachedContentTokenCount',
+  'totalTokenCount', 'thoughtsTokenCount']
 export const hasReportedUsage = (value: unknown): boolean => {
   const u = row(value)
   return !!u && countKeys.some(k => typeof u[k] === 'number' && Number.isFinite(u[k]) && (u[k] as number) >= 0)
@@ -22,7 +23,9 @@ export function createUsageSourceTracker() {
       const hasUsage = hasReportedUsage(usage)
       seen ||= hasUsage
       const candidates = root.candidates ?? response?.candidates
-      const geminiDone = Array.isArray(candidates) && candidates.some(c => !!row(c)?.finishReason)
+      const blockReason = row(root.promptFeedback ?? response?.promptFeedback)?.blockReason
+      const geminiDone = (Array.isArray(candidates) && candidates.some(c => !!row(c)?.finishReason))
+        || (typeof blockReason === 'string' && !!blockReason && blockReason !== 'BLOCK_REASON_UNSPECIFIED')
       const responseDone = ['response.completed', 'response.failed', 'response.incomplete'].includes(type)
       geminiTerminal ||= geminiDone
       const u = row(usage)

@@ -171,8 +171,7 @@ export function isPublicIpAddress(address: string): boolean {
   return false
 }
 
-/** Performs synchronous URL checks suitable for validation before persistence. */
-export function assertSafeUpstreamUrl(raw: string): URL {
+function assertSafeUrl(raw: string, publicOnly: boolean): URL {
   const value = raw.trim()
   let url: URL
   try {
@@ -181,7 +180,7 @@ export function assertSafeUpstreamUrl(raw: string): URL {
     throw new UnsafeUpstreamUrlError('invalid upstream URL')
   }
 
-  if (!envEnabled()) return url
+  if (!publicOnly && !envEnabled()) return url
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new UnsafeUpstreamUrlError('upstream URL must use http or https')
   }
@@ -197,15 +196,19 @@ export function assertSafeUpstreamUrl(raw: string): URL {
   }
 
   const hostname = url.hostname.replace(/^\[(.*)\]$/, '$1')
-  if (isIP(hostname) && !isExplicitlyAllowedUpstreamHost(hostname) && !isPublicIpAddress(hostname)) {
+  if (isIP(hostname) && (publicOnly || !isExplicitlyAllowedUpstreamHost(hostname)) && !isPublicIpAddress(hostname)) {
     throw new UnsafeUpstreamUrlError('upstream URL resolves to a non-public address')
   }
   return url
 }
 
-/** Resolves a hostname immediately before egress and rejects every non-public result. */
-export async function resolveAndAssertPublicHost(url: URL): Promise<void> {
-  if (!envEnabled() || isExplicitlyAllowedUpstreamHost(url.hostname)) return
+/** Performs synchronous URL checks suitable for validation before persistence. */
+export function assertSafeUpstreamUrl(raw: string): URL {
+  return assertSafeUrl(raw, false)
+}
+
+async function resolvePublicHost(url: URL, publicOnly: boolean): Promise<void> {
+  if (!publicOnly && (!envEnabled() || isExplicitlyAllowedUpstreamHost(url.hostname))) return
 
   const hostname = url.hostname.replace(/^\[(.*)\]$/, '$1')
   if (isIP(hostname)) {
@@ -228,10 +231,22 @@ export async function resolveAndAssertPublicHost(url: URL): Promise<void> {
   }
 }
 
+/** Resolves a hostname immediately before egress and rejects every non-public result. */
+export function resolveAndAssertPublicHost(url: URL): Promise<void> {
+  return resolvePublicHost(url, false)
+}
+
 /** Full egress check, including parsing the original value before URL normalization. */
 export async function assertSafeUpstreamEgress(raw: string | URL): Promise<URL> {
   const url = assertSafeUpstreamUrl(raw instanceof URL ? raw.toString() : raw)
   await resolveAndAssertPublicHost(url)
+  return url
+}
+
+/** Untrusted media URLs never inherit private-upstream or disabled-guard exemptions. */
+export async function assertSafePublicMediaEgress(raw: string | URL): Promise<URL> {
+  const url = assertSafeUrl(raw instanceof URL ? raw.toString() : raw, true)
+  await resolvePublicHost(url, true)
   return url
 }
 

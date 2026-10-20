@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ fetch: vi.fn() }))
-vi.mock('../../http/upstream', () => ({ fetchWithConnectTimeout: mocks.fetch }))
+const mocks = vi.hoisted(() => ({ fetch: vi.fn(), mediaFetch: vi.fn() }))
+vi.mock('../../http/upstream', () => ({ fetchWithConnectTimeout: mocks.fetch, fetchPublicMedia: mocks.mediaFetch }))
 import { grsaiBaseUrl, parseGrsaiGenerateRequest, generateGrsai, queryGrsaiResult, parseGrsaiResult, testGrsai } from './client'
 import { buildGrsaiImageRequest, createGrsaiImageStream, grsaiImageUsage, relayGrsaiImages } from './images'
 import { parseOpenAIImagesRequest } from '../openai/images'
@@ -88,10 +88,20 @@ describe('GrsAI transport', () => {
   })
   it('downloads base64 media through the guarded transport without a supplier token', async () => {
     mocks.fetch.mockResolvedValueOnce(Response.json(completed))
-      .mockResolvedValueOnce(new Response('image-bytes', { headers: { 'content-type': 'image/png' } }))
+    mocks.mediaFetch.mockResolvedValueOnce(new Response('image-bytes', { headers: { 'content-type': 'image/png' } }))
     const response = await relayGrsaiImages('secret', image({ response_format: 'b64_json' }))
     expect((await response.json() as { data: unknown[] }).data).toEqual([{ b64_json: Buffer.from('image-bytes').toString('base64') }])
-    expect(mocks.fetch.mock.calls[1]![1].headers).toBeUndefined()
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.mediaFetch).toHaveBeenCalledExactlyOnceWith(completed.results[0]!.url, expect.any(AbortSignal))
+  })
+  it('fails closed when a generated image URL is rejected by the public-only downloader', async () => {
+    mocks.fetch.mockResolvedValueOnce(Response.json(completed))
+    mocks.mediaFetch.mockRejectedValueOnce(new Error('upstream URL resolves to a non-public address'))
+    const response = await relayGrsaiImages('supplier-secret', image({ response_format: 'b64_json' }))
+    expect(response.status).toBe(502)
+    expect(await response.text()).not.toContain('supplier-secret')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.mediaFetch).toHaveBeenCalledOnce()
   })
   it('turns failed generation into an error response and never retries submission', async () => {
     mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'supplier-task-1', status: 'failed', error: 'generate failed' }, { status: 400 }))

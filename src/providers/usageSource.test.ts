@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { createUsageSourceTracker, jsonUsageSource, trackUsageParser, bufferedUsageSource } from './usageSource'
 import { createStreamParser } from './openai/usage'
+import { createStreamParser as createGeminiStreamParser } from './gemini/usage'
 
 it('distinguishes missing, partial, explicit zero and terminal error usage', () => {
   const parser = trackUsageParser(createStreamParser())
@@ -44,4 +45,19 @@ it('keeps reported partial counts across later snapshots and ignores empty usage
   parser.feed({ type: 'response.completed', response: { usage: { output_tokens: 5 } } })
   parser.feed({ type: 'response.completed', response: { usage: {} } })
   expect(parser.result()).toMatchObject({ inputTokens: 10, outputTokens: 5, usageSource: 'upstream' })
+})
+
+it.each([0, 200])('recognizes cache-only Gemini usage, including %s tokens', cachedContentTokenCount => {
+  const usageMetadata = { cachedContentTokenCount }
+  expect(jsonUsageSource({ usageMetadata })).toBe('upstream')
+  expect(jsonUsageSource({ response: { usageMetadata } })).toBe('upstream')
+  const parser = trackUsageParser(createGeminiStreamParser())
+  parser.feed({ usageMetadata })
+  expect(parser.result(true)).toMatchObject({ cacheReadTokens: cachedContentTokenCount, usageSource: 'partial' })
+  parser.feed({ promptFeedback: { blockReason: 'PROHIBITED_CONTENT' }, usageMetadata })
+  expect(parser.result()).toMatchObject({ inputTokens: 0, cacheReadTokens: cachedContentTokenCount, usageSource: 'upstream' })
+})
+
+it.each([-1, NaN, Infinity, '20', null])('ignores invalid Gemini cache counts: %s', cachedContentTokenCount => {
+  expect(jsonUsageSource({ usageMetadata: { cachedContentTokenCount } })).toBe('missing')
 })

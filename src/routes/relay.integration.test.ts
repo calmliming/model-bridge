@@ -1485,8 +1485,13 @@ describe('MiniMax and group admission', () => {
 })
 
 describe('client cancellation', () => {
-  it.each([{ headersSent: false, adapter: false }, { headersSent: true, adapter: false },
-    { headersSent: false, adapter: true }, { headersSent: true, adapter: true }])('aborts upstream and releases all slots after disconnect (headers: $headersSent, adapter: $adapter)', async ({ headersSent, adapter }) => {
+  it.each([{ headersSent: false, provider: 'claude' }, { headersSent: true, provider: 'claude' },
+    { headersSent: false, provider: 'qwen' }, { headersSent: true, provider: 'qwen' },
+    { headersSent: true, provider: 'gemini' }, { headersSent: true, provider: 'antigravity' }])('aborts upstream and releases all slots after disconnect (headers: $headersSent, provider: $provider)', async ({ headersSent, provider }) => {
+    const adapter = provider === 'qwen'
+    const nativeGemini = provider === 'gemini' || provider === 'antigravity'
+    mocks.key.allowedProviders = [provider]
+    mocks.accounts[0]!.metadata = { project: 'project' }
     mocks.accounts[0]!.concurrencyLimit = 1
     mocks.key.concurrencyLimit = 1
     mocks.key.userConcurrencyLimit = 1
@@ -1500,9 +1505,12 @@ describe('client cancellation', () => {
         signal.addEventListener('abort', () => { canceled = true; reject(signal.reason) }, { once: true })
       })
       return new Response(new ReadableStream({ start(controller) {
-        const firstEvent = adapter ? { choices: [{ delta: { content: 'partial' } }], usage: { prompt_tokens: 42 } }
+        const firstEvent = nativeGemini ? { response: { candidates: [{ content: { parts: [{ text: 'partial' }] } }],
+          usageMetadata: { promptTokenCount: 50, cachedContentTokenCount: 8, candidatesTokenCount: 4, thoughtsTokenCount: 2 } } }
+          : adapter ? { choices: [{ delta: { content: 'partial' } }], usage: { prompt_tokens: 42 } }
           : { type: 'message_start', message: { usage: { input_tokens: 42 } } }
-        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(firstEvent)}\n\n`))
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(firstEvent)}\n\n`
+          + (nativeGemini ? 'data: {"response":{"usageMetadata":{}}}\n\n' : '')))
         signal.addEventListener('abort', () => { canceled = true; controller.error(signal.reason) }, { once: true })
       } }), { headers: { 'content-type': 'text/event-stream' } })
     })
@@ -1511,9 +1519,12 @@ describe('client cancellation', () => {
     const origin = await app.listen({ host: '127.0.0.1', port: 0 })
     const client = new AbortController()
     try {
-      const pending = fetch(`${origin}${adapter ? '/api/qwen/v1/responses' : '/v1/messages'}`, {
+      const url = nativeGemini ? `/api/${provider}/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse`
+        : adapter ? '/api/qwen/v1/responses' : '/v1/messages'
+      const pending = fetch(`${origin}${url}`, {
         method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
-        body: JSON.stringify(adapter ? { model: 'qwen3.8-max', stream: true, input: 'Hello' }
+        body: JSON.stringify(nativeGemini ? { contents: [{ role: 'user', parts: [{ text: 'Hello' }] }] }
+          : adapter ? { model: 'qwen3.8-max', stream: true, input: 'Hello' }
           : { model: 'claude-sonnet-5', stream: true, messages: [{ role: 'user', content: 'Hello' }] }),
         signal: client.signal,
       })
@@ -1540,6 +1551,7 @@ describe('client cancellation', () => {
       expect(mocks.logs).toHaveLength(1)
       expect(mocks.logs[0]?.[36]).toBe(headersSent ? 'partial' : 'missing')
       if (headersSent) expect(mocks.logs[0]?.[9]).toBe(42)
+      if (nativeGemini) expect(mocks.logs[0]?.slice(9, 14)).toEqual([42, 6, 2, 0, 8])
     } finally {
       client.abort()
       await app.close()
@@ -1631,6 +1643,46 @@ describe('Antigravity through Sub2API', () => {
 
 
 describe('native Antigravity relay', () => {
+  it.each([
+    { provider: 'gemini', messages: false, stream: true },
+    { provider: 'antigravity', messages: false, stream: true },
+    { provider: 'antigravity', messages: true, stream: true },
+    { provider: 'antigravity', messages: true, stream: false },
+  ])('records merged Gemini snapshots for $provider, messages=$messages, stream=$stream', ({ provider, messages, stream }) => withRelay(async request => {
+    mocks.key.allowedProviders = [provider]
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { response: { candidates: [{ content: { parts: [{ text: 'Answer' }] } }],
+        usageMetadata: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 5 } } },
+      { response: { usageMetadata: {} } },
+      { response: { candidates: [{ finishReason: 'STOP' }], usageMetadata: { candidatesTokenCount: 25 } } },
+    ]))
+    const url = messages ? '/api/antigravity/v1/messages'
+      : `/api/${provider}/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse`
+    const response = await request(messages ? { model: 'claude-sonnet-5', messages: [], stream } : { contents: [] }, url)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Answer')
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.slice(9, 14)).toEqual([60, 30, 5, 0, 40])
+    expect(mocks.logs[0]?.[22]).toBe('success')
+    expect(mocks.logs[0]?.[36]).toBe('upstream')
+    if (messages) expect(response.body).toContain('"input_tokens":60')
+  }))
+
+  it.each([false, true])('records cache-only blocked Gemini usage with its upstream source, stream=%s', stream => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    const response = { promptFeedback: { blockReason: 'PROHIBITED_CONTENT' }, usageMetadata: { cachedContentTokenCount: 200 } }
+    mocks.fetch.mockResolvedValueOnce(stream ? sse([{ response }]) : Response.json({ response }))
+    const url = `/api/antigravity/v1beta/models/gemini-3.8-flash:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`
+    expect((await request({ contents: [] }, url)).status).toBe(200)
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.slice(9, 14)).toEqual([0, 0, 0, 0, 200])
+    expect(mocks.logs[0]?.[22]).toBe('error')
+    expect(mocks.logs[0]?.[36]).toBe('upstream')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+  }))
+
   const privateErrorMessage = 'Permission denied for projects/private-project-42; '
     + 'pool-bot@private-project-42.iam.gserviceaccount.com; consumer: 123456789012; '
     + 'project number 987654321012; https://internal.example/error?key=private-key'
