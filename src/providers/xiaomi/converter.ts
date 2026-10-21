@@ -44,42 +44,37 @@ export interface ChatCompletionsRequest {
   response_format?: unknown
 }
 
-/**
- * Xiaomi forwards V2.5 Pro and V2.5 to these successors from 2026-10-14
- * 18:00 (UTC+8) and stops resolving the old names on 2026-10-21 10:00.
- * Rewriting them here keeps existing client configs working past that date,
- * and usage is billed under the model actually served (same price tier).
- */
-const SUCCESSORS = new Map([
-  ['mimo-v2.5-pro', 'mimo-v2.6-pro'],
-  ['mimo-v2.5', 'mimo-v2.6-flash'],
-])
+export class XiaomiRequestError extends Error {
+  readonly statusCode = 400
+  readonly code = 'invalid_xiaomi_model'
+}
 
 /**
  * Codex defaults to model names like `gpt-5.5` which MiMo does not
  * recognise. Rewrite anything that doesn't already look like a MiMo model
- * to `mimo-v2.6-pro` (the coding/agentic flagship that replaces V2.5 Pro).
- * Retired V2.5 names go to their successor; any other `mimo-` name is passed
- * through, so users can set `model="mimo-v2.6-flash"` for the cheaper
- * multimodal variant in their Codex config.
+ * to `mimo-v2.6-pro`. Retired model names are rejected; other `mimo-` names
+ * are passed through, so users can set `model="mimo-v2.6-flash"` for the
+ * cheaper multimodal variant in their Codex config.
  */
 export function mapModel(input: unknown): string {
   if (typeof input !== 'string' || !input) return 'mimo-v2.6-pro'
+  if (isRetiredXiaomiModel(input)) {
+    throw new XiaomiRequestError(`Unsupported Xiaomi MiMo model: ${input}. Use mimo-v2.6-pro or mimo-v2.6-flash.`)
+  }
   if (!input.startsWith('mimo-')) return 'mimo-v2.6-pro'
-  return SUCCESSORS.get(input.toLowerCase()) ?? input
+  return input
 }
 
 /**
  * Text models Xiaomi has taken off the shelf: the V2 series (offline since
- * 2026-06-30) and V2.5 Pro / V2.5 (see SUCCESSORS). Upstream `/v1/models`
- * keeps listing V2.5 until it stops resolving, so the synced account catalog
- * would re-advertise it. The V2.5 TTS and ASR models are not retired.
+ * 2026-06-30) and V2.5 Pro / V2.5. Keep these names blocked even if an
+ * upstream catalog still lists them. The V2.5 TTS and ASR models are not retired.
  */
-const RETIRED_MODELS = new Set(['mimo-v2-pro', 'mimo-v2-omni', 'mimo-v2-flash', 'mimo-v2-tts', ...SUCCESSORS.keys()])
+const RETIRED_MODELS = new Set(['mimo-v2-pro', 'mimo-v2-omni', 'mimo-v2-flash', 'mimo-v2-tts', 'mimo-v2.5-pro', 'mimo-v2.5'])
 
 /** For the discovery layer: retired names must not be advertised. */
 export function isRetiredXiaomiModel(model: string): boolean {
-  return RETIRED_MODELS.has(model.toLowerCase())
+  return RETIRED_MODELS.has(model.trim().toLowerCase())
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

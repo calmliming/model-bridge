@@ -324,7 +324,8 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge-mimo
 ```
 
-Model names starting with `mimo-` are passed through; everything else is
+Available model names starting with `mimo-` are passed through; retired models
+are rejected. Other model names are
 rewritten to `mimo-v2.6-pro`. The Responses endpoint always streams and usage
 is recorded under `provider=xiaomi`.
 

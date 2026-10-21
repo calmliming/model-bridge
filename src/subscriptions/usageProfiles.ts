@@ -21,7 +21,6 @@ export function subscriptionModelMultiplier(profile: SubscriptionUsageProfile, m
     /^kimi-k2[.-](?:7-code(?!-highspeed)|6)(?:$|-)/,
     /^longcat-2[.-]0(?:$|-)/,
     /^mimo-v2[.-]6-flash(?:$|-)/,
-    /^mimo-v2[.-]5$/,
     /^minimax-m(?:3|2[.-]7)(?:$|-)/,
     /^muse-spark-1[.-](?:2|3)-contributor(?:$|-)/,
     /^qwen3[.-]7-plus(?:$|-)/,

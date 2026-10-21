@@ -23,6 +23,8 @@ describe('one-time seed corrections', () => {
     expect(calls.some(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === 'gpt-6.1-sol' && values?.[6] === 0.1)).toBe(true)
     // New discoverable models get exact rows at their own list price.
     const seeded = (model: string) => calls.find(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === model)?.[1]
+    expect(seeded('mimo-v2.5')).toBeUndefined()
+    expect(seeded('mimo-v2.5-pro')).toBeUndefined()
     expect(seeded('mimo-v2.6-pro-ultraspeed')?.slice(3, 7)).toEqual([4.35, 8.7, 0, 0.036])
     expect(seeded('qwen3.8-flash')?.slice(3, 7)).toEqual([0.112, 0.378, 0, 0.014])
     expect(seeded('glm-5.3-flashx')?.slice(3, 7)).toEqual([0.28, 0.98, 0, 0.0798])

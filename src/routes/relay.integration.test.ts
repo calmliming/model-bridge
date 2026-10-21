@@ -1066,30 +1066,27 @@ describe('mapped provider dispatch', () => {
   }))
 
   it.each([
-    ['/v1/messages', 'mimo-v2.5-pro', 'mimo-v2.6-pro'], ['/api/xiaomi/v1/messages', 'mimo-v2.5', 'mimo-v2.6-flash'],
-    ['/v1/chat/completions', 'mimo-v2.5', 'mimo-v2.6-flash'], ['/api/xiaomi/v1/chat/completions', 'mimo-v2.5-pro', 'mimo-v2.6-pro'],
-    ['/v1/responses', 'mimo-v2.5-pro', 'mimo-v2.6-pro'], ['/api/xiaomi/v1/responses', 'mimo-v2.5', 'mimo-v2.6-flash'],
-  ])('forwards and bills retired MiMo names as their successor at %s', (url, model, successor) => withRelay(async request => {
+    '/v1/messages', '/api/xiaomi/v1/messages',
+    '/v1/chat/completions', '/api/xiaomi/v1/chat/completions', '/chat/completions',
+    '/v1/responses', '/api/xiaomi/v1/responses', '/responses',
+  ])('rejects removed MiMo V2.5 models before scheduling or billing at %s', url => withRelay(async request => {
     mocks.key.allowedProviders = ['xiaomi']
-    if (url.endsWith('/messages')) {
-      mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
-        id: 'msg_mimo', type: 'message', role: 'assistant', model: successor,
-        content: [{ type: 'text', text: 'Hello' }], stop_reason: 'end_turn',
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { headers: { 'content-type': 'application/json' } }))
-    } else if (url.endsWith('/responses')) {
-      mocks.fetch.mockResolvedValueOnce(sse([
-        { choices: [{ delta: { content: 'Hello' }, finish_reason: 'stop' }] },
-        { choices: [], usage: { prompt_tokens: 100, completion_tokens: 20 } },
-      ]))
+    mocks.key.modelMappings = { 'mimo-old': ' MiMo-V2.5-Pro ' }
+    config.BALANCE_INFLIGHT_RESERVATION_ENABLED = true
+    for (const model of ['mimo-v2.5', 'mimo-v2.5-pro', 'mimo-old']) {
+      const response = await request({
+        model, stream: false, max_tokens: 100,
+        ...(url.endsWith('/responses') ? { input: 'Hello' } : { messages: [{ role: 'user', content: 'Hello' }] }),
+      }, url)
+      expect(response.status).toBe(400)
+      expect(JSON.parse(response.body)).toMatchObject({ error: { type: 'invalid_request_error', code: 'invalid_xiaomi_model' } })
     }
-    const response = await request({
-      model, stream: false, max_tokens: 100,
-      ...(url.endsWith('/responses') ? { input: 'Hello' } : { messages: [{ role: 'user', content: 'Hello' }] }),
-    }, url)
-    expect(response.status).toBe(200)
-    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body).model).toBe(successor)
-    expect(mocks.logs[0]?.slice(4, 6)).toEqual(['xiaomi', successor])
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.ensureFreshToken).not.toHaveBeenCalled()
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO relay_reservations'))).toBe(false)
+    expect(mocks.logs).toHaveLength(0)
+    expect(mocks.transactions).toHaveLength(0)
   }))
 
   it.each(['/v1/messages', '/v1/chat/completions', '/v1/responses'])(

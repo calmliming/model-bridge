@@ -362,7 +362,7 @@ export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
 codex --profile model-bridge-mimo
 ```
 
-以 `mimo-` 开头的模型名会透传，其它模型会改写为 `mimo-v2.6-pro`；Responses
+以 `mimo-` 开头的可用模型名会透传，已下线型号会直接拒绝，其它模型会改写为 `mimo-v2.6-pro`；Responses
 入口同样始终以 SSE 返回，用量记在 `provider=xiaomi` 下。
 
 ### Cherry Studio

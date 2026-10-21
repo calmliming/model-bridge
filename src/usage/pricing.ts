@@ -488,7 +488,7 @@ function deepseekPrice(model: string, atMs: number): TierPrice {
 
 // Xiaomi MiMo overseas list prices (per 1M tokens). MiMo has no separate
 // cache-write fee — cacheWrite is 0; cacheRead is the published cached-input
-// price. V2.6 (2026-09-22) keeps the V2.5 prices: Pro = V2.5 Pro, Flash = V2.5.
+// price. These tiers cover the V2.6 Pro and Flash models.
 // Pro UltraSpeed is the same Pro weights on a faster lane at 10× the Pro price.
 const XIAOMI_TIERS: Record<'standard' | 'pro' | 'ultraspeed', TierPrice> = {
   standard: { input: 0.14, output: 0.28, cacheWrite: 0, cacheRead: 0.0028 },
@@ -496,14 +496,9 @@ const XIAOMI_TIERS: Record<'standard' | 'pro' | 'ultraspeed', TierPrice> = {
   ultraspeed: { input: 4.35, output: 8.7, cacheWrite: 0, cacheRead: 0.036 }
 }
 
-const XIAOMI_STALE_TIERS: Record<'standard' | 'pro', TierPrice> = {
-  standard: { input: 1, output: 3, cacheWrite: 0, cacheRead: 0.2 },
-  pro: { input: cny(3), output: cny(6), cacheWrite: 0, cacheRead: cny(0.025) }
-}
-
 function xiaomiTier(model: string): keyof typeof XIAOMI_TIERS {
   // mimo-v2.6-pro-ultraspeed → ultraspeed (must precede the plain "pro" test);
-  // mimo-v2.6-pro / mimo-v2.5-pro → pro; flash / mimo-v2.5 / omni → standard
+  // mimo-v2.6-pro → pro; flash / omni → standard
   const m = model.toLowerCase()
   if (m.includes('ultraspeed')) return 'ultraspeed'
   return m.includes('pro') ? 'pro' : 'standard'
@@ -853,8 +848,6 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'xiaomi', model: 'mimo-v2.6-flash', price: XIAOMI_TIERS.standard },
   // Exact row: the DB substring pass would otherwise bill it as mimo-v2.6-pro.
   { provider: 'xiaomi', model: 'mimo-v2.6-pro-ultraspeed', price: XIAOMI_TIERS.ultraspeed },
-  { provider: 'xiaomi', model: 'mimo-v2.5-pro', price: XIAOMI_TIERS.pro },
-  { provider: 'xiaomi', model: 'mimo-v2.5', price: XIAOMI_TIERS.standard },
   { provider: 'zhipu', model: 'glm-5.3', price: ZHIPU_TIERS.flagship },
   { provider: 'zhipu', model: 'glm-5.3-flash', price: ZHIPU_TIERS.flash53 },
   // Exact row: the DB substring pass would otherwise bill it as glm-5.3-flash.
@@ -1015,20 +1008,6 @@ const SEED_CORRECTIONS: SeedCorrection[] = [
     model: 'deepseek-reasoner',
     from: DEEPSEEK_STALE_PRO_PRICE,
     to: DEEPSEEK_PRE_SCHEDULE_TIERS.flash
-  },
-  // MiMo V2.5 prices were seeded from stale pre-reduction / mixed-region
-  // values. Correct only rows that still contain those exact built-in values.
-  {
-    provider: 'xiaomi',
-    model: 'mimo-v2.5-pro',
-    from: XIAOMI_STALE_TIERS.pro,
-    to: XIAOMI_TIERS.pro
-  },
-  {
-    provider: 'xiaomi',
-    model: 'mimo-v2.5',
-    from: XIAOMI_STALE_TIERS.standard,
-    to: XIAOMI_TIERS.standard
   },
   // gpt-6 Luna was seeded with cached input at 0.05; the official rate is 0.01.
   {

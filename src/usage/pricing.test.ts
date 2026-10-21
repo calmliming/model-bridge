@@ -472,7 +472,7 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
     })
   })
 
-  it('prices MiMo V2.6 at the V2.5 rates and UltraSpeed at 10x Pro', () => {
+  it('prices MiMo V2.6 Pro and Flash, with UltraSpeed at 10x Pro', () => {
     expect(resolvePrice('xiaomi', 'mimo-v2.6-pro')).toMatchObject({
       input: 0.435,
       output: 0.87,
@@ -491,19 +491,6 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
         cacheRead: 0.036
       })
     }
-  })
-
-  it('uses Xiaomi MiMo V2.5 overseas list prices', () => {
-    expect(resolvePrice('xiaomi', 'mimo-v2.5-pro')).toMatchObject({
-      input: 0.435,
-      output: 0.87,
-      cacheRead: 0.0036
-    })
-    expect(resolvePrice('xiaomi', 'mimo-v2.5')).toMatchObject({
-      input: 0.14,
-      output: 0.28,
-      cacheRead: 0.0028
-    })
   })
 
   it('prices the current GLM text and multimodal tiers', () => {
@@ -563,7 +550,7 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
       input: 0.75,
       output: 3.75
     })
-    expect(resolvePrice('sub2api', 'mimo-v2.5')).toMatchObject({
+    expect(resolvePrice('sub2api', 'mimo-v2.6-flash')).toMatchObject({
       input: 0.14,
       output: 0.28
     })
