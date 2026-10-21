@@ -27,7 +27,7 @@ daily / provider / model / key breakdowns, and a one-command Docker deploy.
 
 ## Quick start (development)
 
-Requires Node.js 24.19.0 LTS (or a newer LTS release).
+Requires Node.js 24.22.1 LTS (or a newer LTS release).
 
 Before the first backend start, set `ADMIN_PASSWORD` in the active environment
 file to an 8–72 byte UTF-8 password. There is no default admin password.

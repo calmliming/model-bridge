@@ -4,7 +4,7 @@
 #
 
 # ── Stage 1: build the Vue admin dashboard ───────────────────────
-FROM node:24.19.0-bookworm-slim AS web-builder
+FROM node:24.22.1-bookworm-slim AS web-builder
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 2: install backend production dependencies ────────────
-FROM node:24.19.0-bookworm-slim AS deps
+FROM node:24.22.1-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # tsx lives in `dependencies` so --omit=dev still leaves it available
@@ -20,9 +20,15 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # ── Stage 3: internal system updater ─────────────────────────────
-FROM docker:27-cli AS updater
+FROM docker:29.9.2-cli AS docker-cli
+
+FROM node:24.22.1-bookworm-slim AS updater
 WORKDIR /app
-RUN apk add --no-cache git nodejs
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 
 COPY scripts ./scripts
 
@@ -32,7 +38,7 @@ ENTRYPOINT []
 CMD ["node", "scripts/updater.mjs"]
 
 # ── Stage 4: slim runtime image ─────────────────────────────────
-FROM node:24.19.0-bookworm-slim AS runtime
+FROM node:24.22.1-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \

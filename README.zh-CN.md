@@ -24,7 +24,7 @@ OpenAI（浏览器回调）/ Gemini（Google OAuth + Code Assist）/ DeepSeek �
 
 ## 快速开始（开发环境）
 
-需要 Node.js 24.19.0 LTS（或更新的 LTS 版本）。
+需要 Node.js 24.22.1 LTS（或更新的 LTS 版本）。
 
 本地开发**连本地数据库**，与线上完全隔离（见下面的「本地环境与生产环境」）。
 首次准备好本地配置和数据库：
