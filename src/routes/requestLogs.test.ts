@@ -50,4 +50,11 @@ describe('request log API', () => {
     expect((await app.inject({ url: '/api/users/logs', headers: { authorization: user } })).statusCode).toBe(401)
     expect(mocks.list).toHaveBeenCalledTimes(1)
   })
+
+  it('allows admin identity filters while discarding them on the user endpoint', async () => {
+    await app.inject({ url: '/api/admin/logs?user=alice&account=channel&id=usage:abc', headers: { authorization: admin } })
+    expect(mocks.list).toHaveBeenLastCalledWith(1, 20, { user: 'alice', account: 'channel', id: 'usage:abc' }, undefined)
+    await app.inject({ url: '/api/users/logs?user=alice&account=channel', headers: { authorization: user } })
+    expect(mocks.list).toHaveBeenLastCalledWith(1, 20, {}, 'owner-1')
+  })
 })

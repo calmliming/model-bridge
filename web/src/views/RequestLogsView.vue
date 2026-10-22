@@ -5,8 +5,10 @@ import { api, errMsg } from '../api/client'
 import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
 import { formatSubscriptionUsage } from '../billing'
 import { logStatusLabel, logUsageLabel, safeResultUrl, type RequestLog, type RequestLogsPage } from '../requestLogs'
+import { useMessage } from '../composables/useMessage'
 
 const route = useRoute()
+const message = useMessage()
 const isAdmin = computed(() => route.meta.role === 'admin')
 const endpoint = computed(() => isAdmin.value ? '/admin/logs' : '/users/logs')
 const rows = ref<RequestLog[]>([])
@@ -25,6 +27,10 @@ const model = ref('')
 const key = ref('')
 const dateFrom = ref('')
 const dateEnd = ref('')
+const advanced = ref(false)
+const requestId = ref('')
+const userFilter = ref('')
+const accountFilter = ref('')
 const selected = ref<RequestLog | null>(null)
 const appliedFilters = ref<Record<string, unknown>>({})
 let controller: AbortController | null = null
@@ -78,7 +84,11 @@ async function load(quiet = false) {
 }
 
 function applyFilters() {
+  if (dateFrom.value && dateEnd.value && dateFrom.value > dateEnd.value) { message.warning('开始日期不能晚于结束日期'); return }
   const params: Record<string, unknown> = {}
+  if (requestId.value.trim()) params.id = requestId.value.trim()
+  if (isAdmin.value && userFilter.value.trim()) params.user = userFilter.value.trim()
+  if (isAdmin.value && accountFilter.value.trim()) params.account = accountFilter.value.trim()
   if (manufacturer.value) params.manufacturer = manufacturer.value
   if (kind.value) params.kind = kind.value
   if (status.value) params.status = status.value
@@ -94,6 +104,7 @@ function applyFilters() {
 function resetFilters() {
   manufacturer.value = null; kind.value = null; status.value = null
   model.value = ''; key.value = ''; dateFrom.value = ''; dateEnd.value = ''
+  requestId.value = ''; userFilter.value = ''; accountFilter.value = ''
   applyFilters()
 }
 
@@ -104,6 +115,21 @@ function costLabel(row: RequestLog) {
 
 function durationLabel(row: RequestLog) {
   return `${(row.latencyMs / 1000).toFixed(1)} 秒`
+}
+
+function errorSummary(row: RequestLog) {
+  if (row.status !== 'error') return ''
+  if (row.errorCode === 'no_available_account') return '暂无可用渠道，请稍后重试'
+  if (row.errorCode === 'request_interrupted') return '生成中断，请重新发起'
+  if (/rate|quota/.test(row.errorCode || '')) return '调用达到限额，请稍后重试'
+  if (/violation|policy/.test(row.errorCode || '')) return '请求被拒绝，请查看详情'
+  return '调用失败，请查看详情'
+}
+
+async function copyRequestId() {
+  if (!selected.value) return
+  try { await navigator.clipboard.writeText(selected.value.id); message.success('请求 ID 已复制') }
+  catch { message.warning('复制失败，请手动复制请求 ID') }
 }
 
 watch(page, () => void load())
@@ -122,8 +148,7 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
     <UiCard :bordered="false" class="surface-card">
       <div class="logs-heading">
         <div>
-          <h2>调用日志</h2>
-          <p>查看调用结果和生成进度，按模型所属厂家筛选。</p>
+          <p>查看调用结果与生成进度</p>
         </div>
         <div class="logs-actions">
           <label class="refresh-toggle"><input v-model="autoRefresh" type="checkbox" />自动刷新 · 5 秒</label>
@@ -131,21 +156,26 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
         </div>
       </div>
       <form class="logs-filters" @submit.prevent="applyFilters">
-        <label><span>模型厂家</span><UiSelect v-model:value="manufacturer" :options="manufacturers" clearable aria-label="模型厂家" placeholder="全部厂家" /></label>
-        <label><span>调用类型</span><UiSelect v-model:value="kind" :options="kindOptions" clearable aria-label="调用类型" placeholder="全部类型" /></label>
-        <label><span>状态</span><UiSelect v-model:value="status" :options="statusOptions" clearable aria-label="调用状态" placeholder="全部状态" /></label>
         <label><span>模型</span><UiInput v-model:value="model" placeholder="模型名称或调用别名" /></label>
-        <label><span>API Key</span><UiInput v-model:value="key" placeholder="Key 名称或前缀" /></label>
-        <label><span>开始日期</span><input v-model="dateFrom" type="date" class="input" /></label>
-        <label><span>结束日期</span><input v-model="dateEnd" type="date" class="input" /></label>
-        <div class="filter-actions"><UiButton type="primary" native-type="submit">查询</UiButton><UiButton @click="resetFilters">重置</UiButton></div>
+        <label><span>状态</span><UiSelect v-model:value="status" :options="statusOptions" clearable aria-label="调用状态" placeholder="全部状态" /></label>
+        <div class="filter-actions"><UiButton type="primary" native-type="submit">查询</UiButton><UiButton @click="resetFilters">重置</UiButton><UiButton :aria-expanded="advanced" @click="advanced = !advanced">{{ advanced ? '收起筛选' : '高级筛选' }}</UiButton></div>
+        <div v-if="advanced" class="advanced-filters">
+          <label><span>模型厂家</span><UiSelect v-model:value="manufacturer" :options="manufacturers" clearable aria-label="模型厂家" placeholder="全部厂家" /></label>
+          <label><span>调用类型</span><UiSelect v-model:value="kind" :options="kindOptions" clearable aria-label="调用类型" placeholder="全部类型" /></label>
+          <label><span>API Key</span><UiInput v-model:value="key" placeholder="Key 名称或前缀" /></label>
+          <label><span>请求 ID</span><UiInput v-model:value="requestId" placeholder="输入完整请求 ID" /></label>
+          <label v-if="isAdmin"><span>用户</span><UiInput v-model:value="userFilter" placeholder="用户名称或邮箱" /></label>
+          <label v-if="isAdmin"><span>上游账号</span><UiInput v-model:value="accountFilter" placeholder="账号名称或 ID" /></label>
+          <label><span>开始日期</span><input v-model="dateFrom" type="date" class="input" /></label>
+          <label><span>结束日期</span><input v-model="dateEnd" type="date" class="input" /></label>
+        </div>
       </form>
     </UiCard>
 
     <UiAlert v-if="error" type="error" :title="error" />
     <UiCard :bordered="false" class="surface-card">
       <div class="logs-count"><strong>共 {{ total.toLocaleString() }} 条记录</strong><span v-if="lastUpdated">更新于 {{ formatTime(lastUpdated) }}</span></div>
-      <div class="logs-table-wrap">
+      <div class="logs-table-wrap hidden md:block">
         <table class="logs-table">
           <thead><tr><th>时间</th><th>模型 / 厂家</th><th>类型</th><th>API Key<span v-if="isAdmin"> / 用户</span></th><th>状态 / 进度</th><th>规格 / 用量</th><th>费用</th><th>耗时</th><th>详情</th></tr></thead>
           <tbody>
@@ -159,7 +189,8 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
                 <div v-if="row.progress != null && (row.status === 'running' || row.status === 'settling')" class="log-progress" role="progressbar" :aria-label="`${row.model} 生成进度`" :aria-valuenow="row.progress" aria-valuemin="0" aria-valuemax="100">
                   <div><span :style="{ width: `${Math.min(100, Math.max(0, row.progress))}%` }" /></div><small>{{ Math.round(row.progress) }}%</small>
                 </div>
-                <small v-if="row.errorCode" class="log-error" :title="row.errorMessage || ''">{{ row.errorCode }}</small>
+                <small v-if="row.status === 'error'" class="log-error" :title="row.errorMessage || ''">{{ errorSummary(row) }}</small>
+                <small v-if="isAdmin && row.errorCode">{{ row.errorCode }}</small>
               </td>
               <td>{{ logUsageLabel(row) }}</td>
               <td class="cost-cell">{{ costLabel(row) }}</td>
@@ -170,11 +201,24 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
           </tbody>
         </table>
       </div>
+      <div class="grid gap-3 md:hidden">
+        <p v-if="!rows.length" class="logs-empty">{{ loading ? '正在加载日志…' : '暂无匹配的调用日志' }}</p>
+        <article v-for="row in rows" :key="row.id" class="mobile-log" :data-log-id="row.id">
+          <div class="flex items-start justify-between gap-3"><strong class="min-w-0 break-all">{{ row.model || '未知模型' }}</strong><span class="status-badge" :class="row.status">{{ logStatusLabel(row) }}</span></div>
+          <p class="mt-2 text-xs text-gray-500">{{ formatTime(row.createdAt) }} · {{ manufacturerLabel(row.manufacturer) }}</p>
+          <p class="mt-1 break-words text-xs text-gray-500">{{ row.apiKeyName || '无 Key' }}<template v-if="isAdmin"> · {{ row.userName || '未知用户' }}</template></p>
+          <div class="mt-3 flex flex-wrap justify-between gap-2 text-sm"><span>{{ logUsageLabel(row) }}</span><strong>{{ costLabel(row) }}</strong></div>
+          <p v-if="row.status === 'error'" class="mt-2 text-xs text-red-600">{{ errorSummary(row) }}</p>
+          <div v-if="row.progress != null && (row.status === 'running' || row.status === 'settling')" class="mt-3"><progress class="w-full accent-primary-500" :value="Math.min(100, Math.max(0, row.progress))" max="100" :aria-label="`${row.model} 生成进度`" /><p class="text-xs text-gray-500">{{ Math.round(row.progress) }}%</p></div>
+          <div class="mt-3 flex items-center justify-between"><span class="text-xs text-gray-500">{{ durationLabel(row) }}</span><UiButton size="small" secondary @click="selected = row">查看详情</UiButton></div>
+        </article>
+      </div>
       <div class="logs-pagination"><UiPagination v-model:page="page" :page-size="pageSize" :item-count="total" :disabled="loading" /></div>
     </UiCard>
 
     <UiModal :show="!!selected" title="调用详情" width="min(760px, calc(100vw - 32px))" @update:show="(shown: boolean) => { if (!shown) selected = null }">
       <template v-if="selected">
+        <div class="mb-5 flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 p-3 text-xs dark:bg-dark-900"><code class="min-w-0 flex-1 break-all">{{ selected.id }}</code><UiButton size="small" secondary @click="copyRequestId">复制请求 ID</UiButton></div>
         <div class="log-detail-grid">
           <div><span>模型厂家</span><strong>{{ manufacturerLabel(selected.manufacturer) }}</strong></div>
           <div><span>状态</span><strong>{{ logStatusLabel(selected) }}<template v-if="selected.progress != null"> · {{ Math.round(selected.progress) }}%</template></strong></div>
@@ -202,11 +246,14 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
 .logs-heading p { margin: 6px 0 0; color: #64748b; font-size: 13px; }
 .logs-actions { justify-content: flex-end; }
 .refresh-toggle { display: flex; align-items: center; gap: 7px; color: #64748b; font-size: 12px; cursor: pointer; }
-.logs-filters { margin-top: 20px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: end; }
-.logs-filters > label { display: grid; gap: 7px; min-width: 0; }
-.logs-filters > label > span { font-size: 12px; color: #475569; font-weight: 650; }
+.logs-filters { margin-top: 16px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: end; }
+.logs-filters label { display: grid; gap: 7px; min-width: 0; }
+.logs-filters label > span { font-size: 12px; color: #475569; font-weight: 650; }
+.advanced-filters { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .logs-filters input[type=date] { min-width: 0; width: 100%; min-height: 38px; }
-.filter-actions { display: flex; gap: 8px; }
+.filter-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.mobile-log { min-width: 0; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }
+.dark .mobile-log { border-color: #334155; }
 .logs-count { margin-bottom: 18px; font-size: 13px; color: #334155; }
 .logs-count > span { font-size: 12px; color: #94a3b8; }
 .logs-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; }
@@ -245,6 +292,6 @@ onBeforeUnmount(() => { ++version; controller?.abort(); clearInterval(timer) })
 .request-input { max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; border-radius: 10px; background: #f8fafc; color: #475569; font: 12px/1.8 ui-monospace, monospace; }
 .result-links { display: flex; flex-wrap: wrap; gap: 10px; }
 .result-links a { padding: 8px 12px; border: 1px solid #dbeafe; border-radius: 8px; color: #2563eb; font-size: 13px; text-decoration: none; }
-@media (max-width: 1000px) { .logs-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .logs-filters, .log-detail-grid { grid-template-columns: minmax(0, 1fr); } .logs-actions { justify-content: flex-start; } .logs-count { gap: 8px; } }
+@media (min-width: 1280px) { .logs-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; } .filter-actions { grid-column: auto; } .advanced-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .log-detail-grid { grid-template-columns: minmax(0, 1fr); } .logs-actions { justify-content: flex-start; } .logs-count { gap: 8px; } }
 </style>

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { UiButton, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTime } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 import { buildCcSwitchUrl, ccSwitchProviderName, launchCcSwitch, targetsForProviders, type CcSwitchTarget } from '../ccswitch'
 
 interface ApiKey {
@@ -56,6 +56,15 @@ const keys = ref<ApiKey[]>([])
 const loading = ref(true)
 const groups = ref<AccountGroup[]>([])
 const users = ref<UserRow[]>([])
+const search = ref('')
+const statusFilter = ref('all')
+const showAllColumns = ref(false)
+const actionKey = ref<ApiKey | null>(null)
+const filteredKeys = computed(() => keys.value.filter(row => {
+  const query = search.value.trim().toLowerCase()
+  return (!query || [row.name, row.userEmail, row.userName, row.ownerLabel, row.keyPrefix].some(value => value?.toLowerCase().includes(query)))
+    && (statusFilter.value === 'all' || row.enabled === (statusFilter.value === 'enabled'))
+}))
 
 const adminUserId = computed(() => users.value.find((u) => u.isAdmin)?.id ?? null)
 
@@ -407,6 +416,8 @@ const {
   rowCheckable: keyRowCheckable,
   runBatch
 } = useBulkSelection(keys, keyRowKey)
+
+watch([search, statusFilter], () => { selectedKeyIds.value = [] })
 
 function notifyBatchResult(action: string, results: BatchOutcome[]) {
   const { success, failed, firstError } = summarizeBatch(results)
@@ -1021,41 +1032,24 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 250,
+    width: 96,
     fixed: 'right',
-    render: (row) =>
-      h(
-        UiSpace,
-        { size: 4, wrap: false },
-        {
-          default: () => [
-            h(UiButton, { size: 'small', quaternary: true, onClick: () => openUse(row) }, { default: () => '使用' }),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                disabled: !row.canReveal,
-                onClick: () => openCcSwitch(row)
-              },
-              { default: () => 'CC Switch' }
-            ),
-            h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                type: 'error',
-                quaternary: true,
-                onClick: () => confirmDelete(row)
-              },
-              { default: () => '删除' }
-            )
-          ]
-        }
-      )
+    render: (row) => h(UiButton, { size: 'small', secondary: true, onClick: () => { actionKey.value = row } }, { default: () => '管理' })
   }
 ])
+
+const visibleColumns = computed(() => showAllColumns.value ? columns.value
+  : columns.value.filter(column => ['name', 'owner', 'keyPrefix', 'allowedProviders', 'quota', 'quotaLimit', 'enabled', 'actions'].includes(column.key)))
+
+function manageKey(action: 'use' | 'edit' | 'import' | 'delete') {
+  const row = actionKey.value
+  if (!row) return
+  actionKey.value = null
+  if (action === 'edit') openEdit(row)
+  else if (action === 'use') void openUse(row)
+  else if (action === 'import') void openCcSwitch(row)
+  else confirmDelete(row)
+}
 
 onMounted(() => {
   void load()
@@ -1067,6 +1061,11 @@ onMounted(() => {
 <template>
   <div>
     <div class="page-head">
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+        <UiInput v-model:value="search" aria-label="搜索密钥或用户" placeholder="搜索名称、用户邮箱或密钥前缀" class="!w-full sm:!w-72" />
+        <select v-model="statusFilter" class="input !w-auto" aria-label="密钥状态"><option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select>
+        <span class="text-sm text-gray-500">{{ filteredKeys.length }} 个 Key</span>
+      </div>
       <UiButton type="primary" @click="openCreate">新建 Key</UiButton>
     </div>
 
@@ -1085,19 +1084,48 @@ onMounted(() => {
       </div>
     </Transition>
 
-    <UiCard class="table-card" :bordered="false">
+    <div class="mb-3 hidden justify-end md:flex"><label class="flex items-center gap-2 text-sm text-gray-500"><input v-model="showAllColumns" type="checkbox" />显示全部字段</label></div>
+    <UiCard class="table-card hidden md:block" :bordered="false">
       <UiDataTable
         selectable
         v-model:checked-row-keys="selectedKeyIds"
         :row-key="keyRowKey"
         :row-checkable="keyRowCheckable"
-        :columns="columns"
-        :data="keys"
+        :columns="visibleColumns"
+        :data="filteredKeys"
         :loading="loading"
         :bordered="false"
-        :scroll-x="1960"
+        :scroll-x="showAllColumns ? 1800 : 1100"
+        :empty-text="search || statusFilter !== 'all' ? '没有符合筛选条件的 Key' : '还没有 API Key，点击新建 Key 开始接入'"
       />
     </UiCard>
+
+    <div class="grid min-w-0 gap-3 md:hidden">
+      <p v-if="loading" role="status" class="py-8 text-center text-gray-500">正在加载密钥…</p>
+      <p v-else-if="!filteredKeys.length" class="card p-6 text-center text-sm text-gray-500">{{ search || statusFilter !== 'all' ? '没有符合筛选条件的 Key' : '还没有 API Key，点击新建 Key 开始接入' }}</p>
+      <article v-for="row in filteredKeys" :key="row.id" class="card min-w-0 p-4">
+        <div class="flex items-start gap-3">
+          <input v-model="selectedKeyIds" :value="row.id" type="checkbox" :disabled="bulkBusy" :aria-label="`选择 ${row.name}`" class="mt-1 h-4 w-4 shrink-0" />
+          <div class="min-w-0 flex-1"><h2 class="break-words font-semibold">{{ row.name }}</h2><p class="mt-1 break-all text-xs text-gray-500">{{ row.userEmail || row.ownerLabel || '独立密钥' }}</p></div>
+          <UiTag :type="row.enabled ? 'success' : 'default'">{{ row.enabled ? '启用' : '禁用' }}</UiTag>
+        </div>
+        <div class="my-4 flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 dark:bg-dark-900"><code class="min-w-0 truncate text-sm">{{ row.keyPrefix }}…</code><UiButton size="small" secondary :disabled="!row.canReveal" @click="copyApiKey(row)">复制</UiButton></div>
+        <dl class="grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-gray-500">已用 / 上限</dt><dd class="mt-1 break-words">{{ formatUsd(row.quotaUsed) }} / {{ row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) }}</dd></div><div><dt class="text-xs text-gray-500">分组</dt><dd class="mt-1 break-words">{{ groupName(row.accountGroupId) }}</dd></div></dl>
+        <div class="mt-4 flex justify-end"><UiButton secondary size="small" @click="actionKey = row">管理</UiButton></div>
+      </article>
+    </div>
+
+    <UiModal :show="!!actionKey" :title="`管理 Key：${actionKey?.name ?? ''}`" :width="440" @update:show="(shown: boolean) => { if (!shown) actionKey = null }">
+      <template v-if="actionKey">
+        <p class="mb-4 break-all text-sm text-gray-500">{{ actionKey.userEmail || actionKey.ownerLabel || '独立密钥' }} · {{ actionKey.keyPrefix }}…</p>
+        <div class="grid grid-cols-2 gap-3">
+          <UiButton secondary @click="manageKey('use')">接入方式</UiButton>
+          <UiButton secondary @click="manageKey('edit')">编辑 Key</UiButton>
+          <UiButton secondary :disabled="!actionKey.canReveal" @click="manageKey('import')">导入 CC Switch</UiButton>
+          <UiButton quaternary type="error" @click="manageKey('delete')">删除 Key</UiButton>
+        </div>
+      </template>
+    </UiModal>
 
     <!-- create -->
     <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">

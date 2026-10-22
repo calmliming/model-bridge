@@ -11,7 +11,7 @@ function onSubmit(event: SubmitEvent) {
 </script>
 
 <template>
-  <form class="space-y-0" :novalidate="novalidate" @submit="onSubmit">
+  <form class="space-y-4" :novalidate="novalidate" @submit="onSubmit">
     <slot />
   </form>
 </template>

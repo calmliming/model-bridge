@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useFieldContext } from './fieldContext'
 
 interface Option {
@@ -40,6 +40,7 @@ const emit = defineEmits<{
 }>()
 
 const field = useFieldContext()
+const overlayRoot = inject<Ref<HTMLElement | null> | null>('uiOverlayRoot', null)
 const resolvedId = computed(() => props.id ?? field?.id)
 
 const open = ref(false)
@@ -95,6 +96,7 @@ function pick(val: string | number) {
   } else {
     emitVal(val)
     close()
+    nextTick(() => triggerRef.value?.focus())
   }
   search.value = props.multiple ? '' : search.value
 }
@@ -146,6 +148,14 @@ function close() {
   window.removeEventListener('resize', updateRect)
 }
 
+function onEscape(event: KeyboardEvent) {
+  if (!open.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  close()
+  triggerRef.value?.focus()
+}
+
 function onDocClick(e: MouseEvent) {
   const t = e.target as Node
   if (triggerRef.value?.contains(t) || dropdownRef.value?.contains(t)) return
@@ -165,11 +175,17 @@ onBeforeUnmount(() => {
 
 const dropdownStyle = computed(() => {
   if (!rect.value) return {}
+  const below = window.innerHeight - rect.value.bottom - 12
+  const above = rect.value.top - 12
+  const opensUp = below < 180 && above > below
   return {
     position: 'fixed' as const,
-    left: `${rect.value.left}px`,
-    top: `${rect.value.bottom + 4}px`,
+    left: `${Math.max(8, Math.min(rect.value.left, window.innerWidth - rect.value.width - 8))}px`,
+    top: opensUp ? undefined : `${rect.value.bottom + 4}px`,
+    bottom: opensUp ? `${window.innerHeight - rect.value.top + 4}px` : undefined,
     minWidth: `${rect.value.width}px`,
+    maxWidth: 'calc(100vw - 16px)',
+    maxHeight: `${Math.max(100, Math.min(288, opensUp ? above : below))}px`,
     width: props.consistentMenuWidth ? `${rect.value.width}px` : undefined,
     zIndex: 100000,
   }
@@ -215,7 +231,7 @@ const showClearButton = computed(() =>
       @click="toggle"
       @keydown.enter.self.prevent="toggle"
       @keydown.space.self.prevent="toggle"
-      @keydown.esc.stop="close"
+      @keydown.esc="onEscape"
     >
       <!-- multiple selected tags -->
       <template v-if="multiple && selectedArray.length">
@@ -275,7 +291,7 @@ const showClearButton = computed(() =>
       </span>
     </div>
 
-    <Teleport to="body">
+    <Teleport :to="overlayRoot || 'body'">
       <Transition
         enter-active-class="transition ease-out duration-150"
         enter-from-class="opacity-0 -translate-y-1"
@@ -289,6 +305,7 @@ const showClearButton = computed(() =>
           ref="dropdownRef"
           :style="dropdownStyle"
           role="listbox"
+          @keydown.esc.stop.prevent="close(); triggerRef?.focus()"
           :aria-multiselectable="multiple || undefined"
           class="max-h-72 overflow-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-700 dark:bg-dark-800"
         >
@@ -304,6 +321,7 @@ const showClearButton = computed(() =>
             v-for="opt in filteredOptions"
             :key="opt.value"
             role="option"
+            :tabindex="opt.disabled ? -1 : 0"
             :aria-selected="isSelected(opt.value)"
             class="flex cursor-pointer items-center justify-between gap-2 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-dark-700"
             :class="[
@@ -311,6 +329,8 @@ const showClearButton = computed(() =>
               opt.disabled && 'pointer-events-none opacity-40',
             ]"
             @click="pick(opt.value)"
+            @keydown.enter.prevent="pick(opt.value)"
+            @keydown.space.prevent="pick(opt.value)"
           >
             <span class="truncate">{{ opt.label }}</span>
             <svg

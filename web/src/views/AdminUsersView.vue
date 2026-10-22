@@ -51,6 +51,10 @@ interface UsageLog {
 const message = useMessage()
 const users = ref<UserRow[]>([])
 const loading = ref(true)
+const search = ref('')
+const statusFilter = ref('all')
+const managedUser = ref<UserRow | null>(null)
+const filteredUsers = computed(() => users.value.filter(row => `${row.name} ${row.email}`.toLowerCase().includes(search.value.trim().toLowerCase()) && (statusFilter.value === 'all' || row.status === statusFilter.value)))
 const showInvite = ref(false)
 const inviting = ref(false)
 const inviteForm = ref({ email: '', name: '' })
@@ -64,6 +68,9 @@ const showAdjust = ref(false)
 const adjusting = ref(false)
 const selectedUser = ref<UserRow | null>(null)
 const adjustForm = ref({ amount: 10, note: '' })
+const adjustDirection = ref<1 | -1>(1)
+const signedAmount = computed(() => adjustDirection.value * (Number(adjustForm.value.amount) || 0))
+const adjustedBalance = computed(() => (selectedUser.value?.balance || 0) + signedAmount.value)
 
 const showConcurrency = ref(false)
 const savingConcurrency = ref(false)
@@ -227,7 +234,8 @@ async function updateStatus(row: UserRow) {
 
 function openAdjust(row: UserRow, sign: 1 | -1) {
   selectedUser.value = row
-  adjustForm.value = { amount: sign * 10, note: '' }
+  adjustDirection.value = sign
+  adjustForm.value = { amount: 10, note: '' }
   showAdjust.value = true
 }
 
@@ -258,11 +266,12 @@ async function saveConcurrency() {
 }
 
 async function adjustWallet() {
-  if (!selectedUser.value) return
+  if (!selectedUser.value || adjusting.value) return
+  if (!Number.isFinite(adjustForm.value.amount) || adjustForm.value.amount <= 0) { message.warning('请输入大于 0 的金额'); return }
   adjusting.value = true
   try {
     await api.post(`/admin/users/${selectedUser.value.id}/wallet`, {
-      amount: adjustForm.value.amount,
+      amount: signedAmount.value,
       note: adjustForm.value.note.trim() || undefined
     })
     message.success('已更新余额')
@@ -374,94 +383,23 @@ const columns = computed<TableColumn<UserRow>[]>(() => [
     minWidth: 140,
     render: (row) => formatTime(row.createdAt)
   },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 450,
-    render: (row) =>
-      h(
-        UiSpace,
-        { size: 4, wrap: false },
-        {
-          default: () => [
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openAdjust(row, 1)
-              },
-              { default: () => '充值' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openAdjust(row, -1)
-              },
-              { default: () => '扣款' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openConcurrency(row)
-              },
-              { default: () => '并发' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openWallet(row)
-              },
-              { default: () => '流水' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openUsage(row)
-              },
-              { default: () => '用量' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => openSubscriptions(row)
-              },
-              { default: () => '订阅' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                quaternary: true,
-                onClick: () => resetInvite(row)
-              },
-              { default: () => '重置密码' }
-            ),
-            h(
-              UiButton,
-              {
-                size: 'small',
-                type: row.status === 'active' ? 'error' : 'success',
-                quaternary: true,
-                onClick: () => updateStatus(row)
-              },
-              { default: () => (row.status === 'active' ? '禁用' : '启用') }
-            )
-          ]
-        }
-      )
+  { title: '操作', key: 'actions', width: 96, fixed: 'right',
+    render: row => h(UiButton, { size: 'small', secondary: true, onClick: () => { managedUser.value = row } }, { default: () => '查看' }),
   }
 ])
+
+function manageUser(action: 'credit' | 'debit' | 'wallet' | 'usage' | 'subscriptions' | 'concurrency' | 'password' | 'status') {
+  const row = managedUser.value
+  if (!row) return
+  managedUser.value = null
+  if (action === 'credit' || action === 'debit') openAdjust(row, action === 'credit' ? 1 : -1)
+  else if (action === 'wallet') void openWallet(row)
+  else if (action === 'usage') void openUsage(row)
+  else if (action === 'subscriptions') void openSubscriptions(row)
+  else if (action === 'concurrency') openConcurrency(row)
+  else if (action === 'password') void resetInvite(row)
+  else void updateStatus(row)
+}
 
 const walletColumns: TableColumn<WalletTransaction>[] = [
   {
@@ -533,12 +471,25 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
+      <div class="flex min-w-0 flex-1 flex-wrap gap-3"><UiInput v-model:value="search" aria-label="搜索用户" placeholder="搜索名称或邮箱" class="!w-full sm:!w-72" /><select v-model="statusFilter" class="input !w-auto" aria-label="用户状态"><option value="all">全部用户</option><option value="active">启用</option><option value="disabled">禁用</option></select></div>
       <UiButton type="primary" @click="showInvite = true">邀请用户</UiButton>
     </div>
 
-    <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="users" :loading="loading" :bordered="false" :scroll-x="1400" />
+    <UiCard class="table-card hidden md:block" :bordered="false">
+      <UiDataTable :columns="columns" :data="filteredUsers" :loading="loading" :bordered="false" :scroll-x="1100" empty-text="暂无符合条件的用户" />
     </UiCard>
+
+    <div class="grid gap-3 md:hidden">
+      <p v-if="loading" role="status" class="py-8 text-center text-sm text-gray-500">正在加载用户…</p>
+      <p v-else-if="!filteredUsers.length" class="card p-6 text-center text-sm text-gray-500">暂无符合条件的用户</p>
+      <article v-for="row in filteredUsers" :key="row.id" class="card min-w-0 p-4"><div class="flex justify-between gap-3"><h2 class="min-w-0 break-words font-semibold">{{ row.name }}</h2><UiTag :type="row.status === 'active' ? 'success' : 'default'">{{ row.status === 'active' ? '启用' : '禁用' }}</UiTag></div><p class="mt-2 break-all text-xs text-gray-500">{{ row.email }}</p><div class="mt-4 flex items-end justify-between gap-3"><div><p class="text-xs text-gray-500">钱包余额</p><strong class="text-xl">{{ formatUsd(row.balance) }}</strong><p class="mt-2 text-xs text-gray-500">{{ row.keyCount }} 个 Key · {{ row.requestCount }} 次请求</p></div><UiButton secondary size="small" @click="managedUser = row">用户详情</UiButton></div></article>
+    </div>
+    <UiModal :show="!!managedUser" :title="managedUser?.name || '用户详情'" :width="560" @update:show="(shown: boolean) => { if (!shown) managedUser = null }">
+      <template v-if="managedUser"><p class="break-all text-sm text-gray-500">{{ managedUser.email }}</p><div class="my-4 grid grid-cols-2 gap-3 rounded-xl bg-gray-50 p-4 text-sm dark:bg-dark-900"><div><span class="text-gray-500">钱包余额</span><strong class="mt-1 block text-xl">{{ formatUsd(managedUser.balance) }}</strong></div><div><span class="text-gray-500">累计请求</span><strong class="mt-1 block text-xl">{{ managedUser.requestCount }}</strong></div></div>
+        <h3 class="mb-3 text-sm font-semibold">钱包与消费</h3><div class="grid grid-cols-2 gap-3"><UiButton secondary @click="manageUser('credit')">充值</UiButton><UiButton secondary @click="manageUser('debit')">扣款</UiButton><UiButton secondary @click="manageUser('wallet')">钱包流水</UiButton><UiButton secondary @click="manageUser('usage')">用量记录</UiButton><UiButton secondary @click="manageUser('subscriptions')">订阅套餐</UiButton></div>
+        <details class="mt-5 border-t border-gray-100 pt-4 dark:border-dark-700"><summary class="cursor-pointer text-sm font-semibold">账号管理</summary><div class="mt-3 flex flex-wrap gap-3"><UiButton secondary @click="manageUser('concurrency')">并发限制</UiButton><UiButton secondary @click="manageUser('password')">生成重置密码链接</UiButton><UiButton :type="managedUser.status === 'active' ? 'error' : 'success'" quaternary @click="manageUser('status')">{{ managedUser.status === 'active' ? '禁用用户' : '启用用户' }}</UiButton></div></details>
+      </template>
+    </UiModal>
 
     <UiModal v-model:show="showInvite" title="邀请用户" :width="460">
       <UiForm label-placement="top" @submit="invite">
@@ -577,19 +528,20 @@ onMounted(load)
       </template>
     </UiModal>
 
-    <UiModal v-model:show="showAdjust" :title="`调整余额：${selectedUser?.name ?? ''}`" :width="460">
+    <UiModal v-model:show="showAdjust" :title="`${adjustDirection === 1 ? '充值' : '扣款'}：${selectedUser?.name ?? ''}`" :width="460">
       <UiForm label-placement="top" @submit="adjustWallet">
-        <UiFormItem label="金额（USD，可为负数）">
-          <UiInputNumber v-model:value="adjustForm.amount" :step="1" style="width: 100%" />
+        <UiFormItem label="金额（USD）">
+          <UiInputNumber v-model:value="adjustForm.amount" :min="0.01" :step="1" style="width: 100%" />
         </UiFormItem>
         <UiFormItem label="备注">
           <UiInput v-model:value="adjustForm.note" placeholder="可留空" />
         </UiFormItem>
       </UiForm>
+      <div class="mt-4 rounded-xl bg-gray-50 p-3 text-sm dark:bg-dark-900"><p>当前余额：{{ formatUsd(selectedUser?.balance || 0) }}</p><p class="mt-2">本次{{ adjustDirection === 1 ? '增加' : '扣除' }}：{{ formatUsd(Math.abs(signedAmount)) }}</p><p class="mt-2 font-semibold">预计余额：{{ formatUsd(adjustedBalance) }}</p></div>
       <template #footer>
         <UiSpace justify="end">
           <UiButton @click="showAdjust = false">取消</UiButton>
-          <UiButton type="primary" :loading="adjusting" @click="adjustWallet">保存</UiButton>
+          <UiButton type="primary" :loading="adjusting" @click="adjustWallet">{{ adjustDirection === 1 ? '确认充值' : '确认扣款' }}</UiButton>
         </UiSpace>
       </template>
     </UiModal>

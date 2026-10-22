@@ -408,7 +408,7 @@ const providerOption = computed(() => {
   const rows = providerRows.value
   const data = rows.map((row) => ({
     name: providerLabel(row.provider),
-    value: row.tokens || row.requests,
+    value: row.requests,
     itemStyle: { color: providerColors[row.provider] ?? '#6366f1' },
   }))
   return {
@@ -616,18 +616,18 @@ function openRequestInput(row: DashboardRecentLog) {
 </script>
 
 <template>
-  <div class="grid gap-4">
+  <div class="overview-page grid min-w-0 grid-cols-1 gap-4">
     <UiGrid :cols="4" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-      <UiGi v-for="card in cards" :key="card.label" span="4 s:2 m:1">
-        <UiCard class="surface-card relative overflow-hidden min-h-[132px]" :bordered="false">
+      <UiGi v-for="card in cards" :key="card.label" span="2 l:1">
+        <UiCard class="overview-metric surface-card relative overflow-hidden min-h-[116px]" :bordered="false">
           <div
             class="absolute -right-7 -top-7 h-24 w-24 rounded-full opacity-15"
             :style="{ background: toneColors[card.tone].blob }"
             aria-hidden="true"
           />
-          <div class="relative z-[1] flex items-center gap-4 min-h-[92px]">
+          <div class="metric-content relative z-[1] flex items-center gap-4 min-h-[80px]">
             <div
-              class="grid place-items-center shrink-0 w-14 h-14 rounded-[14px]"
+              class="metric-icon grid place-items-center shrink-0 w-12 h-12 rounded-xl"
               :style="{ color: toneColors[card.tone].icon, background: toneColors[card.tone].iconBg }"
               aria-hidden="true"
             >
@@ -646,7 +646,7 @@ function openRequestInput(row: DashboardRecentLog) {
             <div class="min-w-0">
               <div class="text-accent-900/60 text-[13px] font-[760]">{{ card.label }}</div>
               <div class="overflow-hidden text-accent-900 text-[clamp(26px,2.2vw,34px)] font-[820] leading-[1.05] truncate mt-1.5 mb-0.5">{{ loading ? '—' : card.value }}</div>
-              <div class="truncate text-accent-900/40 text-xs">{{ card.hint }}</div>
+              <div class="metric-hint text-accent-900/60 text-xs">{{ card.hint }}</div>
             </div>
           </div>
         </UiCard>
@@ -672,10 +672,10 @@ function openRequestInput(row: DashboardRecentLog) {
           <div class="flex items-start justify-between gap-3.5 mb-4 max-md:flex-col max-md:items-start">
             <div>
               <h3 class="text-accent-900 text-base font-[820] m-0">服务商占比</h3>
-              <span class="block mt-1 text-accent-900/45 text-xs">按近 30 天 Tokens 统计</span>
+              <span class="block mt-1 text-accent-900/60 text-xs">近 30 天 · 按请求数统计，包含文本、图片和视频</span>
             </div>
           </div>
-          <LazyEChart v-if="providerRows.length" :option="providerOption" height="218px" />
+          <LazyEChart v-if="providerRows.some(row => row.requests > 0)" :option="providerOption" height="218px" />
           <div v-else class="grid place-items-center min-h-[150px] border border-dashed border-accent-900/15 rounded-[14px] text-accent-900/40 bg-accent-50 text-[13px]">暂无用量数据</div>
           <div class="grid gap-2.5 mt-1">
             <div
@@ -685,7 +685,7 @@ function openRequestInput(row: DashboardRecentLog) {
               :style="providerStyle(row.provider)"
             >
               <span class="flex items-center gap-2 text-accent-900/70 text-[13px] before:content-[''] before:h-2 before:w-2 before:shrink-0 before:rounded-full before:bg-[var(--provider-color)]">{{ providerLabel(row.provider) }}</span>
-              <strong class="text-accent-900 text-[13px]">{{ formatNumber(row.tokens) }}</strong>
+              <strong class="text-accent-900 text-[13px]">{{ formatNumber(row.requests) }} 次</strong>
             </div>
           </div>
         </UiCard>
@@ -955,3 +955,13 @@ function openRequestInput(row: DashboardRecentLog) {
     </UiModal>
   </div>
 </template>
+
+<style scoped>
+.overview-page > * { min-width: 0; }
+@media (max-width: 639px) {
+  .overview-metric :deep(.card-body) { padding: 12px; }
+  .metric-icon { display: none; }
+  .metric-content { min-height: 80px; gap: 0; }
+  .metric-hint { margin-top: 6px; overflow-wrap: anywhere; }
+}
+</style>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { dialogState, confirm, cancel } from '../../composables/useDialog'
+import UiModal from './UiModal.vue'
 
 const accent: Record<string, { icon: string; ring: string; confirm: string }> = {
   warning: { icon: 'text-amber-500 bg-amber-100 dark:bg-amber-900/30', ring: '', confirm: 'btn-danger' },
@@ -10,14 +11,17 @@ const accent: Record<string, { icon: string; ring: string; confirm: string }> = 
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
+    <UiModal
       v-for="d in dialogState.dialogs"
       :key="d.id"
-      class="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      :show="d.show"
+      :title="d.title || '确认操作'"
+      :width="460"
+      :closable="!d.loading"
+      role="alertdialog"
+      @update:show="(shown: boolean) => { if (!shown && !d.loading) cancel(d.id) }"
     >
-      <div class="w-full max-w-md rounded-2xl bg-white shadow-2xl dark:bg-dark-800">
-        <div class="flex items-start gap-3 px-6 pt-6">
+        <div class="flex items-start gap-3">
           <span
             class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full"
             :class="accent[d.type ?? 'warning'].icon"
@@ -31,17 +35,14 @@ const accent: Record<string, { icon: string; ring: string; confirm: string }> = 
             </svg>
           </span>
           <div class="min-w-0 flex-1 pt-0.5">
-            <h3 v-if="d.title" class="text-base font-semibold text-gray-900 dark:text-white">
-              {{ d.title }}
-            </h3>
             <component :is="d.content" v-if="typeof d.content === 'function'" class="mt-2" />
             <p v-else class="mt-1 text-sm leading-relaxed text-gray-600 dark:text-gray-300">
               {{ d.content }}
             </p>
           </div>
         </div>
-        <div class="flex justify-end gap-3 px-6 pb-5 pt-5">
-          <button v-if="d.negativeText" class="btn btn-secondary btn-sm" @click="cancel(d.id)">
+        <template #footer>
+          <button v-if="d.negativeText" class="btn btn-secondary btn-sm" :disabled="d.loading" @click="cancel(d.id)">
             {{ d.negativeText }}
           </button>
           <button
@@ -53,8 +54,6 @@ const accent: Record<string, { icon: string; ring: string; confirm: string }> = 
             <span v-if="d.loading" class="spinner h-3.5 w-3.5" />
             {{ d.positiveText ?? '确定' }}
           </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+        </template>
+    </UiModal>
 </template>

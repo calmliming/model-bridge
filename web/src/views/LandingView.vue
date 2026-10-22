@@ -4,10 +4,13 @@ import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { api } from '../api/client'
 import BrandLogo from '../components/BrandLogo.vue'
+import { useMessage } from '../composables/useMessage'
 
 type SnippetKey = 'curl' | 'python' | 'js'
 
 const auth = useAuthStore()
+const message = useMessage()
+const baseOrigin = window.location.origin
 const scrolled = ref(false)
 const activeTab = ref<SnippetKey>('curl')
 const mobileMenuOpen = ref(false)
@@ -94,8 +97,9 @@ const features = [
 const snippetTabs: SnippetKey[] = ['curl', 'python', 'js']
 
 const codeSnippets: Record<SnippetKey, string> = {
-  curl: `curl https://api.model-bridge.io/v1/chat/completions \\
+  curl: `curl ${baseOrigin}/v1/chat/completions \\
   -H "Authorization: Bearer $MB_KEY" \\
+  -H "Content-Type: application/json" \\
   -d '{
     "model": "gpt-6.1-sol",
     "messages": [{"role": "user", "content": "Hello!"}]
@@ -103,7 +107,7 @@ const codeSnippets: Record<SnippetKey, string> = {
   python: `import openai
 
 client = openai.OpenAI(
-    base_url="https://api.model-bridge.io/v1",
+    base_url="${baseOrigin}/v1",
     api_key="your-mb-api-key"
 )
 
@@ -113,9 +117,14 @@ response = client.chat.completions.create(
 )`,
   js: `const OpenAI = require('openai');
 const openai = new OpenAI({
-  baseURL: 'https://api.model-bridge.io/v1',
+  baseURL: '${baseOrigin}/v1',
   apiKey: 'your-mb-api-key',
 });`
+}
+
+async function copySnippet() {
+  try { await navigator.clipboard.writeText(codeSnippets[activeTab.value]); message.success('代码已复制') }
+  catch { message.warning('无法自动复制，请选中代码手动复制') }
 }
 </script>
 
@@ -134,7 +143,7 @@ const openai = new OpenAI({
         
         <div class="hidden items-center gap-10 md:flex">
           <a href="#features" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">核心功能</a>
-          <RouterLink :to="{ name: 'docs' }" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">文档</RouterLink>
+          <RouterLink :to="{ name: 'api-docs' }" class="text-sm font-medium text-slate-600 transition-colors hover:text-primary-600 dark:text-slate-400 dark:hover:text-primary-400" @click="mobileMenuOpen = false">文档</RouterLink>
         </div>
 
         <div
@@ -143,7 +152,7 @@ const openai = new OpenAI({
           class="absolute inset-x-4 top-[calc(100%+0.5rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-xl md:hidden dark:border-dark-700 dark:bg-dark-900"
         >
           <a href="#features" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">核心功能</a>
-          <RouterLink :to="{ name: 'docs' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">文档</RouterLink>
+          <RouterLink :to="{ name: 'api-docs' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">文档</RouterLink>
           <RouterLink v-if="!auth.isAuthenticated" :to="{ name: 'login' }" class="block rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-dark-800" @click="mobileMenuOpen = false">登录</RouterLink>
         </div>
 
@@ -196,16 +205,16 @@ const openai = new OpenAI({
           <div class="mt-8 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:justify-center sm:gap-5 lg:justify-start">
             <RouterLink
               :to="auth.isAuthenticated ? (auth.isAdmin ? '/overview' : '/app') : { name: 'login' }"
-              class="flex min-h-12 items-center justify-center rounded-xl bg-slate-900 px-3 py-3 text-center text-sm font-bold text-white shadow-xl transition-all hover:bg-slate-800 dark:bg-primary-600 dark:hover:bg-primary-700 sm:px-8 sm:py-4 sm:text-lg"
+              class="flex min-h-12 items-center justify-center rounded-xl bg-primary-600 px-3 py-3 text-center text-sm font-bold text-white shadow-sm transition-all hover:bg-primary-700 sm:px-8 sm:py-4 sm:text-lg"
             >
-              {{ auth.isAuthenticated ? '进入控制台' : '立即开始构建' }}
+              {{ auth.isAuthenticated ? '进入控制台' : '立即开始' }}
             </RouterLink>
             <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-3 text-center text-sm font-bold text-slate-900 shadow-sm transition-all hover:bg-slate-50 dark:border-dark-700 dark:bg-dark-800 dark:text-white sm:px-8 sm:py-4 sm:text-lg">
               GitHub 源码
             </a>
           </div>
         </div>
-        <div class="relative min-w-0 animate-in fade-in zoom-in-95 duration-1000 delay-200">
+        <div class="hero-preview relative min-w-0 animate-in fade-in zoom-in-95 duration-1000 delay-200">
           <div class="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-2xl dark:border-dark-700 dark:bg-dark-800 sm:p-2">
             <div class="bg-slate-50 dark:bg-dark-950 rounded-xl overflow-hidden">
               <div class="flex items-center gap-2 border-b px-3 py-2.5 dark:border-dark-800 sm:px-5 sm:py-3">
@@ -214,7 +223,7 @@ const openai = new OpenAI({
                   <div class="h-3 w-3 rounded-full bg-yellow-400"></div>
                   <div class="h-3 w-3 rounded-full bg-green-400"></div>
                 </div>
-                <div class="min-w-0 flex-1 truncate text-center text-[10px] font-bold uppercase tracking-widest text-slate-400 sm:text-[11px]">Analytics Dashboard</div>
+                <div class="min-w-0 flex-1 truncate text-center text-xs font-semibold text-slate-500">控制台布局示意</div>
               </div>
               <div class="p-3 sm:p-6 lg:p-8">
                 <div class="mb-4 grid grid-cols-2 gap-3 sm:mb-8 sm:gap-6">
@@ -227,7 +236,7 @@ const openai = new OpenAI({
                     <div class="mt-3 h-5 w-3/4 rounded bg-purple-100 dark:bg-purple-900/30 sm:mt-4 sm:h-6"></div>
                   </div>
                 </div>
-                <div class="flex h-28 items-end justify-between gap-1.5 rounded-xl border border-slate-100 bg-white p-3 dark:border-dark-800 dark:bg-dark-900 sm:h-40 sm:gap-2 sm:p-4">
+                <div class="preview-chart flex h-20 items-end justify-between gap-1.5 rounded-xl border border-slate-100 bg-white p-3 dark:border-dark-800 dark:bg-dark-900 sm:h-40 sm:gap-2 sm:p-4">
                   <div v-for="(height, index) in chartBars" :key="index" class="w-full rounded-t-lg bg-primary-500/20 dark:bg-primary-500/40" :style="{ height: `${height}%` }"></div>
                 </div>
               </div>
@@ -282,6 +291,7 @@ const openai = new OpenAI({
                 {{ t }}
               </button>
             </div>
+            <div class="flex justify-end px-4 pt-3"><button type="button" class="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-white hover:bg-slate-700" @click="copySnippet">复制代码</button></div>
             <pre id="code-example" role="tabpanel" :aria-labelledby="`tab-${activeTab}`" class="max-w-full overflow-x-auto p-4 font-mono text-xs leading-relaxed text-blue-300 sm:p-6 sm:text-sm lg:p-8"><code>{{ codeSnippets[activeTab] }}</code></pre>
           </div>
           <p class="mt-2 text-right text-xs text-slate-500 sm:hidden">左右滑动查看完整代码</p>
@@ -311,7 +321,7 @@ const openai = new OpenAI({
         <p class="text-sm font-medium text-slate-400 dark:text-dark-500">© 2026 Model Bridge Protocol. Open source infrastructure.</p>
         <div class="flex gap-8">
           <a href="https://github.com/calmliming/model-bridge" target="_blank" rel="noopener noreferrer" class="text-sm font-bold text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-white">GitHub</a>
-          <RouterLink :to="{ name: 'docs' }" class="text-sm font-bold text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-white">文档</RouterLink>
+          <RouterLink :to="{ name: 'api-docs' }" class="text-sm font-bold text-slate-400 transition-colors hover:text-slate-900 dark:hover:text-white">文档</RouterLink>
         </div>
       </div>
     </footer>
@@ -319,6 +329,10 @@ const openai = new OpenAI({
 </template>
 
 <style scoped>
+@media (max-width: 639px) {
+  .hero-preview .grid > div { height: 40px; padding: 8px; }
+  .hero-preview .grid > div > div:last-child { margin-top: 6px; height: 8px; }
+}
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

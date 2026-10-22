@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useFieldContext } from './fieldContext'
+
+defineOptions({ inheritAttrs: false })
+const passwordVisible = ref(false)
 
 const props = withDefaults(
   defineProps<{
@@ -28,6 +31,8 @@ const props = withDefaults(
 
 const field = useFieldContext()
 const resolvedId = computed(() => props.id ?? field?.id)
+const invalid = computed(() => props.error || field?.invalid.value || false)
+const describedBy = computed(() => props.ariaDescribedby ?? field?.descriptionId.value)
 
 const emit = defineEmits<{
   (e: 'update:value', value: string): void
@@ -52,25 +57,36 @@ const minRows = computed(() =>
 <template>
   <textarea
     v-if="type === 'textarea'"
+    v-bind="$attrs"
     class="input resize-y"
-    :class="error && 'input-error'"
+    :class="invalid && 'input-error'"
     :id="resolvedId"
     :name="name"
     :value="current"
     :placeholder="placeholder"
     :autocomplete="autocomplete"
     :aria-label="ariaLabel"
-    :aria-describedby="ariaDescribedby"
+    :aria-describedby="describedBy"
+    :aria-invalid="invalid || undefined"
     :required="required"
     :disabled="disabled"
     :readonly="readonly"
     :rows="minRows"
     @input="onInput"
   />
+  <div v-else-if="type === 'password'" class="relative min-w-0">
+    <input v-bind="$attrs" class="input !pr-14" :class="invalid && 'input-error'" :id="resolvedId" :name="name"
+      :type="passwordVisible ? 'text' : 'password'" :value="current" :placeholder="placeholder" :autocomplete="autocomplete"
+      :aria-label="ariaLabel" :aria-describedby="describedBy" :aria-invalid="invalid || undefined"
+      :required="required" :disabled="disabled" :readonly="readonly" @input="onInput" @keyup="emit('keyup', $event)" />
+    <button type="button" class="absolute inset-y-0 right-1 rounded-lg px-2 text-xs text-gray-500 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+      :disabled="disabled" :aria-label="passwordVisible ? '隐藏密码' : '显示密码'" :aria-pressed="passwordVisible" @click="passwordVisible = !passwordVisible">{{ passwordVisible ? '隐藏' : '显示' }}</button>
+  </div>
   <input
     v-else
+    v-bind="$attrs"
     class="input"
-    :class="error && 'input-error'"
+    :class="invalid && 'input-error'"
     :id="resolvedId"
     :name="name"
     :type="type"
@@ -78,7 +94,8 @@ const minRows = computed(() =>
     :placeholder="placeholder"
     :autocomplete="autocomplete"
     :aria-label="ariaLabel"
-    :aria-describedby="ariaDescribedby"
+    :aria-describedby="describedBy"
+    :aria-invalid="invalid || undefined"
     :required="required"
     :disabled="disabled"
     :readonly="readonly"

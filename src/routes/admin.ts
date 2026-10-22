@@ -264,6 +264,7 @@ const redeemCodesQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(20),
   status: z.enum(['unused', 'used', 'disabled']).optional(),
   batchId: z.string().trim().min(1).optional(),
+  validity: z.enum(['valid', 'expired', 'permanent']).optional(),
 })
 
 const updateRedeemCodeSchema = z.object({
@@ -407,6 +408,11 @@ const recentLogsQuerySchema = paginationQuerySchema.extend({
 
 const paymentOrdersQuerySchema = paginationQuerySchema.extend({
   status: z.enum(['pending', 'paid', 'canceled', 'expired']).optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+  startDate: z.coerce.number().int().nonnegative().optional(),
+  endDate: z.coerce.number().int().positive().optional(),
+}).refine(query => query.startDate == null || query.endDate == null || query.startDate < query.endDate, {
+  message: '结束日期必须晚于开始日期',
 })
 
 const paymentOrderActionSchema = z.object({
@@ -1684,12 +1690,16 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   )
 
   // Usage statistics
-  app.get<{ Querystring: { days?: string } }>(
+  app.get<{ Querystring: { days?: string; startDate?: string; endDate?: string; orderBy?: string } }>(
     '/api/admin/stats/summary',
     { preHandler: requireAdmin },
-    async (request) => {
-      const days = request.query.days ? Number(request.query.days) : 30
-      return await statsSummary(days)
+    async (request, reply) => {
+      const query = z.object({ days: z.coerce.number().int().min(1).max(365).default(30),
+        startDate: z.string().optional(), endDate: z.string().optional(),
+        orderBy: z.enum(['tokens', 'requests', 'cost']).optional() }).safeParse(request.query)
+      if (!query.success) return reply.code(400).send({ error: '统计筛选参数无效' })
+      try { return await statsSummary(query.data.days, query.data) }
+      catch (error) { if (error instanceof RangeError) return reply.code(400).send({ error: error.message }); throw error }
     },
   )
 }

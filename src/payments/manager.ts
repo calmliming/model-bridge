@@ -260,18 +260,29 @@ export async function listPaymentOrders(input: {
   page?: number
   pageSize?: number
   status?: PaymentOrderStatus
+  search?: string
+  startDate?: number
+  endDate?: number
 } = {}): Promise<{ page: number; pageSize: number; total: number; orders: PaymentOrderView[] }> {
   await expirePendingOrders()
   const safePage = Math.max(1, Math.floor(Number.isFinite(input.page) ? input.page! : 1))
   const safePageSize = Math.max(1, Math.min(100, Math.floor(Number.isFinite(input.pageSize) ? input.pageSize! : 20)))
   const offset = (safePage - 1) * safePageSize
-  const where = input.status ? 'WHERE o.status = $1' : ''
-  const values: unknown[] = input.status ? [input.status] : []
+  const filters: string[] = []
+  const values: unknown[] = []
+  if (input.status) { values.push(input.status); filters.push(`o.status = $${values.length}`) }
+  if (input.search?.trim()) {
+    values.push(`%${input.search.trim().replace(/[\\%_]/g, '\\$&')}%`)
+    filters.push(`(o.id ILIKE $${values.length} OR u.email ILIKE $${values.length} OR u.name ILIKE $${values.length})`)
+  }
+  if (input.startDate != null) { values.push(input.startDate); filters.push(`o.created_at >= $${values.length}`) }
+  if (input.endDate != null) { values.push(input.endDate); filters.push(`o.created_at < $${values.length}`) }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : ''
   const limitParam = values.length + 1
   const offsetParam = values.length + 2
   const [total, rows] = await Promise.all([
     pool.query<Record<string, unknown>>(
-      `SELECT COUNT(*) AS total FROM payment_orders o ${where}`,
+      `SELECT COUNT(*) AS total FROM payment_orders o LEFT JOIN users u ON u.id = o.user_id ${where}`,
       values,
     ),
     pool.query<Record<string, unknown>>(

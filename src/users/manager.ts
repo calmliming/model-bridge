@@ -130,7 +130,7 @@ function asUsageLog(row: Record<string, unknown>): UserUsageLog {
     model: (row.model as string | null) ?? null,
     status: row.status as string,
     usageSource: typeof row.usage_source === 'string' ? row.usage_source : 'unknown',
-    errorCategory: normalizeUserErrorCategory(row.error_code, row.upstream_status),
+    errorCategory: row.status === 'success' ? null : normalizeUserErrorCategory(row.error_code, row.upstream_status) ?? '请求失败',
     modelMismatch: row.model_mismatch === true,
     latencyMs: row.latency_ms == null ? null : Number(row.latency_ms),
     firstTokenMs: row.first_token_ms == null ? null : Number(row.first_token_ms),
@@ -161,7 +161,7 @@ function normalizeUserErrorCategory(codeValue: unknown, statusValue: unknown): s
   if (status === 403 || code.includes('policy')) return '请求被拒绝'
   if (status === 404 || code.includes('model')) return '模型不支持'
   if (status >= 500) return '上游服务异常'
-  return code || status ? '请求失败' : null
+  return code || status >= 400 ? '请求失败' : null
 }
 
 export async function getUserById(id: string): Promise<UserView | null> {
@@ -228,6 +228,19 @@ export async function createUserInvite(input: { email: string; name?: string | n
   } finally {
     client.release()
   }
+}
+
+export async function previewInvite(token: string): Promise<{ email: string; name: string; expiresAt: number }> {
+  const { rows } = await pool.query<Record<string, unknown>>(
+    `SELECT i.expires_at, i.accepted_at, u.email, u.name, u.status
+     FROM user_invites i JOIN users u ON u.id = i.user_id WHERE i.token_hash = $1`,
+    [hashToken(token.trim())],
+  )
+  const row = rows[0]
+  if (!row || row.accepted_at != null || Number(row.expires_at) <= Date.now() || row.status === 'disabled') {
+    throw new UserManagerError('邀请链接无效或已失效，请联系邀请人重新发送。', 400)
+  }
+  return { email: String(row.email), name: String(row.name), expiresAt: Number(row.expires_at) }
 }
 
 export async function acceptInvite(input: { token: string; password: string; name?: string | null }): Promise<UserView> {

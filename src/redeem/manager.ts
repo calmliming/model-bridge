@@ -210,6 +210,7 @@ export interface ListRedeemCodesInput {
   pageSize?: number
   status?: RedeemCodeStatus
   batchId?: string
+  validity?: 'valid' | 'expired' | 'permanent'
 }
 
 /** Paginated admin listing. Plaintext codes are withheld (use export to reveal). */
@@ -217,6 +218,7 @@ export async function listRedeemCodes(input: ListRedeemCodesInput = {}): Promise
   page: number
   pageSize: number
   total: number
+  summary: { value: number; used: number }
   codes: RedeemCodeView[]
 }> {
   const safePage = Math.max(1, Math.floor(Number.isFinite(input.page) ? input.page! : 1))
@@ -233,10 +235,15 @@ export async function listRedeemCodes(input: ListRedeemCodesInput = {}): Promise
     values.push(input.batchId)
     filters.push(`batch_id = $${values.length}`)
   }
+  if (input.validity === 'permanent') filters.push('expires_at IS NULL')
+  else if (input.validity) {
+    values.push(Date.now())
+    filters.push(input.validity === 'expired' ? `expires_at <= $${values.length}` : `(expires_at IS NULL OR expires_at > $${values.length})`)
+  }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : ''
 
   const [total, rows] = await Promise.all([
-    pool.query<Record<string, unknown>>(`SELECT COUNT(*) AS total FROM redeem_codes ${where}`, values),
+    pool.query<Record<string, unknown>>(`SELECT COUNT(*) AS total, COALESCE(SUM(value_micros), 0) AS total_value, COUNT(*) FILTER (WHERE status = 'used') AS used FROM redeem_codes ${where}`, values),
     pool.query<Record<string, unknown>>(
       `SELECT id, type, value_micros, status, batch_id, note, redeemed_by,
               redeemed_at, expires_at, created_at
@@ -251,6 +258,7 @@ export async function listRedeemCodes(input: ListRedeemCodesInput = {}): Promise
     page: safePage,
     pageSize: safePageSize,
     total: Number(total.rows[0]?.total ?? 0),
+    summary: { value: microsToUsd(Number(total.rows[0]?.total_value ?? 0)), used: Number(total.rows[0]?.used ?? 0) },
     codes: rows.rows.map((r) => asRedeemCodeView(r)),
   }
 }

@@ -1,0 +1,30 @@
+{
+  "prodChecks": [
+    {
+      "path": "/docs/api#text-chat",
+      "document": 390,
+      "width": 390
+    },
+    {
+      "path": "/keys",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "path": "/settings",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "path": "/stats",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "path": "/docs",
+      "width": 390,
+      "scroll": 390
+    }
+  ],
+  "prodErrors": []
+}

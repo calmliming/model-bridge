@@ -13,7 +13,7 @@ vi.mock('./pricing', () => ({
   resolvePrice: mocks.resolvePrice,
 }))
 
-import { dailyStats, dashboardRecentLogs } from './stats'
+import { dailyStats, dashboardRecentLogs, statsSummary, statsWindow } from './stats'
 import { config } from '../config'
 
 beforeEach(() => {
@@ -102,5 +102,26 @@ describe('dailyStats', () => {
     expect(out).toHaveLength(7)
     expect(out.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.day))).toBe(true)
     expect(out[0].day < out[out.length - 1].day).toBe(true)
+  })
+})
+
+describe('custom stats windows', () => {
+  it('uses inclusive calendar dates and the same exclusive upper bound for every aggregate', async () => {
+    mocks.query.mockResolvedValue({ rows: [] })
+    const window = statsWindow(30, '2026-10-03', '2026-10-04')
+    expect(window.start).toBe(Date.parse('2026-10-02T16:00:00Z'))
+    expect(window.end).toBe(Date.parse('2026-10-04T16:00:00Z'))
+    const result = await statsSummary(30, { startDate: '2026-10-03', endDate: '2026-10-04', orderBy: 'requests' })
+    expect(result.daily.map(day => day.day)).toEqual(['2026-10-03', '2026-10-04'])
+    for (const [, values] of mocks.query.mock.calls) {
+      expect(values).toContain(window.start)
+      expect(values).toContain(window.end)
+    }
+    expect(mocks.query.mock.calls.find(([sql]) => sql.includes('GROUP BY model'))?.[0]).toContain('ORDER BY requests DESC, model ASC')
+  })
+
+  it.each([['0000-01-01', '0000-01-02'], ['2026-02-30', '2026-03-02'], ['2026-10-05', '2026-10-04'], ['2024-01-01', '2026-01-01'], ['2026-10-04', undefined]])('rejects invalid or oversized ranges before querying', async (startDate, endDate) => {
+    await expect(statsSummary(30, { startDate, endDate })).rejects.toBeInstanceOf(RangeError)
+    expect(mocks.query).not.toHaveBeenCalled()
   })
 })

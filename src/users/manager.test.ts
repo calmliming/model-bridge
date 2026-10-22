@@ -25,7 +25,7 @@ vi.mock('bcryptjs', () => ({
   },
 }))
 
-import { acceptInvite, registerUser, verifyUserCredentials, userFailureCategoriesToday, userUsageDaily, userUsageSummary, UserManagerError } from './manager'
+import { acceptInvite, previewInvite, registerUser, verifyUserCredentials, userFailureCategoriesToday, userUsageDaily, userUsageSummary, listUserUsage, UserManagerError } from './manager'
 import { beginEmailRegistration } from './emailRegistration'
 
 const USER_ROW = {
@@ -65,6 +65,23 @@ describe('user password persistence boundary', () => {
     const password = '汉'.repeat(25)
     scriptQueries([{ match: /FROM users WHERE email/, rows: [{ ...USER_ROW, password_hash: `hashed:${password}` }] }])
     expect(await verifyUserCredentials(USER_ROW.email, password)).toMatchObject({ id: USER_ROW.id })
+  })
+})
+
+describe('invite preview', () => {
+  it('returns only invite identity and expiry without changing account state', async () => {
+    const expiresAt = Date.now() + 60_000
+    mocks.query.mockResolvedValue({ rows: [{ email: 'invited@example.test', name: 'Invited', status: 'active', accepted_at: null, expires_at: expiresAt }] })
+    expect(await previewInvite('preview-token')).toEqual({ email: 'invited@example.test', name: 'Invited', expiresAt })
+    expect(mocks.query).toHaveBeenCalledTimes(1)
+    expect(mocks.query.mock.calls[0][0]).toMatch(/^SELECT/)
+    expect(mocks.query.mock.calls[0][1]).not.toContain('preview-token')
+    expect(mocks.connect).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, { accepted_at: 1 }, { expires_at: 1 }, { status: 'disabled' }])('rejects missing, used, expired or disabled invitations', async override => {
+    mocks.query.mockResolvedValue({ rows: override ? [{ email: 'hidden@example.test', status: 'active', accepted_at: null, expires_at: Date.now() + 60_000, ...override }] : [] })
+    await expect(previewInvite('invalid-token')).rejects.toMatchObject({ statusCode: 400 })
   })
 })
 
@@ -109,6 +126,24 @@ describe('userUsageSummary', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('usage result labels', () => {
+  it('does not label successful HTTP 200 responses as failures, while preserving actual error categories', async () => {
+    scriptQueries([
+      { match: /COUNT\(\*\) AS total FROM usage_logs/, rows: [{ total: 4 }] },
+      { match: /SELECT l.id, l.ts/, rows: [
+        { id: 'ok', status: 'success', upstream_status: 200, error_code: null, provider: 'openai' },
+        { id: 'legacy', status: 'success', upstream_status: 200, error_code: 'failed', provider: 'openai' },
+        { id: 'limited', status: 'error', upstream_status: 429, error_code: null, provider: 'openai' },
+        { id: 'stream-error', status: 'error', upstream_status: 200, error_code: null, provider: 'openai' },
+      ] },
+    ])
+    const { logs } = await listUserUsage('u_1')
+    expect(logs.map(row => [row.id, row.errorCategory])).toEqual([
+      ['ok', null], ['legacy', null], ['limited', '上游限流'], ['stream-error', '请求失败'],
+    ])
   })
 })
 

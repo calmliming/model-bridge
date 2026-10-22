@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
-import { usagePointsToUsd, usdToUsagePoints } from '../billing'
+import { usagePointsToUsd, usdToUsagePoints, formatUsageQuota } from '../billing'
+import { formatUsd } from '../utils'
 import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
 
 interface Plan {
@@ -42,6 +44,16 @@ const loadError = ref('')
 const waffo = ref<{ configured: boolean; mode: string; missing: string[] } | null>(null)
 const plans = ref<Plan[]>([])
 const groups = ref<GroupOption[]>([])
+const viewMode = ref<'manage' | 'preview'>('manage')
+const previewPlan = ref<Plan | null>(null)
+function planIssues(plan: Plan) {
+  const issues: string[] = []
+  if (!plan.hasAccounts) issues.push('需分配上游账户')
+  if (plan.paymentProvider === 'waffo' && !waffo.value?.configured) issues.push('支付服务待配置')
+  if (plan.paymentProvider === 'waffo' && !plan.waffoProductId) issues.push('待关联月度产品')
+  return issues
+}
+const saleLabel = (plan: Plan) => !plan.forSale ? '未上架' : planIssues(plan).length ? '暂不可购买' : '可购买'
 const groupOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })))
 
 const showEdit = ref(false)
@@ -287,7 +299,7 @@ onMounted(load)
 <template>
   <div>
     <div class="toolbar">
-      <div class="catalog-heading"><h2>为每种用量，准备合适的套餐。</h2><p>按月订阅，额度清晰。价格与服务资源可随时调整。</p></div>
+      <UiRadioGroup v-model:value="viewMode" aria-label="套餐显示方式"><UiRadioButton value="manage">套餐管理</UiRadioButton><UiRadioButton value="preview">展示预览</UiRadioButton></UiRadioGroup>
       <div class="toolbar-actions"><UiButton secondary :loading="loading" @click="load">刷新</UiButton><UiButton type="primary" @click="openCreate">新建套餐</UiButton></div>
     </div>
     <UiAlert v-if="loadError" type="error" class="mb-4">{{ loadError }}</UiAlert>
@@ -313,18 +325,28 @@ onMounted(load)
     </Transition>
 
     <div v-if="loading && !plans.length" class="plan-grid" aria-label="正在加载套餐" aria-busy="true"><div v-for="n in 3" :key="n" class="plan-skeleton" /></div>
+    <div v-else-if="plans.length && viewMode === 'manage'" class="grid gap-3">
+      <article v-for="plan in plans" :key="plan.id" class="card min-w-0 p-4 sm:p-5" :aria-label="`${plan.name} 管理卡`">
+        <div class="flex flex-wrap items-start justify-between gap-4"><div class="flex min-w-0 items-start gap-3"><input type="checkbox" class="plan-select mt-1" :aria-label="`选择 ${plan.name}`" :checked="selectedPlanIds.includes(plan.id)" :disabled="bulkBusy" @change="selectPlan(plan.id, $event)" /><div class="min-w-0"><h2 class="break-words text-lg font-semibold">{{ plan.name }}</h2><p class="mt-1 text-xs text-gray-500">{{ plan.groupName || '未绑定分组' }}</p></div></div><div class="text-right"><UiTag :type="saleLabel(plan) === '可购买' ? 'success' : plan.forSale ? 'warning' : 'default'">{{ saleLabel(plan) }}</UiTag><p class="mt-2 text-lg font-semibold">{{ formatUsd(plan.price) }} <span class="text-xs font-normal text-gray-500">/ {{ plan.paymentProvider === 'waffo' ? '月' : `${plan.validityDays} 天` }}</span></p></div></div>
+        <p v-if="planIssues(plan).length" class="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">{{ planIssues(plan).join(' · ') }}<RouterLink v-if="!plan.hasAccounts" to="/account-groups" class="ml-2 underline">管理分组 →</RouterLink></p>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3"><p class="text-sm text-gray-500">{{ plan.quotaMode === 'usage' ? `5小时 ${formatUsageQuota(plan.fiveHourLimitPoints)} · 每周 ${formatUsageQuota(plan.weeklyLimitPoints)} · 每月 ${formatUsageQuota(plan.monthlyLimitPoints)}` : `30天额度 ${plan.monthlyLimitUsd == null ? '不限' : formatUsd(plan.monthlyLimitUsd)}` }}</p><div class="flex flex-wrap gap-2"><UiButton secondary size="small" @click="openEdit(plan)">编辑套餐</UiButton><UiButton size="small" quaternary @click="previewPlan = plan">预览</UiButton><UiButton size="small" quaternary type="error" :disabled="bulkBusy" @click="confirmDelete(plan)">删除</UiButton></div></div>
+      </article>
+    </div>
     <div v-else-if="plans.length" class="plan-grid">
       <SubscriptionPlanCard v-for="plan in plans" :key="plan.id" :plan="plan">
+        <template #notice><div class="mb-4"><UiTag :type="saleLabel(plan) === '可购买' ? 'success' : 'warning'">{{ saleLabel(plan) }}</UiTag><p v-if="planIssues(plan).length" class="mt-2 text-xs text-amber-700">{{ planIssues(plan).join(' · ') }}</p></div></template>
         <template #selection><input type="checkbox" class="plan-select" :aria-label="`选择 ${plan.name}`" :checked="selectedPlanIds.includes(plan.id)" :disabled="bulkBusy" @change="selectPlan(plan.id, $event)" /></template>
         <div class="plan-actions"><UiButton secondary :disabled="bulkBusy" @click="openEdit(plan)">编辑套餐</UiButton><UiButton quaternary type="error" :disabled="bulkBusy" @click="confirmDelete(plan)">删除</UiButton></div>
-        <template #status><div class="plan-status"><UiTag :type="plan.forSale ? 'success' : 'default'" size="small" :bordered="false">{{ plan.forSale ? '已上架' : '未上架' }}</UiTag><span v-if="plan.paymentProvider === 'waffo'">{{ !plan.hasAccounts ? '需分配上游账户' : plan.waffoProductId ? '产品已关联' : '待关联 Waffo 产品' }}</span></div></template>
       </SubscriptionPlanCard>
     </div>
     <div v-else-if="!loadError" class="plans-empty"><h3>还没有套餐</h3><p>创建套餐并绑定账号分组，即可配置订阅额度。</p><UiButton secondary @click="openCreate">新建套餐</UiButton></div>
     <p class="catalog-footnote">加权用量按订阅用户汇总，多个 API Key 共享额度。任一窗口用尽后暂停新调用，等待对应窗口重置。</p>
 
+    <UiModal :show="!!previewPlan" title="用户展示预览" :width="480" @update:show="(shown: boolean) => { if (!shown) previewPlan = null }"><SubscriptionPlanCard v-if="previewPlan" :plan="previewPlan"><UiButton block disabled>{{ saleLabel(previewPlan) }}</UiButton></SubscriptionPlanCard></UiModal>
+
     <UiModal v-model:show="showEdit" :title="editing ? '编辑套餐' : '新建套餐'" :width="480">
       <UiForm label-placement="top" @submit="save">
+        <fieldset class="min-w-0 space-y-4"><legend class="mb-3 text-sm font-semibold">基础信息</legend>
         <UiFormItem label="套餐名称">
           <UiInput v-model:value="form.name" placeholder="如：Claude 月卡" />
         </UiFormItem>
@@ -334,6 +356,8 @@ onMounted(load)
         <UiFormItem label="绑定账号分组">
           <UiSelect v-model:value="form.groupId" :options="groupOptions" placeholder="订阅授予的调度分组" />
         </UiFormItem>
+        </fieldset>
+        <fieldset class="min-w-0 space-y-4"><legend class="mb-3 text-sm font-semibold">购买与支付</legend>
         <UiFormItem label="购买方式">
           <UiSelect v-model:value="form.paymentProvider" :options="[{ label: 'Waffo 按月订阅', value: 'waffo' }, { label: '钱包余额购买', value: 'wallet' }]" />
         </UiFormItem>
@@ -354,6 +378,8 @@ onMounted(load)
             </UiFormItem>
           </UiGi>
         </UiGrid>
+        </fieldset>
+        <fieldset class="min-w-0 space-y-4"><legend class="mb-3 text-sm font-semibold">额度与计量</legend>
         <UiFormItem label="用量规则">
           <UiSelect v-model:value="form.quotaMode" :options="[{ label: '加权用量 · 5 小时 / 周 / 月', value: 'usage' }, { label: '金额额度 · 日 / 周 / 30 天（兼容旧套餐）', value: 'spend' }]" />
         </UiFormItem>
@@ -386,10 +412,12 @@ onMounted(load)
             </UiFormItem>
           </UiGi>
         </UiGrid>
+        </fieldset>
         <UiFormItem>
           <UiCheckbox v-model:checked="form.forSale">在用户套餐商店上架售卖</UiCheckbox>
         </UiFormItem>
       </UiForm>
+      <p class="mt-4 rounded-xl bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-900 dark:text-gray-300">保存预览：{{ form.name || '未命名套餐' }} · {{ formatUsd(form.price || 0) }} / {{ form.paymentProvider === 'waffo' ? '月' : `${form.validityDays} 天` }} · {{ form.forSale ? '在商店展示' : '不上架' }}</p>
       <template #footer>
         <UiSpace justify="end">
           <UiButton @click="showEdit = false">取消</UiButton>

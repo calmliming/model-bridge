@@ -58,7 +58,7 @@ watch(
 
 <template>
   <div class="flex flex-wrap items-center justify-end gap-1.5" :class="disabled && 'pointer-events-none opacity-50'">
-    <button class="pg-btn" :disabled="page <= 1" @click="go(page - 1)">
+    <button class="pg-btn" aria-label="上一页" :disabled="disabled || page <= 1" @click="go(page - 1)">
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
       </svg>
@@ -69,12 +69,14 @@ watch(
         v-else
         class="pg-btn"
         :class="p === page && 'is-active'"
+        :aria-current="p === page ? 'page' : undefined"
+        :disabled="disabled"
         @click="go(p as number)"
       >
         {{ p }}
       </button>
     </template>
-    <button class="pg-btn" :disabled="page >= pageCount" @click="go(page + 1)">
+    <button class="pg-btn" aria-label="下一页" :disabled="disabled || page >= pageCount" @click="go(page + 1)">
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
       </svg>

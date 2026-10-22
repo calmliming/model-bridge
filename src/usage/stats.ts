@@ -2,7 +2,7 @@ import { pool } from '../db/index'
 import { config } from '../config'
 import { clearExpiredAccountCooldowns } from '../accounts/scheduler'
 import { resolvePrice, type TierPrice } from './pricing'
-import { dayKeyInTz, startOfTodayMs } from '../time'
+import { dayKeyInTz, startOfDayMs, startOfTodayMs } from '../time'
 import { roundUsd } from '../wallet/money'
 
 export interface DailyStat {
@@ -176,9 +176,19 @@ const MS_PER_DAY = 86_400_000
 // session timezone doesn't matter.
 const STATS_TZ = config.STATS_TIMEZONE
 
-function rangeStart(days: number): number {
-  const range = clampDays(days)
-  return startOfTodayMs() - (range - 1) * MS_PER_DAY
+interface StatsWindow { days: number; firstDay: string; start: number; end: number }
+type ModelMetric = 'tokens' | 'requests' | 'cost'
+const shiftDay = (day: string, offset: number) => new Date(Date.parse(`${day}T00:00:00Z`) + offset * MS_PER_DAY).toISOString().slice(0, 10)
+
+export function statsWindow(days: number, startDate?: string, endDate?: string): StatsWindow {
+  const valid = (day: string | undefined): day is string => !!day && /^[1-9]\d{3}-\d{2}-\d{2}$/.test(day)
+    && Number.isFinite(Date.parse(`${day}T00:00:00Z`)) && new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day
+  if ((startDate != null || endDate != null) && (!valid(startDate) || !valid(endDate))) throw new RangeError('请选择有效的开始和结束日期')
+  const lastDay = endDate ?? dayKeyInTz(Date.now(), STATS_TZ)
+  const firstDay = startDate ?? shiftDay(lastDay, 1 - clampDays(days))
+  const count = Math.round((Date.parse(`${lastDay}T00:00:00Z`) - Date.parse(`${firstDay}T00:00:00Z`)) / MS_PER_DAY) + 1
+  if (count < 1 || count > 366) throw new RangeError('日期范围须为 1–366 天，且结束日期不能早于开始日期')
+  return { days: count, firstDay, start: startOfDayMs(firstDay, STATS_TZ), end: startOfDayMs(shiftDay(lastDay, 1), STATS_TZ) }
 }
 
 function clampDays(days: number): number {
@@ -336,9 +346,9 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
  * Per-day usage for the last `days` days, bucketed by STATS_TIMEZONE. Returns
  * a contiguous series with zero-filled gaps so the chart has no holes.
  */
-export async function dailyStats(days: number): Promise<DailyStat[]> {
-  const range = clampDays(days)
-  const since = rangeStart(range)
+export async function dailyStats(days: number, window = statsWindow(days)): Promise<DailyStat[]> {
+  const range = window.days
+  const since = window.start
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT to_char(to_timestamp(ts / 1000) AT TIME ZONE $2, 'YYYY-MM-DD') AS day,
             COUNT(*) AS requests,
@@ -348,15 +358,15 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
             COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
-     WHERE ts >= $1
+     WHERE ts >= $1 AND ts < $3
      GROUP BY day
      ORDER BY day`,
-    [since, STATS_TZ]
+    [since, STATS_TZ, window.end]
   )
   const byDay = new Map(rows.map((r) => [r.day as string, asDaily(r)]))
   const out: DailyStat[] = []
   for (let i = range - 1; i >= 0; i--) {
-    const day = dayKeyInTz(Date.now() - i * MS_PER_DAY, STATS_TZ)
+    const day = shiftDay(window.firstDay, range - 1 - i)
     out.push(
       byDay.get(day) ?? {
         day,
@@ -372,8 +382,8 @@ export async function dailyStats(days: number): Promise<DailyStat[]> {
   return out
 }
 
-export async function statsByProvider(days: number): Promise<ProviderStat[]> {
-  const since = rangeStart(days)
+export async function statsByProvider(days: number, window = statsWindow(days)): Promise<ProviderStat[]> {
+  const since = window.start
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT provider,
             COUNT(*) AS requests,
@@ -384,16 +394,17 @@ export async function statsByProvider(days: number): Promise<ProviderStat[]> {
             COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
-     WHERE ts >= $1
+     WHERE ts >= $1 AND ts < $2
      GROUP BY provider
      ORDER BY tokens DESC`,
-    [since]
+    [since, window.end]
   )
   return rows.map(asProvider)
 }
 
-export async function statsByModel(days: number, limit = 10): Promise<ModelStat[]> {
-  const since = rangeStart(days)
+export async function statsByModel(days: number, limit = 10, window = statsWindow(days), metric: ModelMetric = 'tokens'): Promise<ModelStat[]> {
+  const since = window.start
+  const orderBy = ({ tokens: 'tokens', requests: 'requests', cost: 'cost' } as const)[metric] ?? 'tokens'
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT COALESCE(model, '(unknown)') AS model,
             COUNT(*) AS requests,
@@ -404,17 +415,17 @@ export async function statsByModel(days: number, limit = 10): Promise<ModelStat[
             COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
      FROM usage_logs
-     WHERE ts >= $1
+     WHERE ts >= $1 AND ts < $3
      GROUP BY model
-     ORDER BY tokens DESC
+     ORDER BY ${orderBy} DESC, model ASC
      LIMIT $2`,
-    [since, limit]
+    [since, limit, window.end]
   )
   return rows.map(asModel)
 }
 
-export async function statsByKey(days: number): Promise<KeyStat[]> {
-  const since = rangeStart(days)
+export async function statsByKey(days: number, window = statsWindow(days)): Promise<KeyStat[]> {
+  const since = window.start
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT api_keys.id AS id,
             api_keys.name AS name,
@@ -429,17 +440,18 @@ export async function statsByKey(days: number): Promise<KeyStat[]> {
      FROM api_keys
      LEFT JOIN usage_logs
             ON usage_logs.api_key_id = api_keys.id
-           AND usage_logs.ts >= $1
+           AND usage_logs.ts >= $1 AND usage_logs.ts < $2
      GROUP BY api_keys.id
      ORDER BY tokens DESC, name`,
-    [since]
+    [since, window.end]
   )
   return rows.map(asKey)
 }
 
-export async function statsSummary(days: number): Promise<StatsSummary> {
-  const range = clampDays(days)
-  const since = rangeStart(range)
+export async function statsSummary(days: number, options: { startDate?: string; endDate?: string; orderBy?: ModelMetric } = {}): Promise<StatsSummary> {
+  const window = statsWindow(days, options.startDate, options.endDate)
+  const range = window.days
+  const since = window.start
   const { rows } = await pool.query<Record<string, unknown>>(
     `SELECT COUNT(*) AS requests,
             COALESCE(SUM(input_tokens + image_input_tokens), 0) AS inputTokens,
@@ -447,8 +459,8 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
             COALESCE(SUM(cache_create_tokens), 0) AS cacheCreateTokens,
             COALESCE(SUM(cache_read_tokens + image_cache_read_tokens), 0) AS cacheReadTokens,
             COALESCE(SUM(cost), 0) AS cost
-     FROM usage_logs WHERE ts >= $1`,
-    [since]
+     FROM usage_logs WHERE ts >= $1 AND ts < $2`,
+    [since, window.end]
   )
   const r = rows[0] ?? {}
   const totals = {
@@ -460,10 +472,10 @@ export async function statsSummary(days: number): Promise<StatsSummary> {
     cost: toNum(r.cost)
   }
   const [daily, byProvider, byModel, byKey] = await Promise.all([
-    dailyStats(range),
-    statsByProvider(range),
-    statsByModel(range),
-    statsByKey(range)
+    dailyStats(range, window),
+    statsByProvider(range, window),
+    statsByModel(range, 10, window, options.orderBy),
+    statsByKey(range, window)
   ])
   return { rangeDays: range, totals, daily, byProvider, byModel, byKey }
 }

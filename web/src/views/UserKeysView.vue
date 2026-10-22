@@ -44,6 +44,10 @@ const dialog = useDialog()
 const keys = ref<ApiKey[]>([])
 const groups = ref<AccountGroup[]>([])
 const loading = ref(true)
+const search = ref('')
+const showAllColumns = ref(false)
+const managedKey = ref<ApiKey | null>(null)
+const filteredKeys = computed(() => keys.value.filter(row => `${row.name} ${row.keyPrefix}`.toLowerCase().includes(search.value.trim().toLowerCase())))
 
 const groupSelectOptions = computed(() =>
   groups.value.map((g) => ({
@@ -316,8 +320,8 @@ async function triggerCcSwitch(target: CcSwitchTarget) {
 }
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [
-  { title: '名称', key: 'name', minWidth: 150, render: (row) => h('strong', { class: 'key-name' }, row.name) },
-  { title: '密钥', key: 'prefix', minWidth: 150, render: (row) => h('code', `${row.keyPrefix}...`) },
+  { title: '名称', key: 'name', minWidth: 150, fixed: 'left', render: (row) => h('strong', { class: 'key-name' }, row.name) },
+  { title: '密钥', key: 'prefix', minWidth: 210, render: (row) => h('div', { class: 'flex items-center gap-2' }, [h('code', `${row.keyPrefix}…`), h(UiButton, { size: 'small', secondary: true, disabled: !row.canReveal, onClick: () => copyKey(row) }, { default: () => '复制' })]) },
   { title: '服务商', key: 'providers', minWidth: 150, render: (row) => {
     const list = row.allowedProviders
     if (!list?.length) return h(UiTag, { size: 'small', type: 'success', bordered: false }, { default: () => '全部' })
@@ -333,13 +337,17 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => formatTime(row.expiresAt) },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => formatTime(row.lastUsedAt) },
   { title: '状态', key: 'enabled', width: 76, render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }) },
-  { title: '操作', key: 'actions', width: 260, render: (row) => h(UiSpace, { size: 4, wrap: false }, { default: () => [
-    h(UiButton, { size: 'small', quaternary: true, onClick: () => copyKey(row) }, { default: () => '复制' }),
-    h(UiButton, { size: 'small', quaternary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) }, { default: () => 'CC Switch' }),
-    h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-    h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
-  ] }) },
+  { title: '操作', key: 'actions', width: 96, fixed: 'right', render: (row) => h(UiButton, { size: 'small', secondary: true, onClick: () => { managedKey.value = row } }, { default: () => '管理' }) },
 ])
+const visibleColumns = computed(() => showAllColumns.value ? columns.value : columns.value.filter(column => ['name', 'prefix', 'quotaUsed', 'quotaLimit', 'enabled', 'actions'].includes(column.key)))
+function manage(action: 'edit' | 'import' | 'delete') {
+  const row = managedKey.value
+  if (!row) return
+  managedKey.value = null
+  if (action === 'edit') openEdit(row)
+  else if (action === 'import') void openCcSwitch(row)
+  else confirmDelete(row)
+}
 
 onMounted(() => {
   void load()
@@ -350,12 +358,28 @@ onMounted(() => {
 <template>
   <div>
     <div class="page-head">
+      <UiInput v-model:value="search" aria-label="搜索 API Key" placeholder="搜索名称或密钥前缀" class="!w-full sm:!w-72" />
       <UiButton type="primary" @click="showCreate = true">新建 Key</UiButton>
     </div>
 
-    <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="keys" :loading="loading" :bordered="false" :scroll-x="1540" />
+    <div class="mb-3 hidden justify-end md:flex"><label class="flex items-center gap-2 text-sm text-gray-500"><input v-model="showAllColumns" type="checkbox" />显示全部字段</label></div>
+    <UiCard class="table-card hidden md:block" :bordered="false">
+      <UiDataTable :columns="visibleColumns" :data="filteredKeys" :loading="loading" :bordered="false" :scroll-x="showAllColumns ? 1440 : 740" empty-text="暂无符合条件的 API Key" />
     </UiCard>
+    <div class="grid gap-3 md:hidden">
+      <p v-if="loading" role="status" class="py-8 text-center text-sm text-gray-500">正在加载密钥…</p>
+      <p v-else-if="!filteredKeys.length" class="card p-6 text-center text-sm text-gray-500">暂无符合条件的 API Key</p>
+      <article v-for="row in filteredKeys" :key="row.id" class="card min-w-0 p-4">
+        <div class="flex justify-between gap-3"><h2 class="min-w-0 break-words font-semibold">{{ row.name }}</h2><UiTag :type="row.enabled ? 'success' : 'default'">{{ row.enabled ? '启用' : '禁用' }}</UiTag></div>
+        <div class="my-4 flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 dark:bg-dark-900"><code class="min-w-0 truncate text-sm">{{ row.keyPrefix }}…</code><UiButton size="small" secondary :disabled="!row.canReveal" @click="copyKey(row)">复制</UiButton></div>
+        <dl class="grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-gray-500">已用 / 上限</dt><dd class="mt-1 break-words">{{ formatUsd(row.quotaUsed) }} / {{ row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) }}</dd></div><div><dt class="text-xs text-gray-500">分组</dt><dd class="mt-1 break-words">{{ groupName(row.accountGroupId) }}</dd></div></dl>
+        <details class="mt-4 border-t border-gray-100 pt-3 text-xs dark:border-dark-700"><summary class="cursor-pointer text-primary-700 dark:text-primary-300">查看权限与限制</summary><p class="mt-2 break-words">服务商：{{ row.allowedProviders?.map(value => providerLabel[value] || value).join('、') || '全部' }}</p><p class="mt-2 break-all">模型：{{ row.allowedModels?.join('、') || '不限' }}</p><p class="mt-2">限速：{{ row.rateLimit ?? '不限' }} · 并发：{{ row.concurrencyLimit ?? '不限' }}</p><p class="mt-2">过期：{{ formatTime(row.expiresAt) }}</p></details>
+        <div class="mt-4 flex justify-end"><UiButton secondary size="small" @click="managedKey = row">管理</UiButton></div>
+      </article>
+    </div>
+    <UiModal :show="!!managedKey" :title="`管理 Key：${managedKey?.name ?? ''}`" :width="440" @update:show="(shown: boolean) => { if (!shown) managedKey = null }">
+      <div class="grid gap-3"><UiButton secondary @click="manage('edit')">编辑 Key</UiButton><UiButton secondary :disabled="!managedKey?.canReveal" @click="manage('import')">导入 CC Switch</UiButton><UiButton type="error" quaternary @click="manage('delete')">删除 Key</UiButton></div>
+    </UiModal>
 
     <UiModal v-model:show="showCreate" title="新建 API Key" :width="520">
       <UiForm label-placement="top">

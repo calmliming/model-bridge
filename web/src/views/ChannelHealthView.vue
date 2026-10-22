@@ -12,6 +12,8 @@ const hours = ref(24), groupBy = ref('account'), provider = ref(''), groupId = r
 const groups = ref<Array<{ id: string; name: string }>>([])
 const loading = ref(false), saving = ref(false), error = ref(''), notice = ref('')
 const settings = ref<Settings>({ minSamples: 20, errorRatePercent: 10, ttftP95Ms: 10000 })
+const providerLabels: Record<string, string> = { claude: 'Claude', openai: 'OpenAI', gemini: 'Gemini', antigravity: 'Antigravity', deepseek: 'DeepSeek', xiaomi: '小米 MiMo', qwen: '通义 Qwen', zhipu: '智谱 GLM', kimi: 'Kimi', minimax: 'MiniMax', grok: 'Grok', sub2api: 'Sub2API', grsai: 'GrsAI' }
+const healthRows = computed(() => [...(snapshot.value?.rows ?? [])].sort((a, b) => ({ warning: 0, insufficient: 1, healthy: 2 }[a.state]) - ({ warning: 0, insufficient: 1, healthy: 2 }[b.state])))
 const providers = ['claude', 'openai', 'gemini', 'antigravity', 'deepseek', 'xiaomi', 'qwen', 'zhipu', 'kimi', 'minimax', 'grok', 'sub2api', 'grsai']
 let sequence = 0, timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -46,17 +48,33 @@ onBeforeUnmount(() => { disposed = true; sequence++; if (timer) clearInterval(ti
 </script>
 
 <template>
-  <div class="operations-page">
-    <header class="op-heading"><div><p class="op-eyebrow">运行状态</p><h2>渠道健康</h2><p>根据实际请求观察可靠性与首 Token 延迟，每 30 秒刷新。</p></div><button class="op-button" :disabled="loading" @click="load">{{ loading ? '正在刷新…' : '立即刷新' }}</button></header>
+  <div class="operations-page health-page">
+    <header class="op-heading"><p>根据实际请求观察可靠性与延迟，每 30 秒刷新。</p><button class="op-button" :disabled="loading" @click="load">{{ loading ? '正在刷新…' : '立即刷新' }}</button></header>
     <p v-if="error" class="op-error" role="alert">{{ error }}<span v-if="snapshot"> · 当前保留上次成功加载的数据。</span></p>
     <p v-if="notice" class="op-notice" role="status">{{ notice }}</p>
-    <div class="op-toolbar"><label>时间范围<select v-model="hours"><option :value="1">近 1 小时</option><option :value="6">近 6 小时</option><option :value="24">近 24 小时</option><option :value="168">近 7 天</option></select></label><label>查看维度<select v-model="groupBy"><option value="account">账号</option><option value="provider">服务商</option><option value="model">模型</option></select></label><label>服务商<select v-model="provider"><option value="">全部服务商</option><option v-for="item in providers" :key="item">{{ item }}</option></select></label><label>当前账号分组<select v-model="groupId"><option value="">全部分组</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label></div>
+    <div class="op-toolbar"><label>时间范围<select v-model="hours"><option :value="1">近 1 小时</option><option :value="6">近 6 小时</option><option :value="24">近 24 小时</option><option :value="168">近 7 天</option></select></label><label>查看维度<select v-model="groupBy"><option value="account">账号</option><option value="provider">服务商</option><option value="model">模型</option></select></label><label>服务商<select v-model="provider"><option value="">全部服务商</option><option v-for="item in providers" :key="item" :value="item">{{ providerLabels[item] || item }}</option></select></label><label>当前账号分组<select v-model="groupId"><option value="">全部分组</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label></div>
     <div class="op-metrics"><article><span>观察请求</span><strong>{{ totals.requests.toLocaleString() }}</strong></article><article><span>上游错误率</span><strong>{{ totals.eligible ? `${(totals.failures / totals.eligible * 100).toFixed(1)}%` : '—' }}</strong></article><article><span>当前告警</span><strong>{{ snapshot?.alerts.length ?? 0 }}</strong></article><article><span>排除的请求</span><strong>{{ totals.excluded }}</strong></article></div>
     <section v-if="snapshot?.alerts.length" class="op-alerts" aria-label="当前告警"><strong>需要关注</strong><p v-for="alert in snapshot.alerts" :key="alert.id">{{ alert.label }}：{{ alert.reasons.join('；') }}</p></section>
-    <section class="op-panel"><div class="op-panel-title"><h3>请求趋势</h3><span v-if="snapshot">更新于 {{ new Date(snapshot.to).toLocaleTimeString('zh-CN') }}</span></div><LazyEChart v-if="snapshot?.trend.length" :option="chart" height="240px" /><p v-else class="op-empty">所选范围暂无请求记录。</p></section>
+
     <section class="op-panel"><div class="op-panel-title"><h3>健康明细</h3><span>策略拒绝、客户端取消和请求参数错误单独统计</span></div><p v-if="snapshot?.truncated" class="op-error">当前仅展示请求较多或失败较多的 500 项，汇总卡片也仅包含这些项。请缩小筛选范围。</p>
-      <div class="op-table-wrap"><table class="op-table"><thead><tr><th>渠道 / 模型</th><th>状态</th><th>有效样本</th><th>上游失败</th><th>错误率</th><th>首 Token P95</th><th>总耗时 P95</th><th>排除请求</th></tr></thead><tbody><tr v-for="row in snapshot?.rows" :key="`${row.provider}:${row.id}`"><td><strong>{{ row.label }}</strong><small>{{ row.provider }}</small></td><td><span class="op-badge" :class="row.state" :title="row.alerts.join('；')">{{ { healthy: '正常', warning: '告警', insufficient: '样本不足' }[row.state] }}</span></td><td>{{ row.eligible }}</td><td>{{ row.failures }}</td><td>{{ row.errorRatePercent == null ? '—' : `${row.errorRatePercent.toFixed(1)}%` }}</td><td>{{ ms(row.ttftP95Ms) }}<small>{{ row.ttftSamples }} 个延迟样本</small></td><td>{{ ms(row.latencyP95Ms) }}</td><td>{{ row.excluded }}<small>取消 {{ row.canceled }} · 策略 {{ row.policy }} · 参数 {{ row.requestErrors }}</small></td></tr><tr v-if="!snapshot?.rows.length"><td class="op-empty" colspan="8">{{ loading ? '正在加载健康数据…' : '暂无数据；没有请求记录的渠道不会被标记为正常。' }}</td></tr></tbody></table></div>
+      <div class="op-table-wrap hidden md:block"><table class="op-table"><thead><tr><th>渠道 / 模型</th><th>状态</th><th>有效样本</th><th>上游失败</th><th>错误率</th><th>首 Token P95</th><th>总耗时 P95</th><th>排除请求</th></tr></thead><tbody><tr v-for="row in healthRows" :key="`${row.provider}:${row.id}`"><td><strong>{{ row.label }}</strong><small>{{ row.provider }}</small></td><td><span class="op-badge" :class="row.state" :title="row.alerts.join('；')">{{ { healthy: '正常', warning: '告警', insufficient: '样本不足' }[row.state] }}</span></td><td>{{ row.eligible }}</td><td>{{ row.failures }}</td><td>{{ row.errorRatePercent == null ? '—' : `${row.errorRatePercent.toFixed(1)}%` }}</td><td>{{ ms(row.ttftP95Ms) }}<small>{{ row.ttftSamples }} 个延迟样本</small></td><td>{{ ms(row.latencyP95Ms) }}</td><td>{{ row.excluded }}<small>取消 {{ row.canceled }} · 策略 {{ row.policy }} · 参数 {{ row.requestErrors }}</small></td></tr><tr v-if="!snapshot?.rows.length"><td class="op-empty" colspan="8">{{ loading ? '正在加载健康数据…' : '暂无数据；没有请求记录的渠道不会被标记为正常。' }}</td></tr></tbody></table></div>
+      <div class="grid gap-3 md:hidden">
+        <p v-if="!healthRows.length" class="op-empty">暂无数据；没有请求记录的渠道不会被标记为正常。</p>
+        <article v-for="row in healthRows" :key="`${row.provider}:${row.id}`" class="min-w-0 rounded-xl border border-gray-200 p-3 dark:border-dark-700">
+          <div class="flex items-start justify-between gap-3"><strong class="min-w-0 break-words text-sm">{{ row.label }}</strong><span class="op-badge" :class="row.state">{{ { healthy: '正常', warning: '告警', insufficient: '样本不足' }[row.state] }}</span></div>
+          <p class="mt-2 text-xs text-gray-500">{{ providerLabels[row.provider] || row.provider }} · 有效样本 {{ row.eligible }}</p>
+          <dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-gray-500">上游错误率</dt><dd>{{ row.errorRatePercent == null ? '—' : `${row.errorRatePercent.toFixed(1)}%` }}</dd></div><div><dt class="text-xs text-gray-500">首 Token P95</dt><dd>{{ ms(row.ttftP95Ms) }}</dd></div><div><dt class="text-xs text-gray-500">总耗时 P95</dt><dd>{{ ms(row.latencyP95Ms) }}</dd></div><div><dt class="text-xs text-gray-500">排除请求</dt><dd>{{ row.excluded }}</dd></div></dl>
+          <p v-if="row.alerts.length" class="mt-3 text-xs text-amber-700">{{ row.alerts.join('；') }}</p>
+        </article>
+      </div>
     </section>
-    <section class="op-panel"><h3>站内告警阈值</h3><form class="op-toolbar" @submit.prevent="save"><label>最少有效样本<input v-model.number="settings.minSamples" type="number" min="5" max="10000" required /></label><label>上游错误率（%）<input v-model.number="settings.errorRatePercent" type="number" min="1" max="100" step="0.1" required /></label><label>首 Token P95（ms）<input v-model.number="settings.ttftP95Ms" type="number" min="100" max="600000" required /></label><button class="op-button" :disabled="saving">{{ saving ? '正在保存…' : '保存阈值' }}</button></form><p class="op-hint">样本达到阈值后才产生告警；延迟告警还要求足够的成功请求延迟样本。告警随当前窗口恢复自动消失。分组筛选按账号当前归属计算。</p></section>
+    <section class="op-panel"><div class="op-panel-title"><h3>请求趋势</h3><span v-if="snapshot">更新于 {{ new Date(snapshot.to).toLocaleTimeString('zh-CN') }}</span></div><LazyEChart v-if="snapshot?.trend.length" :option="chart" height="240px" /><p v-else class="op-empty">所选范围暂无请求记录。</p></section>
+    <details class="op-panel"><summary class="cursor-pointer text-sm font-semibold">站内告警阈值设置</summary><form class="op-toolbar" @submit.prevent="save"><label>最少有效样本<input v-model.number="settings.minSamples" type="number" min="5" max="10000" required /></label><label>上游错误率（%）<input v-model.number="settings.errorRatePercent" type="number" min="1" max="100" step="0.1" required /></label><label>首 Token P95（ms）<input v-model.number="settings.ttftP95Ms" type="number" min="100" max="600000" required /></label><button class="op-button" :disabled="saving">{{ saving ? '正在保存…' : '保存阈值' }}</button></form><p class="op-hint">样本达到阈值后才产生告警；延迟告警还要求足够的成功请求延迟样本。告警随当前窗口恢复自动消失。分组筛选按账号当前归属计算。</p></details>
   </div>
 </template>
+
+<style scoped>
+.health-page .op-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.health-page .op-metrics article { padding: 14px; }
+@media (min-width: 1280px) { .health-page .op-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+</style>

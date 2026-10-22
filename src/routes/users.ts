@@ -10,6 +10,7 @@ import { waffoConfiguration } from '../payments/providers/waffo'
 import { checkLoginRateLimit, verifyTurnstileToken } from '../auth/security'
 import {
   acceptInvite,
+  previewInvite,
   listUserUsage,
   userFailureCategoriesToday,
   userUsageDaily,
@@ -146,6 +147,15 @@ export function registerUserRoutes(app: FastifyInstance): void {
     }
     const token = app.jwt.sign(userSessionPayload(user), { expiresIn: '7d' })
     return { token, user }
+  })
+
+  // POST keeps the bearer invite token out of API URL logs; this endpoint is read-only.
+  app.post('/api/users/invites/preview', async (request, reply) => {
+    const body = z.object({ token: z.string().trim().min(1).max(256) }).safeParse(request.body)
+    if (!body.success) return reply.code(400).send({ error: '邀请链接不完整，请联系邀请人重新发送。' })
+    reply.header('Cache-Control', 'no-store')
+    try { return await previewInvite(body.data.token) }
+    catch (err) { return sendUserError(reply, err) }
   })
 
   app.post('/api/users/invites/accept', async (request, reply) => {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -14,6 +14,13 @@ const auth = useAuthStore()
 
 const account = ref('')
 const password = ref('')
+const fieldErrors = ref<Record<string, string>>({})
+const formError = ref('')
+async function showFieldErrors(errors: Record<string, string>) {
+  fieldErrors.value = errors
+  await nextTick()
+  document.getElementById(Object.keys(errors)[0] ?? '')?.focus()
+}
 const loading = ref(false)
 const googleLoading = ref(false)
 const googleClientId = ref<string | null>(null)
@@ -30,6 +37,7 @@ const regPassword = ref('')
 const regConfirm = ref('')
 const regName = ref('')
 const regCode = ref('')
+watch([account, password, regEmail, regPassword, regConfirm, regCode], () => { fieldErrors.value = {}; formError.value = '' })
 const verificationExpiresAt = ref(0)
 const resendAfter = ref(0)
 const now = ref(Date.now())
@@ -64,6 +72,7 @@ function googleSignedIn(session: { token: string; user: { email: string } }) {
 
 function setMode(next: 'login' | 'register') {
   mode.value = next
+  fieldErrors.value = {}; formError.value = ''
   resetTurnstile()
 }
 
@@ -71,7 +80,7 @@ async function login() {
   if (loading.value || googleLoading.value) return
   const accountValue = account.value.trim()
   if (!accountValue || !password.value) {
-    message.warning('请输入账号和密码')
+    void showFieldErrors({ ...(!accountValue ? { 'login-account': '请输入账号' } : {}), ...(!password.value ? { 'login-password': '请输入密码' } : {}) })
     return
   }
   if (captchaMissing.value) {
@@ -94,7 +103,8 @@ async function login() {
     }
   } catch (e) {
     resetTurnstile()
-    message.error(errMsg(e, '登录失败'))
+    const error = errMsg(e, '登录失败，请稍后重试')
+    formError.value = error === 'invalid account or password' ? '账号或密码不正确，请检查后重试。' : error
   } finally {
     loading.value = false
   }
@@ -103,18 +113,11 @@ async function login() {
 async function register() {
   if (loading.value || googleLoading.value) return
   const email = regEmail.value.trim()
-  if (!email || !regPassword.value) {
-    message.warning('请输入邮箱和密码')
-    return
-  }
-  if (regPassword.value.length < 6) {
-    message.warning('密码至少 6 位')
-    return
-  }
-  if (regPassword.value !== regConfirm.value) {
-    message.warning('两次输入的密码不一致')
-    return
-  }
+  const errors: Record<string, string> = {}
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors['register-email'] = '请输入有效邮箱'
+  if (regPassword.value.length < 6 || new TextEncoder().encode(regPassword.value).length > 72) errors['register-password'] = '密码至少 6 个字符，且不超过 72 个 UTF-8 字节'
+  if (regPassword.value !== regConfirm.value) errors['register-confirm'] = '两次输入的密码不一致'
+  if (Object.keys(errors).length) { void showFieldErrors(errors); return }
   if (captchaMissing.value) {
     message.warning('请先完成人机验证')
     return
@@ -138,7 +141,7 @@ async function register() {
     message.success('验证码已发送，请查收邮件')
   } catch (e) {
     resetTurnstile()
-    message.error(errMsg(e, '注册失败'))
+    formError.value = errMsg(e, '注册失败，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -147,7 +150,7 @@ async function register() {
 async function verifyRegistration() {
   const code = regCode.value.trim()
   if (!/^\d{6}$/.test(code)) {
-    message.warning('请输入 6 位数字验证码')
+    void showFieldErrors({ 'register-code': '请输入 6 位数字验证码' })
     return
   }
   loading.value = true
@@ -157,7 +160,7 @@ async function verifyRegistration() {
     message.success('邮箱验证成功，注册完成')
     void router.push({ name: 'user-overview' })
   } catch (e) {
-    message.error(errMsg(e, '验证失败'))
+    formError.value = errMsg(e, '验证失败，请检查验证码后重试')
   } finally {
     loading.value = false
   }
@@ -192,10 +195,10 @@ async function resendRegistration() {
   <div class="login-wrap">
     <div class="ambient-grid" />
     <div class="login-shell">
-      <div class="login-brand">
+      <RouterLink to="/" class="login-brand" aria-label="返回首页">
         <BrandLogo :size="38" />
         <span>Model Bridge</span>
-      </div>
+      </RouterLink>
 
       <section class="login-main">
         <div class="hero-copy">
@@ -239,8 +242,9 @@ async function resendRegistration() {
           <span class="secure-badge">Secure</span>
         </div>
 
+        <p v-if="formError" role="alert" class="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">{{ formError }}</p>
         <UiForm v-if="mode === 'login'" label-placement="top" novalidate class="login-form" @submit="login">
-          <UiFormItem label="账号" for-id="login-account">
+          <UiFormItem label="账号" for-id="login-account" :error="fieldErrors['login-account']">
             <UiInput
               id="login-account"
               name="account"
@@ -251,7 +255,7 @@ async function resendRegistration() {
               required
             />
           </UiFormItem>
-          <UiFormItem label="密码" for-id="login-password">
+          <UiFormItem label="密码" for-id="login-password" :error="fieldErrors['login-password']">
             <UiInput
               id="login-password"
               name="password"
@@ -279,7 +283,7 @@ async function resendRegistration() {
         </UiForm>
 
         <UiForm v-else-if="mode === 'register'" label-placement="top" novalidate class="login-form" @submit="register">
-          <UiFormItem label="邮箱" for-id="register-email">
+          <UiFormItem label="邮箱" for-id="register-email" :error="fieldErrors['register-email']">
             <UiInput
               id="register-email"
               name="email"
@@ -300,7 +304,7 @@ async function resendRegistration() {
               autocomplete="name"
             />
           </UiFormItem>
-          <UiFormItem label="密码" for-id="register-password">
+          <UiFormItem label="密码" for-id="register-password" :error="fieldErrors['register-password']">
             <UiInput
               id="register-password"
               name="password"
@@ -313,7 +317,7 @@ async function resendRegistration() {
               required
             />
           </UiFormItem>
-          <UiFormItem label="确认密码" for-id="register-confirm">
+          <UiFormItem label="确认密码" for-id="register-confirm" :error="fieldErrors['register-confirm']">
             <UiInput
               id="register-confirm"
               name="passwordConfirmation"
@@ -341,7 +345,7 @@ async function resendRegistration() {
         </UiForm>
         <UiForm v-else label-placement="top" novalidate class="login-form" @submit="verifyRegistration">
           <p class="verification-hint">验证码已发送至 <strong>{{ regEmail }}</strong>。验证通过后才会创建账号，有效期至 {{ new Date(verificationExpiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}。</p>
-          <UiFormItem label="6 位验证码" for-id="register-code">
+          <UiFormItem label="6 位验证码" for-id="register-code" :error="fieldErrors['register-code']">
             <input id="register-code" v-model="regCode" class="input verification-code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="输入邮件中的验证码" required />
           </UiFormItem>
           <UiButton type="primary" size="large" block native-type="submit" :loading="loading">验证并完成注册</UiButton>
@@ -350,6 +354,10 @@ async function resendRegistration() {
           <p class="form-switch"><button type="button" class="form-switch-link" @click="setMode('register')">修改注册信息</button><span> · </span><button type="button" class="form-switch-link" @click="setMode('login')">返回登录</button></p>
         </UiForm>
         <GoogleSignIn v-if="googleClientId && mode !== 'verify'" :client-id="googleClientId" :disabled="loading" @busy="googleLoading = $event" @success="googleSignedIn" />
+        <div class="mt-6 text-center text-xs text-slate-500">
+          <RouterLink to="/" class="text-primary-700 hover:underline">返回首页</RouterLink><span class="mx-3">·</span><RouterLink to="/docs/api" class="text-primary-700 hover:underline">API 文档</RouterLink>
+          <details class="mt-3"><summary class="cursor-pointer">无法登录？</summary><p class="mt-2 leading-5">请联系站点管理员获取邀请，或申请重置密码链接。</p></details>
+        </div>
         </div>
       </main>
     </div>
@@ -665,11 +673,12 @@ async function resendRegistration() {
     min-height: 100dvh;
     padding: 18px;
     overflow: auto;
+    place-items: start center;
   }
 
   .login-shell {
     grid-template-columns: 1fr;
-    gap: 28px;
+    gap: 16px;
     min-height: auto;
   }
 
@@ -679,11 +688,11 @@ async function resendRegistration() {
 
   .login-main {
     min-height: auto;
-    padding-top: 18px;
+    padding-top: 0;
   }
 
   .hero-copy {
-    margin-bottom: 30px;
+    margin-bottom: 0;
   }
 
   .hero-copy h1 {
@@ -692,7 +701,7 @@ async function resendRegistration() {
 
   .login-card-inner {
     min-height: auto;
-    padding: 32px 26px 28px;
+    padding: 24px;
   }
 }
 
@@ -702,16 +711,19 @@ async function resendRegistration() {
   }
 
   .login-shell {
-    gap: 22px;
+    gap: 16px;
   }
 
   .hero-copy {
-    margin-bottom: 22px;
+    margin-bottom: 0;
   }
 
   .hero-copy h1 {
-    font-size: 38px;
+    display: none;
   }
+
+  .hero-kicker { display: none; }
+  .hero-copy p { margin-top: 0; }
 
   .hero-copy p {
     font-size: 15px;

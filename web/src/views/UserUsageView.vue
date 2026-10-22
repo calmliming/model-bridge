@@ -49,10 +49,25 @@ interface WalletTransaction {
 
 const message = useMessage()
 const route = useRoute()
+const activeTab = ref(route.query.tab === 'wallet' ? 'wallet' : 'usage')
 const usageLoading = ref(true)
 const walletLoading = ref(true)
 const usageRows = ref<UsageLog[]>([])
 const walletRows = ref<WalletTransaction[]>([])
+const usagePage = ref(1), walletPage = ref(1)
+const usageTotal = ref(0), walletTotal = ref(0)
+const pageSize = 20
+let usageVersion = 0, walletVersion = 0
+const duration = (value: number | null) => value == null ? '—' : `${(value / 1000).toFixed(1)} 秒`
+const walletType = (type: string) => ({ usage: '调用扣费', credit: '充值入账', debit: '余额扣款', refund: '退款', redeem: '兑换入账', subscription: '套餐购买' } as Record<string, string>)[type] ?? type
+const walletNote = (note: string | null) => note === 'usage charge' ? '调用扣费' : note || '—'
+
+function usageLabel(row: UsageLog) {
+  if (row.videoSeconds > 0) return `${row.videoSeconds} 秒 · ${row.videoResolution || '视频'}`
+  if (row.imageCount > 0) return `${row.imageCount} 张`
+  const total = row.inputTokens + row.outputTokens + row.cacheCreateTokens + row.cacheReadTokens + (row.imageInputTokens ?? 0) + (row.imageOutputTokens ?? 0) + (row.imageCacheReadTokens ?? 0)
+  return total > 0 || row.status === 'success' ? `${total.toLocaleString()} Tokens` : '未记录用量'
+}
 
 // Date filter — stored as "YYYY-MM-DD" strings for the native date inputs,
 // converted to epoch-ms range when calling the API.
@@ -100,8 +115,11 @@ function applyPreset(preset: (typeof datePresets)[number]) {
 
 // Reload when date range changes
 watch([dateFrom, dateEnd, failureOnly], () => {
-  loadUsage()
+  if (usagePage.value === 1) void loadUsage()
+  else usagePage.value = 1
 })
+watch(usagePage, loadUsage)
+watch(walletPage, loadWallet)
 
 function totalTokens(row: UsageLog) {
   if (row.videoSeconds > 0 || (row.imageCount > 0 && !(row.inputTokens + row.outputTokens + row.cacheReadTokens + row.imageOutputTokens))) return h('span', { class: 'token-total' }, row.videoSeconds > 0 ? `${row.videoSeconds} 秒 · ${row.videoResolution}` : `${row.imageCount ?? 0} 张`)
@@ -132,33 +150,37 @@ function totalTokens(row: UsageLog) {
 }
 
 async function loadUsage() {
+  const version = ++usageVersion
   usageLoading.value = true
   try {
-    const params: Record<string, unknown> = { pageSize: 100 }
+    const params: Record<string, unknown> = { page: usagePage.value, pageSize }
     if (dateFrom.value) params.startDate = calendarDayRangeMs(dateFrom.value)[0]
     if (dateEnd.value) params.endDate = calendarDayRangeMs(dateEnd.value)[1]
     if (failureOnly.value) params.status = 'error'
     const usageRes = await api.get('/users/usage', { params })
+    if (version !== usageVersion) return
     usageRows.value = usageRes.data.logs
+    usageTotal.value = usageRes.data.total
   } catch (e) {
-    message.error(errMsg(e))
+    if (version === usageVersion) message.error(errMsg(e))
   } finally {
-    usageLoading.value = false
+    if (version === usageVersion) usageLoading.value = false
   }
 }
 
-async function load() {
-  usageLoading.value = true
+async function loadWallet() {
+  const version = ++walletVersion
   walletLoading.value = true
   try {
-    const [walletRes] = await Promise.all([api.get('/users/wallet/transactions', { params: { pageSize: 100 } })])
+    const walletRes = await api.get('/users/wallet/transactions', { params: { page: walletPage.value, pageSize } })
+    if (version !== walletVersion) return
     walletRows.value = walletRes.data.transactions
+    walletTotal.value = walletRes.data.total
   } catch (e) {
-    message.error(errMsg(e))
+    if (version === walletVersion) message.error(errMsg(e))
   } finally {
-    walletLoading.value = false
+    if (version === walletVersion) walletLoading.value = false
   }
-  await loadUsage()
 }
 
 const usageColumns: TableColumn<UsageLog>[] = [
@@ -184,7 +206,7 @@ const usageColumns: TableColumn<UsageLog>[] = [
   { title: '用量来源', key: 'usageSource', width: 125, render: row => h(UiTag,
     { size: 'small', bordered: false, type: row.usageSource === 'missing' || row.usageSource === 'partial' ? 'warning' : 'default' },
     { default: () => usageSourceLabel(row.usageSource) }) },
-  { title: 'Tokens', key: 'tokens', width: 110, render: totalTokens },
+  { title: '用量', key: 'tokens', width: 110, render: totalTokens },
   {
     title: '消耗',
     key: 'cost',
@@ -195,13 +217,13 @@ const usageColumns: TableColumn<UsageLog>[] = [
     title: '首字',
     key: 'firstTokenMs',
     width: 90,
-    render: (row) => (row.firstTokenMs == null ? '—' : `${row.firstTokenMs}ms`)
+    render: (row) => duration(row.firstTokenMs)
   },
   {
     title: '延迟',
     key: 'latencyMs',
     width: 90,
-    render: (row) => (row.latencyMs == null ? '—' : `${row.latencyMs}ms`)
+    render: (row) => duration(row.latencyMs)
   },
   {
     title: '状态',
@@ -216,9 +238,9 @@ const usageColumns: TableColumn<UsageLog>[] = [
             bordered: false,
             type: row.status === 'success' ? 'success' : 'error'
           },
-          { default: () => row.status }
+          { default: () => row.status === 'success' ? '成功' : '失败' }
         ),
-        row.errorCategory ? h('span', null, row.errorCategory) : null,
+        row.status !== 'success' && row.errorCategory ? h('span', null, row.errorCategory) : null,
         row.modelMismatch ? h(UiTag, { size: 'small', bordered: false, type: 'warning' }, { default: () => '模型异常' }) : null
       ])
   }
@@ -231,7 +253,7 @@ const walletColumns: TableColumn<WalletTransaction>[] = [
     minWidth: 150,
     render: (row) => formatTime(row.createdAt)
   },
-  { title: '类型', key: 'type', width: 90 },
+  { title: '类型', key: 'type', width: 90, render: row => walletType(row.type) },
   {
     title: '金额',
     key: 'amount',
@@ -248,15 +270,15 @@ const walletColumns: TableColumn<WalletTransaction>[] = [
     title: '备注',
     key: 'note',
     minWidth: 180,
-    render: (row) => row.note || '—'
+    render: (row) => walletNote(row.note)
   }
 ]
 
-onMounted(load)
+onMounted(() => { void loadWallet(); void loadUsage() })
 </script>
 
 <template>
-  <UiTabs type="line" animated>
+  <UiTabs v-model:value="activeTab" type="line" animated>
     <UiTabPane name="usage" tab="用量">
       <div class="filter-bar">
         <div class="filter-presets">
@@ -280,14 +302,32 @@ onMounted(load)
           <input type="date" v-model="dateEnd" class="date-input" title="结束日期" />
         </div>
       </div>
-      <UiCard class="table-card" :bordered="false">
+      <UiCard class="table-card hidden md:block" :bordered="false">
         <UiDataTable :columns="usageColumns" :data="usageRows" :loading="usageLoading" :bordered="false" :scroll-x="940" />
       </UiCard>
+      <div class="grid gap-3 md:hidden">
+        <p v-if="usageLoading" class="py-8 text-center text-sm text-gray-500" role="status">正在加载用量…</p>
+        <p v-else-if="!usageRows.length" class="card p-6 text-center text-sm text-gray-500">当前筛选范围内没有调用记录</p>
+        <article v-for="row in usageRows" :key="row.id" class="card min-w-0 p-4">
+          <div class="flex items-start justify-between gap-3"><h2 class="min-w-0 break-all text-sm font-semibold">{{ row.model || '未知模型' }}</h2><UiTag :type="row.status === 'success' ? 'success' : 'error'">{{ row.status === 'success' ? '成功' : '失败' }}</UiTag></div>
+          <p class="mt-1 text-xs text-gray-500">{{ formatTime(row.ts) }} · {{ row.apiKeyName || '无 Key' }}</p>
+          <div class="mt-4 flex flex-wrap justify-between gap-2 text-sm"><span>{{ usageLabel(row) }}</span><strong>{{ row.subscriptionPoints != null ? formatSubscriptionUsage(row.subscriptionPoints) : formatUsd(row.cost) }}</strong></div>
+          <p v-if="row.status !== 'success' && row.errorCategory" class="mt-2 text-sm text-red-600">{{ row.errorCategory }}</p>
+          <details class="mt-3 border-t border-gray-100 pt-3 text-xs dark:border-dark-700"><summary class="cursor-pointer text-primary-700 dark:text-primary-300">用量与耗时详情</summary><dl class="mt-3 grid grid-cols-2 gap-3"><div><dt class="text-gray-500">用量来源</dt><dd>{{ usageSourceLabel(row.usageSource) }}</dd></div><div><dt class="text-gray-500">服务商</dt><dd>{{ row.provider === 'modelbridge' ? 'Model Bridge' : row.provider }}</dd></div><div><dt class="text-gray-500">首字</dt><dd>{{ duration(row.firstTokenMs) }}</dd></div><div><dt class="text-gray-500">耗时</dt><dd>{{ duration(row.latencyMs) }}</dd></div></dl><p v-if="row.modelMismatch" class="mt-2 text-amber-700">调用模型与返回模型不一致</p></details>
+        </article>
+      </div>
+      <UiPagination class="mt-4" v-model:page="usagePage" :page-size="pageSize" :item-count="usageTotal" :disabled="usageLoading" />
     </UiTabPane>
     <UiTabPane name="wallet" tab="钱包">
-      <UiCard class="table-card" :bordered="false">
+      <UiCard class="table-card hidden md:block" :bordered="false">
         <UiDataTable :columns="walletColumns" :data="walletRows" :loading="walletLoading" :bordered="false" :scroll-x="660" />
       </UiCard>
+      <div class="grid gap-3 md:hidden">
+        <p v-if="walletLoading" class="py-8 text-center text-sm text-gray-500" role="status">正在加载钱包…</p>
+        <p v-else-if="!walletRows.length" class="card p-6 text-center text-sm text-gray-500">暂无钱包流水</p>
+        <article v-for="row in walletRows" :key="row.id" class="card min-w-0 p-4 text-sm"><div class="flex justify-between gap-3"><strong>{{ walletType(row.type) }}</strong><strong :class="row.amount < 0 ? 'text-red-600' : 'text-emerald-600'">{{ formatUsd(row.amount) }}</strong></div><p class="mt-2 text-xs text-gray-500">{{ formatTime(row.createdAt) }} · 余额 {{ formatUsd(row.balanceAfter) }}</p><p class="mt-2 break-words">{{ walletNote(row.note) }}</p></article>
+      </div>
+      <UiPagination class="mt-4" v-model:page="walletPage" :page-size="pageSize" :item-count="walletTotal" :disabled="walletLoading" />
     </UiTabPane>
   </UiTabs>
 </template>
@@ -329,11 +369,14 @@ onMounted(load)
 
 .filter-dates {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
 .date-input {
+  min-width: 0;
+  flex: 1;
   padding: 4px 10px;
   border: 1px solid var(--n-border-color, #e5e7eb);
   border-radius: 6px;

@@ -32,6 +32,7 @@ const quota = computed(() => {
       <span v-if="recommended" class="plan-recommended">推荐</span>
       <slot name="selection" />
     </div>
+    <slot name="notice" />
     <h2>{{ plan.name }}</h2>
     <p class="plan-description">{{ plan.description || '灵活的模型调用额度，满足你的使用需求。' }}</p>
     <div class="plan-price"><strong>{{ money(plan.price) }}</strong><span>/ {{ plan.paymentProvider === 'waffo' ? '月' : `${plan.validityDays} 天` }}</span></div>

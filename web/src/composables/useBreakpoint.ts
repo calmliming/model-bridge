@@ -52,6 +52,7 @@ export function resolveSpan(spanStr: string | number, current: Breakpoint): numb
 
 export function useBreakpoint() {
   onMounted(() => {
+    onResize()
     if (listeners === 0) window.addEventListener('resize', onResize)
     listeners++
   })

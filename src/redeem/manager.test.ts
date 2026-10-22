@@ -28,7 +28,7 @@ vi.mock('../wallet/manager', () => ({
   applyWalletTransactionWithClient: mocks.applyWalletTransactionWithClient,
 }))
 
-import { generateRedeemCodes, redeemCode, RedeemError } from './manager'
+import { generateRedeemCodes, redeemCode, listRedeemCodes, RedeemError } from './manager'
 
 /** Drives the fake client: a sequence of responses matched to SQL fragments. */
 function scriptQueries(handlers: Array<{ match: RegExp; rows?: unknown[]; rowCount?: number }>): void {
@@ -42,6 +42,19 @@ function scriptQueries(handlers: Array<{ match: RegExp; rows?: unknown[]; rowCou
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('redeem code listing', () => {
+  it('paginates filtered batches and reports totals across the filtered result', async () => {
+    mocks.query.mockImplementation(async (sql: string) => ({ rows: sql.includes('COUNT(*)') ? [{ total: 1000, total_value: 5_000_000_000, used: 12 }] : [] }))
+    const result = await listRedeemCodes({ page: 50, pageSize: 20, batchId: 'batch_1', validity: 'expired' })
+    expect(result).toMatchObject({ total: 1000, summary: { value: 5000, used: 12 } })
+    const count = mocks.query.mock.calls.find(([sql]) => sql.includes('COUNT(*)'))!
+    const list = mocks.query.mock.calls.find(([sql]) => sql.includes('SELECT id, type'))!
+    expect(count[0]).toContain('batch_id = $1 AND expires_at <= $2')
+    expect(count[1][0]).toBe('batch_1')
+    expect(list[1]).toEqual([...count[1], 20, 980])
+  })
 })
 
 describe('redeemCode', () => {

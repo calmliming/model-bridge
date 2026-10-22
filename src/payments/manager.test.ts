@@ -34,7 +34,7 @@ vi.mock('./providers/index', () => ({
   })),
 }))
 
-import { createPaymentOrder, handlePaymentNotification, queryPaymentOrder } from './manager'
+import { createPaymentOrder, handlePaymentNotification, queryPaymentOrder, listPaymentOrders } from './manager'
 
 function order(overrides: Record<string, unknown> = {}) {
   return {
@@ -124,6 +124,21 @@ describe('online payment switch', () => {
     await expect(queryPaymentOrder({ id: 'po_1', userId: 'user_1' })).resolves.toMatchObject({ status: 'paid' })
     expect(mocks.applyWalletTransactionWithClient).toHaveBeenCalledOnce()
     expect(mocks.isOnlinePaymentEnabled).not.toHaveBeenCalled()
+  })
+})
+
+describe('payment order listing', () => {
+  it('uses identical parameterized filters for totals and later pages', async () => {
+    mocks.query.mockImplementation(async (sql: string) => ({ rows: sql.includes('COUNT(*)') ? [{ total: 45 }] : [], rowCount: 0 }))
+    const result = await listPaymentOrders({ page: 3, pageSize: 20, status: 'paid', search: "name_%'", startDate: 1000, endDate: 2000 })
+    expect(result).toMatchObject({ page: 3, total: 45 })
+    const count = mocks.query.mock.calls.find(([sql]) => sql.includes('COUNT(*)'))!
+    const list = mocks.query.mock.calls.find(([sql]) => sql.includes('SELECT o.id'))!
+    expect(count[0]).toContain('LEFT JOIN users u')
+    expect(count[0]).toContain('o.created_at >= $3 AND o.created_at < $4')
+    expect(count[0]).not.toContain("name_%'")
+    expect(count[1]).toEqual(['paid', "%name\\_\\%'%", 1000, 2000])
+    expect(list[1]).toEqual([...count[1], 20, 40])
   })
 })
 

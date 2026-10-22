@@ -7,6 +7,7 @@ import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime, openAIPlanLabel } from '../utils'
 import ImportAccountsModal from '../components/ImportAccountsModal.vue'
+import { useBreakpoint } from '../composables/useBreakpoint'
 
 interface AccountQuotaWindow {
   key: 'hourly' | 'weekly' | 'weekly_sonnet' | 'weekly_fable' | 'primary' | 'secondary' | 'model'
@@ -157,7 +158,15 @@ const searchQuery = ref('')
 const providerFilter = ref<string>('all')
 const statusFilter = ref<StatusFilter>('all')
 const VIEW_MODE_STORAGE_KEY = 'model-bridge.accounts.view-mode'
-const viewMode = ref<ViewMode>(readStoredViewMode())
+const { width: viewportWidth } = useBreakpoint()
+const mobileViewMode = ref<ViewMode>(readStoredViewMode('mobile'))
+const desktopViewMode = ref<ViewMode>(readStoredViewMode('desktop'))
+const viewMode = computed<ViewMode>({
+  get: () => viewportWidth.value < 768 ? mobileViewMode.value : desktopViewMode.value,
+  set: mode => { if (viewportWidth.value < 768) mobileViewMode.value = mode; else desktopViewMode.value = mode },
+})
+const moreTools = ref(false)
+const managedAccount = ref<Account | null>(null)
 const testingId = ref<string | null>(null)
 const refreshingQuotaId = ref<string | null>(null)
 const balanceRefreshingIds = ref<Set<string>>(new Set())
@@ -254,20 +263,21 @@ const bulkForm = ref<BulkEditForm>({
   autopausePercent: null,
 })
 
-function readStoredViewMode(): ViewMode {
+function readStoredViewMode(device: 'mobile' | 'desktop'): ViewMode {
   try {
-    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+    const stored = window.localStorage.getItem(`${VIEW_MODE_STORAGE_KEY}.${device}`)
+      ?? (device === 'desktop' ? window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) : null)
     if (stored === 'table' || stored === 'card') return stored
   } catch {
     // Storage may be unavailable (private mode); fall back to the layout default.
   }
   // The table needs ~2000px of scroll width, so narrow screens start on cards.
-  return window.matchMedia?.('(max-width: 768px)').matches ? 'card' : 'table'
+  return device === 'mobile' ? 'card' : 'table'
 }
 
 watch(viewMode, (mode) => {
   try {
-    window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+    window.localStorage.setItem(`${VIEW_MODE_STORAGE_KEY}.${viewportWidth.value < 768 ? 'mobile' : 'desktop'}`, mode)
   } catch {
     // Not persisting the preference is harmless.
   }
@@ -1791,72 +1801,19 @@ function renderToggle(row: Account) {
 }
 
 function renderActions(row: Account) {
-  return h(
-    UiSpace,
-    { size: 4 },
-    {
-      default: () => [
-        h(
-          UiButton,
-          {
-            size: 'small',
-            quaternary: true,
-            loading: testingId.value === row.id,
-            onClick: () => testConnectivity(row),
-            title: '测试连通性',
-          },
-          {
-            default: () => h('div', { class: 'flex items-center gap-1' }, [
-              h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M13 10V3L4 14h7v7l9-11h-7z' })
-              ]),
-              h('span', '测试')
-            ])
-          },
-        ),
-        // Reset quota: OpenAI / Claude OAuth accounts — consumes an upstream credit.
-        row.provider === 'openai' || row.provider === 'claude'
-          ? h(
-              UiButton,
-              {
-                size: 'small',
-                type: 'warning',
-                quaternary: true,
-                loading: resettingQuotaId.value === row.id,
-                onClick: () => row.provider === 'claude' ? openClaudeReset(row) : confirmResetQuota(row),
-                title: row.provider === 'claude' ? '查询并兑换 Claude 原生重置额度' : '重置限额（消耗一次 reset credit）',
-              },
-              {
-                default: () => h('div', { class: 'flex items-center gap-1' }, [
-                  h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' })
-                  ]),
-                  h('span', '重置')
-                ])
-              },
-            )
-          : null,
-        h(
-          UiButton,
-          {
-            size: 'small',
-            type: 'error',
-            quaternary: true,
-            onClick: () => confirmDelete(row),
-            title: '删除账户',
-          },
-          {
-            default: () => h('div', { class: 'flex items-center gap-1' }, [
-              h('svg', { class: 'w-3.5 h-3.5', fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor' }, [
-                h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2', d: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' })
-              ]),
-              h('span', '删除')
-            ])
-          },
-        ),
-      ],
-    },
-  )
+  return h(UiSpace, { size: 4 }, { default: () => [
+    h(UiButton, { size: 'small', quaternary: true, loading: testingId.value === row.id,
+      title: '测试连通性', onClick: () => testConnectivity(row) }, { default: () => '测试' }),
+    row.provider === 'openai' || row.provider === 'claude'
+      ? h(UiButton, { size: 'small', type: 'warning', quaternary: true,
+          loading: resettingQuotaId.value === row.id,
+          title: '重置限额（消耗上游重置次数）',
+          onClick: () => row.provider === 'claude' ? openClaudeReset(row) : confirmResetQuota(row) },
+        { default: () => '重置' })
+      : null,
+    h(UiButton, { size: 'small', secondary: true, title: '更多账户操作',
+      onClick: () => { managedAccount.value = row } }, { default: () => '更多' }),
+  ] })
 }
 
 const columns = computed<TableColumn<Account>[]>(() => [
@@ -2069,7 +2026,7 @@ onBeforeUnmount(() => {
         />
       </div>
       <div class="accounts-actions">
-        <div class="view-switch" role="group" aria-label="显示方式">
+        <div v-show="moreTools || viewportWidth >= 768" class="view-switch" role="group" aria-label="显示方式">
           <button
             type="button"
             :class="{ 'is-active': viewMode === 'table' }"
@@ -2105,7 +2062,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </UiButton>
-        <UiButton secondary @click="openGroups">
+        <UiButton v-show="moreTools || viewportWidth >= 768" secondary @click="openGroups">
           <template #default>
             <div class="flex items-center gap-1.5">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2115,7 +2072,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </UiButton>
-        <UiButton secondary @click="openBatchImport">
+        <UiButton v-show="moreTools || viewportWidth >= 768" secondary @click="openBatchImport">
           <template #default>
             <div class="flex items-center gap-1.5">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2125,6 +2082,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </UiButton>
+        <UiButton v-if="viewportWidth < 768" secondary :aria-expanded="moreTools" @click="moreTools = !moreTools">{{ moreTools ? '收起工具' : '更多工具' }}</UiButton>
         <UiButton type="primary" @click="openAdd">
           <template #default>
             <div class="flex items-center gap-1.5">
@@ -2275,6 +2233,8 @@ onBeforeUnmount(() => {
               <RenderCell :render="() => renderQuota(account)" />
             </section>
 
+            <details class="account-card-section">
+              <summary class="cursor-pointer text-sm font-semibold text-primary-700 dark:text-primary-300">分组与调度设置</summary>
             <section class="account-card-section">
               <span class="account-card-label">分组</span>
               <RenderCell :render="() => renderGroupCell(account)" />
@@ -2299,6 +2259,7 @@ onBeforeUnmount(() => {
               <span class="account-card-label">备注</span>
               <RenderCell :render="() => renderNotes(account)" />
             </section>
+            </details>
 
             <dl class="account-card-meta">
               <div>
@@ -2323,6 +2284,10 @@ onBeforeUnmount(() => {
       </UiCard>
     </div>
 
+    <UiModal :show="!!managedAccount" :title="`管理账户：${managedAccount?.name ?? ''}`" :width="440" @update:show="(shown: boolean) => { if (!shown) managedAccount = null }">
+      <p class="mb-4 text-sm text-gray-500">删除后该账号将退出调度，相关历史用量仍保留。</p>
+      <UiButton v-if="managedAccount" type="error" @click="confirmDelete(managedAccount); managedAccount = null">删除账户</UiButton>
+    </UiModal>
     <UiModal v-model:show="showAdd" title="添加上游账户" :width="520">
       <div v-if="step === 'name'">
           <UiForm label-placement="top" @submit="submitAddForm">

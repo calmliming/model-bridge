@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import { UiTag } from '../components/ui'
 import LazyEChart from '../components/LazyEChart.vue'
 import { useBreakpoint } from '../composables/useBreakpoint'
 import { useMessage } from '../composables/useMessage'
-import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { calendarDayRangeMs, formatTime, formatUsd } from '../utils'
+import { formatTime, formatUsd } from '../utils'
 import BrandLogo from '../components/BrandLogo.vue'
 import SubscriptionPlanCard from '../components/SubscriptionPlanCard.vue'
 import RechargeAmountPicker from '../components/RechargeAmountPicker.vue'
@@ -33,6 +32,10 @@ interface WalletTransaction {
 
 interface UsageLog {
   subscriptionPoints: number | null
+  imageCount?: number
+  videoSeconds?: number
+  inputTokens?: number
+  outputTokens?: number
   id: string
   ts: number
   provider: string
@@ -147,38 +150,29 @@ const trendDays = ref<7 | 30>(7)
 const trendMetric = ref<'cost' | 'requests'>('cost')
 const trendRanges = [7, 30] as const
 
-// Date filter for usage logs
-const dateFrom = ref<string>('')
-const dateEnd = ref<string>('')
-
-const datePresets = [
-  { label: '全部', value: null as null | [string, string] },
-  { label: '近7天', value: [daysAgoStr(6), todayStr()] as [string, string] },
-  { label: '近30天', value: [daysAgoStr(29), todayStr()] as [string, string] },
-]
-
-function todayStr(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+const orderHistoryOpen = ref(false)
+const orderHistoryPage = ref(1)
+const orderHistoryTotal = ref(0)
+const orderHistoryLoading = ref(false)
+const orderHistory = ref<PaymentOrder[]>([])
+const paymentStatus = (status: string) => ({ paid: '已入账', pending: '待支付', canceled: '已取消', expired: '已过期' } as Record<string, string>)[status] || status
+const walletType = (type: string) => ({ usage: '调用扣费', credit: '充值入账', debit: '余额扣款', refund: '退款' } as Record<string, string>)[type] || type
+function recentUsage(row: UsageLog) {
+  if (row.videoSeconds) return `${row.videoSeconds} 秒视频`
+  if (row.imageCount) return `${row.imageCount} 张图片`
+  const tokens = (row.inputTokens || 0) + (row.outputTokens || 0)
+  return tokens ? `${tokens.toLocaleString()} Tokens` : '—'
 }
-
-function daysAgoStr(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+async function loadOrderHistory() {
+  orderHistoryLoading.value = true
+  try {
+    const { data } = await api.get('/users/payment-orders', { params: { page: orderHistoryPage.value, pageSize: 20 } })
+    orderHistory.value = data.orders; orderHistoryTotal.value = data.total
+  } catch (error) { message.error(errMsg(error)) }
+  finally { orderHistoryLoading.value = false }
 }
-
-function pad2(v: number) { return String(v).padStart(2, '0') }
-
-function applyPreset(preset: (typeof datePresets)[number]) {
-  if (preset.value) {
-    dateFrom.value = preset.value[0]
-    dateEnd.value = preset.value[1]
-  } else {
-    dateFrom.value = ''
-    dateEnd.value = ''
-  }
-}
+function openOrderHistory() { orderHistoryOpen.value = true; void loadOrderHistory() }
+watch(orderHistoryPage, loadOrderHistory)
 
 const emptySummary: UsageSummary = {
   requests24h: 0,
@@ -271,7 +265,8 @@ const notices = computed<DashboardNotice[]>(() => {
 function handleNotice(action: DashboardNotice['action']) {
   if (action === 'recharge') showRecharge.value = true
   else if (action === 'store') void openStore()
-  else document.getElementById(action === 'subscription' ? 'my-subscriptions' : 'payment-orders')?.scrollIntoView({ behavior: 'smooth' })
+  else if (action === 'orders') openOrderHistory()
+  else document.getElementById('my-subscriptions')?.scrollIntoView({ behavior: 'smooth' })
 }
 
 function openFailures() {
@@ -307,27 +302,22 @@ function formatNumber(n: number): string {
 
 const metricCards = computed(() => [
   {
-    label: '近 24 小时请求',
+    label: '今日请求',
     value: formatNumber(stat.value.requests24h),
     hint: `累计 ${formatNumber(stat.value.requestsTotal)} 次`,
   },
   {
-    label: '近 24 小时 Tokens',
-    value: formatNumber(stat.value.tokens24h),
-    hint: `费用 ${formatUsd(stat.value.cost24h)}`,
-  },
-  {
-    label: '近 24 小时按量费用',
+    label: '今日按量费用',
     value: formatUsd(stat.value.cost24h),
-    hint: `${formatNumber(stat.value.tokens24h)} tokens`,
+    hint: '订阅额度消耗另计',
   },
   {
-    label: '30天 按量费用',
+    label: '近30天按量费用',
     value: formatUsd(stat.value.cost30d),
-    hint: `${formatNumber(stat.value.requests30d)} 次 · ${formatNumber(stat.value.tokens30d)} tokens`,
+    hint: `${formatNumber(stat.value.requests30d)} 次请求 · 包含图片与视频`,
   },
   {
-    label: '30天 成功率',
+    label: '近30天成功率',
     value: successRate30d.value == null ? '—' : `${successRate30d.value.toFixed(1)}%`,
     hint:
       successRate30d.value == null
@@ -346,8 +336,6 @@ const providerLabels: Record<string, string> = {
 async function loadUsage() {
   try {
     const params: Record<string, unknown> = { pageSize: 8 }
-    if (dateFrom.value) params.startDate = calendarDayRangeMs(dateFrom.value)[0]
-    if (dateEnd.value) params.endDate = calendarDayRangeMs(dateEnd.value)[1]
     const usageRes = await api.get('/users/usage', { params })
     usageLogs.value = usageRes.data.logs
   } catch (e) {
@@ -394,9 +382,6 @@ async function load() {
   }
 }
 
-watch([dateFrom, dateEnd], () => {
-  loadUsage()
-})
 
 async function createRechargeOrder() {
   if (!Number.isFinite(rechargeAmount.value) || rechargeAmount.value <= 0) {
@@ -590,29 +575,6 @@ function remainLabel(sub: Subscription): string {
   return parts.length ? parts.join(' · ') : '额度不限'
 }
 
-const walletColumns: TableColumn<WalletTransaction>[] = [
-  { title: '时间', key: 'createdAt', minWidth: 140, render: (row) => formatTime(row.createdAt) },
-  { title: '类型', key: 'type', width: 90 },
-  { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: row.amount < 0 ? 'danger' : 'amount' }, formatUsd(row.amount)) },
-  { title: '余额', key: 'balanceAfter', width: 110, render: (row) => formatUsd(row.balanceAfter) },
-  { title: '备注', key: 'note', minWidth: 160, render: (row) => row.note || '—' },
-]
-
-const usageColumns: TableColumn<UsageLog>[] = [
-  { title: '时间', key: 'ts', minWidth: 140, render: (row) => formatTime(row.ts) },
-  { title: '服务商', key: 'provider', width: 90 },
-  { title: '模型', key: 'model', minWidth: 160, render: (row) => row.model || '—' },
-  { title: '消耗', key: 'cost', width: 115, render: (row) => row.subscriptionPoints != null ? formatSubscriptionUsage(row.subscriptionPoints) : formatUsd(row.cost) },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'success' ? 'success' : 'error' }, { default: () => row.status }) },
-]
-
-const paymentColumns: TableColumn<PaymentOrder>[] = [
-  { title: '时间', key: 'createdAt', minWidth: 140, render: (row) => formatTime(row.createdAt) },
-  { title: '金额', key: 'amount', width: 110, render: (row) => h('span', { class: 'amount' }, formatUsd(row.amount)) },
-  { title: '状态', key: 'status', width: 90, render: (row) => h(UiTag, { size: 'small', bordered: false, type: row.status === 'paid' ? 'success' : row.status === 'pending' ? 'warning' : 'default' }, { default: () => row.status }) },
-  { title: '入账时间', key: 'paidAt', minWidth: 140, render: (row) => row.paidAt ? formatTime(row.paidAt) : '—' },
-]
-
 onMounted(() => {
   void load().then(() => checkSubscriptionPayment(true))
   void loadInsights()
@@ -733,42 +695,36 @@ onUnmounted(() => {
         </UiCard>
       </div>
 
-      <div class="records-grid">
-          <UiCard title="近期用量" class="usage-card records-usage" :bordered="false">
-            <template #header-extra>
-              <div class="usage-filter">
-                <div class="usage-presets">
-                  <button
-                    v-for="preset in datePresets"
-                    :key="preset.label"
-                    type="button"
-                    class="preset-btn"
-                    :class="{ active: preset.value ? (dateFrom === preset.value[0] && dateEnd === preset.value[1]) : (!dateFrom && !dateEnd) }"
-                    @click="applyPreset(preset)"
-                  >
-                    {{ preset.label }}
-                  </button>
-                </div>
-                <div class="usage-dates">
-                  <input type="date" v-model="dateFrom" class="date-input" aria-label="开始日期" />
-                  <span class="date-sep">—</span>
-                  <input type="date" v-model="dateEnd" class="date-input" aria-label="结束日期" />
-                </div>
-              </div>
-            </template>
-            <UiDataTable :columns="usageColumns" :data="usageLogs" :bordered="false" size="small" :scroll-x="620" />
-            <p class="table-scroll-hint">左右滑动查看完整记录</p>
-          </UiCard>
-          <UiCard title="钱包流水" :bordered="false">
-            <UiDataTable :columns="walletColumns" :data="transactions" :bordered="false" size="small" :scroll-x="640" />
-            <p class="table-scroll-hint">左右滑动查看完整记录</p>
-          </UiCard>
-          <UiCard id="payment-orders" title="充值订单" :bordered="false">
-            <UiDataTable :columns="paymentColumns" :data="paymentOrders" :bordered="false" size="small" :scroll-x="520" />
-            <p class="table-scroll-hint">左右滑动查看完整记录</p>
-          </UiCard>
-      </div>
+      <UiCard title="最近记录" :bordered="false">
+        <UiTabs>
+          <UiTabPane name="usage" tab="用量">
+            <p v-if="!usageLogs.length" class="py-4 text-sm text-gray-500">暂无调用记录</p>
+            <div v-for="row in usageLogs.slice(0, 5)" :key="row.id" class="recent-summary-row">
+              <div class="min-w-0"><strong>{{ row.model || row.provider }}</strong><p>{{ formatTime(row.ts) }} · {{ recentUsage(row) }}</p></div>
+              <div class="shrink-0 text-right"><strong>{{ row.subscriptionPoints != null ? formatSubscriptionUsage(row.subscriptionPoints) : formatUsd(row.cost) }}</strong><p :class="row.status === 'success' ? 'text-emerald-600' : 'text-red-600'">{{ row.status === 'success' ? '成功' : '失败' }}</p></div>
+            </div>
+            <UiButton class="mt-3" quaternary @click="router.push('/app/usage')">查看全部用量 →</UiButton>
+          </UiTabPane>
+          <UiTabPane name="wallet" tab="钱包">
+            <p v-if="!transactions.length" class="py-4 text-sm text-gray-500">暂无钱包流水</p>
+            <div v-for="row in transactions.slice(0, 5)" :key="row.id" class="recent-summary-row"><div><strong>{{ walletType(row.type) }}</strong><p>{{ formatTime(row.createdAt) }}</p></div><strong>{{ formatUsd(row.amount) }}</strong></div>
+            <UiButton class="mt-3" quaternary @click="router.push({ name: 'user-usage', query: { tab: 'wallet' } })">查看全部钱包流水 →</UiButton>
+          </UiTabPane>
+          <UiTabPane name="payments" tab="充值订单">
+            <p v-if="!paymentOrders.length" class="py-4 text-sm text-gray-500">暂无充值订单</p>
+            <div v-for="row in paymentOrders.slice(0, 5)" :key="row.id" class="recent-summary-row"><div><strong>{{ formatUsd(row.amount) }}</strong><p>{{ formatTime(row.createdAt) }}</p></div><span>{{ paymentStatus(row.status) }}</span></div>
+            <UiButton class="mt-3" quaternary @click="openOrderHistory">查看全部充值订单 →</UiButton>
+          </UiTabPane>
+        </UiTabs>
+      </UiCard>
     </UiSpin>
+
+    <UiModal v-model:show="orderHistoryOpen" title="充值订单" :width="640">
+      <p v-if="orderHistoryLoading" role="status" class="py-4 text-sm text-gray-500">正在加载订单…</p>
+      <p v-else-if="!orderHistory.length" class="py-4 text-sm text-gray-500">暂无充值订单</p>
+      <div v-for="row in orderHistory" :key="row.id" class="recent-summary-row"><div class="min-w-0"><strong>{{ formatUsd(row.amount) }}</strong><p>{{ formatTime(row.createdAt) }}</p><p class="break-all">{{ row.id }}</p></div><span>{{ paymentStatus(row.status) }}</span></div>
+      <template #footer><UiPagination v-model:page="orderHistoryPage" :page-size="20" :item-count="orderHistoryTotal" :disabled="orderHistoryLoading" /></template>
+    </UiModal>
 
     <UiModal v-model:show="showRecharge" title="按量充值" :width="500">
       <UiAlert v-if="!onlinePaymentsEnabled" type="info" class="mb-4">
@@ -813,6 +769,7 @@ onUnmounted(() => {
 
     <UiModal v-model:show="showStore" title="选择适合你的套餐" :width="1060">
       <div class="store-intro"><p>从轻量体验，到高频使用。</p><span>Waffo 按月自动续订，可在订阅管理中取消续订；税费以收银台显示为准。</span></div>
+      <UiAlert v-if="!storeLoading && storePlans.length && storePlans.every(plan => plan.checkoutAvailable === false)" type="info" class="mb-4">当前套餐暂未开放购买，请联系管理员；按量调用可继续使用钱包余额。</UiAlert>
       <UiAlert v-if="waffoTestMode" type="warning" class="mb-4">当前为 Waffo 测试模式，请使用测试支付方式。</UiAlert>
       <UiAlert v-if="storeError" type="error" class="mb-4">{{ storeError }} <UiButton size="small" quaternary @click="openStore">重新加载</UiButton></UiAlert>
       <div v-if="subscriptionCheckout" class="subscription-checkout" role="status">
@@ -904,6 +861,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.recent-summary-row { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 12px 0; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+.recent-summary-row strong { overflow-wrap: anywhere; }
+.recent-summary-row p { margin-top: 4px; font-size: 12px; color: #64748b; }
+.dark .recent-summary-row { border-color: #334155; }
+
 .user-overview { width: 100%; max-width: 1440px; margin-inline: auto; }
 .overview-hero { display: grid; grid-template-columns: minmax(260px, .82fr) minmax(0, 2fr); gap: 16px; margin-bottom: 18px; }
 .wallet-card { display: flex; min-width: 0; flex-direction: column; background: linear-gradient(145deg, #e9f5ee, #f5faf6 68%, #fff); border-color: #d7e9dd; }
@@ -1251,7 +1213,7 @@ onUnmounted(() => {
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 

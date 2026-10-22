@@ -1,12 +1,10 @@
-.operations-page { display: grid; gap: 20px; color: #22382f; max-width: 1440px; margin: 0 auto; }
+.operations-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; color: #0f172a; max-width: 1440px; margin: 0 auto; }
 .op-heading { display: flex; gap: 20px; justify-content: space-between; align-items: center; }
 .op-heading h2 { font-size: 26px; font-weight: 750; margin: 3px 0 8px; letter-spacing: -.6px; }
 .op-heading p, .op-hint, .op-context, .op-panel-title span { font-size: 13px; color: #64766d; }
 .op-heading .op-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #39856b; }
-.op-button { border: 1px solid #ccdad2; border-radius: 10px; background: #fff; padding: 10px 16px; color: #244b39; font-size: 13px; font-weight: 650; white-space: nowrap; cursor: pointer; }
-.op-button:hover { background: #edf5ef; }
-.op-primary { background: #246c50; border-color: #246c50; color: white; }
-.op-primary:hover { background: #185139; }
+.op-button { @apply rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50; white-space: nowrap; cursor: pointer; }
+.op-primary { @apply border-primary-600 bg-primary-600 text-white hover:bg-primary-700; }
 .op-button:disabled { opacity: .5; cursor: not-allowed; }
 .operations-page :focus-visible { outline: 2px solid #3d9876; outline-offset: 3px; }
 .op-panel { border: 1px solid #dce5df; background: #fff; border-radius: 16px; padding: 20px; min-width: 0; }

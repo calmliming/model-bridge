@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, watch, onUnmounted } from 'vue'
+import { computed, watch, onUnmounted, ref, provide } from 'vue'
+import { useModalFocus } from '../../composables/useModalFocus'
 
 defineOptions({ inheritAttrs: false })
 
@@ -9,14 +10,19 @@ const props = withDefaults(
     title?: string
     width?: number | string
     closable?: boolean
+    role?: 'dialog' | 'alertdialog'
   }>(),
   {
     width: 520,
     closable: true,
+    role: 'dialog',
   },
 )
 
 const emit = defineEmits<{ (e: 'update:show', value: boolean): void }>()
+const overlay = ref<HTMLElement | null>(null)
+provide('uiOverlayRoot', overlay)
+const { isTop } = useModalFocus(() => props.show, overlay)
 
 const widthStyle = computed(() => ({
   width: typeof props.width === 'number' ? `${props.width}px` : props.width,
@@ -28,24 +34,24 @@ function close() {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.show) close()
+  if (e.key === 'Escape' && props.show && isTop() && !e.defaultPrevented) {
+    e.preventDefault()
+    close()
+  }
 }
 
 watch(
   () => props.show,
   (open) => {
     if (open) {
-      document.body.classList.add('modal-open')
       document.addEventListener('keydown', onKey)
     } else {
-      document.body.classList.remove('modal-open')
       document.removeEventListener('keydown', onKey)
     }
-  },
+  }, { immediate: true },
 )
 
 onUnmounted(() => {
-  document.body.classList.remove('modal-open')
   document.removeEventListener('keydown', onKey)
 })
 </script>
@@ -53,8 +59,8 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="modal-fade">
-      <div v-if="show" class="modal-overlay">
-        <div class="modal-panel" :style="widthStyle" role="dialog" aria-modal="true" :aria-label="title">
+      <div v-if="show" ref="overlay" class="modal-overlay" tabindex="-1">
+        <div class="modal-panel" :style="widthStyle" :role="props.role" aria-modal="true" :aria-label="title">
           <div class="modal-header">
             <h3 class="modal-title">{{ title }}</h3>
             <button

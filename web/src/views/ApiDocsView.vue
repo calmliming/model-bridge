@@ -68,6 +68,7 @@ const message = useMessage()
 const auth = useAuthStore()
 const activeSection = ref<DocSection>('overview')
 const docsSearch = ref('')
+const mobileDirectory = ref<HTMLDetailsElement | null>(null)
 const generationLanguage = ref<'curl' | 'javascript'>('curl')
 const editLanguage = ref<'curl' | 'javascript'>('curl')
 const testerApiKey = ref('')
@@ -665,13 +666,9 @@ function syncSectionFromHash(): void {
 function selectSection(section: DocSection): void {
   activeSection.value = section
   docsSearch.value = ''
+  if (mobileDirectory.value) mobileDirectory.value.open = false
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${section}`)
   document.querySelector('.docs-article')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-function handleMobileSection(event: Event): void {
-  const section = resolveSection((event.target as HTMLSelectElement).value)
-  if (section) selectSection(section)
 }
 
 function openAuthorization(): void {
@@ -736,7 +733,7 @@ onBeforeUnmount(() => {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                   <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" />
                 </svg>
-                <input v-model="docsSearch" type="search" placeholder="搜索文档" />
+                <input v-model="docsSearch" type="search" aria-label="搜索文档" placeholder="搜索文档" />
               </label>
               <button
                 type="button"
@@ -799,14 +796,23 @@ onBeforeUnmount(() => {
         </aside>
 
         <main id="api-doc-content" class="docs-main">
-      <label class="docs-mobile-nav">
-        <span>文档目录</span>
-        <select :value="activeSection" @change="handleMobileSection">
-          <optgroup v-for="group in navigationGroups" :key="group.label" :label="group.label">
-            <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.label }}</option>
-          </optgroup>
-        </select>
-      </label>
+      <details ref="mobileDirectory" class="docs-mobile-nav">
+        <summary>文档目录 <strong>{{ activeNavigationItem.label }}</strong></summary>
+        <div class="mt-3">
+          <input v-model="docsSearch" class="input" type="search" aria-label="搜索文档章节" placeholder="搜索章节、模型或接口" />
+          <nav class="docs-mobile-links" aria-label="移动端文档目录">
+            <div v-for="group in filteredNavigationGroups" :key="group.label" class="docs-nav-group">
+              <p>{{ group.label }}</p>
+              <button v-for="item in group.items" :key="item.id" type="button" class="docs-nav-item"
+                :class="activeSection === item.id && 'docs-nav-item-active'"
+                :aria-current="activeSection === item.id ? 'page' : undefined" @click="selectSection(item.id)">
+                <span class="docs-nav-label">{{ item.label }}<span v-if="item.method" class="nav-method">{{ item.method }}</span></span>
+              </button>
+            </div>
+            <p v-if="!filteredNavigationGroups.length" class="docs-empty">没有匹配的文档，请换个关键词。</p>
+          </nav>
+        </div>
+      </details>
 
       <article class="docs-article">
         <header class="article-header">
@@ -1455,7 +1461,7 @@ anthropic-version: 2023-06-01</code></pre>
 }
 
 .docs-layout {
-  @apply mx-auto grid max-w-[1440px] gap-6;
+  @apply mx-auto grid min-w-0 grid-cols-1 max-w-[1440px] gap-6;
   transition: grid-template-columns 240ms ease;
 }
 
@@ -1486,17 +1492,17 @@ anthropic-version: 2023-06-01</code></pre>
 .docs-search input { @apply min-w-0 flex-1 bg-transparent text-xs text-gray-800 outline-none placeholder:text-gray-400 dark:text-dark-100; }
 
 .docs-nav { @apply min-h-0 flex-1 space-y-6 overflow-y-auto pb-5; }
-.docs-nav-group > p { @apply mb-2 px-2 text-[10px] font-black uppercase tracking-[0.16em] text-gray-400 dark:text-dark-500; }
+.docs-nav-group > p { @apply mb-2 px-2 text-xs font-semibold text-gray-500 dark:text-dark-400; }
 .docs-nav-item { @apply mb-1 block w-full rounded-lg border-l-2 border-transparent px-2.5 py-2 text-left transition duration-200 hover:bg-gray-100/80 active:translate-y-px dark:hover:bg-dark-800; }
 .docs-nav-item:focus-visible { @apply outline-none ring-2 ring-primary-500/30; }
 .docs-nav-item-active { @apply border-primary-500 bg-primary-50/80 dark:bg-primary-900/15; }
 .docs-nav-label { @apply flex items-center gap-1.5 text-[13px] font-semibold text-gray-700 dark:text-dark-200; }
 .docs-nav-item-active .docs-nav-label { @apply text-primary-700 dark:text-primary-300; }
-.docs-nav-item small { @apply mt-0.5 block truncate text-[10px] text-gray-400 dark:text-dark-500; }
+.docs-nav-item small { @apply mt-0.5 block truncate text-xs text-gray-500 dark:text-dark-400; }
 .docs-nav-copy { @apply block min-w-0; }
 .docs-nav-symbol { @apply hidden h-8 w-8 items-center justify-center rounded-lg text-gray-500 dark:text-dark-400; }
 .docs-nav-symbol svg { @apply h-[1.125rem] w-[1.125rem]; }
-.nav-method { @apply ml-auto font-mono text-[8px] font-black tracking-wide text-emerald-600 dark:text-emerald-400; }
+.nav-method { @apply ml-auto shrink-0 font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-400; }
 .docs-empty { @apply px-2 py-8 text-center text-xs text-gray-400; }
 
 .docs-base-url { @apply border-t border-gray-200 pt-4 dark:border-dark-700; }
@@ -1522,10 +1528,11 @@ anthropic-version: 2023-06-01</code></pre>
 
 .docs-main { @apply min-w-0; }
 .docs-mobile-nav { @apply mb-4 block rounded-xl border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900 xl:hidden; }
-.docs-mobile-nav span { @apply mb-1.5 block text-xs font-semibold text-gray-500 dark:text-dark-400; }
-.docs-mobile-nav select { @apply w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-semibold text-gray-800 outline-none focus:border-primary-400 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-100; }
+.docs-mobile-nav summary { @apply cursor-pointer rounded-md py-1 text-sm text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-dark-300; }
+.docs-mobile-nav summary strong { @apply ml-2 font-semibold text-gray-900 dark:text-white; }
+.docs-mobile-links { @apply mt-4 max-h-[50dvh] space-y-4 overflow-y-auto; }
 
-.docs-article { @apply min-w-0 rounded-2xl border border-gray-200 bg-white px-5 pb-6 pt-7 shadow-[0_12px_36px_rgba(15,23,42,0.04)] dark:border-dark-700 dark:bg-dark-900 sm:px-8 lg:px-10; scroll-margin-top: 1rem; }
+.docs-article { @apply min-w-0 rounded-2xl border border-gray-200 bg-white px-5 pb-6 pt-7 shadow-[0_12px_36px_rgba(15,23,42,0.04)] dark:border-dark-700 dark:bg-dark-900 sm:px-8 lg:px-10; scroll-margin-top: 5.25rem; overflow-wrap: anywhere; }
 .article-header { @apply border-b border-gray-200 pb-6 dark:border-dark-700; }
 .article-kicker { @apply mb-3 text-[11px] font-bold tracking-wide text-primary-600 dark:text-primary-300; }
 .article-kicker span { @apply mx-1 text-gray-300 dark:text-dark-600; }
@@ -1533,11 +1540,12 @@ anthropic-version: 2023-06-01</code></pre>
 .article-title-row h1 { @apply text-3xl font-black leading-tight tracking-[-0.035em] text-gray-950 dark:text-white sm:text-4xl; text-wrap: balance; }
 .article-title-row p { @apply mt-2 text-sm leading-6 text-gray-500 dark:text-dark-400; }
 
-.article-body { @apply grid gap-7 py-7; }
+.article-body { @apply grid min-w-0 grid-cols-1 gap-7 py-7; }
+.article-body > *, .article-section > *, .article-title-row > div { min-width: 0; }
 .lead-copy { @apply max-w-3xl; }
 .lead-copy h2 { @apply text-xl font-extrabold tracking-tight text-gray-950 dark:text-white; }
 .lead-copy p { @apply mt-2 max-w-[68ch] text-[15px] leading-7 text-gray-600 dark:text-dark-300; text-wrap: pretty; }
-.article-section { @apply grid gap-3 border-t border-gray-100 pt-6 dark:border-dark-800; }
+.article-section { @apply grid min-w-0 grid-cols-1 gap-3 border-t border-gray-100 pt-6 dark:border-dark-800; }
 .article-section > h2, .section-heading h2 { @apply text-base font-extrabold tracking-tight text-gray-950 dark:text-white; }
 .section-heading { @apply flex flex-wrap items-center justify-between gap-3; }
 
@@ -1547,7 +1555,7 @@ anthropic-version: 2023-06-01</code></pre>
 .status-dot { @apply h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]; }
 
 .start-list { @apply divide-y divide-gray-100 border-y border-gray-100 dark:divide-dark-800 dark:border-dark-800; }
-.start-list li { @apply grid grid-cols-[2.5rem_1fr] gap-4 py-5; }
+.start-list li { @apply grid grid-cols-[2rem_minmax(0,1fr)] gap-3 py-5 sm:gap-4; }
 .start-list li > span { @apply font-mono text-xs font-bold text-primary-500; }
 .start-list strong { @apply text-sm font-bold text-gray-900 dark:text-white; }
 .start-list p { @apply mt-1 max-w-[68ch] text-[13px] leading-6 text-gray-500 dark:text-dark-400; }
@@ -1566,8 +1574,8 @@ anthropic-version: 2023-06-01</code></pre>
 .doc-copy code, .doc-note code { @apply font-semibold text-gray-800 dark:text-dark-100; }
 .doc-note { @apply text-xs leading-5 text-gray-500 dark:text-dark-400; }
 
-.table-wrap { @apply overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-700; }
-.doc-table { @apply w-full min-w-[760px] border-collapse text-left text-[13px]; }
+.table-wrap { @apply min-w-0 max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-dark-700; }
+.doc-table { @apply w-full min-w-[760px] border-collapse text-left text-[13px]; overflow-wrap: normal; }
 .doc-table th { @apply whitespace-nowrap border-b border-gray-200 bg-gray-50 px-4 py-3 font-bold text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300; }
 .doc-table td { @apply border-b border-gray-100 px-4 py-3 align-top leading-5 text-gray-600 dark:border-dark-800 dark:text-dark-300; }
 .doc-table tr:last-child td { @apply border-b-0; }
@@ -1579,7 +1587,7 @@ anthropic-version: 2023-06-01</code></pre>
 .language-switch button { @apply rounded-md px-3 py-1.5 text-xs font-semibold text-gray-500 transition hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-dark-400 dark:hover:text-white; }
 .language-switch button.active { @apply bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white; }
 
-.code-shell { @apply relative overflow-hidden rounded-lg border border-slate-700 bg-slate-950; }
+.code-shell { @apply relative min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-700 bg-slate-950; }
 .code-shell pre { @apply overflow-x-auto p-4 pr-20 text-[13px] leading-6 text-slate-200; }
 .code-shell code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .copy-code { @apply absolute right-2 top-2 z-10 rounded-md border border-slate-700 bg-slate-900/90 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400; }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import CopyCodeBlock from '../components/CopyCodeBlock.vue'
 
 const baseOrigin = computed(() => {
   if (typeof window === 'undefined') return 'http://localhost:3000'
@@ -10,14 +11,40 @@ const isSecureContext = computed(() => {
   if (typeof window === 'undefined') return true
   return window.isSecureContext
 })
+
+const claudeExample = computed(() => `export ANTHROPIC_BASE_URL=${baseOrigin.value}
+export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
+claude`)
+
+const codexExample = computed(() => `# ~/.codex/config.toml
+[profiles.model-bridge]
+model_provider = "model-bridge"
+model = "gpt-6.1-sol"
+
+[model_providers.model-bridge]
+name = "model-bridge"
+base_url = "${baseOrigin.value}/v1"
+env_key = "MODEL_BRIDGE_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
+codex --profile model-bridge`)
 </script>
 
 <template>
-  <div class="grid gap-4">
-    <UiGrid :cols="12" :x-gap="16" :y-gap="16" responsive="screen">
+  <div class="usage-docs grid min-w-0 grid-cols-1 gap-4">
+    <details class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+      <summary class="cursor-pointer text-sm font-semibold">目录 · 快速跳转</summary>
+      <nav aria-label="使用文档目录" class="mt-3 flex flex-wrap gap-2">
+        <a v-for="item in [{id:'quickstart',label:'快速上手'},{id:'clients',label:'客户端接入'},{id:'antigravity',label:'Antigravity'},{id:'media',label:'图片与视频'},{id:'sub2api',label:'Sub2API'},{id:'upstreams',label:'上游账户'},{id:'deployment',label:'远程部署'}]"
+          :key="item.id" :href="`#${item.id}`" class="rounded-lg bg-primary-50 px-3 py-2 text-sm text-primary-700 dark:bg-primary-900/20 dark:text-primary-300">{{ item.label }}</a>
+      </nav>
+    </details>
+    <UiGrid id="quickstart" :cols="12" :x-gap="16" :y-gap="16" responsive="screen">
       <UiGi span="12 l:7">
         <UiCard title="使用流程">
-          <UiSteps vertical :current="4">
+          <UiSteps vertical>
             <UiStep title="修改管理员密码" description="首次登录后进入设置，立即替换默认密码。" />
             <UiStep title="添加上游账户" description="在上游账户页面接入 Claude、OpenAI、Gemini、DeepSeek、Xiaomi MiMo、Zhipu GLM、Tongyi Qwen、Kimi、MiniMax 或 Sub2API。" />
             <UiStep title="创建 API Key" description="在 API Keys 页面创建密钥，并按需设置服务商、分组、限速、并发、成本配额和过期时间。" />
@@ -30,8 +57,8 @@ const isSecureContext = computed(() => {
         <UiCard title="API Key">
           <div class="grid gap-3.5">
             <div>
-              <strong class="block text-sm text-gray-900 dark:text-white">密钥只显示一次</strong>
-              <p class="doc-p">创建后立即复制保存，后台之后只展示 Key 前缀。</p>
+              <strong class="block text-sm text-gray-900 dark:text-white">保存与复制密钥</strong>
+              <p class="doc-p">列表默认只显示 Key 前缀。支持再次读取的密钥可点击“复制”；旧密钥若无法读取，请使用已保存的值或新建密钥。</p>
             </div>
             <div v-if="!isSecureContext">
               <strong class="block text-sm text-gray-900 dark:text-white">HTTP 访问下的复制</strong>
@@ -69,7 +96,7 @@ const isSecureContext = computed(() => {
       </UiGi>
     </UiGrid>
 
-    <UiCard title="原生接入 Antigravity（直接连接 Google）">
+    <UiCard id="antigravity" title="原生接入 Antigravity（直接连接 Google）">
       <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
         <li>在服务器配置 Antigravity OAuth 客户端参数；需要指定网络出口时配置 <code class="code-inline">ANTIGRAVITY_PROXY_URL</code>，然后重启服务。</li>
         <li>在上游账户选择 <strong>Antigravity（反重力）</strong>，生成链接并用符合资格的 Google 账号授权。回调地址为 localhost:8085/callback；远程部署可粘贴完整回调 URL 完成。</li>
@@ -80,7 +107,7 @@ const isSecureContext = computed(() => {
       <p class="doc-p mt-2">原生入口由本项目处理 Google OAuth、刷新、模型查询和生成；下方的 Sub2API 方式仍可独立使用。</p>
     </UiCard>
 
-    <UiCard title="通过 GrsAI 接入 GPT 图片与 MiniMax H3 视频">
+    <UiCard id="media" title="通过 GrsAI 接入 GPT 图片与 MiniMax H3 视频">
       <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
         <li>在上游账户中选择 GrsAI 并填写供应商 API Key。Base URL 留空使用国内节点；全球节点填 <code class="code-inline">https://grsaiapi.com</code>。</li>
         <li>将账号与调用 Key 绑定到同一分组，并为调用 Key 开启 GrsAI 权限。</li>
@@ -89,7 +116,7 @@ const isSecureContext = computed(() => {
       <p class="doc-p mt-3">模型广场展示各型号及价格。<a class="text-primary-600 hover:underline" href="/docs/api#video-generation">查看文本、图片与视频接口的参数、调用示例与在线调试</a>。</p>
     </UiCard>
 
-    <UiCard title="通过 Sub2API 接入 Antigravity（反重力）">
+    <UiCard id="sub2api" title="通过 Sub2API 接入 Antigravity（反重力）">
       <ol class="list-decimal pl-5 space-y-2 text-sm text-gray-700 dark:text-gray-300">
         <li>先在上游 Sub2API 完成 Antigravity 授权，确认账号可调用，再创建对应分组的 API Key。</li>
         <li>在本项目添加 Sub2API 账户，Base URL 填 <code class="code-inline">https://你的上游/antigravity</code>，API Key 填上游密钥。</li>
@@ -102,12 +129,10 @@ const isSecureContext = computed(() => {
       <p class="doc-p mt-2">Google 授权和网络出口由上游 Sub2API 处理。地区拒绝需检查上游出口及账号地区、资格，本项目不能改变 Google 的账号准入结果。</p>
     </UiCard>
 
-    <UiCard title="客户端接入">
+    <UiCard id="clients" title="客户端接入">
       <UiTabs>
         <UiTabPane name="claude" tab="Claude Code">
-          <pre class="code-block"><code>export ANTHROPIC_BASE_URL={{ baseOrigin }}
-export ANTHROPIC_AUTH_TOKEN=mb-xxxxxxxx
-claude</code></pre>
+          <CopyCodeBlock :value="claudeExample" />
           <p class="doc-p mt-3">
             DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen / Kimi 的 Anthropic 兼容入口分别是
             <code class="code-inline">{{ baseOrigin }}/api/deepseek</code>、
@@ -119,20 +144,7 @@ claude</code></pre>
           </p>
         </UiTabPane>
         <UiTabPane name="codex" tab="Codex CLI">
-          <pre class="code-block"><code># ~/.codex/config.toml
-[profiles.model-bridge]
-model_provider = "model-bridge"
-model = "gpt-6.1-sol"
-
-[model_providers.model-bridge]
-name = "model-bridge"
-base_url = "{{ baseOrigin }}/v1"
-env_key = "MODEL_BRIDGE_API_KEY"
-wire_api = "responses"
-requires_openai_auth = false
-
-export MODEL_BRIDGE_API_KEY=mb-xxxxxxxx
-codex --profile model-bridge</code></pre>
+          <CopyCodeBlock :value="codexExample" />
           <p class="doc-p mt-3">Codex 的 base URL 填到 <code class="code-inline">/v1</code>，客户端会自动请求 <code class="code-inline">/v1/responses</code>。</p>
           <p class="doc-p mt-2">
             DeepSeek / Xiaomi MiMo / Zhipu GLM / Tongyi Qwen / Kimi 专用入口分别使用
@@ -189,7 +201,7 @@ codex --profile model-bridge</code></pre>
 
     <UiGrid :cols="2" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
       <UiGi span="2 m:1">
-        <UiCard title="上游账户">
+        <UiCard id="upstreams" title="上游账户">
           <div class="grid gap-3.5">
             <div>
               <strong class="block text-sm text-gray-900 dark:text-white">Claude</strong>
@@ -216,12 +228,12 @@ codex --profile model-bridge</code></pre>
       </UiGi>
 
       <UiGi span="2 m:1">
-        <UiCard title="远程部署">
+        <UiCard id="deployment" title="远程部署">
           <p class="doc-p">
             如果后台部署在 VPS、NAS 或家庭服务器，OAuth 回调里的 <code class="code-inline">localhost:1455</code>
             指的是浏览器所在电脑。可从地址栏复制完整回调 URL 粘贴回后台，也可以先建立 SSH 隧道：
           </p>
-          <pre class="code-block mt-3"><code>ssh -L 1455:127.0.0.1:1455 your-server</code></pre>
+          <CopyCodeBlock class="mt-3" value="ssh -L 1455:127.0.0.1:1455 your-server" />
           <p class="doc-p mt-3">已有凭据时可用直接导入 Token 或批量导入 JSON，跳过 OAuth 回调。</p>
         </UiCard>
       </UiGi>
@@ -230,6 +242,11 @@ codex --profile model-bridge</code></pre>
 </template>
 
 <style scoped>
+.usage-docs > *, .usage-docs :deep(.card-body), .usage-docs :deep(.grid) { min-width: 0; }
+.usage-docs { overflow-wrap: anywhere; }
+.usage-docs :deep([id]) { scroll-margin-top: 1rem; }
+.usage-docs :deep(.code-block) { max-width: 100%; overflow-x: auto; }
+.usage-docs :deep(.card-header) { align-items: flex-start; }
 .doc-p {
   @apply mt-1.5 text-[13px] leading-relaxed text-gray-500 dark:text-dark-400;
 }

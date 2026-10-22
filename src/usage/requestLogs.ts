@@ -9,6 +9,8 @@ export interface RequestLogFilters {
   status?: 'running' | 'settling' | 'success' | 'error'
   model?: string
   key?: string
+  user?: string
+  account?: string
   startDate?: number
   endDate?: number
 }
@@ -74,7 +76,7 @@ export async function listRequestLogs(page = 1, pageSize = 20, filters: RequestL
   ), classified AS (
     SELECT requests.*, ${modelManufacturerSql('manufacturer_model', 'provider')} AS manufacturer FROM requests
   ), named AS (
-    SELECT c.*, k.name AS key_name, k.key_prefix, a.name AS account_name, usr.name AS user_name
+    SELECT c.*, k.name AS key_name, k.key_prefix, a.name AS account_name, usr.name AS user_name, usr.email AS user_email
     FROM classified c LEFT JOIN api_keys k ON k.id = c.api_key_id
     LEFT JOIN accounts a ON a.id = c.account_id LEFT JOIN users usr ON usr.id = c.user_id
   )`
@@ -90,6 +92,14 @@ export async function listRequestLogs(page = 1, pageSize = 20, filters: RequestL
   if (filters.key) {
     const value = param(`%${filters.key}%`)
     where.push(`(key_name ILIKE ${value} OR key_prefix ILIKE ${value} OR api_key_id ILIKE ${value})`)
+  }
+  if (filters.user && userId == null) {
+    const value = param(`%${filters.user}%`)
+    where.push(`(user_name ILIKE ${value} OR user_email ILIKE ${value})`)
+  }
+  if (filters.account && userId == null) {
+    const value = param(`%${filters.account}%`)
+    where.push(`(account_name ILIKE ${value} OR account_id ILIKE ${value})`)
   }
   if (filters.startDate != null) where.push(`created_at >= ${param(filters.startDate)}`)
   if (filters.endDate != null) where.push(`created_at <= ${param(filters.endDate)}`)

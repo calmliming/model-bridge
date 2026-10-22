@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { UiButton, UiSpace, UiTag } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
@@ -39,6 +40,11 @@ const dialog = useDialog()
 
 const groups = ref<GroupInfo[]>([])
 const loading = ref(true)
+const search = ref('')
+const groupDetails = ref<GroupInfo | null>(null)
+const relatedKeys = ref<Array<{ id: string; name: string; accountGroupId: string | null }> | null>(null)
+const filteredGroups = computed(() => groups.value.filter(group => `${group.name} ${group.description ?? ''}`.toLowerCase().includes(search.value.trim().toLowerCase())))
+const keysForGroup = (id: string) => relatedKeys.value?.filter(key => key.accountGroupId === id) ?? []
 
 const providerLabel: Record<string, string> = {
   claude: 'Claude',
@@ -355,8 +361,10 @@ const columns = computed<TableColumn<GroupInfo>[]>(() => [
     title: '成员数',
     key: 'accountCount',
     minWidth: 90,
-    render: (row) => h('span', { class: 'plain-cell' }, `${row.accountCount}`),
+    render: (row) => row.accountCount ? h('span', { class: 'plain-cell' }, `${row.accountCount}`)
+      : h(UiTag, { type: 'warning' }, { default: () => '待添加账号' }),
   },
+  { title: '关联 Key', key: 'keyCount', width: 100, render: row => relatedKeys.value == null ? '—' : keysForGroup(row.id).length },
   {
     title: '创建时间',
     key: 'createdAt',
@@ -366,38 +374,59 @@ const columns = computed<TableColumn<GroupInfo>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 220,
+    width: 160,
+    fixed: 'right',
     render: (row) =>
       h(UiSpace, { size: 4, wrap: false }, {
         default: () => [
           h(UiButton, { size: 'small', quaternary: true, onClick: () => openMembers(row) }, { default: () => '成员' }),
-          h(UiButton, { size: 'small', quaternary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(UiButton, { size: 'small', type: 'error', quaternary: true, onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+          h(UiButton, { size: 'small', secondary: true, onClick: () => { groupDetails.value = row } }, { default: () => '详情' }),
         ],
       }),
   },
 ])
+const visibleColumns = computed(() => ['name', 'accountCount', 'rateMultiplier', 'keyCount', 'actions'].flatMap(key => columns.value.filter(column => column.key === key)))
+function manageGroup(action: 'members' | 'edit' | 'delete') {
+  const group = groupDetails.value
+  if (!group) return
+  groupDetails.value = null
+  if (action === 'members') void openMembers(group)
+  else if (action === 'edit') openEdit(group)
+  else confirmDelete(group)
+}
 
 onMounted(() => {
   void load()
+  void api.get('/admin/keys').then(({ data }) => { relatedKeys.value = data.keys }).catch(() => {})
 })
 </script>
 
 <template>
   <div>
     <div class="page-head">
+      <UiInput v-model:value="search" aria-label="搜索分组" placeholder="搜索分组名称或描述" class="!w-full sm:!w-72" />
       <UiButton type="primary" @click="openCreate">新建分组</UiButton>
     </div>
 
-    <UiCard class="table-card" :bordered="false">
+    <UiCard class="table-card hidden md:block" :bordered="false">
       <UiDataTable
-        :columns="columns"
-        :data="groups"
+        :columns="visibleColumns"
+        :data="filteredGroups"
         :loading="loading"
         :bordered="false"
-        :scroll-x="940"
+        :scroll-x="640"
+        empty-text="暂无符合条件的分组"
       />
     </UiCard>
+    <div class="grid gap-3 md:hidden">
+      <p v-if="loading" role="status" class="py-8 text-center text-sm text-gray-500">正在加载分组…</p>
+      <p v-else-if="!filteredGroups.length" class="card p-6 text-center text-sm text-gray-500">暂无符合条件的分组</p>
+      <article v-for="group in filteredGroups" :key="group.id" class="card min-w-0 p-4"><div class="flex justify-between gap-3"><h2 class="min-w-0 break-words font-semibold">{{ group.name }}</h2><UiTag :type="rateMultiplierType(group.rateMultiplier)">×{{ group.rateMultiplier }}</UiTag></div><p class="mt-3 text-sm text-gray-500">{{ group.accountCount }} 个账号 · 关联 {{ relatedKeys == null ? '—' : keysForGroup(group.id).length }} 个 Key</p><p v-if="!group.accountCount" class="mt-2 text-sm text-amber-700">尚未配置上游账号，当前分组无法调度。</p><div class="mt-4 flex gap-2"><UiButton size="small" :type="group.accountCount ? 'default' : 'primary'" @click="openMembers(group)">{{ group.accountCount ? '管理成员' : '添加成员' }}</UiButton><UiButton size="small" secondary @click="groupDetails = group">分组详情</UiButton></div></article>
+    </div>
+    <UiModal :show="!!groupDetails" :title="groupDetails?.name || '分组详情'" :width="520" @update:show="(shown: boolean) => { if (!shown) groupDetails = null }">
+      <template v-if="groupDetails"><p class="text-sm text-gray-500">{{ groupDetails.description || '暂无分组说明' }}</p><dl class="my-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-gray-500">计费倍率</dt><dd>×{{ groupDetails.rateMultiplier }}</dd></div><div><dt class="text-gray-500">创建时间</dt><dd>{{ formatTime(groupDetails.createdAt) }}</dd></div></dl><h3 class="text-sm font-semibold">关联 API Key</h3><p class="mt-2 break-words text-sm text-gray-500">{{ relatedKeys == null ? '关联信息暂时无法加载' : keysForGroup(groupDetails.id).map(key => key.name).join('、') || '暂无绑定的 Key' }}</p><RouterLink to="/keys" class="mt-3 inline-block text-sm text-primary-700" @click="groupDetails = null">前往 API Keys →</RouterLink></template>
+      <template #footer><UiButton secondary @click="manageGroup('members')">管理成员</UiButton><UiButton secondary @click="manageGroup('edit')">编辑分组</UiButton><UiButton quaternary type="error" @click="manageGroup('delete')">删除</UiButton></template>
+    </UiModal>
 
     <!-- create / edit -->
     <UiModal v-model:show="showForm" :title="formTitle" :width="480">

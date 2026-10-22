@@ -4,7 +4,7 @@ import { UiTag } from '../components/ui'
 import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
-import { formatTokens } from '../utils'
+import { formatTokens, formatUsd } from '../utils'
 import LazyEChart from '../components/LazyEChart.vue'
 
 interface DailyStat {
@@ -67,7 +67,18 @@ interface Summary {
 const message = useMessage()
 const loading = ref(true)
 const range = ref<1 | 7 | 30>(1)
+const dateEditor = ref(false)
+const dateFrom = ref(''), dateEnd = ref('')
+const appliedDates = ref<{ startDate: string; endDate: string } | null>(null)
+const loadError = ref('')
+let loadVersion = 0
 const summary = ref<Summary | null>(null)
+const breakdownMetric = ref<'requests' | 'tokens' | 'cost'>('requests')
+const metricLabel = computed(() => ({ requests: '请求数', tokens: 'Token', cost: '费用' })[breakdownMetric.value])
+const breakdownValue = (row: ModelStat | ProviderStat) => row[breakdownMetric.value]
+const formatBreakdown = (value: number) => breakdownMetric.value === 'cost' ? formatUsd(value) : compactNumber(value)
+const breakdownTotal = computed(() => !summary.value ? 0 : breakdownMetric.value === 'tokens'
+  ? totalTokens(summary.value.totals) : summary.value.totals[breakdownMetric.value])
 
 const PROVIDER_COLOR: Record<string, string> = {
   claude: '#d97757',
@@ -110,18 +121,37 @@ const metricIconPaths: Record<string, string[]> = {
 }
 
 async function load() {
+  const version = ++loadVersion
   loading.value = true
+  loadError.value = ''
   try {
-    const { data } = await api.get('/admin/stats/summary', { params: { days: range.value } })
+    const { data } = await api.get('/admin/stats/summary', { params: { days: range.value, ...appliedDates.value, orderBy: breakdownMetric.value } })
+    if (version !== loadVersion) return
     summary.value = data
   } catch (e) {
-    message.error(errMsg(e))
+    if (version === loadVersion) { loadError.value = errMsg(e); summary.value = null }
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
-watch(range, load)
+function setRange(value: string | number) {
+  if (value === 'custom') {
+    dateEditor.value = true
+    dateFrom.value ||= summary.value?.daily[0]?.day || ''
+    dateEnd.value ||= summary.value?.daily.at(-1)?.day || ''
+    return
+  }
+  range.value = Number(value) as 1 | 7 | 30
+  dateEditor.value = false; appliedDates.value = null
+  void load()
+}
+function applyDates() {
+  if (!dateFrom.value || !dateEnd.value || dateFrom.value > dateEnd.value) { message.warning('请选择有效日期，开始日期不能晚于结束日期'); return }
+  appliedDates.value = { startDate: dateFrom.value, endDate: dateEnd.value }
+  void load()
+}
+watch(breakdownMetric, load)
 onMounted(load)
 
 function formatNumber(n: number): string {
@@ -187,9 +217,9 @@ const cards = computed(() => {
 const dailyOption = computed(() => {
   const series = summary.value?.daily ?? []
   return {
-    grid: { left: 50, right: 24, top: 36, bottom: 36 },
+    grid: { left: 46, right: 36, top: 64, bottom: 36 },
     tooltip: { trigger: 'axis' },
-    legend: { right: 0, top: 0, textStyle: { color: '#475569' } },
+    legend: { type: 'scroll', left: 0, right: 0, top: 0, textStyle: { color: '#475569' } },
     xAxis: {
       type: 'category',
       data: series.map((d) => d.day.slice(5)), // MM-DD
@@ -205,7 +235,7 @@ const dailyOption = computed(() => {
       },
       {
         type: 'value',
-        name: 'Requests',
+        name: '请求',
         axisLabel: { color: '#64748b', fontSize: 11 },
         splitLine: { show: false },
       },
@@ -263,7 +293,7 @@ const dailyOption = computed(() => {
 })
 
 const providerOption = computed(() => {
-  const rows = summary.value?.byProvider ?? []
+  const rows = [...(summary.value?.byProvider ?? [])].sort((a, b) => breakdownValue(a) - breakdownValue(b))
   return {
     grid: { left: 60, right: 24, top: 16, bottom: 32 },
     tooltip: { trigger: 'axis' },
@@ -283,7 +313,7 @@ const providerOption = computed(() => {
       {
         type: 'bar',
         data: rows.map((r) => ({
-          value: r.tokens,
+          value: breakdownValue(r),
           itemStyle: { color: PROVIDER_COLOR[r.provider] ?? '#6366f1' },
         })),
         barWidth: 18,
@@ -292,10 +322,6 @@ const providerOption = computed(() => {
     ],
   }
 })
-
-const modelTotalTokens = computed(() =>
-  (summary.value?.byModel ?? []).reduce((sum, row) => sum + row.tokens, 0),
-)
 
 const modelColumns = computed<TableColumn<ModelStat>[]>(() => [
   {
@@ -308,15 +334,17 @@ const modelColumns = computed<TableColumn<ModelStat>[]>(() => [
         h(UiTag, { size: 'small', bordered: false, type: 'info' }, { default: () => modelFamily(row.model) }),
       ]),
   },
+  { title: '请求数', key: 'requests', minWidth: 90, render: (row) => formatNumber(row.requests) },
+  { title: '费用', key: 'cost', minWidth: 100, render: (row) => formatUsd(row.cost) },
   { title: 'Token', key: 'tokens', minWidth: 110, render: (row) => compactNumber(row.tokens) },
   { title: '输入', key: 'inputTokens', minWidth: 100, render: (row) => compactNumber(row.inputTokens) },
   { title: '输出', key: 'outputTokens', minWidth: 100, render: (row) => compactNumber(row.outputTokens) },
   { title: '缓存写入', key: 'cacheCreateTokens', minWidth: 100, render: (row) => compactNumber(row.cacheCreateTokens) },
   { title: '缓存读取', key: 'cacheReadTokens', minWidth: 100, render: (row) => compactNumber(row.cacheReadTokens) },
-  { title: '占比', key: 'share', minWidth: 90, render: (row) => percent(row.tokens, modelTotalTokens.value) },
+  { title: `${metricLabel.value}占比`, key: 'share', minWidth: 100, render: (row) => breakdownTotal.value ? percent(breakdownValue(row), breakdownTotal.value) : '—' },
 ])
 
-const topModelRows = computed(() => (summary.value?.byModel ?? []).slice(0, 6))
+const topModelRows = computed(() => [...(summary.value?.byModel ?? [])].sort((a, b) => breakdownValue(b) - breakdownValue(a)).slice(0, 6))
 
 const keyColumns: TableColumn<KeyStat>[] = [
   { title: '名称', key: 'name' },
@@ -348,14 +376,16 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 <template>
   <div class="stats-page">
     <div class="stats-head">
-      <div>
-      </div>
-      <UiRadioGroup v-model:value="range" size="small">
+      <span class="text-sm text-gray-500">统计范围：{{ appliedDates ? `${appliedDates.startDate} 至 ${appliedDates.endDate}` : range === 1 ? '今天' : `近 ${range} 天` }}</span>
+      <UiRadioGroup :value="dateEditor ? 'custom' : range" @update:value="setRange" size="small" aria-label="统计时间范围">
         <UiRadioButton :value="1">{{ rangeLabel(1) }}</UiRadioButton>
         <UiRadioButton :value="7">{{ rangeLabel(7) }}</UiRadioButton>
         <UiRadioButton :value="30">{{ rangeLabel(30) }}</UiRadioButton>
+        <UiRadioButton value="custom">自定义</UiRadioButton>
       </UiRadioGroup>
     </div>
+    <form v-if="dateEditor" class="flex flex-wrap items-end gap-3" @submit.prevent="applyDates"><label class="min-w-0 flex-1"><span class="field-label">开始日期</span><input v-model="dateFrom" class="input min-w-0" type="date" required /></label><label class="min-w-0 flex-1"><span class="field-label">结束日期</span><input v-model="dateEnd" class="input min-w-0" type="date" required /></label><UiButton type="primary" native-type="submit">应用日期</UiButton><p class="w-full text-xs text-gray-500">按站点统计时区计算，包含结束当天，最多 366 天。</p></form>
+    <UiAlert v-if="loadError" type="error">{{ loadError }}</UiAlert>
 
     <div class="metric-grid">
       <UiCard v-for="c in cards" :key="c.label" class="metric-card" :class="`tone-${c.tone}`" :bordered="false">
@@ -375,7 +405,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
           </div>
           <div class="metric-copy">
             <div class="metric-label">{{ c.label }}</div>
-            <div class="metric-value">{{ c.value }}</div>
+            <div class="metric-value">{{ loading || !summary ? '—' : c.value }}</div>
             <div class="metric-hint">{{ c.hint }}</div>
           </div>
         </div>
@@ -396,22 +426,27 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
       <div class="section-head">
         <div>
           <h3>模型使用情况</h3>
-          <p>按 token 统计模型占比，包含输入、输出和缓存明细。</p>
+          <p>按{{ metricLabel }}查看当前模型分布。图片和视频按次或时长计费，可切换请求数与费用。</p>
         </div>
+        <UiRadioGroup v-model:value="breakdownMetric" size="small" aria-label="统计维度">
+          <UiRadioButton value="requests">请求数</UiRadioButton>
+          <UiRadioButton value="cost">费用</UiRadioButton>
+          <UiRadioButton value="tokens">Token</UiRadioButton>
+        </UiRadioGroup>
       </div>
       <div class="model-usage-grid">
         <div class="model-distribution">
           <div class="distribution-top">
             <div>
-              <div class="distribution-title">Token 分布</div>
+              <div class="distribution-title">{{ metricLabel }}分布</div>
               <div class="distribution-subtitle">Top {{ topModelRows.length }} 模型</div>
             </div>
             <div class="distribution-total">
-              {{ compactNumber(modelTotalTokens) }}
-              <span>Token</span>
+              {{ formatBreakdown(breakdownTotal) }}
+              <span>{{ breakdownMetric === 'requests' ? '次请求' : breakdownMetric === 'cost' ? 'USD' : 'Token' }}</span>
             </div>
           </div>
-          <div v-if="summary?.byModel.length" class="distribution-list">
+          <div v-if="breakdownTotal > 0" class="distribution-list">
             <div
               v-for="(row, index) in topModelRows"
               :key="row.model"
@@ -422,19 +457,19 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
                   <i :style="{ background: MODEL_COLOR[index % MODEL_COLOR.length] }" />
                   {{ row.model }}
                 </span>
-                <strong>{{ percent(row.tokens, modelTotalTokens) }}</strong>
+                <strong>{{ percent(breakdownValue(row), breakdownTotal) }}</strong>
               </div>
               <div class="distribution-bar">
                 <span
                   :style="{
-                    width: percent(row.tokens, modelTotalTokens),
+                    width: percent(breakdownValue(row), breakdownTotal),
                     background: MODEL_COLOR[index % MODEL_COLOR.length],
                   }"
                 />
               </div>
             </div>
           </div>
-          <UiText v-else depth="3" style="font-size: 13px">暂无数据</UiText>
+          <UiText v-else depth="3" style="font-size: 13px">当前范围暂无可统计的{{ metricLabel }}。</UiText>
         </div>
         <div class="model-table-wrap">
           <UiDataTable
@@ -453,12 +488,12 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
           <div class="section-head compact">
             <div>
               <h3>按服务商</h3>
-              <p>服务商 token 消耗占比。</p>
+              <p>服务商{{ metricLabel }}分布，与上方所选维度一致。</p>
             </div>
           </div>
-          <LazyEChart v-if="summary?.byProvider.length" :option="providerOption" height="220px" />
+          <LazyEChart v-if="summary?.byProvider.some(row => breakdownValue(row) > 0)" :option="providerOption" height="220px" />
           <UiText v-else depth="3" style="font-size: 13px">
-            暂无数据
+            当前范围暂无可统计的{{ metricLabel }}。
           </UiText>
         </UiCard>
 
@@ -484,8 +519,12 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 <style scoped>
 .stats-page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
+
+.stats-page > *, .lower-grid > *, .model-usage-grid > * { min-width: 0; }
+.panel-card :deep(.card-body) { min-width: 0; }
 
 .stats-head {
   display: flex;
@@ -599,6 +638,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
 
 .section-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -755,7 +795,7 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1279px) {
   .stats-head {
     align-items: flex-start;
     flex-direction: column;
@@ -766,11 +806,11 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   }
 
   .model-usage-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .lower-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -780,8 +820,15 @@ const rangeLabel = (d: number) => (d === 1 ? '今天' : `${d} 天`)
   }
 
   .metric-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
+
+  .metric-content { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .metric-icon { width: 32px; height: 32px; }
+  .metric-icon svg { width: 18px; height: 18px; }
+  .metric-card :deep(.card-body) { padding: 12px; }
+  .metric-card .metric-hint { white-space: normal; overflow-wrap: anywhere; }
 
   .metric-card .metric-value {
     font-size: 24px;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { UiButton, UiInputNumber, UiSpace, UiTag } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
@@ -25,11 +25,27 @@ const message = useMessage()
 const dialog = useDialog()
 const loading = ref(false)
 const codes = ref<RedeemCode[]>([])
+const page = ref(1), total = ref(0), pageSize = 20
+const summary = ref({ value: 0, used: 0 })
+const statusFilter = ref(''), batchFilter = ref(''), validityFilter = ref('')
+const appliedFilters = ref<Record<string, string | undefined>>({})
+let loadVersion = 0
+const revealedBatch = ref<{ id: string; codes: string[] } | null>(null)
+
+function applyFilters() {
+  appliedFilters.value = { status: statusFilter.value || undefined, batchId: batchFilter.value.trim() || undefined, validity: validityFilter.value || undefined }
+  if (page.value === 1) void load()
+  else page.value = 1
+}
+function resetFilters() { statusFilter.value = ''; batchFilter.value = ''; validityFilter.value = ''; applyFilters() }
+watch(page, load)
 
 // Generation form
 const showGenerate = ref(false)
 const generating = ref(false)
 const genForm = ref({ count: 10, valueUsd: 5, validityDays: null as number | null, note: '' })
+const generationValue = computed(() => Math.max(0, genForm.value.count || 0) * Math.max(0, genForm.value.valueUsd || 0))
+const generationExpiry = computed(() => genForm.value.validityDays ? formatTime(Date.now() + genForm.value.validityDays * 86_400_000) : '永久有效')
 
 const statusType: Record<RedeemCode['status'], 'success' | 'warning' | 'error' | 'default'> = {
   unused: 'success',
@@ -43,14 +59,20 @@ const statusLabel: Record<RedeemCode['status'], string> = {
 }
 
 async function load() {
+  const version = ++loadVersion
   loading.value = true
   try {
-    const { data } = await api.get('/admin/redeem-codes', { params: { pageSize: 100 } })
+    const { data } = await api.get('/admin/redeem-codes', { params: { ...appliedFilters.value, page: page.value, pageSize } })
+    if (version !== loadVersion) return
     codes.value = data.codes
+    total.value = data.total
+    summary.value = data.summary ?? { value: 0, used: 0 }
+    const lastPage = Math.max(1, Math.ceil(data.total / pageSize))
+    if (page.value > lastPage) page.value = lastPage
   } catch (e) {
-    message.error(errMsg(e))
+    if (version === loadVersion) message.error(errMsg(e))
   } finally {
-    loading.value = false
+    if (version === loadVersion) loading.value = false
   }
 }
 
@@ -86,27 +108,12 @@ async function submitGenerate() {
 }
 
 function revealBatch(batchId: string, list: string[]) {
-  dialog.success({
-    title: `批次 ${batchId} — ${list.length} 个兑换码`,
-    content: () =>
-      h('div', { style: 'max-height:50vh;overflow:auto' }, [
-        h('p', { style: 'margin:0 0 8px;color:rgba(15,23,42,.6)' }, '请立即复制保存，明文仅在此展示。'),
-        h(
-          'textarea',
-          {
-            readonly: true,
-            style:
-              'width:100%;height:240px;font-family:monospace;font-size:13px;padding:10px;border-radius:8px;border:1px solid #e2e8f0',
-            value: list.join('\n'),
-          },
-        ),
-      ]),
-    positiveText: '复制全部',
-    onPositiveClick: () => {
-      void navigator.clipboard?.writeText(list.join('\n'))
-      message.success('已复制到剪贴板')
-    },
-  })
+  revealedBatch.value = { id: batchId, codes: list }
+}
+
+async function copyBatch() {
+  try { await navigator.clipboard.writeText(revealedBatch.value?.codes.join('\n') ?? ''); message.success('已复制全部兑换码') }
+  catch { message.warning('复制失败，请在文本框中手动选中并复制') }
 }
 
 async function exportBatch(batchId: string) {
@@ -190,13 +197,32 @@ onMounted(load)
 
 <template>
   <div>
+    <form class="redeem-filters" @submit.prevent="applyFilters">
+      <label><span class="field-label">批次</span><UiInput v-model:value="batchFilter" placeholder="输入完整批次 ID" /></label>
+      <label><span class="field-label">状态</span><select v-model="statusFilter" class="input" aria-label="兑换码状态"><option value="">全部状态</option><option v-for="(label, value) in statusLabel" :key="value" :value="value">{{ label }}</option></select></label>
+      <label><span class="field-label">有效期</span><select v-model="validityFilter" class="input" aria-label="兑换码有效期"><option value="">全部有效期</option><option value="valid">未过期</option><option value="expired">已过期</option><option value="permanent">永久有效</option></select></label>
+      <div class="flex flex-wrap gap-2"><UiButton native-type="submit" type="primary">查询</UiButton><UiButton @click="resetFilters">重置</UiButton></div>
+    </form>
     <div class="toolbar">
       <UiButton type="primary" @click="showGenerate = true">生成兑换码</UiButton>
       <UiButton secondary :loading="loading" @click="load">刷新</UiButton>
     </div>
-    <UiCard class="table-card" :bordered="false">
-      <UiDataTable :columns="columns" :data="codes" :loading="loading" :bordered="false" :scroll-x="1180" />
+    <p class="mb-4 text-sm text-gray-500">符合条件：{{ total }} 个 · 已使用 {{ summary.used }} 个 · 总面额 {{ formatUsd(summary.value) }}</p>
+    <UiCard class="table-card hidden md:block" :bordered="false">
+      <UiDataTable :columns="columns" :data="codes" :loading="loading" :bordered="false" :scroll-x="1180" empty-text="暂无符合条件的兑换码" />
     </UiCard>
+    <div class="grid gap-3 md:hidden">
+      <p v-if="loading" role="status" class="py-8 text-center text-sm text-gray-500">正在加载兑换码…</p>
+      <p v-else-if="!codes.length" class="card p-6 text-center text-sm text-gray-500">暂无符合条件的兑换码，可调整筛选或生成新批次。</p>
+      <article v-for="row in codes" :key="row.id" class="card min-w-0 p-4"><div class="flex justify-between gap-2"><strong class="text-xl">{{ formatUsd(row.value) }}</strong><UiTag :type="statusType[row.status]">{{ statusLabel[row.status] }}</UiTag></div><p class="mt-3 break-all text-xs text-gray-500">批次：{{ row.batchId || '无批次' }}</p><p class="mt-2 text-sm">有效期：{{ row.expiresAt ? formatTime(row.expiresAt) : '永久' }}</p><p v-if="row.note" class="mt-2 break-words text-sm text-gray-500">{{ row.note }}</p><div class="mt-4 flex flex-wrap gap-2"><UiButton v-if="row.batchId" secondary size="small" @click="exportBatch(row.batchId)">导出批次</UiButton><UiButton v-if="row.status !== 'used'" secondary size="small" @click="toggleStatus(row)">{{ row.status === 'disabled' ? '启用' : '禁用' }}</UiButton><UiButton v-if="row.status !== 'used'" quaternary type="error" size="small" @click="confirmDelete(row)">删除</UiButton></div></article>
+    </div>
+    <UiPagination class="mt-4" v-model:page="page" :page-size="pageSize" :item-count="total" :disabled="loading" />
+
+    <UiModal :show="!!revealedBatch" title="导出兑换码" :width="560" @update:show="(shown: boolean) => { if (!shown) revealedBatch = null }">
+      <p class="mb-3 break-all text-sm text-gray-500">批次 {{ revealedBatch?.id }} · {{ revealedBatch?.codes.length }} 个。请妥善保存，也可之后通过“导出批次”再次获取。</p>
+      <textarea class="input font-mono text-sm" aria-label="兑换码明文列表" rows="8" readonly :value="revealedBatch?.codes.join('\n')" />
+      <template #footer><UiButton @click="revealedBatch = null">关闭</UiButton><UiButton type="primary" @click="copyBatch">复制全部</UiButton></template>
+    </UiModal>
 
     <UiModal v-model:show="showGenerate" title="生成兑换码" :width="460">
       <UiForm label-placement="top" @submit="submitGenerate">
@@ -212,6 +238,7 @@ onMounted(load)
         <UiFormItem label="备注（可选）">
           <UiInput v-model:value="genForm.note" placeholder="例如：双十一活动" />
         </UiFormItem>
+        <div class="rounded-xl bg-primary-50 p-3 text-sm text-primary-800 dark:bg-primary-900/20 dark:text-primary-200"><p>{{ genForm.count || 0 }} 张 × {{ formatUsd(genForm.valueUsd || 0) }} = <strong>{{ formatUsd(generationValue) }}</strong></p><p class="mt-1">有效至：{{ generationExpiry }}</p></div>
       </UiForm>
       <template #footer>
         <UiSpace justify="end">
@@ -224,6 +251,9 @@ onMounted(load)
 </template>
 
 <style scoped>
+.redeem-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; margin-bottom: 16px; }
+.redeem-filters > label { min-width: 0; }
+@media (min-width: 1280px) { .redeem-filters { grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)) auto; } }
 .toolbar {
   display: flex;
   justify-content: flex-end;

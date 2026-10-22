@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { useDialog } from '../composables/useDialog'
 import { api, errMsg } from '../api/client'
@@ -8,11 +9,24 @@ import { useAuthStore } from '../stores/auth'
 const message = useMessage()
 const dialog = useDialog()
 const auth = useAuthStore()
+const route = useRoute()
 
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 const saving = ref(false)
+const activeSection = ref('account')
+const settingSections = [
+  { id: 'account', label: '账户与访问' },
+  { id: 'billing', label: '支付' },
+  { id: 'scheduling', label: '账号调度' },
+  { id: 'security', label: '安全状态' },
+  { id: 'maintenance', label: '系统维护' },
+]
+watch(() => route.hash, (hash) => {
+  if (hash === '#system-update') activeSection.value = 'maintenance'
+  if (hash === '#online-payments') activeSection.value = 'billing'
+}, { immediate: true })
 
 const registrationEnabled = ref(false)
 const emailRegistrationReady = ref(false)
@@ -381,8 +395,13 @@ function confirmSystemUpdate() {
 </script>
 
 <template>
-  <div class="space-y-5">
-    <UiCard id="system-update" class="max-w-3xl scroll-mt-6" title="系统更新">
+  <div class="settings-page">
+    <nav class="settings-nav" aria-label="设置分类">
+      <button v-for="section in settingSections" :key="section.id" type="button" :aria-current="activeSection === section.id ? 'page' : undefined"
+        :class="activeSection === section.id && 'is-active'" @click="activeSection = section.id">{{ section.label }}</button>
+    </nav>
+    <div class="min-w-0 space-y-5">
+    <UiCard v-show="activeSection === 'maintenance'" id="system-update" class="scroll-mt-6" title="系统更新">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <strong class="text-gray-900 dark:text-white">系统版本</strong>
@@ -460,33 +479,34 @@ function confirmSystemUpdate() {
       </div>
     </UiCard>
 
-    <UiCard class="max-w-xl" title="管理员账户">
+    <UiCard v-show="activeSection === 'account'" title="管理员账户">
       <UiForm label-placement="top" @submit="changePassword">
         <UiFormItem label="当前用户">
           <UiInput :value="auth.username ?? ''" readonly />
         </UiFormItem>
         <UiFormItem label="当前密码">
-          <UiInput v-model:value="currentPassword" type="password" />
+          <UiInput v-model:value="currentPassword" type="password" autocomplete="current-password" />
         </UiFormItem>
         <UiFormItem label="新密码">
-          <UiInput v-model:value="newPassword" type="password" />
+          <UiInput v-model:value="newPassword" type="password" autocomplete="new-password" />
         </UiFormItem>
         <UiFormItem label="确认新密码">
           <UiInput
             v-model:value="confirmPassword"
             type="password"
+            autocomplete="new-password"
           />
         </UiFormItem>
         <UiButton type="primary" native-type="submit" :loading="saving">更新密码</UiButton>
       </UiForm>
     </UiCard>
 
-    <UiCard class="max-w-xl" title="用户注册">
+    <UiCard v-show="activeSection === 'account'" title="用户注册">
       <div class="flex items-center justify-between gap-5">
         <div>
           <strong class="text-gray-900 dark:text-white">开放用户自助注册</strong>
           <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
-            关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。
+            切换后立即保存。关闭后，登录页不显示注册入口，仅管理员邀请可创建用户。
           </p>
           <p v-if="!emailRegistrationReady" class="mt-1.5 text-[13px] text-amber-700 dark:text-amber-300">
             邮箱注册尚未就绪：请验证 Resend 发件域名，并配置 RESEND_API_KEY、RESEND_FROM_EMAIL 后重启服务。
@@ -494,12 +514,14 @@ function confirmSystemUpdate() {
         </div>
         <UiSwitch
           :value="registrationEnabled"
+          :disabled="togglingRegistration"
+          aria-label="开放用户自助注册"
           @update:value="toggleRegistration"
         />
       </div>
     </UiCard>
 
-    <UiCard id="online-payments" class="max-w-xl scroll-mt-6" title="支付设置">
+    <UiCard v-show="activeSection === 'billing'" id="online-payments" class="scroll-mt-6" title="支付设置">
       <div class="flex items-center justify-between gap-5">
         <div>
           <strong class="text-gray-900 dark:text-white">允许在线支付</strong>
@@ -525,17 +547,17 @@ function confirmSystemUpdate() {
       </div>
     </UiCard>
 
-    <UiCard class="max-w-xl" title="账号配额自动停调">
-      <div class="flex flex-wrap items-center justify-between gap-4">
+    <UiCard v-show="activeSection === 'scheduling'" title="账号配额自动停调">
+      <div class="setting-control">
         <div class="min-w-0 flex-1">
           <strong class="text-gray-900 dark:text-white">用量阈值</strong>
           <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
             账号 5 小时 / 7 天用量达到该百分比时，自动暂停调度直到对应窗口重置。
             设为 100 表示仅在上游判定超额时停调；调低可在账号快用尽前提前切走流量。
-            单个账号可在「账号」页单独覆盖或关闭。
+            单个账号可在「账号」页单独覆盖或关闭。修改后点击保存生效。
           </p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <UiInputNumber
             v-model:value="autopauseInput"
             :min="1"
@@ -556,13 +578,13 @@ function confirmSystemUpdate() {
       </div>
     </UiCard>
 
-    <UiCard class="max-w-xl" title="OpenAI 调度策略">
-      <div class="flex flex-wrap items-center justify-between gap-4">
+    <UiCard v-show="activeSection === 'scheduling'" title="OpenAI 调度策略">
+      <div class="setting-control">
         <div class="min-w-0 flex-1">
           <strong class="text-gray-900 dark:text-white">账号选择方式</strong>
           <p class="mt-1.5 text-[13px] text-gray-500 dark:text-dark-400">
             仅影响 OpenAI 账号的非粘性回退调度，其它服务商不受影响。粘性会话始终优先以保持对话缓存。
-            「优先最快重置」会先选择配额窗口最快重置的可用账号，让接近用尽的账号先消耗、其余账号留作储备。
+            「优先最快重置」会先选择配额窗口最快重置的可用账号，让接近用尽的账号先消耗、其余账号留作储备。选择后立即保存。
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -571,14 +593,15 @@ function confirmSystemUpdate() {
             :options="schedulingStrategyOptions"
             :loading="savingSchedulingStrategy"
             :disabled="savingSchedulingStrategy"
-            style="width: 220px"
+            class="w-full sm:w-72"
+            aria-label="OpenAI 账号选择方式"
             @update:value="saveSchedulingStrategy"
           />
         </div>
       </div>
     </UiCard>
 
-    <UiCard class="max-w-xl" title="安全加固">
+    <UiCard v-show="activeSection === 'security'" title="安全加固">
       <div class="space-y-4">
         <div class="flex items-center justify-between gap-5">
           <div>
@@ -604,10 +627,19 @@ function confirmSystemUpdate() {
         </div>
       </div>
     </UiCard>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.settings-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; max-width: 1100px; margin: 0 auto; }
+.settings-nav { display: flex; flex-wrap: wrap; gap: 6px; align-content: start; }
+.settings-nav button { @apply rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-800; }
+.settings-nav button.is-active { @apply bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300; }
+.settings-nav button:focus-visible { @apply outline-none ring-2 ring-primary-500; }
+.setting-control { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.settings-page :deep(.card) { min-width: 0; }
+@media (min-width: 1280px) { .settings-page { grid-template-columns: 150px minmax(0, 1fr); } .settings-nav { flex-direction: column; position: sticky; top: 0; align-self: start; } }
 .update-version-grid {
   display: grid;
   grid-template-columns: repeat(1, minmax(0, 1fr));

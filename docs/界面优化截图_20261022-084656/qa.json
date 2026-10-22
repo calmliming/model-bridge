@@ -1,0 +1,1055 @@
+{
+  "qaResults": [
+    {
+      "name": "首页",
+      "path": "/",
+      "width": 390,
+      "actual": "/",
+      "document": 390,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "首页",
+      "path": "/",
+      "width": 1024,
+      "actual": "/",
+      "document": 1024,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "首页",
+      "path": "/",
+      "width": 1440,
+      "actual": "/",
+      "document": 1440,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "登录",
+      "path": "/login",
+      "width": 390,
+      "actual": "/login",
+      "document": 390,
+      "main": [
+        {
+          "width": 352,
+          "scroll": 352
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "登录",
+      "path": "/login",
+      "width": 1024,
+      "actual": "/login",
+      "document": 1024,
+      "main": [
+        {
+          "width": 388,
+          "scroll": 388
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "登录",
+      "path": "/login",
+      "width": 1440,
+      "actual": "/login",
+      "document": 1440,
+      "main": [
+        {
+          "width": 388,
+          "scroll": 388
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "邀请",
+      "path": "/accept-invite",
+      "width": 390,
+      "actual": "/accept-invite",
+      "document": 390,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "邀请",
+      "path": "/accept-invite",
+      "width": 1024,
+      "actual": "/accept-invite",
+      "document": 1024,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "邀请",
+      "path": "/accept-invite",
+      "width": 1440,
+      "actual": "/accept-invite",
+      "document": 1440,
+      "main": [],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "公开文档",
+      "path": "/docs/api",
+      "width": 390,
+      "actual": "/docs/api",
+      "document": 390,
+      "main": [
+        {
+          "width": 358,
+          "scroll": 358
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "公开文档",
+      "path": "/docs/api",
+      "width": 1024,
+      "actual": "/docs/api",
+      "document": 1024,
+      "main": [
+        {
+          "width": 960,
+          "scroll": 960
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "公开文档",
+      "path": "/docs/api",
+      "width": 1440,
+      "actual": "/docs/api",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1112,
+          "scroll": 1112
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户仪表盘",
+      "path": "/app",
+      "width": 390,
+      "actual": "/app",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户仪表盘",
+      "path": "/app",
+      "width": 1024,
+      "actual": "/app",
+      "document": 1024,
+      "main": [
+        {
+          "width": 792,
+          "scroll": 792
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户仪表盘",
+      "path": "/app",
+      "width": 1440,
+      "actual": "/app",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1208,
+          "scroll": 1208
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户模型广场",
+      "path": "/app/models",
+      "width": 390,
+      "actual": "/app/models",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户模型广场",
+      "path": "/app/models",
+      "width": 1024,
+      "actual": "/app/models",
+      "document": 1024,
+      "main": [
+        {
+          "width": 792,
+          "scroll": 792
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户模型广场",
+      "path": "/app/models",
+      "width": 1440,
+      "actual": "/app/models",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1208,
+          "scroll": 1208
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户密钥",
+      "path": "/app/keys",
+      "width": 390,
+      "actual": "/app/keys",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户密钥",
+      "path": "/app/keys",
+      "width": 1024,
+      "actual": "/app/keys",
+      "document": 1024,
+      "main": [
+        {
+          "width": 792,
+          "scroll": 792
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户密钥",
+      "path": "/app/keys",
+      "width": 1440,
+      "actual": "/app/keys",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1208,
+          "scroll": 1208
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户用量",
+      "path": "/app/usage",
+      "width": 390,
+      "actual": "/app/usage",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户用量",
+      "path": "/app/usage",
+      "width": 1024,
+      "actual": "/app/usage",
+      "document": 1024,
+      "main": [
+        {
+          "width": 792,
+          "scroll": 792
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户用量",
+      "path": "/app/usage",
+      "width": 1440,
+      "actual": "/app/usage",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1208,
+          "scroll": 1208
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户日志",
+      "path": "/app/logs",
+      "width": 390,
+      "actual": "/app/logs",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户日志",
+      "path": "/app/logs",
+      "width": 1024,
+      "actual": "/app/logs",
+      "document": 1024,
+      "main": [
+        {
+          "width": 792,
+          "scroll": 792
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户日志",
+      "path": "/app/logs",
+      "width": 1440,
+      "actual": "/app/logs",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1208,
+          "scroll": 1208
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员仪表盘",
+      "path": "/overview",
+      "width": 390,
+      "actual": "/overview",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员仪表盘",
+      "path": "/overview",
+      "width": 1024,
+      "actual": "/overview",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员仪表盘",
+      "path": "/overview",
+      "width": 1440,
+      "actual": "/overview",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员模型广场",
+      "path": "/models",
+      "width": 390,
+      "actual": "/models",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员模型广场",
+      "path": "/models",
+      "width": 1024,
+      "actual": "/models",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员模型广场",
+      "path": "/models",
+      "width": 1440,
+      "actual": "/models",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "动态模型",
+      "path": "/model-catalog",
+      "width": 390,
+      "actual": "/model-catalog",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "动态模型",
+      "path": "/model-catalog",
+      "width": 1024,
+      "actual": "/model-catalog",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "动态模型",
+      "path": "/model-catalog",
+      "width": 1440,
+      "actual": "/model-catalog",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "渠道健康",
+      "path": "/channel-health",
+      "width": 390,
+      "actual": "/channel-health",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "渠道健康",
+      "path": "/channel-health",
+      "width": 1024,
+      "actual": "/channel-health",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "渠道健康",
+      "path": "/channel-health",
+      "width": 1440,
+      "actual": "/channel-health",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "上游账户",
+      "path": "/accounts",
+      "width": 390,
+      "actual": "/accounts",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "上游账户",
+      "path": "/accounts",
+      "width": 1024,
+      "actual": "/accounts",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "上游账户",
+      "path": "/accounts",
+      "width": 1440,
+      "actual": "/accounts",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "分组管理",
+      "path": "/account-groups",
+      "width": 390,
+      "actual": "/account-groups",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "分组管理",
+      "path": "/account-groups",
+      "width": 1024,
+      "actual": "/account-groups",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "分组管理",
+      "path": "/account-groups",
+      "width": 1440,
+      "actual": "/account-groups",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员密钥",
+      "path": "/keys",
+      "width": 390,
+      "actual": "/keys",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员密钥",
+      "path": "/keys",
+      "width": 1024,
+      "actual": "/keys",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员密钥",
+      "path": "/keys",
+      "width": 1440,
+      "actual": "/keys",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户钱包",
+      "path": "/users",
+      "width": 390,
+      "actual": "/users",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户钱包",
+      "path": "/users",
+      "width": 1024,
+      "actual": "/users",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用户钱包",
+      "path": "/users",
+      "width": 1440,
+      "actual": "/users",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "充值订单",
+      "path": "/payments",
+      "width": 390,
+      "actual": "/payments",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "充值订单",
+      "path": "/payments",
+      "width": 1024,
+      "actual": "/payments",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "充值订单",
+      "path": "/payments",
+      "width": 1440,
+      "actual": "/payments",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "兑换码",
+      "path": "/redeem-codes",
+      "width": 390,
+      "actual": "/redeem-codes",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "兑换码",
+      "path": "/redeem-codes",
+      "width": 1024,
+      "actual": "/redeem-codes",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "兑换码",
+      "path": "/redeem-codes",
+      "width": 1440,
+      "actual": "/redeem-codes",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "订阅套餐",
+      "path": "/subscription-plans",
+      "width": 390,
+      "actual": "/subscription-plans",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "订阅套餐",
+      "path": "/subscription-plans",
+      "width": 1024,
+      "actual": "/subscription-plans",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "订阅套餐",
+      "path": "/subscription-plans",
+      "width": 1440,
+      "actual": "/subscription-plans",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员日志",
+      "path": "/logs",
+      "width": 390,
+      "actual": "/logs",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员日志",
+      "path": "/logs",
+      "width": 1024,
+      "actual": "/logs",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "管理员日志",
+      "path": "/logs",
+      "width": 1440,
+      "actual": "/logs",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用量统计",
+      "path": "/stats",
+      "width": 390,
+      "actual": "/stats",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用量统计",
+      "path": "/stats",
+      "width": 1024,
+      "actual": "/stats",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "用量统计",
+      "path": "/stats",
+      "width": 1440,
+      "actual": "/stats",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "使用文档",
+      "path": "/docs",
+      "width": 390,
+      "actual": "/docs",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "使用文档",
+      "path": "/docs",
+      "width": 1024,
+      "actual": "/docs",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "使用文档",
+      "path": "/docs",
+      "width": 1440,
+      "actual": "/docs",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "系统设置",
+      "path": "/settings",
+      "width": 390,
+      "actual": "/settings",
+      "document": 390,
+      "main": [
+        {
+          "width": 390,
+          "scroll": 390
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "系统设置",
+      "path": "/settings",
+      "width": 1024,
+      "actual": "/settings",
+      "document": 1024,
+      "main": [
+        {
+          "width": 768,
+          "scroll": 768
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    },
+    {
+      "name": "系统设置",
+      "path": "/settings",
+      "width": 1440,
+      "actual": "/settings",
+      "document": 1440,
+      "main": [
+        {
+          "width": 1184,
+          "scroll": 1184
+        }
+      ],
+      "inert": false,
+      "overlay": false
+    }
+  ],
+  "qaErrors": []
+}
