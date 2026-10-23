@@ -628,7 +628,10 @@ function kimiTier(model: string): keyof typeof KIMI_TIERS {
 // xAI (Grok) list prices per 1M tokens. No separate cache-write fee —
 // cacheWrite is 0; cacheRead is the cached-input rate.
 // https://docs.x.ai/developers/models/grok-4.7 (2026-09-26).
+const GROK_47_FAST_MODEL = /^(?:xai\/)?grok-4[.-]7-(?:build-)?fast(?:$|-)/i
+const GROK_47_MODEL = /^(?:xai\/)?grok-4[.-]7(?:$|-)/i
 const GROK_47: TierPrice = { input: 2, output: 6, cacheWrite: 0, cacheRead: 0.5, imageInput: 2 }
+const GROK_47_FAST: TierPrice = { input: 4, output: 12, cacheWrite: 0, cacheRead: 1, imageInput: 4 }
 const GROK_46: TierPrice = {
   input: 2,
   output: 6,
@@ -656,7 +659,8 @@ const GROK_BUILD: TierPrice = {
 
 function grokPrice(model: string): TierPrice {
   const m = model.toLowerCase()
-  if (/^grok-4[.-]7(?:$|-)/.test(m)) return GROK_47
+  if (GROK_47_FAST_MODEL.test(m)) return GROK_47_FAST
+  if (GROK_47_MODEL.test(m)) return GROK_47
   if (m.includes('build') || m.includes('code')) return GROK_BUILD
   if (m.includes('4.3') || m.includes('4-3')) return GROK_43
   if (m.includes('4.6') || m.includes('4-6')) return GROK_46
@@ -691,7 +695,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
   // price when the relay preserves the original model name for auditing.
   if (m.startsWith('kimi') || m.startsWith('moonshot') || m === 'k3' || m === 'k3-256k' || m === 'kimi-code/k3') return KIMI_TIERS.k3
   if (m.startsWith('minimax-')) return minimaxPrice(model)
-  if (m.startsWith('grok')) return grokPrice(model)
+  if (m.startsWith('grok') || m.startsWith('xai/grok')) return grokPrice(model)
   return CLAUDE_SONNET
 }
 
@@ -887,6 +891,9 @@ const SEED_ROWS: SeedRow[] = [
   // Grok (xAI) — exact rows for the discoverable models; grokPrice() covers
   // other grok-* variants via substring tiers.
   { provider: 'grok', model: 'grok-4.7', price: GROK_47 },
+  // Exact rows: the DB substring pass would otherwise bill them as grok-4.7.
+  { provider: 'grok', model: 'grok-4.7-fast', price: GROK_47_FAST },
+  { provider: 'grok', model: 'grok-4.7-build-fast', price: GROK_47_FAST },
   { provider: 'grok', model: 'grok-4.6', price: GROK_46 },
   { provider: 'grok', model: 'grok-4.5', price: GROK_45 },
   { provider: 'grok', model: 'grok-4.3', price: GROK_43 },
@@ -1178,7 +1185,7 @@ export async function initPricing(): Promise<void> {
   await loadPricing()
 }
 
-const FAST_LANE_MODEL = /^(?:mimo-v2[.-]6-pro-ultraspeed|glm-5[.-]3-flashx|kimi-k2[.-]7-code-highspeed)(?:$|-)/
+const FAST_LANE_MODEL = /^(?:mimo-v2[.-]6-pro-ultraspeed|glm-5[.-]3-flashx|kimi-k2[.-]7-code-highspeed|(?:xai\/)?grok-4[.-]7-(?:build-)?fast)(?:$|-)/
 
 /**
  * Resolves the price for (provider, model). Checks the DB cache first
@@ -1263,7 +1270,8 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const subscriptionLongContextExempt = provider === 'openai' && isGpt61SolModel(model)
   const haiku55 = ['claude', 'antigravity', 'sub2api'].includes(provider) && HAIKU_55_MODEL.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
-  const grok47 = (provider === 'grok' || provider === 'sub2api') && /^grok-4[.-]7(?:$|-)/i.test(model)
+  const grok47Fast = (provider === 'grok' || provider === 'sub2api') && GROK_47_FAST_MODEL.test(model)
+  const grok47 = (provider === 'grok' || provider === 'sub2api') && !grok47Fast && GROK_47_MODEL.test(model)
   const longContext =
     override?.longContext !== undefined
       ? override.longContext
@@ -1273,9 +1281,11 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
           ? { threshold: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 }
           : minimaxM3
             ? { threshold: 512_000, inputMultiplier: 2, outputMultiplier: 2 }
-            : grok47
-              ? { threshold: 200_000, inputMultiplier: 2, outputMultiplier: 2 }
-              : null
+            : grok47Fast
+              ? { threshold: 200_000, inputMultiplier: 1.5, outputMultiplier: 1.5 }
+              : grok47
+                ? { threshold: 200_000, inputMultiplier: 2, outputMultiplier: 2 }
+                : null
   const totalInput =
     usage.inputTokens + usage.cacheReadTokens + usage.cacheCreateTokens + (usage.imageInputTokens ?? 0) + (usage.imageCacheReadTokens ?? 0)
   const long = longContext && totalInput > longContext.threshold ? longContext : null

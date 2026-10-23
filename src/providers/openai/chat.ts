@@ -480,7 +480,12 @@ export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTe
   return null
 }
 
-const RESPONSES_PREAMBLE_EVENTS = new Set(['response.created', 'response.in_progress', 'response.queued'])
+const RESPONSES_PREAMBLE_EVENTS = new Set([
+  'response.created',
+  'response.in_progress',
+  'response.queued',
+  'response.metadata',
+])
 
 /**
  * OpenAI and Grok sometimes refuse silently: the stream ends with a

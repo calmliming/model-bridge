@@ -32,10 +32,25 @@ const UNSUPPORTED_SCHEMA_KEYS = new Set([
   'deprecated',
 ])
 
-// Nested schema containers to recurse into. `properties` and `$defs`-like maps
+// Nested schema containers to recurse into. `properties` and `dependentSchemas`
 // hold named sub-schemas; the rest hold a schema or an array of schemas.
-const SCHEMA_MAP_KEYS = new Set(['properties'])
-const SCHEMA_LIST_OR_NODE_KEYS = new Set(['items', 'anyOf', 'allOf', 'oneOf', 'prefixItems', 'not'])
+const SCHEMA_MAP_KEYS = new Set(['properties', 'dependentSchemas'])
+const SCHEMA_LIST_OR_NODE_KEYS = new Set([
+  'items',
+  'additionalItems',
+  'unevaluatedItems',
+  'contains',
+  'propertyNames',
+  'anyOf',
+  'allOf',
+  'oneOf',
+  'prefixItems',
+  'not',
+  'if',
+  'then',
+  'else',
+  'contentSchema',
+])
 
 /**
  * Gemini enums are string-valued even when the incoming JSON Schema contains
@@ -80,6 +95,14 @@ function cleanSchema(value: unknown): unknown {
         props[propName] = cleanSchema(propSchema)
       }
       out[key] = props
+    } else if (key === 'dependencies' && val && typeof val === 'object' && !Array.isArray(val)) {
+      const deps: Record<string, unknown> = {}
+      for (const [depName, depSchema] of Object.entries(val as Record<string, unknown>)) {
+        deps[depName] = depSchema && typeof depSchema === 'object' && !Array.isArray(depSchema)
+          ? cleanSchema(depSchema)
+          : depSchema
+      }
+      out[key] = deps
     } else if (SCHEMA_LIST_OR_NODE_KEYS.has(key)) {
       out[key] = cleanSchema(val)
     } else {
@@ -111,9 +134,10 @@ function cleanSchema(value: unknown): unknown {
     const constant = typeof out.const === 'string' ? [out.const] : null
     delete out.const
     if (constant) {
-      const existing = Object.prototype.hasOwnProperty.call(out, 'enum') ? normalizeGeminiEnum(out.enum) : null
-      const intersection = existing?.filter(value => value === constant[0])
-      out.enum = intersection?.length ? intersection : constant
+      const existing = Object.prototype.hasOwnProperty.call(out, 'enum') && Array.isArray(out.enum)
+        ? out.enum.filter((value): value is string => typeof value === 'string' && value === constant[0])
+        : null
+      out.enum = existing?.length ? existing : constant
       out.type ??= 'string'
     }
   }

@@ -4,7 +4,9 @@ import {
   chatCompletionsToResponses,
   createOpenaiChatCompletionsStreamTransform,
   inspectResponsesSseTerminalFailure,
+  responsesSseEmptyCompletionReason,
   responsesSseToChatCompletion,
+  responsesStreamStartVerdict,
 } from './chat'
 
 describe('chatCompletionsToResponses', () => {
@@ -342,6 +344,30 @@ describe('inspectResponsesSseTerminalFailure', () => {
       'data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}',
       '',
     ].join('\n'))).toBeNull()
+  })
+
+  it('keeps response.metadata in the stream preamble so empty completions and overloads still retry', () => {
+    expect(
+      responsesStreamStartVerdict({
+        type: 'response.metadata',
+        response_id: 'resp_1',
+        metadata: { openai_chatgpt_moderation_metadata: { prompt: {} } },
+      }),
+    ).toBe('continue')
+    expect(
+      responsesSseEmptyCompletionReason(
+        [
+          'data: {"type":"response.created","response":{"id":"resp_1"}}',
+          '',
+          'data: {"type":"response.queued","response":{"id":"resp_1","status":"queued"}}',
+          '',
+          'data: {"type":"response.metadata","response_id":"resp_1","metadata":{"openai_chatgpt_moderation_metadata":{"prompt":{}}}}',
+          '',
+          'data: {"type":"response.completed","response":{"id":"resp_1","output":[]}}',
+          '',
+        ].join('\n'),
+      ),
+    ).toBe('empty_completed')
   })
 })
 

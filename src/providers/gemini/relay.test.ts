@@ -218,6 +218,41 @@ describe('sanitizeGeminiBody', () => {
     expect(parameters.properties.kind).toEqual({ const: 'search' })
   })
 
+  it('cleans nested schemas inside dependentSchemas, dependencies, and conditional keywords', () => {
+    const parameters = {
+      type: 'object',
+      dependentSchemas: {
+        mode: { type: 'object', additionalProperties: false, properties: { sub: { const: 'x', examples: ['x'] } } },
+      },
+      dependencies: {
+        a: ['b'],
+        c: { type: 'object', additionalProperties: false, properties: { flag: { const: 'on' } } },
+      },
+      if: { properties: { kind: { const: 'v1', deprecated: true } } },
+      then: { properties: { target: { type: 'string', minLength: 1 } } },
+      else: { properties: { fallback: { const: 'none' } } },
+      propertyNames: { type: 'string', maxLength: 32 },
+      contains: { type: 'string', const: 'needle' },
+    }
+    const body = { tools: [{ functionDeclarations: [{ name: 'complex', parameters }] }] }
+    const params = (sanitizeGeminiBody(body).tools as any)[0].functionDeclarations[0].parameters
+    expect(params).toEqual({
+      type: 'object',
+      dependentSchemas: {
+        mode: { type: 'object', properties: { sub: { type: 'string', enum: ['x'] } } },
+      },
+      dependencies: {
+        a: ['b'],
+        c: { type: 'object', properties: { flag: { type: 'string', enum: ['on'] } } },
+      },
+      if: { properties: { kind: { type: 'string', enum: ['v1'] } } },
+      then: { properties: { target: { type: 'string' } } },
+      else: { properties: { fallback: { type: 'string', enum: ['none'] } } },
+      propertyNames: { type: 'string' },
+      contains: { type: 'string', enum: ['needle'] },
+    })
+  })
+
   it('returns the body unchanged when there are no tools', () => {
     const body = { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }
     expect(sanitizeGeminiBody(body)).toBe(body)

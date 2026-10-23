@@ -319,8 +319,11 @@ interface AnthropicStreamEvent {
  */
 export function createClaudeChatCompletionsStreamTransform(): {
   transform(data: unknown): unknown[]
-  flush(): unknown[]
+  flush(context?: { interrupted?: boolean; clientCanceled?: boolean }): unknown[]
+  status(): 'success' | 'error'
 } {
+  let failed = false
+  let sawStopReason = false
   const state = {
     id: `chatcmpl-${randomUUID()}`,
     created: Math.floor(Date.now() / 1000),
@@ -396,7 +399,10 @@ export function createClaudeChatCompletionsStreamTransform(): {
           return []
         }
         case 'message_delta':
-          if (e.delta?.stop_reason != null) state.finishReason = mapStopReason(e.delta.stop_reason)
+          if (e.delta?.stop_reason != null) {
+            sawStopReason = true
+            state.finishReason = mapStopReason(e.delta.stop_reason)
+          }
           return []
         case 'message_stop': {
           if (state.completed) return []
@@ -411,6 +417,7 @@ export function createClaudeChatCompletionsStreamTransform(): {
           // Surface it as an OpenAI-style error chunk and terminate, instead of
           // silently ending with an empty, successful-looking finish.
           if (state.completed) return []
+          failed = true
           state.completed = true
           const message = typeof e.error?.message === 'string' ? e.error.message : 'Upstream error.'
           const type = typeof e.error?.type === 'string' ? e.error.type : 'upstream_error'
@@ -420,12 +427,28 @@ export function createClaudeChatCompletionsStreamTransform(): {
           return []
       }
     },
-    flush(): unknown[] {
+    flush(context?: { interrupted?: boolean; clientCanceled?: boolean }): unknown[] {
       if (state.completed) return []
       state.completed = true
-      const delta = state.sentRole ? {} : { role: 'assistant' }
-      return [chatChunk(state.id, state.created, state.model, delta, state.finishReason), '[DONE]']
+      if (!context?.interrupted && !context?.clientCanceled && sawStopReason) {
+        const delta = state.sentRole ? {} : { role: 'assistant' }
+        return [chatChunk(state.id, state.created, state.model, delta, state.finishReason), '[DONE]']
+      }
+      failed = true
+      return [
+        {
+          error: {
+            code: context?.clientCanceled ? 'client_disconnected' : 'upstream_stream_closed',
+            type: 'upstream_error',
+            message: context?.clientCanceled
+              ? 'Client disconnected during generation.'
+              : 'Upstream stream closed before completion.',
+          },
+        },
+        '[DONE]',
+      ]
     },
+    status: () => (failed ? 'error' : 'success'),
   }
 }
 
@@ -457,11 +480,12 @@ export function parseAnthropicSseEvents(text: string): unknown[] {
 export function claudeSseToChatCompletion(
   text: string,
   fallbackModel: string,
-): { body: Record<string, unknown>; usage: UsageData } {
+): { body: Record<string, unknown>; usage: UsageData; status?: 'error'; httpStatus?: number } {
   let id = `chatcmpl-${randomUUID()}`
   let model = fallbackModel
   let content = ''
   let stopReason: unknown = null
+  let failure: { code: string; message: string } | undefined
   const toolByBlock = new Map<number, { id: string; name: string; args: string }>()
   const usage: AnthropicUsage = {}
 
@@ -502,8 +526,23 @@ export function claudeSseToChatCompletion(
         if (e.delta?.stop_reason != null) stopReason = e.delta.stop_reason
         if (e.usage) Object.assign(usage, e.usage)
         break
+      case 'error': {
+        const message = typeof e.error?.message === 'string' && e.error.message ? e.error.message : 'Upstream error.'
+        const type = typeof e.error?.type === 'string' && e.error.type ? e.error.type : 'upstream_error'
+        failure = { code: type, message }
+        break
+      }
       default:
         break
+    }
+  }
+
+  if (failure) {
+    return {
+      body: { error: { message: failure.message, type: failure.code, code: failure.code } },
+      usage: usageFromAnthropic(usage),
+      status: 'error',
+      httpStatus: failure.code === 'overloaded_error' || failure.code === 'rate_limit_error' ? 429 : 502,
     }
   }
 

@@ -743,6 +743,37 @@ describe('Grok 4.7 official rates', () => {
     expect(resolveUsagePrice(provider, 'grok-4.7', { ...usage, cacheReadTokens: 2 })).toMatchObject({ input: 4, output: 12, cacheRead: 1 })
     expect(resolvePrice(provider, 'grok-4.5')).toMatchObject({ cacheRead: 0.3 })
   })
+
+  it.each(['grok', 'sub2api'])(
+    'prices Grok 4.7 Fast and Build Fast at $4 / $1 / $12 with a 1.5x >200k context multiplier on %s',
+    provider => {
+      const short = { ...emptyUsage(), inputTokens: 199_999, cacheReadTokens: 1, outputTokens: 10 }
+      const long = { ...short, cacheReadTokens: 2 }
+      for (const model of [
+        'grok-4.7-fast',
+        'grok-4.7-build-fast',
+        'grok-4-7-fast',
+        'grok-4-7-build-fast',
+        'xai/grok-4.7-fast',
+        'xai/grok-4.7-build-fast',
+      ]) {
+        expect(resolveUsagePrice(provider, model, short)).toMatchObject({
+          input: 4,
+          output: 12,
+          cacheWrite: 0,
+          cacheRead: 1,
+          imageInput: 4,
+        })
+        expect(resolveUsagePrice(provider, model, long)).toMatchObject({
+          input: 6,
+          output: 18,
+          cacheWrite: 0,
+          cacheRead: 1.5,
+          imageInput: 6,
+        })
+      }
+    },
+  )
 })
 
 it('charges Grok 4.7 image input tokens at the same context tier as text', () => {

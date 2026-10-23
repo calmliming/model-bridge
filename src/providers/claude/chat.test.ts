@@ -198,12 +198,17 @@ describe('createClaudeChatCompletionsStreamTransform', () => {
   })
 
   it('surfaces a mid-stream error event instead of silently ending', () => {
-    const out = runTransform([
+    const t = createClaudeChatCompletionsStreamTransform()
+    const out: unknown[] = []
+    for (const e of [
       { type: 'message_start', message: { id: 'msg_1', model: 'claude' } },
       { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
       { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hi' } },
       { type: 'error', error: { type: 'overloaded_error', message: 'overloaded' } },
-    ])
+    ]) {
+      out.push(...t.transform(e))
+    }
+    out.push(...t.flush())
     expect(out[out.length - 1]).toBe('[DONE]')
     const errorEvent = out.find(
       (c): c is Record<string, any> => c !== '[DONE]' && !!(c as Record<string, unknown>).error,
@@ -213,10 +218,45 @@ describe('createClaudeChatCompletionsStreamTransform', () => {
       type: 'overloaded_error',
       code: 'overloaded_error',
     })
+    expect(t.status()).toBe('error')
+  })
+
+  it('reports an error when the upstream stream closes before message_stop or stop_reason', () => {
+    const t = createClaudeChatCompletionsStreamTransform()
+    const out = [
+      ...t.transform({ type: 'message_start', message: { id: 'msg_1', model: 'claude' } }),
+      ...t.transform({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'partial' } }),
+      ...t.flush(),
+    ]
+    expect(out[out.length - 1]).toBe('[DONE]')
+    expect(out).toContainEqual({
+      error: {
+        code: 'upstream_stream_closed',
+        type: 'upstream_error',
+        message: 'Upstream stream closed before completion.',
+      },
+    })
+    expect(t.status()).toBe('error')
   })
 })
 
 describe('claudeSseToChatCompletion', () => {
+  it('surfaces a mid-stream error event in buffered mode instead of a fake 200 completion', () => {
+    const sse = [
+      'event: message_start',
+      'data: {"type":"message_start","message":{"id":"msg_err","model":"claude-opus-4","usage":{"input_tokens":8}}}',
+      '',
+      'event: error',
+      'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+      '',
+    ].join('\n')
+    const result = claudeSseToChatCompletion(sse, 'fallback')
+    expect(result.status).toBe('error')
+    expect(result.httpStatus).toBe(429)
+    expect(result.body).toEqual({
+      error: { message: 'Overloaded', type: 'overloaded_error', code: 'overloaded_error' },
+    })
+  })
   it('buffers a streamed text response into one Chat Completion', () => {
     const sse = [
       'event: message_start',

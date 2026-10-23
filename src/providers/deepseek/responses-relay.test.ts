@@ -74,4 +74,38 @@ describe('normalizeDeepseekResponsesBody', () => {
     ] })
     expect(out.input).toEqual([user])
   })
+
+  it('normalizes input_image parts to image_url and strips duplicate url fields', () => {
+    const out = normalizeDeepseekResponsesBody({
+      model: 'deepseek-flash',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            {
+              type: 'input_image',
+              image_url: { url: 'data:image/png;base64,AAA' },
+              url: 'data:image/png;base64,AAA',
+              detail: 'high',
+            },
+            {
+              type: 'input_image',
+              url: 'https://example.com/only-url.png',
+            },
+          ],
+        },
+      ],
+    })
+    expect(out.input).toEqual([
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_image', image_url: 'data:image/png;base64,AAA', detail: 'high' },
+          { type: 'input_image', image_url: 'https://example.com/only-url.png' },
+        ],
+      },
+    ])
+  })
 })
