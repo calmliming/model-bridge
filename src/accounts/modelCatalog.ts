@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { pool } from '../db'
 import { getAccount, ensureFreshToken, updateAccountMetadata } from './manager'
 import { fetchWithConnectTimeout } from '../http/upstream'
-import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
+import { CODEX_CLIENT_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
 import { normalizeSub2ApiBaseUrl } from '../providers/sub2api/relay'
 import { minimaxBaseUrl } from '../providers/minimax/relay'
 import { mergeCatalogModels, parseModelCatalog, readCatalogSnapshot, type CatalogModel } from '../providers/modelCatalog'
@@ -19,7 +19,7 @@ function catalogEndpoint(provider: string, proxyUrl: string | null): string {
   if (provider === 'sub2api') return `${normalizeSub2ApiBaseUrl(proxyUrl)}/v1/models`
   if (provider === 'minimax') return `${minimaxBaseUrl(proxyUrl)}/v1/models`
   const urls: Record<string, string> = {
-    openai: `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_USER_AGENT.split('/')[1]}`,
+    openai: `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`,
     // Anthropic 的模型列表端点与 /v1/messages 同域同 token，OAuth 账户可直接调用。
     claude: 'https://api.anthropic.com/v1/models',
     deepseek: 'https://api.deepseek.com/models', xiaomi: 'https://api.xiaomimimo.com/v1/models',

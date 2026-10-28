@@ -11,12 +11,14 @@
 
 import type { ReadableStreamReadResult } from 'node:stream/web'
 
-export type PeekVerdict = 'continue' | 'pass' | { retry: string }
+export type PeekVerdict = 'continue' | 'pass' | { retry: string; failureEvent?: unknown }
 
 export interface PeekResult {
   response: Response
   /** Set when the stream ended (or was rejected) before any content. */
   retryReason: string | null
+  /** Preserve an upstream terminal for provider-aware retry/cooldown policy. */
+  failureEvent?: unknown
 }
 
 function eventData(block: string): string | null {
@@ -60,8 +62,8 @@ export async function peekSseStart(
     try {
       return verdictFor(JSON.parse(data))
     } catch {
-      // A malformed frame is left for the streaming path to report.
-      return 'continue'
+      // Unknown data is a replay boundary, not evidence of an empty answer.
+      return 'pass'
     }
   }
 
@@ -129,5 +131,6 @@ export async function peekSseStart(
   return {
     response: new Response(replay, { status: upstream.status, statusText: upstream.statusText, headers: upstream.headers }),
     retryReason,
+    ...(typeof verdict === 'object' && verdict.failureEvent !== undefined ? { failureEvent: verdict.failureEvent } : {}),
   }
 }

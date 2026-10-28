@@ -1195,9 +1195,10 @@ describe('upstream compatibility regressions', () => {
     expect(mocks.quota).toBe(mocks.cost)
   }))
 
-  it.each(['/v1/responses', '/v1/chat/completions'])('sends a protocol error once at %s', url => withRelay(async request => {
+  it.each(['/v1/responses', '/v1/chat/completions'])('sends a protocol error once after output at %s', url => withRelay(async request => {
     const error = { type: 'error', error: { code: 'server_error', message: 'failed once', status: 503 } }
-    mocks.fetch.mockResolvedValueOnce(sse([error, error, { type: 'response.completed', response: { usage: { output_tokens: 999 } } }]))
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'response.output_text.delta', delta: 'partial' }, error, error,
+      { type: 'response.completed', response: { usage: { output_tokens: 999 } } }]))
     const response = await request({ ...prompt, stream: true }, url)
     expect(response.body.match(/failed once/g)).toHaveLength(1)
     expect(response.body).not.toContain('999')
@@ -1984,4 +1985,144 @@ describe('upstream compatibility errors and usage provenance', () => {
     expect(mocks.logs[0]?.[36]).toBe('missing')
     expect(mocks.transactions).toHaveLength(0)
   }))
+})
+
+describe('Responses overload and edge-block recovery', () => {
+  const prompt = { model: 'gpt-5.4', stream: true, input: 'Hi', messages: [{ role: 'user', content: 'Hi' }] }
+  const overload = { code: 'server_is_overloaded', message: 'Our servers are currently overloaded. Please try again later.' }
+  const failure = (error: Record<string, unknown>) => ({ type: 'response.failed', response: { error } })
+  const answered = async () => new Response('data: {"type":"response.output_text.delta","delta":"Paid answer"}\n\n' +
+    await openaiResponse().text(), { headers: { 'content-type': 'text/event-stream' } })
+
+  it.each([
+    { url: '/v1/responses', stream: true, hint: 'http' },
+    { url: '/v1/chat/completions', stream: true, hint: 'body' },
+    { url: '/v1/chat/completions', stream: false, hint: 'http' },
+    { url: '/v1/chat/completions', stream: false, hint: 'body' },
+  ])('waits before retry, frees the account slot and bills only the successful attempt: %j', ({ url, stream, hint }) => withRelay(async request => {
+    mocks.accounts[0]!.concurrencyLimit = 1
+    let firstAt = 0
+    let slotDuringWait!: Promise<number>
+    mocks.fetch.mockImplementationOnce(async () => {
+      firstAt = Date.now()
+      slotDuringWait = new Promise(resolve => setTimeout(() => {
+        void currentConcurrency('account:account-1').then(resolve)
+      }, 20))
+      const error = { ...overload, ...(hint === 'body' ? { headers: { 'retry-after-ms': '100' } } : {}) }
+      const response = sse([
+        { type: 'response.output_item.added', item: { type: 'message', content: [] } },
+        { type: 'response.output_text.delta', delta: '' },
+        { type: 'response.output_text.done', text: '' }, failure(error),
+      ])
+      if (hint === 'http') response.headers.set('retry-after-ms', '100')
+      return response
+    }).mockImplementationOnce(async () => {
+      expect(Date.now() - firstAt).toBeGreaterThanOrEqual(90)
+      return answered()
+    })
+    const response = await request({ ...prompt, stream }, url)
+    expect(await slotDuringWait).toBe(0)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Paid answer')
+    expect(response.body).not.toContain('server_is_overloaded')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.ensureFreshToken.mock.calls.map(([account]) => account.id)).toEqual(['account-1', 'account-1'])
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[26]).toBe(2)
+    expect(mocks.quota).toBe(mocks.cost)
+  }))
+
+  it('honors a request delay on HTTP 503 and preserves the original retry budget', () => withRelay(async request => {
+    let firstAt = 0
+    mocks.fetch.mockImplementation(async () => {
+      if (firstAt) expect(Date.now() - firstAt).toBeGreaterThanOrEqual(45)
+      firstAt = Date.now()
+      return Response.json({ error: overload }, { status: 503, headers: { 'retry-after-ms': '50' } })
+    })
+    const response = await request(prompt)
+    expect(response.body).toContain('server_is_overloaded')
+    expect(mocks.fetch).toHaveBeenCalledTimes(3)
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[22]).toBe('error')
+  }))
+
+  it.each([true, false])('rotates an exhausted account after empty frames (stream=%s)', stream => withRelay(async request => {
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null })
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'response.content_part.added', part: { type: 'output_text', text: '' } },
+      failure({ code: 'usage_limit_reached', message: 'usage limit reached', resets_in_seconds: 3600 }),
+    ])).mockImplementationOnce(answered)
+    const response = await request({ ...prompt, stream }, '/v1/chat/completions')
+    expect(response.body).toContain('Paid answer')
+    expect(mocks.ensureFreshToken.mock.calls.map(([account]) => account.id)).toEqual(['account-1', 'account-2'])
+    expect(mocks.penalizeAccount).toHaveBeenCalledWith('account-1', 'rate_limited', expect.any(Number))
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+  }))
+
+  it.each(['cyber_policy', 'invalid_request_error'])('preserves a hard %s decision without retrying', code => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([failure({ code, message: 'request blocked' })]))
+    const response = await request(prompt)
+    expect(response.body).toContain(code)
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+  }))
+
+  it('retries a standalone error frame without requiring a later failed event', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'error', error: overload }]))
+    const response = await request(prompt)
+    expect(response.body).toContain('Paid answer')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  }))
+
+  it('rotates a Cloudflare-blocked relay key without writing cooldowns', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['sub2api']
+    mocks.accounts[0]!.proxyUrl = 'https://relay.example'
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null, proxyUrl: 'https://relay.example' })
+    mocks.fetch.mockResolvedValueOnce(Response.json({ cloudflare_error: true, code: 1010, message: 'quota exceeded' }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ id: 'chat-1', choices: [{ message: { role: 'assistant', content: 'Recovered' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 } }))
+    const response = await request({ ...prompt, stream: false }, '/v1/chat/completions')
+    expect(response.body).toContain('Recovered')
+    expect(mocks.ensureFreshToken.mock.calls.map(([account]) => account.id)).toEqual(['account-1', 'account-2'])
+    expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()
+  }))
+
+  it('cancels the retry wait and releases all capacity on client disconnect', async () => {
+    mocks.accounts[0]!.concurrencyLimit = 1
+    mocks.key.concurrencyLimit = 1
+    mocks.key.userConcurrencyLimit = 1
+    mocks.fetch.mockImplementation(async () => Response.json({ error: overload }, { status: 503, headers: { 'retry-after': '7' } }))
+    const app = Fastify()
+    registerRelayRoutes(app)
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    const client = new AbortController()
+    try {
+      const pending = fetch(`${origin}/v1/responses`, { method: 'POST',
+        headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' },
+        body: JSON.stringify(prompt), signal: client.signal }).catch(() => null)
+      await vi.waitFor(async () => {
+        expect(mocks.fetch).toHaveBeenCalledOnce()
+        expect(await currentConcurrency('account:account-1')).toBe(0)
+        expect(await currentConcurrency('key-1')).toBe(1)
+      })
+      client.abort()
+      await pending
+      await vi.waitFor(async () => {
+        expect(await currentConcurrency('key-1')).toBe(0)
+        expect(await currentConcurrency('user:user-1')).toBe(0)
+      })
+      expect(mocks.fetch).toHaveBeenCalledOnce()
+      expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    } finally {
+      client.abort()
+      await app.close()
+      await waitForPendingUsage()
+    }
+  })
 })

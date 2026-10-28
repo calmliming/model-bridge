@@ -411,7 +411,7 @@ export function buildResponsesErrorEvents(message: string, code: string, options
   return options.started ? events.slice(2).map(event => ({ ...event, sequence_number: sequence })) : events
 }
 
-export function parseResponsesSseEvents(text: string): unknown[] {
+export function parseResponsesSseEvents(text: string, preserveMalformed = false): unknown[] {
   const events: unknown[] = []
   for (const block of text.split(/\r?\n\r?\n/)) {
     const payload = block
@@ -424,7 +424,8 @@ export function parseResponsesSseEvents(text: string): unknown[] {
     try {
       events.push(JSON.parse(payload))
     } catch {
-      // Ignore non-JSON data frames.
+      // Retry inspection must retain an unknown-data replay boundary.
+      if (preserveMalformed) events.push(null)
     }
   }
   return events
@@ -439,19 +440,11 @@ export function parseResponsesSseEvents(text: string): unknown[] {
  */
 export function inspectResponsesSseTerminalFailure(text: string): ResponsesSseTerminalFailure | null {
   let hasOutput = false
-  for (const raw of parseResponsesSseEvents(text)) {
+  for (const raw of parseResponsesSseEvents(text, true)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { hasOutput = true; continue }
     const event = raw as ResponsesStreamEvent & { error?: Record<string, unknown> }
     const type = event.type
-    if (
-      type === 'response.output_text.delta' ||
-      type === 'response.refusal.delta' ||
-      type === 'response.output_item.added' ||
-      type === 'response.function_call_arguments.delta' ||
-      type === 'response.reasoning_summary_text.delta' ||
-      type === 'response.content_part.added'
-    ) {
-      hasOutput = true
-    }
+    if (responsesEventStartsClientOutput(raw)) hasOutput = true
     if (type === 'response.failed') {
       const rawError = event.response?.error ?? event.error
       const error = rawError && typeof rawError === 'object'
@@ -487,6 +480,64 @@ const RESPONSES_PREAMBLE_EVENTS = new Set([
   'response.metadata',
 ])
 
+function responseRecord(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : null
+}
+
+/** Only recognized empty structures are safe to replay; unknown shapes aren't. */
+function responsesPartHasOutput(raw: unknown): boolean {
+  const part = responseRecord(raw)
+  if (!part) return true
+  if (part.type === 'output_text' || part.type === 'summary_text') return part.text !== ''
+  if (part.type === 'refusal') return part.refusal !== ''
+  return true
+}
+
+function responsesItemHasOutput(raw: unknown): boolean {
+  const item = responseRecord(raw)
+  if (!item) return true
+  switch (item.type) {
+    case 'message':
+      return !Array.isArray(item.content) || item.content.some(responsesPartHasOutput)
+    case 'reasoning':
+      return (item.encrypted_content != null && item.encrypted_content !== '') ||
+        (item.summary != null && (!Array.isArray(item.summary) || item.summary.some(responsesPartHasOutput)))
+    case 'function_call': return item.arguments !== ''
+    case 'custom_tool_call': return item.input !== ''
+    case 'compaction': return item.encrypted_content !== ''
+    default: return true
+  }
+}
+
+/** Shared by streaming and buffered retry checks. Whitespace is real output. */
+export function responsesEventStartsClientOutput(raw: unknown): boolean {
+  const event = responseRecord(raw)
+  if (!event) return true
+  const type = event.type
+  if (typeof type !== 'string') return true
+  if (RESPONSES_PREAMBLE_EVENTS.has(type) || type === 'error' || type === 'response.failed') return false
+  switch (type) {
+    case 'response.output_item.added': return responsesItemHasOutput(event.item)
+    case 'response.content_part.added':
+    case 'response.content_part.done':
+    case 'response.reasoning_summary_part.added':
+    case 'response.reasoning_summary_part.done': return responsesPartHasOutput(event.part)
+    case 'response.output_text.delta':
+    case 'response.reasoning_summary_text.delta':
+    case 'response.reasoning_text.delta':
+    case 'response.function_call_arguments.delta':
+    case 'response.custom_tool_call_input.delta':
+    case 'response.refusal.delta': return event.delta !== ''
+    case 'response.output_text.done':
+    case 'response.reasoning_summary_text.done':
+    case 'response.reasoning_text.done': return event.text !== ''
+    case 'response.refusal.done': return event.refusal !== ''
+    // Tool completion, encrypted reasoning, and unknown events are replay
+    // boundaries even if they carry no text or empty tool arguments.
+    default: return true
+  }
+}
+
 /**
  * OpenAI and Grok sometimes refuse silently: the stream ends with a
  * response.completed that carries no output, no usage and no error. Relayed
@@ -500,8 +551,8 @@ function isEmptyResponsesCompletion(event: ResponsesStreamEvent): boolean {
 
 /**
  * Classifies Responses events before any byte reaches the client (see
- * streamPeek). Lifecycle and non-`response.*` metadata events wait for more;
- * an empty completion is retried; content, failures and usable terminals pass.
+ * streamPeek). Known empty events wait; terminals retain their error payload
+ * for the relay's provider-aware policy before it decides whether to retry.
  */
 export function responsesStreamStartVerdict(raw: unknown): PeekVerdict {
   const event = (raw && typeof raw === 'object' ? raw : {}) as ResponsesStreamEvent
@@ -509,16 +560,16 @@ export function responsesStreamStartVerdict(raw: unknown): PeekVerdict {
   if (type === 'response.completed' || type === 'response.done') {
     return isEmptyResponsesCompletion(event) ? { retry: 'empty_completed' } : 'pass'
   }
-  if (RESPONSES_PREAMBLE_EVENTS.has(type) || (!type.startsWith('response.') && type !== 'error')) return 'continue'
-  return 'pass'
+  if (type === 'error' || type === 'response.failed') return { retry: type, failureEvent: raw }
+  return responsesEventStartsClientOutput(raw) ? 'pass' : 'continue'
 }
 
 /** Applies the stream-start verdict to a buffered transcript; null = keep it. */
 export function responsesSseEmptyCompletionReason(text: string): string | null {
-  for (const event of parseResponsesSseEvents(text)) {
+  for (const event of parseResponsesSseEvents(text, true)) {
     const verdict = responsesStreamStartVerdict(event)
     if (verdict === 'pass') return null
-    if (verdict !== 'continue') return verdict.retry
+    if (verdict !== 'continue') return verdict.failureEvent !== undefined ? null : verdict.retry
   }
   return null
 }

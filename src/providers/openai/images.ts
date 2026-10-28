@@ -484,7 +484,9 @@ function imageUsage(
     ? tool
     : recordOf(response.usage)
   const usage = tokenSource ? parseOpenAIUsagePayload(tokenSource) : emptyUsage()
-  usage.imageCount = count || (typeof tool?.images === 'number' ? tool.images : 0)
+  // Per-image charges follow actual final outputs; reported token usage remains
+  // billable independently even when the upstream supplies no image result.
+  usage.imageCount = count
   usage.imageSize = size
   usage.imageModel = model
   return usage

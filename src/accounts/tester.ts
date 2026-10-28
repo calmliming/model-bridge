@@ -37,7 +37,7 @@ import {
   type AccountBalanceInfo,
   type AccountBalanceSnapshot,
 } from '../providers/balance'
-import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
+import { CODEX_CLIENT_VERSION, CODEX_ORIGINATOR, CODEX_USER_AGENT } from '../providers/openai/constants'
 import { fetchCodexManifest } from '../providers/openai/codexCatalog'
 import { openAIAccountIdFromMetadata } from '../providers/openai/quota'
 import { parseModelCatalog } from '../providers/modelCatalog'
@@ -183,7 +183,7 @@ async function pickOpenAIProbeModel(account: AccountRow, accessToken: string): P
       accountId: account.id,
       token: accessToken,
       chatgptAccountId: openAIAccountIdFromMetadata(account.metadata),
-      clientVersion: CODEX_USER_AGENT.split('/')[1]!,
+      clientVersion: CODEX_CLIENT_VERSION,
     })
     const offered = parseModelCatalog(manifest).map((model) => model.id)
     return OPENAI_PROBE_MODELS.find((model) => offered.includes(model)) ?? offered[0] ?? OPENAI_PROBE_MODELS[0]!

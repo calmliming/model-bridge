@@ -196,6 +196,7 @@ describe('testAccountConnectivity (OpenAI probe model)', () => {
 
     const [catalogUrl, catalogInit] = upstream.fetchWithConnectTimeout.mock.calls[0]!
     expect(String(catalogUrl)).toContain('/backend-api/codex/models?client_version=')
+    expect(new URL(String(catalogUrl)).searchParams.get('client_version')).toBe('0.146.0')
     expect(catalogInit.headers).toMatchObject({ 'ChatGPT-Account-ID': 'chatgpt-1' })
     expect(probeModel()).toBe('gpt-6.1-sol')
     expect(result.message).toContain('gpt-6.1-sol')

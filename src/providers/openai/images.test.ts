@@ -328,4 +328,19 @@ describe('OpenAI Images streaming conversion', () => {
       imageModel: 'gpt-image-2',
     })
   })
+
+  it('counts final image results independently from reported image totals and tokens', () => {
+    const request = generation({ stream: true, n: 5 })
+    const parser = createOpenAIImagesUsageParser(request)
+    parser.feed({ type: 'response.completed', response: {
+      output: [], tool_usage: { image_gen: { images: 5, input_tokens: 12, output_tokens: 21 } },
+    } })
+    expect(parser.result()).toMatchObject({ imageCount: 0, inputTokens: 12, outputTokens: 21 })
+    parser.feed({ type: 'response.completed', response: {
+      output: [{ id: 'img_1', type: 'image_generation_call', result: 'AAAA' },
+        { id: 'img_2', type: 'image_generation_call', result: 'BBBB' }],
+      tool_usage: { image_gen: { images: 5, input_tokens: 12, output_tokens: 21 } },
+    } })
+    expect(parser.result()).toMatchObject({ imageCount: 2, inputTokens: 12, outputTokens: 21 })
+  })
 })

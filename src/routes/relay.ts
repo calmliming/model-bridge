@@ -12,6 +12,7 @@ import { cachedAccountCatalogs } from '../accounts/modelCatalog'
 import { isImage25Model } from '../providers/openai/imageModels'
 import { convertNativeImageResponse, createNativeImagesUsageParser, createNativeImagesStreamTransform, parseNativeImageUsage } from '../providers/openai/directImages'
 import type { ServerResponse } from 'node:http'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../config'
 import { requireApiKey, type AuthedApiKey } from '../middleware/apiKeyAuth'
@@ -161,6 +162,7 @@ const RELAY_TO_RELAY_COOLDOWN_MS = 3_000
 // deliberately narrow: a bare "capacity" or "load" also appears in account-level
 // quota messages, which must keep the long cooldown.
 const UPSTREAM_OVERLOAD_COOLDOWN_MS = 30_000
+const REQUEST_RETRY_MAX_DELAY_MS = 8_000
 const UPSTREAM_OVERLOAD_MARKERS = [
   'excessive system load',
   'system load',
@@ -271,7 +273,7 @@ interface ProviderHandler {
   /** Optional provider-specific HTTP failure policy. */
   classifyUpstreamFailure?: (response: Response, model: string) => Promise<UpstreamFailure>
   /** Optional semantic failure policy for a buffered HTTP-200 SSE transcript. */
-  classifyBufferedFailure?: (text: string, model: string) => Promise<UpstreamFailure | null>
+  classifyBufferedFailure?: (text: string, model: string, headers: Headers) => Promise<UpstreamFailure | null>
   /**
    * Streaming: classifies upstream events until the first content, before any
    * byte reaches the client, so an empty HTTP-200 reply can still be retried.
@@ -782,8 +784,10 @@ interface RelayMeta {
 export interface UpstreamFailure {
   penalty: 'rate_limited' | 'error' | null
   retryable: boolean
-  /** An empty/malformed model reply, not an account fault: a retry may reuse the account. */
+  /** A request-level transient, not an account fault: a retry may reuse the account. */
   transientResponse?: boolean
+  /** Bounded request retry wait, separate from persistent account/model cooldown. */
+  retryDelayMs?: number
   resetAt?: number | null
   /** When true the account token is permanently invalid — disable it instead of cooldown. */
   disable?: boolean
@@ -842,6 +846,22 @@ function parsedErrorObject(text: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+/** Valid JSON must carry Cloudflare's structured marker, not just mention 1010. */
+export function isCloudflareBotBlockResponse(text: string): boolean {
+  const containsBlock = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(containsBlock)
+    const node = jsonRecord(value)
+    if (!node) return false
+    const fields = Object.fromEntries(Object.entries(node).map(([key, value]) => [key.toLowerCase(), value]))
+    if (normalizedMessage(fields.error_name) === 'browser_signature_banned') return true
+    if (fields.cloudflare_error === true && [fields.code, fields.error_code].some(code =>
+      code === 1010 || (typeof code === 'string' && code.trim() === '1010'))) return true
+    return Object.values(node).some(containsBlock)
+  }
+  try { return containsBlock(JSON.parse(text)) }
+  catch { return /error code:\s*1010\b/i.test(text) }
 }
 
 /**
@@ -913,10 +933,39 @@ function parseResetHeader(raw: string | null): number | null {
 }
 
 function parseRetryAfter(raw: string | null): number | null {
-  if (!raw) return null
+  if (!raw?.trim()) return null
   const seconds = Number(raw.trim())
-  if (Number.isFinite(seconds) && seconds >= 0) return Date.now() + seconds * 1000
-  return parseResetHeader(raw)
+  if (!Number.isNaN(seconds)) return Number.isFinite(seconds) && seconds >= 0 && Number.isFinite(seconds * 1000)
+    ? Date.now() + seconds * 1000 : null
+  const date = Date.parse(raw)
+  return Number.isFinite(date) && date > Date.now() ? date : null
+}
+
+function parseRetryAfterMilliseconds(raw: string | null): number | null {
+  if (!raw?.trim()) return null
+  const milliseconds = Number(raw)
+  return Number.isFinite(milliseconds) && milliseconds >= 0 ? Date.now() + milliseconds : null
+}
+
+function parseRetryHeaders(headers: Headers): number | null {
+  return parseRetryAfter(headers.get('retry-after')) ?? parseRetryAfterMilliseconds(headers.get('retry-after-ms'))
+}
+
+function parseBodyRetryReset(text: string): number | null {
+  try {
+    const root = jsonRecord(JSON.parse(text))
+    const errors = [jsonRecord(root?.error), jsonRecord(jsonRecord(root?.response)?.error)]
+    const headers = errors.map(error => jsonRecord(error?.headers)).filter(header => header !== null)
+    for (const name of ['retry-after', 'retry-after-ms']) {
+      for (const header of headers) {
+        const value = Object.entries(header).find(([key]) => key.toLowerCase() === name)?.[1]
+        if (typeof value !== 'string' && typeof value !== 'number') continue
+        const reset = name === 'retry-after' ? parseRetryAfter(String(value)) : parseRetryAfterMilliseconds(String(value))
+        if (reset != null) return reset
+      }
+    }
+  } catch { /* Not a JSON error envelope. */ }
+  return null
 }
 
 function headerNumber(headers: Headers, name: string): number | null {
@@ -1069,6 +1118,9 @@ function parseBodyReset(text: string, provider: string): number | null {
       return Date.now() + resetsInSeconds * 1000
     }
 
+    const retryReset = parseBodyRetryReset(text)
+    if (retryReset != null) return retryReset
+
     const details = Array.isArray(error?.details) ? error.details : []
     for (const rawDetail of details) {
       const detail = jsonRecord(rawDetail)
@@ -1094,7 +1146,7 @@ function parseRateLimitReset(provider: string, response: Response, text: string)
   return (
     parseCodexReset(response.headers) ??
     parseAnthropicReset(response.headers) ??
-    parseRetryAfter(response.headers.get('retry-after')) ??
+    parseRetryHeaders(response.headers) ??
     parseResetHeader(response.headers.get('x-ratelimit-reset-requests')) ??
     parseResetHeader(response.headers.get('x-ratelimit-reset-tokens')) ??
     parseBodyReset(text, provider)
@@ -1125,6 +1177,23 @@ export async function classifyUpstreamFailure(
   response: Response,
   model = '',
 ): Promise<UpstreamFailure> {
+  // Edge blocks must be recognized before provider/location and quota wording.
+  if (response.status === 403 && isCloudflareBotBlockResponse(await readErrorText(response))) {
+    return { penalty: null, retryable: true, accountScoped: true }
+  }
+  if (provider === 'openai' && (response.status === 429 || response.status >= 500)) {
+    const text = await readErrorText(response)
+    const error = parsedErrorObject(text)
+    const codes = [normalizedMessage(error?.code), normalizedMessage(error?.type)]
+    const overloaded = codes.includes('server_is_overloaded') ||
+      /\bour servers are (?:currently )?overloaded\b/i.test(typeof error?.message === 'string' ? error.message : text)
+    if (overloaded && !isHardResponsesFailure(`${codes.join(' ')} ${normalizedMessage(error?.message)}`) &&
+      parseCodexReset(response.headers) == null && !isOpenaiQuotaExhaustedBody(text) && !textLooksAccountBalanceExhausted(text)) {
+      const reset = parseRetryHeaders(response.headers) ?? parseBodyRetryReset(text)
+      return { penalty: null, retryable: true, transientResponse: true,
+        retryDelayMs: reset == null ? 0 : Math.min(REQUEST_RETRY_MAX_DELAY_MS, Math.max(0, reset - Date.now())) }
+    }
+  }
   if ((provider === 'gemini' || provider === 'antigravity' || provider === 'sub2api') &&
       isGoogleLocationUnsupported(response.status, await readErrorTextForLocation(response))) {
     return { penalty: 'error', retryable: true, accountScoped: true, locationUnsupported: true }
@@ -1256,7 +1325,7 @@ async function applyFailureSideEffects(
     return 'next-account'
   }
 
-  if (allowSameAccountRetry && relayToRelay && shouldRetrySameRelayAccount(failure)) {
+  if (allowSameAccountRetry && (failure.transientResponse || relayToRelay) && shouldRetrySameRelayAccount(failure)) {
     return 'same-account'
   }
 
@@ -1269,8 +1338,8 @@ async function applyFailureSideEffects(
         : failure.resetAt
       await penalizeAccount(accountId, failure.penalty, cooldownUntil)
     }
-    if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
   }
+  if (failure.accountScoped && sessionKey) await clearStickyAccount(sessionKey)
   return 'next-account'
 }
 
@@ -1315,6 +1384,7 @@ export async function classifyBufferedResponsesFailure(
   provider: string,
   text: string,
   model = '',
+  headers?: Headers,
 ): Promise<UpstreamFailure | null> {
   const terminal = inspectResponsesSseTerminalFailure(text)
   if (!terminal || terminal.hasOutput) return null
@@ -1332,7 +1402,7 @@ export async function classifyBufferedResponsesFailure(
   const syntheticStatus = terminal.httpStatus ?? (hasExplicitReset
     ? 429
     : responsesTerminalFailureStatus(terminal.code, terminal.message))
-  const synthetic = new Response(serialized, { status: syntheticStatus })
+  const synthetic = new Response(serialized, { status: syntheticStatus, headers })
   return classifyUpstreamFailure(provider, synthetic, model)
 }
 
@@ -1465,9 +1535,9 @@ async function inspectBufferedUpstreamFailure(
   try {
     const text = await bufferedUpstreamText(upstream, provider)
     if (provider.classifyBufferedFailure) {
-      return await provider.classifyBufferedFailure(text, model)
+      return await provider.classifyBufferedFailure(text, model, upstream.headers)
     }
-    return await classifyBufferedResponsesFailure(provider.id, text, model)
+    return await classifyBufferedResponsesFailure(provider.id, text, model, upstream.headers)
   } catch {
     return null
   }
@@ -2206,8 +2276,6 @@ function bodyWithMappedModel(body: Record<string, unknown>, model: string): Reco
   return { ...body, model }
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
 async function acquireSlotWithStickyWait(
   acquire: () => Promise<boolean>,
   waitMs: number,
@@ -2251,7 +2319,15 @@ async function runRelayLoop(
   const relayToRelay = provider.relayToRelay === true
 
   let attempts = 0
+  let retryDelayMs = 0
   while (attempts < MAX_ATTEMPTS) {
+    // The previous attempt's finally has already released its account slots.
+    // A disconnected client cancels the wait without starting another request.
+    if (retryDelayMs > 0) {
+      try { await sleep(retryDelayMs, undefined, { signal: upstreamSignal() }) }
+      catch (error) { if (!upstreamSignal()?.aborted) throw error }
+      retryDelayMs = 0
+    }
     if (upstreamSignal()?.aborted) {
       request.log.info(`client disconnected; skipping further ${provider.id} attempts`)
       return
@@ -2493,6 +2569,7 @@ async function runRelayLoop(
         )
         if (retryMode === 'same-account') tried.pop()
         await cancelUpstreamResponse(upstream)
+        retryDelayMs = failure.retryDelayMs ?? 0
         continue
       }
 
@@ -2502,26 +2579,27 @@ async function runRelayLoop(
       // attempt can be retried. It is a model flake rather than an account
       // fault, so the same account stays eligible. A JSON body (e.g. Codex
       // remote-compact) has no SSE events to judge and is never retried here.
+      let streamFailure: UpstreamFailure | null = null
       if (wantStream && upstream.ok && provider.streamStartVerdict &&
         !isNonStreamContentType(upstream.headers.get('content-type'))) {
         const peeked = await peekSseStart(upstream, provider.streamStartVerdict, STREAM_START_PEEK_MS)
         upstream = peeked.response
-        if (peeked.retryReason && !lastAttempt && !upstreamSignal()?.aborted) {
-          request.log.warn(`${provider.id} account ${account.id} returned an empty stream (${peeked.retryReason}); retrying`)
-          await cancelUpstreamResponse(upstream)
-          tried.pop()
-          continue
+        if (peeked.failureEvent !== undefined) {
+          streamFailure = await classifyBufferedResponsesFailure(provider.id,
+            `data: ${JSON.stringify(peeked.failureEvent)}\n\n`, parsed.model, upstream.headers)
+        } else if (peeked.retryReason) {
+          streamFailure = { penalty: null, retryable: true, transientResponse: true }
         }
       }
 
       // Some Responses-compatible upstreams return HTTP 200 with a semantic
       // response.failed/error event. Cache the transcript for sendBuffered(),
       // so a transient terminal can rotate accounts without teeing the body.
-      const bufferedFailure = !wantStream
+      const bufferedFailure = streamFailure ?? (!wantStream
         ? await inspectBufferedUpstreamFailure(upstream, provider, parsed.model)
-        : null
+        : null)
       if (bufferedFailure) {
-        if (bufferedFailure.retryable && !lastAttempt) {
+        if (bufferedFailure.retryable && !lastAttempt && !upstreamSignal()?.aborted) {
           const retryMode = await applyFailureSideEffects(
             bufferedFailure,
             account.id,
@@ -2530,8 +2608,9 @@ async function runRelayLoop(
             relayToRelay,
             true,
           )
-          if (retryMode === 'same-account' || bufferedFailure.transientResponse) tried.pop()
+          if (retryMode === 'same-account') tried.pop()
           await cancelUpstreamResponse(upstream)
+          retryDelayMs = bufferedFailure.retryDelayMs ?? 0
           continue
         }
         if (bufferedFailure.disable || bufferedFailure.penalty) {
@@ -3639,9 +3718,9 @@ function legacyChatStream(transform: StreamTransform, meta: RelayMeta): StreamTr
 }
 
 /** A buffered OpenAI transcript ending in an empty completion is retried like the stream path. */
-async function classifyOpenAIChatBufferedFailure(text: string, model: string): Promise<UpstreamFailure | null> {
+async function classifyOpenAIChatBufferedFailure(text: string, model: string, headers: Headers): Promise<UpstreamFailure | null> {
   if (responsesSseEmptyCompletionReason(text)) return { penalty: null, retryable: true, transientResponse: true }
-  return classifyBufferedResponsesFailure('openai', text, model)
+  return classifyBufferedResponsesFailure('openai', text, model, headers)
 }
 
 function callAntigravity(token: string, body: Record<string, unknown>, ctx: UpstreamContext): Promise<Response> {
