@@ -1,4 +1,5 @@
 import { config } from '../config'
+import { getSystemVersionInfo } from './version'
 
 export type UpdateTaskStatus = 'idle' | 'checking' | 'updating' | 'succeeded' | 'failed'
 
@@ -8,6 +9,9 @@ export interface UpdateCheck {
   currentVersion: string | null
   latestVersion: string | null
   hasUpdate: boolean
+  requiresRebuild?: boolean
+  repositoryCommit?: string | null
+  repositoryVersion?: string | null
   branch: string
   remote: string
   dirty: boolean
@@ -136,8 +140,19 @@ export async function checkSystemUpdates(): Promise<UpdateCheck> {
     const result = await callUpdater<Omit<UpdateCheck, 'updaterAvailable'>>('/check', {
       method: 'POST',
     })
+    const runtime = getSystemVersionInfo()
+    const versionDiffers = !!(runtime.version && result.latestVersion && runtime.version !== result.latestVersion)
+    const commitDiffers = !!(runtime.commit && result.latestCommit &&
+      !runtime.commit.startsWith(result.latestCommit) && !result.latestCommit.startsWith(runtime.commit))
+    const runtimeDiffers = versionDiffers || commitDiffers
     return {
       ...result,
+      repositoryCommit: result.currentCommit,
+      repositoryVersion: result.currentVersion,
+      currentCommit: runtime.commit,
+      currentVersion: runtime.version,
+      hasUpdate: result.hasUpdate || runtimeDiffers,
+      requiresRebuild: !result.hasUpdate && runtimeDiffers,
       updaterAvailable: true,
     }
   } catch (err) {

@@ -13,7 +13,8 @@ const backendTarget = `http://localhost:${backendPort}`
 // In production the backend serves the built `dist/` directly.
 export default defineConfig({
   plugins: [vue()],
-  define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version) },
+  // The Docker web-builder contains only web/, so read its own manifest.
+  define: { 'import.meta.env.VITE_APP_VERSION': JSON.stringify(JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version) },
   server: {
     port: 5173,
     proxy: {

@@ -13,6 +13,7 @@ interface UpdateCheck {
   currentVersion: string | null
   latestVersion: string | null
   hasUpdate: boolean
+  requiresRebuild?: boolean
   branch: string
   remote: string
   dirty: boolean
@@ -62,8 +63,8 @@ let statusInitialized = false
 const updateBusy = computed(() => updateTask.value.status === 'checking' || updateTask.value.status === 'updating')
 
 const displayedVersion = computed(() => {
-  // The updater reports its Git checkout, which can differ from the running app.
-  return appVersion.value || updateCheck.value?.currentVersion || updateTask.value.currentVersion
+  // The check endpoint reports the running service; the bundled version is a fallback.
+  return updateCheck.value?.currentVersion || appVersion.value || updateTask.value.currentVersion
 })
 
 const versionLabel = computed(() => formatVersion(displayedVersion.value, 'v--'))
@@ -79,6 +80,7 @@ const versionState = computed<{ label: string; type: TagType }>(() => {
   if (!check) return { label: '未检查', type: 'default' }
   if (check.warning || check.updaterAvailable === false) return { label: '更新服务不可用', type: 'error' }
   if (check.dirty) return { label: '工作区有改动', type: 'warning' }
+  if (check.requiresRebuild) return { label: '待重建服务', type: 'warning' }
   if (check.hasUpdate) return { label: '有新版本', type: 'warning' }
   return { label: '已是最新', type: 'success' }
 })
@@ -393,6 +395,9 @@ function confirmSystemUpdate() {
           <UiAlert v-if="updateCheck?.warning" type="error">{{ updateCheck.warning }}</UiAlert>
           <UiAlert v-else-if="updateCheck?.dirty" type="warning">
             生产目录存在 tracked 改动，已阻止自动更新。
+          </UiAlert>
+          <UiAlert v-else-if="updateCheck?.requiresRebuild" type="warning">
+            源码已是最新，运行服务仍是旧版本，请点击“立即更新”重建服务。
           </UiAlert>
 
           <div v-if="updateTask.operationId || updateTask.status !== 'idle'" class="rounded-xl border border-gray-100 p-3 dark:border-dark-800">

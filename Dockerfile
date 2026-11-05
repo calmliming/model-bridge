@@ -40,9 +40,11 @@ CMD ["node", "scripts/updater.mjs"]
 # ── Stage 4: slim runtime image ─────────────────────────────────
 FROM node:24.22.1-bookworm-slim AS runtime
 WORKDIR /app
+ARG BUILD_COMMIT=""
 ENV NODE_ENV=production \
     PORT=3000 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    GIT_COMMIT=${BUILD_COMMIT}
 
 COPY package.json ./
 COPY --from=deps /app/node_modules ./node_modules

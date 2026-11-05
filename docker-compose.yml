@@ -25,6 +25,8 @@ services:
     build:
       context: .
       target: runtime
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-}
     image: model-bridge:latest
     container_name: model-bridge
     restart: unless-stopped

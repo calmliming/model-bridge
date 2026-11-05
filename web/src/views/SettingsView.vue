@@ -60,6 +60,7 @@ interface UpdateCheck {
   currentVersion: string | null
   latestVersion: string | null
   hasUpdate: boolean
+  requiresRebuild?: boolean
   branch: string
   remote: string
   dirty: boolean
@@ -106,6 +107,7 @@ const versionState = computed<{ label: string; type: TagType }>(() => {
   if (!check) return { label: '未检查', type: 'default' }
   if (check.warning || check.updaterAvailable === false) return { label: '更新服务不可用', type: 'error' }
   if (check.dirty) return { label: '工作区有改动', type: 'warning' }
+  if (check.requiresRebuild) return { label: '待重建服务', type: 'warning' }
   if (check.hasUpdate) return { label: '有新版本', type: 'warning' }
   return { label: '已是最新', type: 'success' }
 })
@@ -441,6 +443,9 @@ function confirmSystemUpdate() {
       </UiAlert>
       <UiAlert v-else-if="updateCheck?.dirty" class="mt-4" type="warning">
         生产目录存在 tracked 改动，已阻止自动更新。
+      </UiAlert>
+      <UiAlert v-else-if="updateCheck?.requiresRebuild" class="mt-4" type="warning">
+        源码已是最新，运行服务仍是旧版本，请点击“立即更新”重建服务。
       </UiAlert>
 
       <div class="mt-4 flex flex-wrap justify-end gap-3">

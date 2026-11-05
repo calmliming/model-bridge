@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import http from 'node:http'
+import { pathToFileURL } from 'node:url'
 
 const UPDATE_TOKEN = (process.env.UPDATE_TOKEN ?? '').trim()
 const REPO_DIR = process.env.REPO_DIR || '/repo'
@@ -73,7 +74,7 @@ function quoteArg(value) {
   return /^[A-Za-z0-9_./:@=-]+$/.test(value) ? value : JSON.stringify(value)
 }
 
-function runCommand(command, args, { timeoutMs = FETCH_TIMEOUT_MS, log = false } = {}) {
+function runCommand(command, args, { timeoutMs = FETCH_TIMEOUT_MS, log = false, env = {} } = {}) {
   if (log) appendLog(`$ ${[command, ...args].map(quoteArg).join(' ')}`)
 
   return new Promise((resolve, reject) => {
@@ -81,7 +82,7 @@ function runCommand(command, args, { timeoutMs = FETCH_TIMEOUT_MS, log = false }
     let killed = false
     const child = spawn(command, args, {
       cwd: REPO_DIR,
-      env: process.env,
+      env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -134,11 +135,12 @@ async function ensureComposeCommand() {
   }
 }
 
-async function dockerCompose(args) {
+async function dockerCompose(args, env = {}) {
   const compose = await ensureComposeCommand()
   return runCommand(compose.command, [...compose.prefix, ...args], {
     timeoutMs: DOCKER_TIMEOUT_MS,
     log: true,
+    env,
   })
 }
 
@@ -214,18 +216,31 @@ async function runUpdate(operationId) {
       throw new Error('tracked worktree changes block update')
     }
     if (!info.hasUpdate) {
-      task.status = 'succeeded'
-      task.finishedAt = Date.now()
-      task.message = 'already_up_to_date'
-      appendLog('already up to date')
-      return
+      appendLog('repository already up to date; rebuilding the running service')
     }
 
     task.status = 'updating'
-    await git(['reset', '--hard', 'FETCH_HEAD'], { timeoutMs: FETCH_TIMEOUT_MS, log: true })
-    await dockerCompose(['up', '-d', '--build', '--no-deps', UPDATE_SERVICE])
+    if (info.hasUpdate) {
+      // A concurrent check may overwrite FETCH_HEAD; use the inspected commit.
+      await git(['reset', '--hard', info.latestCommitFull], { timeoutMs: FETCH_TIMEOUT_MS, log: true })
+    }
+    const buildEnv = { BUILD_COMMIT: info.latestCommitFull }
+    await dockerCompose(['up', '-d', '--build', '--force-recreate', '--no-deps', UPDATE_SERVICE], buildEnv)
+
+    const runtime = JSON.parse(await dockerCompose([
+      'exec', '-T', UPDATE_SERVICE, 'node', '--input-type=module', '-e',
+      "import { readFileSync } from 'node:fs'; console.log(JSON.stringify({ version: JSON.parse(readFileSync('package.json', 'utf8')).version, commit: process.env.GIT_COMMIT || null }))",
+    ], buildEnv))
+    if (!runtime.version || (info.latestVersion && runtime.version !== info.latestVersion)) {
+      throw new Error(`running service version mismatch: expected ${info.latestVersion}, got ${runtime.version ?? 'unknown'}`)
+    }
+    if (runtime.commit && runtime.commit !== info.latestCommitFull) {
+      throw new Error('running service commit does not match the update target')
+    }
 
     task.status = 'succeeded'
+    task.currentVersion = runtime.version
+    task.currentCommit = runtime.commit ? runtime.commit.slice(0, info.latestCommit.length) : null
     task.finishedAt = Date.now()
     task.message = 'update_succeeded'
     appendLog('update succeeded')
@@ -340,13 +355,17 @@ async function handle(req, res) {
   }
 }
 
-const server = http.createServer((req, res) => {
-  void handle(req, res)
-})
+export function createUpdaterServer() {
+  return http.createServer((req, res) => {
+    void handle(req, res)
+  })
+}
 
-server.listen(UPDATER_PORT, '0.0.0.0', () => {
-  console.log(`[updater] listening on ${UPDATER_PORT}`)
-  if (!UPDATE_TOKEN) {
-    console.warn('[updater] UPDATE_TOKEN is not configured; update endpoints are disabled')
-  }
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  createUpdaterServer().listen(UPDATER_PORT, '0.0.0.0', () => {
+    console.log(`[updater] listening on ${UPDATER_PORT}`)
+    if (!UPDATE_TOKEN) {
+      console.warn('[updater] UPDATE_TOKEN is not configured; update endpoints are disabled')
+    }
+  })
+}
