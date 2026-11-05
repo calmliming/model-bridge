@@ -1,3 +1,5 @@
+import { config } from '../config'
+import { SseBudget, UpstreamResourceError } from '../http/bodyLimits'
 /**
  * Reads the start of an upstream SSE response before any byte reaches the
  * client, so an empty reply can still be retried on another attempt.
@@ -51,6 +53,9 @@ export async function peekSseStart(
   const decoder = new TextDecoder()
   const chunks: Uint8Array[] = []
   let buffered = ''
+  let bytes = 0
+  const budget = new SseBudget()
+  const budgetDecoder = new TextDecoder()
   let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null
   let done = false
   let readError: unknown = null
@@ -89,6 +94,14 @@ export async function peekSseStart(
       done = true
       break
     }
+    bytes += result.value.byteLength
+    if (bytes > config.STREAM_PEEK_MAX_BYTES) {
+      void reader.cancel().catch(() => {})
+      reader.releaseLock()
+      throw new UpstreamResourceError('response_too_large', 'Upstream preread exceeds the configured limit.')
+    }
+    try { budget.feed(budgetDecoder.decode(result.value, { stream: true })) }
+    catch (error) { void reader.cancel().catch(() => {}); reader.releaseLock(); throw error }
     chunks.push(result.value)
     // Normalize the joined text so a CRLF split across chunks is still found.
     buffered = (buffered + decoder.decode(result.value, { stream: true })).replace(/\r\n/g, '\n')

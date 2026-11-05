@@ -1,3 +1,4 @@
+import { adminSessionVersion } from '../auth/sessionVersion'
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { eq } from 'drizzle-orm'
@@ -206,6 +207,7 @@ const oauthFinishSchema = z
 
 const accountUpdateSchema = z
   .object({
+    imageSizeTiers: z.array(z.enum(['1K', '2K', '4K'])).max(3).transform(values => [...new Set(values)]).optional(),
     upstreamRequestIdHeader: z.string().trim().refine(isRequestIdHeader).nullable().optional(),
     status: z.enum(['active', 'disabled']).optional(),
     weight: z.number().int().min(1).max(100).optional(),
@@ -230,6 +232,7 @@ const accountBulkUpdateSchema = z.object({
 const createGroupSchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(500).nullable().optional(),
+  imageBillingMode: z.enum(['tokens', 'per_image', 'both']).optional(),
   rateMultiplier: z.number().positive().max(100).optional(),
   allowedModels: z.array(z.string().trim().min(1).max(200)).min(1).max(200).nullable().optional(),
 })
@@ -238,7 +241,8 @@ const updateGroupSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     description: z.string().trim().max(500).nullable().optional(),
-    rateMultiplier: z.number().positive().max(100).optional(),
+    imageBillingMode: z.enum(['tokens', 'per_image', 'both']).optional(),
+  rateMultiplier: z.number().positive().max(100).optional(),
     allowedModels: z.array(z.string().trim().min(1).max(200)).min(1).max(200).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' })
@@ -260,7 +264,7 @@ const generateRedeemCodesSchema = z.object({
 })
 
 const redeemCodesQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
+  page: z.coerce.number().int().positive().max(100_000).default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
   status: z.enum(['unused', 'used', 'disabled']).optional(),
   batchId: z.string().trim().min(1).optional(),
@@ -377,7 +381,7 @@ const batchImportSchema = z.object({
 })
 
 const paginationQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
+  page: z.coerce.number().int().positive().max(100_000).default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(10),
 })
 
@@ -550,7 +554,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!(await verifyAdminCredentials(body.data.username, body.data.password))) {
       return reply.code(401).send({ error: 'invalid username or password' })
     }
-    const token = app.jwt.sign({ sub: body.data.username, role: 'admin' }, { expiresIn: '7d' })
+    const token = app.jwt.sign({ sub: body.data.username, role: 'admin', ver: adminSessionVersion() }, { expiresIn: '7d' })
     return { token, username: body.data.username }
   })
 
@@ -690,6 +694,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       if (!params.success || !body.success) {
         return reply.code(400).send({ error: 'invalid request body' })
       }
+      if (body.data.status === 'disabled' && params.data.id === await getAdminUserId()) return reply.code(400).send({ error: '不能禁用系统管理员账户' })
       const user = await updateUser({ id: params.data.id, ...body.data })
       if (!user) return reply.code(404).send({ error: 'user not found' })
       return { user }

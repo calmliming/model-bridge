@@ -1,3 +1,4 @@
+import { agentMessageText } from '../agentMessage'
 import {
   GROK_CHAT_COMPLETIONS_URL,
   GROK_DEFAULT_MODEL,
@@ -200,6 +201,13 @@ export function sanitizeGrokResponsesInput(input: unknown[]): unknown[] {
 
   for (const rawItem of input) {
     const item = recordOf(rawItem)
+    if (item?.type === 'agent_message') {
+      appendGrokToolOutputImageMessage(filtered, pendingImages)
+      pendingImages = []
+      const text = agentMessageText(item.content)
+      if (text) filtered.push({ type: 'message', role: 'user', content: text })
+      continue
+    }
     if (!item || !isGrokToolOutputItem(item)) {
       appendGrokToolOutputImageMessage(filtered, pendingImages)
       pendingImages = []

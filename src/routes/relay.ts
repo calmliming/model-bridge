@@ -1,3 +1,9 @@
+import { normalizeTerraRequest } from '../providers/openai/models'
+import { accountUpstreamMemory, UpstreamMemoryError, withUpstreamMemory } from '../http/upstreamMemory'
+import { releaseIngressMemory, retainIngressUntilSettled } from '../http/ingressMemory'
+import { requestedImageTier } from '../providers/openai/imageSizeTiers'
+import { readBoundedText, readWithDeadline, bodyHasSseFraming, SseBudget, UpstreamResourceError } from '../http/bodyLimits'
+import { isCNFrequencyLimit, isCNQuotaExhausted } from '../providers/cnRateLimit'
 import { trackUsageParser, jsonUsageSource, bufferedUsageSource } from '../providers/usageSource'
 import { writeStreamChunk } from '../http/streamWriter'
 import { zhipuResponsesEffort } from '../providers/zhipu/effort'
@@ -9,7 +15,7 @@ import { isResponsesTerminalBlock, readResponsesSse } from '../providers/openai/
 import { antigravityThinkingLevel, resolveAntigravityModel } from '../providers/antigravity/model'
 import { antigravityThinking } from '../providers/antigravity/thinking'
 import { cachedAccountCatalogs } from '../accounts/modelCatalog'
-import { isImage25Model } from '../providers/openai/imageModels'
+import { isNativeImageModel } from '../providers/openai/imageModels'
 import { convertNativeImageResponse, createNativeImagesUsageParser, createNativeImagesStreamTransform, parseNativeImageUsage } from '../providers/openai/directImages'
 import type { ServerResponse } from 'node:http'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -778,6 +784,8 @@ interface RelayMeta {
   upstreamRequestId?: string | null
   reasoningEffort?: string | null
   /** The Chat caller declared legacy `functions` only and reads `function_call` back. */
+  clientInstructions?: unknown
+  restoreInstructions?: boolean
   legacyFunctionCall?: boolean
 }
 
@@ -908,9 +916,20 @@ function isOpenaiQuotaExhaustedBody(text: string): boolean {
   return false
 }
 
+async function readErrorTextForQuota(response: Response): Promise<string> {
+  return [402, 403, 429].includes(response.status) ? readErrorText(response) : ''
+}
+
 async function readErrorText(response: Response): Promise<string> {
   try {
-    return (await response.clone().text()).slice(0, 4_000)
+    const reader = response.clone().body?.getReader()
+    if (!reader) return ''
+    let text = ''
+    const decoder = new TextDecoder()
+    try {
+      while (text.length < 4000) { const item = await readWithDeadline(reader); if (item.done) break; text += decoder.decode(item.value, { stream: true }); if (text.length >= 4000) break }
+      return text.slice(0, 4000)
+    } finally { void reader.cancel().catch(() => {}); reader.releaseLock() }
   } catch {
     return ''
   }
@@ -1203,6 +1222,19 @@ export async function classifyUpstreamFailure(
       return { penalty: 'error', retryable: true, modelScoped: true, modelUnavailable: true }
     }
   }
+  if (isCNQuotaExhausted(provider, response.status, await readErrorTextForQuota(response))) {
+    const hint = parseRateLimitReset(provider, response, await readErrorText(response))
+    const futureHint = hint != null && hint > Date.now() ? hint : null
+    return { penalty: 'rate_limited', retryable: true, accountScoped: true,
+      resetAt: futureHint ?? Date.now() + config.CN_QUOTA_EXHAUSTED_COOLDOWN_MS }
+  }
+  if ((response.status === 429 || response.status === 403) &&
+      isCNFrequencyLimit(provider, response.status, await readErrorText(response))) {
+    const hint = parseRateLimitReset(provider, response, await readErrorText(response))
+    const futureHint = hint != null && hint > Date.now() ? hint : null
+    return { penalty: config.CN_RATE_LIMIT_COOLDOWN_MS === 0 && futureHint == null ? null : 'rate_limited', retryable: true, accountScoped: true,
+      resetAt: futureHint ?? Date.now() + config.CN_RATE_LIMIT_COOLDOWN_MS }
+  }
   if (response.status === 429) {
     const text = await readErrorText(response)
     if (provider === 'claude' && isAnthropicFableOnlyWindowExceeded(response.headers, model)) {
@@ -1440,12 +1472,12 @@ export async function classifyOpenAIImageUpstreamFailure(
   model: string,
   cooldownMs = openAIImageUnavailableCooldownMs(),
 ): Promise<UpstreamFailure> {
-  if (isImage25Model(model) && !response.ok) {
+  if (isNativeImageModel(model) && !response.ok) {
     try {
-      const payload = await response.clone().json() as { usage?: unknown; data?: unknown[] }
+      const payload = await response.clone().json() as { usage?: unknown; data?: unknown[]; svg_usage?: { input_tokens?: number; output_tokens?: number } }
       const usage = parseNativeImageUsage(payload.usage)
       const hasUsage = Object.values(usage).some(value => typeof value === 'number' && value > 0)
-      if (hasUsage || payload.data?.length) return { penalty: null, retryable: false }
+      if (hasUsage || payload.data?.length || (payload.svg_usage?.input_tokens ?? 0) > 0 || (payload.svg_usage?.output_tokens ?? 0) > 0) return { penalty: null, retryable: false }
     } catch { /* Ordinary HTTP errors use the existing policy below. */ }
   }
   if (response.status === 400) {
@@ -1467,13 +1499,14 @@ export async function classifyBufferedOpenAIImageFailure(
   model: string,
   cooldownMs = openAIImageUnavailableCooldownMs(),
 ): Promise<UpstreamFailure | null> {
-  const converted = isImage25Model(request.model) ? convertNativeImageResponse(text, request) : convertOpenAIImagesSse(text, request)
+  const converted = isNativeImageModel(request.model) ? convertNativeImageResponse(text, request) : convertOpenAIImagesSse(text, request)
   if (converted.status !== 'error') return null
 
   // A native failure can include billable partial work. Return and record it
   // instead of discarding its usage during failover and paying for a replay.
-  if (isImage25Model(request.model) && Object.entries(converted.usage).some(([key, value]) =>
-    (key.endsWith('Tokens') || key === 'imageCount') && typeof value === 'number' && value > 0)) {
+  if (isNativeImageModel(request.model) && (Object.entries(converted.usage).some(([key, value]) =>
+    (key.endsWith('Tokens') || key === 'imageCount') && typeof value === 'number' && value > 0) ||
+    (converted.usage.svgUsage && converted.usage.svgUsage.inputTokens + converted.usage.svgUsage.outputTokens > 0))) {
     return { penalty: null, retryable: false }
   }
 
@@ -1515,8 +1548,8 @@ const bufferedTranscripts = new WeakMap<Response, Promise<string>>()
 function bufferedUpstreamText(upstream: Response, provider: ProviderHandler): Promise<string> {
   let pending = bufferedTranscripts.get(upstream)
   if (!pending) {
-    pending = provider.bufferedResponsesProtocol && upstream.ok && upstream.headers.get('content-type')?.includes('text/event-stream')
-      ? readResponsesSse(upstream) : upstream.text()
+    pending = (provider.bufferedResponsesProtocol || provider.responsesProtocol) && upstream.ok
+      ? readResponsesSse(upstream) : readBoundedText(upstream)
     bufferedTranscripts.set(upstream, pending)
   }
   return pending
@@ -1529,16 +1562,17 @@ async function inspectBufferedUpstreamFailure(
 ): Promise<UpstreamFailure | null> {
   if (
     (!provider.bufferedResponsesProtocol && !provider.classifyBufferedFailure) ||
-    !upstream.ok ||
-    (!(upstream.headers.get('content-type')?.includes('text/event-stream') ?? false) && !provider.bufferJsonResponse)
+    !upstream.ok
   ) return null
   try {
     const text = await bufferedUpstreamText(upstream, provider)
+    if (!upstream.headers.get('content-type')?.includes('text/event-stream') && !bodyHasSseFraming(text) && !provider.bufferJsonResponse) return null
     if (provider.classifyBufferedFailure) {
       return await provider.classifyBufferedFailure(text, model, upstream.headers)
     }
     return await classifyBufferedResponsesFailure(provider.id, text, model, upstream.headers)
-  } catch {
+  } catch (error) {
+    if (error instanceof UpstreamResourceError || error instanceof UpstreamMemoryError) throw error
     return null
   }
 }
@@ -1567,7 +1601,7 @@ function isOpenaiModelScopedLimit(provider: string, response: Response, text = '
 
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
-  const imageBodyLimit = 64 * 1024 * 1024
+  const imageBodyLimit = 128 * 1024 * 1024
   // DeepSeek vision accepts up to 48 MiB JSON requests (base64 images included).
   // Keep headroom for JSON encoding while leaving the global limit unchanged.
   const multimodalBodyLimit = 64 * 1024 * 1024
@@ -1640,7 +1674,7 @@ export function registerRelayRoutes(app: FastifyInstance): void {
           }, body)
           return
         }
-        const native = isImage25Model(mappedRequest.model)
+        const native = isNativeImageModel(mappedRequest.model)
         const provider: ProviderHandler = {
           id: 'openai',
           forceStream: false,
@@ -2190,6 +2224,7 @@ async function executeRelay(
   }
   try {
     let admission: RelayAdmission
+    retainIngressUntilSettled(request)
     try {
       admission = await reserveRequestAdmission(apiKey, provider.id, parsed.model, body, request.headers['content-length'])
     } catch (error) {
@@ -2204,7 +2239,7 @@ async function executeRelay(
     try {
       const mapped = bodyWithMappedModel(body, parsed.model)
       const mappedBody = provider.relayToRelay ? mapped : sanitizeToolSchemas(mapped)
-      const preparedBody = provider.prepareBody
+      let preparedBody = provider.prepareBody
         ? provider.prepareBody(mappedBody, {
             apiKeyId: apiKey.id,
             userId: apiKey.userId,
@@ -2212,16 +2247,23 @@ async function executeRelay(
             model: parsed.model,
           })
         : mappedBody
+      if (provider.id === 'openai') preparedBody = normalizeTerraRequest(preparedBody as Record<string, unknown>)
       const controller = new AbortController()
+      let drainTimer: ReturnType<typeof setTimeout> | undefined
       const onClose = () => {
-        if (!reply.raw.writableEnded) controller.abort(new Error('client_disconnected'))
+        if (reply.raw.writableEnded) return
+        if (reply.raw.headersSent && config.STREAM_DRAIN_TIMEOUT_MS > 0) {
+          drainTimer ??= setTimeout(() => controller.abort(new Error('client_disconnected')), config.STREAM_DRAIN_TIMEOUT_MS)
+          drainTimer.unref()
+        } else controller.abort(new Error('client_disconnected'))
       }
       reply.raw.once('close', onClose)
       if (reply.raw.destroyed) onClose()
       try {
-        await withRequestAdmission(admission.id, () => withUpstreamSignal(AbortSignal.any([controller.signal, admission.signal]),
-          () => runRelayLoop(request, reply, provider, preparedBody, parsed)))
+        await withUpstreamMemory(() => withRequestAdmission(admission.id, () => withUpstreamSignal(AbortSignal.any([controller.signal, admission.signal]),
+          () => runRelayLoop(request, reply, provider, preparedBody, parsed))))
       } finally {
+        clearTimeout(drainTimer)
         reply.raw.off('close', onClose)
         controller.abort()
       }
@@ -2230,8 +2272,10 @@ async function executeRelay(
       await admission.release()
     }
   } finally {
-    if (concurrencyLimit != null) await releaseSlot(apiKey.id)
-    if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
+    try {
+      if (concurrencyLimit != null) await releaseSlot(apiKey.id)
+      if (userSlotKey && userLimit != null) await releaseSlot(userSlotKey)
+    } finally { releaseIngressMemory(request) }
   }
 }
 
@@ -2302,6 +2346,13 @@ async function runRelayLoop(
   parsed: ParsedRoute,
 ): Promise<void> {
   const apiKey = request.apiKey!
+  if (parsed.action.startsWith('images.') && provider.id === 'openai') {
+    const original = provider
+    const decorate = (usage: UsageData): UsageData => ({ ...usage, imageBillingMode: apiKey.imageBillingMode ?? 'both' })
+    const wrap = (convert: NonNullable<ProviderHandler['bufferSseResponse']>) => (text: string, meta: RelayMeta) => { const result = convert(text, meta); return { ...result, usage: decorate(result.usage) } }
+    provider = { ...original, createStreamParser: () => { const parser = original.createStreamParser(); return { ...parser, result: () => decorate(parser.result()) } }, parseJsonUsage: body => decorate(original.parseJsonUsage(body)),
+      bufferSseResponse: original.bufferSseResponse && wrap(original.bufferSseResponse), bufferJsonResponse: original.bufferJsonResponse && wrap(original.bufferJsonResponse) }
+  }
   const wantStream =
     provider.forceStream || body.stream === true || parsed.action === 'streamGenerateContent'
   const session = computeSessionInfo(provider.id, apiKey.id, request.headers, body)
@@ -2320,7 +2371,12 @@ async function runRelayLoop(
 
   let attempts = 0
   let retryDelayMs = 0
-  while (attempts < MAX_ATTEMPTS) {
+  const maxAttempts = provider.id === 'gemini' ? MAX_ATTEMPTS + config.GEMINI_SAME_ACCOUNT_RETRIES : MAX_ATTEMPTS
+  const imageTier = requestedImageTier(body, parsed.action.startsWith('images.')) ?? ((parsed.action.startsWith('images.') || (Array.isArray(body.tools) && body.tools.some(tool => tool?.type === 'image_generation'))) ? 'auto' : undefined)
+  const boundCache = provider.id === 'gemini' && !!(body.cachedContent || body.cached_content)
+  let boundCacheAccount: string | undefined
+  const sameAccountRetries = new Map<string, number>()
+  while (attempts < maxAttempts) {
     // The previous attempt's finally has already released its account slots.
     // A disconnected client cancels the wait without starting another request.
     if (retryDelayMs > 0) {
@@ -2338,7 +2394,13 @@ async function runRelayLoop(
       sessionKey,
       apiKey.accountGroupId ?? null,
       parsed.model,
+      imageTier,
     )
+    if (account && boundCacheAccount && account.id !== boundCacheAccount) {
+      await reply.code(503).send({ error: 'Explicit cache owner is temporarily unavailable; retry on the original account.' })
+      return
+    }
+    if (boundCache && account) boundCacheAccount ??= account.id
     if (!account) {
       if (lastRoutingFailure) {
         const { response, meta } = lastRoutingFailure
@@ -2481,7 +2543,7 @@ async function runRelayLoop(
         }
         const upstreamError = err instanceof Error ? err.message : String(err)
         request.log.warn(`upstream call failed for ${account.id}: ${upstreamError}`)
-        if (relayToRelay && attempt < MAX_ATTEMPTS - 1) {
+        if (relayToRelay && attempt < maxAttempts - 1) {
           // Transient network error reaching the sub2api gateway: retry the same
           // account (don't cool it down or exclude it) so the next attempt can
           // land on a healthy backend behind the gateway.
@@ -2493,7 +2555,7 @@ async function runRelayLoop(
           'error',
           relayToRelay ? Date.now() + RELAY_TO_RELAY_COOLDOWN_MS : undefined,
         )
-        if (attempt === MAX_ATTEMPTS - 1) {
+        if (attempt === maxAttempts - 1) {
           await recordUsage({
             apiKeyId: apiKey.id,
             userId: apiKey.userId,
@@ -2524,6 +2586,8 @@ async function runRelayLoop(
             parsed.thinkingLevel, parsed.preserveModel, parsed.thinkingExplicit)
         : parsed.model
       const meta: RelayMeta = {
+        restoreInstructions: provider.id === 'openai' && provider.responsesProtocol === true,
+        clientInstructions: (request.body as Record<string, unknown>)?.instructions ?? null,
         apiKeyId: apiKey.id,
         userId: apiKey.userId,
         accountId: account.id,
@@ -2567,7 +2631,10 @@ async function runRelayLoop(
           relayToRelay,
           true,
         )
-        if (retryMode === 'same-account') tried.pop()
+        if (retryMode === 'same-account') {
+          const count = sameAccountRetries.get(account.id) ?? 0
+          if (provider.id !== 'gemini' || count < config.GEMINI_SAME_ACCOUNT_RETRIES) { tried.pop(); sameAccountRetries.set(account.id, count + 1) }
+        }
         await cancelUpstreamResponse(upstream)
         retryDelayMs = failure.retryDelayMs ?? 0
         continue
@@ -2608,7 +2675,10 @@ async function runRelayLoop(
             relayToRelay,
             true,
           )
-          if (retryMode === 'same-account') tried.pop()
+          if (retryMode === 'same-account') {
+            const count = sameAccountRetries.get(account.id) ?? 0
+            if (provider.id !== 'gemini' || count < config.GEMINI_SAME_ACCOUNT_RETRIES) { tried.pop(); sameAccountRetries.set(account.id, count + 1) }
+          }
           await cancelUpstreamResponse(upstream)
           retryDelayMs = bufferedFailure.retryDelayMs ?? 0
           continue
@@ -2815,14 +2885,14 @@ async function sendStreaming(
   reply.hijack()
   const raw = reply.raw
   const responsesProtocol = provider.responsesProtocol === true
-  const responseFields = createResponsesFieldNormalizer()
+  const responseFields = createResponsesFieldNormalizer({ restoreInstructions: !!meta.restoreInstructions, instructions: meta.clientInstructions })
 
   // Responses-protocol providers (Codex backend): an upstream error body is
   // usually JSON, not Responses SSE. Streaming it verbatim makes Codex reconnect
   // forever without ever showing the cause. Emit a synthetic `response.failed`
   // stream carrying the real error message instead.
   if (responsesProtocol && !upstream.ok) {
-    const errorText = await upstream.text().catch(() => '')
+    const errorText = await readBoundedText(upstream).catch(() => '')
     const extracted = extractUpstreamError(errorText, upstream.status)
     const code = extracted.code
     // Relay-to-relay: the gateway's error text may name internal backends —
@@ -2873,7 +2943,7 @@ async function sendStreaming(
     upstream.ok &&
     isNonStreamContentType(upstream.headers.get('content-type'))
   ) {
-    const bodyText = await upstream.text().catch(() => '')
+    const bodyText = await readBoundedText(upstream).catch(() => '')
     startStreamingResponse(raw, 200)
     const jsonParser = trackUsageParser(provider.createStreamParser())
     const jsonState = newResponsesStreamState()
@@ -2960,6 +3030,8 @@ async function sendStreaming(
   const modelAudit: ModelAuditState = { upstreamModel: null }
   let streamReadFailed = false
   let reachedUpstreamTerminal = false
+  const eventBudget = new SseBudget()
+  let transformedBytes = 0
 
   if (upstream.body) {
     const reader = upstream.body.getReader()
@@ -2986,9 +3058,16 @@ async function sendStreaming(
       : null
     try {
       readLoop: for (;;) {
-        const { done, value } = await reader.read()
+        const { done, value } = await readWithDeadline(reader)
         if (done) break
-        buffer += decoder.decode(value, { stream: true })
+        const chunkText = decoder.decode(value, { stream: true })
+        if (streamTransform) {
+          transformedBytes += value.byteLength
+          if (transformedBytes > config.UPSTREAM_BUFFER_MAX_BYTES) throw new UpstreamResourceError('response_too_large', 'Converted stream exceeds its retention budget.')
+          accountUpstreamMemory(transformedBytes)
+        }
+        if (sseOutput) eventBudget.feed(chunkText)
+        buffer += chunkText
         // Normalise CRLF so SSE block splitting and multi-line data handling
         // work regardless of the upstream server's newline convention.
         buffer = buffer.replace(/\r\n/g, '\n')
@@ -3065,9 +3144,16 @@ async function sendStreaming(
           }
         }
       }
-    } catch {
-      // Client disconnected or upstream aborted — stop quietly.
+    } catch (error) {
       streamReadFailed = true
+      buffer = ''
+      if (error instanceof UpstreamResourceError || error instanceof UpstreamMemoryError) {
+        streamState.errorCode = error.code
+        streamState.errorMessage = error.message
+        streamState.sawFailure = true
+        if (!responsesProtocol && !downstreamClosed) await writeSseData(raw, { type: 'error', error: { type: 'upstream_error', code: error.code, message: error.message } })
+      }
+      void reader.cancel().catch(() => {})
     } finally {
       if (heartbeat) clearInterval(heartbeat)
       reader.releaseLock()
@@ -3106,7 +3192,7 @@ async function sendStreaming(
     streamState.sawFailure = true
     for (const event of buildResponsesErrorEvents(
       'Upstream stream closed before completion.',
-      'upstream_stream_closed',
+      streamState.errorCode ?? 'upstream_stream_closed',
       responseFields.errorContext(meta.model),
     )) {
       if (!downstreamClosed && !await writeSseData(raw, event)) downstreamClosed = true
@@ -3121,7 +3207,7 @@ async function sendStreaming(
     }
   }
 
-  const clientCanceled = upstreamSignal()?.aborted && !streamState.sawTerminal
+  const clientCanceled = (upstreamSignal()?.aborted || (raw.destroyed && !raw.writableEnded)) && !streamState.sawTerminal
   const providerFailure = upstream.ok ? parser.failure?.() : null
   const streamStatus = streamReadFailed || clientCanceled
     ? 'error'
@@ -3254,7 +3340,7 @@ async function sendSanitizedRelayError(
   upstream: Response,
   meta: RelayMeta,
 ): Promise<void> {
-  const text = await upstream.text().catch(() => '')
+  const text = await readBoundedText(upstream).catch(() => '')
   request.log.warn(
     `sub2api upstream error for account ${meta.accountId}: HTTP ${upstream.status} ${text.slice(0, 2_000)}`,
   )
@@ -3296,7 +3382,7 @@ async function sendAntigravityUpstreamError(
   meta: RelayMeta,
   provider: ProviderHandler,
 ): Promise<void> {
-  const text = await upstream.text().catch(() => '')
+  const text = await readBoundedText(upstream).catch(() => '')
   reply.log.warn({ accountId: meta.accountId, upstreamStatus: upstream.status, upstreamError: text.slice(0, 2_000) },
     'Antigravity upstream error')
   let payload: unknown = text
@@ -3347,7 +3433,9 @@ async function sendBuffered(
     return sendAntigravityUpstreamError(reply, upstream, meta, provider)
   }
   const contentType = upstream.headers.get('content-type') ?? 'application/json'
-  const bufferResponse = contentType.includes('text/event-stream') ? provider.bufferSseResponse : provider.bufferJsonResponse
+  const bufferedText = await bufferedUpstreamText(upstream, provider)
+  const isSse = contentType.includes('text/event-stream') || bodyHasSseFraming(bufferedText)
+  const bufferResponse = isSse ? provider.bufferSseResponse : provider.bufferJsonResponse
   if (bufferResponse) {
     const sseText = await bufferedUpstreamText(upstream, provider)
     let responseText = sseText
@@ -3359,7 +3447,7 @@ async function sendBuffered(
     if (upstream.ok) {
       const converted = bufferResponse(sseText, meta)
       responseText = JSON.stringify(converted.body)
-      usage = { ...converted.usage, usageSource: bufferedUsageSource(sseText, contentType.includes('text/event-stream')) }
+      usage = { ...converted.usage, usageSource: bufferedUsageSource(sseText, isSse) }
       responseContentType = 'application/json'
       convertedStatus = converted.status
       convertedHttpStatus = converted.httpStatus
@@ -3427,7 +3515,7 @@ async function sendBuffered(
       text = JSON.stringify(json)
     }
     if (provider.responsesProtocol) {
-      const normalized = createResponsesFieldNormalizer().json(json)
+      const normalized = createResponsesFieldNormalizer({ restoreInstructions: !!meta.restoreInstructions, instructions: meta.clientInstructions }).json(json)
       if (normalized !== json) text = JSON.stringify(normalized)
       json = normalized
     }

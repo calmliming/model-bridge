@@ -195,6 +195,10 @@ export function antigravityStreamStartVerdict(raw: unknown): StreamStartVerdict 
   const parts = object(candidate?.content)?.parts
   for (const part of Array.isArray(parts) ? parts.map(object) : []) {
     if (!part) continue
+    if ('functionCall' in part) {
+      const call = object(part.functionCall)
+      if (!call || typeof call.name !== 'string' || !call.name.trim() || (call.args != null && !object(call.args))) return { retry: 'MALFORMED_FUNCTION_CALL' }
+    }
     if (typeof part.text === 'string' && part.text) return 'pass'
     if (Object.keys(part).some(key => key !== 'text' && key !== 'thought' && key !== 'thoughtSignature')) return 'pass'
   }

@@ -12,6 +12,7 @@ import {
   type AccountQuotaSnapshot,
 } from './quota'
 import { clearAccountCooldown, penalizeAccount } from './scheduler'
+import { decrypt } from '../crypto'
 import { getQuotaAutopausePercent } from '../db/settings'
 import {
   fetchOpenAIQuota,
@@ -93,6 +94,22 @@ export async function queryOpenAIAccountQuota(id: string): Promise<OpenAIQuotaRe
   const { account, chatgptAccountId } = await loadOpenAIAccount(id)
   const accessToken = await ensureFreshToken(account)
   const quota = await fetchOpenAIQuota(accessToken, chatgptAccountId)
+  await persistQuota(id, quota)
+  return { quota, resetCredits: quota.resetCredits ?? null }
+}
+
+/** Machine read permissions do not authorize credential recovery or scheduling changes. */
+export async function queryOpenAIAccountQuotaReadOnly(id: string): Promise<OpenAIQuotaResult> {
+  const account = await getAccount(id)
+  if (!account) throw new OpenAIQuotaError('account not found', 404)
+  assertOpenAIAccount(account)
+  const reauth = (account.metadata as { reauth?: { required?: boolean } } | null)?.reauth?.required
+  if (account.status === 'disabled' || reauth || !account.oauthAccessToken || (account.tokenExpiresAt && account.tokenExpiresAt <= Date.now() + 30_000)) {
+    throw new OpenAIQuotaError('账号凭证需要管理员刷新或重新授权后再查询', 409)
+  }
+  const chatgptAccountId = openAIAccountIdFromMetadata(account.metadata)
+  if (!chatgptAccountId) return missingOpenAIAccountId()
+  const quota = await fetchOpenAIQuota(decrypt(account.oauthAccessToken), chatgptAccountId)
   await persistQuota(id, quota)
   return { quota, resetCredits: quota.resetCredits ?? null }
 }

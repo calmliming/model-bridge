@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { parseOpenAIUsagePayload } from './usage'
 import { relayOpenaiImageResponses } from './relay'
 import { emptyUsage, type UsageData } from '../types'
-import { isImage25Model } from './imageModels'
+import { isImage26Model, isNativeImageModel } from './imageModels'
 import { relayNativeImages } from './directImages'
 
 export type OpenAIImagesEndpoint = 'generations' | 'edits'
@@ -21,6 +21,7 @@ export interface OpenAIImagesRequestBody extends Record<string, unknown> {
   response_format: string
   images: OpenAIImageReference[]
   mask?: OpenAIImageReference
+  markup?: OpenAIImageReference
   __image_endpoint: OpenAIImagesEndpoint
 }
 
@@ -72,7 +73,7 @@ const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
 // Host model for the image_generation tool. gpt-5.4-mini left ChatGPT-signed-in
 // Codex on 2026-08-31; OpenAI names gpt-6-luna as its replacement.
 const IMAGE_RESPONSES_MODEL = 'gpt-6-luna'
-const MAX_UPLOAD_PART_BYTES = 20 * 1024 * 1024
+const MAX_UPLOAD_PART_BYTES = 50 * 1024 * 1024
 
 function stringField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -138,11 +139,11 @@ function parseMultipartBody(body: Buffer, contentType: string): Record<string, u
 
     if (fileName) {
       if (data.byteLength > MAX_UPLOAD_PART_BYTES) {
-        throw new Error(`multipart field ${fieldName || fileName} exceeds 20 MB`)
+        throw new Error(`multipart field ${fieldName || fileName} exceeds 50 MB`)
       }
       const detected = headers.get('content-type') || 'application/octet-stream'
       const ref = { image_url: `data:${detected};base64,${data.toString('base64')}` }
-      if (fieldName === 'mask') fields.mask = ref
+      if (fieldName === 'mask' || fieldName === 'markup') fields[fieldName] = ref
       else if (fieldName === 'image' || fieldName.startsWith('image[')) imageRefs.push(ref)
     } else if (fieldName) {
       const value = data.toString('utf8').trim()
@@ -227,8 +228,6 @@ export function parseOpenAIImagesRequest(
     throw new Error('response_format must be b64_json or url')
   }
 
-  if (!options.deferModelValidation) validateOpenAIImagesRequestModel(source, model)
-
   const images = collectImageReferences(source.images ?? source.image)
   const rawImages = source.images ?? source.image
   if (rawImages != null && (Array.isArray(rawImages) ? rawImages.length : 1) !== images.length) throw new Error('invalid image reference')
@@ -248,31 +247,89 @@ export function parseOpenAIImagesRequest(
   if (source.mask != null && !mask) throw new Error('invalid mask reference')
   if (mask?.file_id) throw new Error('mask.file_id is not supported; use mask.image_url instead')
   if (mask) normalized.mask = mask
+  if (source.markup != null) {
+    const row = source.markup as Record<string, unknown>
+    const markup = imageReference(row)
+    if (!markup || typeof row !== 'object' || Array.isArray(row) || !!stringField(row.image_url) === !!stringField(row.file_id)) {
+      throw new Error('markup requires exactly one image_url or file_id')
+    }
+    normalized.markup = markup
+  }
   for (const numericField of ['output_compression', 'partial_images'] as const) {
     const value = optionalInteger(source[numericField], numericField, 0, numericField === 'output_compression' ? 100 : 3)
     if (value != null) normalized[numericField] = value
     else delete normalized[numericField]
   }
+  // The API reference currently permits 2–16 GIF frames; keep the gateway
+  // within that contract even though the guide advertises a wider preview.
+  for (const [field, min, max] of [['frame_count', 2, 16], ['frame_duration_ms', 20, 2000]] as const) {
+    const value = optionalInteger(source[field], field, min, max)
+    if (value != null) normalized[field] = value
+    else delete normalized[field]
+  }
+  if (!options.deferModelValidation) validateOpenAIImagesRequestModel(normalized, model, endpoint)
   return normalized
 }
 
 export function validateOpenAIImagesRequestModel(
   body: Record<string, unknown>,
   model: string,
+  endpoint: OpenAIImagesEndpoint = body.__image_endpoint === 'edits' ? 'edits' : 'generations',
 ): void {
   validateOpenAIImageModel(model)
-  if (model.toLowerCase().startsWith('gpt-image-2.5')) {
-    if (!isImage25Model(model)) throw new Error('unsupported Image 2.5 model; use Flare or Sunburst')
+  if (/^gpt-image-2\.[56]/i.test(model)) {
+    if (!isNativeImageModel(model)) throw new Error('unsupported Image 2.5/2.6 model; use Flare or Sunburst')
+    const image26 = isImage26Model(model)
     if (body.size != null && typeof body.size !== 'string') throw new Error('size must be a string')
-    validateGptImage2Size(stringField(body.size))
+    const format = stringField(body.output_format) || 'png'
+    if (image26 && format === 'gif') {
+      const size = stringField(body.size)
+      if (size && size !== 'auto') {
+        const match = /^(\d+)x(\d+)$/i.exec(size)
+        const width = Number(match?.[1]), height = Number(match?.[2])
+        if (!width || !height || width % 16 || height % 16 || Math.max(width, height) > 3840 || width * height > 8_294_400) {
+          throw new Error('GIF size must contain positive multiples of 16 within the image size limits')
+        }
+      }
+    } else validateGptImage2Size(stringField(body.size))
     for (const [field, allowed] of Object.entries({
       quality: ['low', 'medium', 'high', 'xhigh', 'max', 'auto'],
-      background: ['transparent', 'opaque', 'auto'], output_format: ['png', 'jpeg', 'webp'],
+      background: ['transparent', 'opaque', 'auto'], output_format: image26 ? ['png', 'jpeg', 'webp', 'svg', 'gif'] : ['png', 'jpeg', 'webp'],
     })) {
-      if (body[field] != null && !allowed.includes(stringField(body[field]))) throw new Error(`invalid Image 2.5 ${field}`)
+      if (body[field] != null && !allowed.includes(stringField(body[field]))) throw new Error(`invalid GPT Image ${field}`)
     }
-    if (body.background === 'transparent' && body.output_format === 'jpeg') throw new Error('transparent backgrounds require png or webp')
+    if (body.complexity != null && (!image26 || !['low', 'medium', 'high'].includes(stringField(body.complexity)))) throw new Error('complexity requires Image 2.6 and must be low, medium or high')
+    if (body.background === 'transparent' && !['png', 'webp'].includes(format)) throw new Error('transparent backgrounds require png or webp')
     if (collectImageReferences(body.images ?? body.image).some(image => image.file_id)) throw new Error('native images require image_url instead of file_id')
+    if (collectImageReferences(body.images ?? body.image).length > 16) throw new Error('native edits accept at most 16 images')
+    if (body.markup != null) {
+      if (endpoint !== 'edits') throw new Error('markup is only supported on image edits')
+      const markup = body.markup as OpenAIImageReference
+      if (!markup.image_url || markup.file_id) throw new Error('native markup requires image_url instead of file_id')
+      if (!/^https:\/\//i.test(markup.image_url) && !/^data:image\/png;base64,/i.test(markup.image_url)) throw new Error('markup must be an HTTPS URL or PNG data URL')
+      if (body.mask != null || body.prompt_rewriter != null) throw new Error('markup cannot be combined with mask or prompt_rewriter')
+    }
+    if (body.frame_count != null || body.frame_duration_ms != null) {
+      if (!image26 || format !== 'gif') throw new Error('frame_count and frame_duration_ms require Image 2.6 GIF output')
+    }
+    if (format === 'svg' || format === 'gif') {
+      if (endpoint !== 'generations') throw new Error('SVG and GIF output are only supported on image generations')
+      if (body.stream === true || Number(body.partial_images ?? 0) > 0 || body.output_compression != null || body.prompt_rewriter != null || body.mask != null) {
+        throw new Error('SVG and GIF output do not support streaming, partial images, compression, masks or prompt_rewriter')
+      }
+      if (format === 'svg' && Number(body.n ?? 1) !== 1) throw new Error('SVG output requires n=1')
+    }
+    if (body.svg != null) {
+      if (format !== 'svg' || typeof body.svg !== 'object' || Array.isArray(body.svg)) throw new Error('svg options require SVG output')
+      const svg = body.svg as Record<string, unknown>
+      if (!stringField(svg.model) || stringField(svg.model).length > 200 || Object.keys(svg).some(key => !['model', 'reasoning'].includes(key))) throw new Error('svg.model is required and svg options must contain only model and reasoning')
+      if (svg.reasoning != null) {
+        const reasoning = svg.reasoning as Record<string, unknown>
+        if (typeof reasoning !== 'object' || Array.isArray(reasoning) || Object.keys(reasoning).some(key => key !== 'effort') ||
+          (reasoning.effort != null && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(stringField(reasoning.effort)))) throw new Error('invalid SVG reasoning effort')
+      }
+    }
+    if (body.safety_identifier != null && (typeof body.safety_identifier !== 'string' || body.safety_identifier.length > 128)) throw new Error('safety_identifier must be a string of at most 128 characters')
     return
   }
   if (!model.toLowerCase().startsWith('gpt-image-2')) return
@@ -329,7 +386,7 @@ export function relayOpenaiImages(
   body: Record<string, unknown>,
   accountId?: string,
 ): Promise<Response> {
-  if (isImage25Model(String(body.model))) return relayNativeImages(accessToken, body as OpenAIImagesRequestBody, accountId)
+  if (isNativeImageModel(String(body.model))) return relayNativeImages(accessToken, body as OpenAIImagesRequestBody, accountId)
   return relayOpenaiImageResponses(
     accessToken,
     buildOpenAIImagesResponsesRequest(body as OpenAIImagesRequestBody),
@@ -770,8 +827,12 @@ export function summarizeOpenAIImagesRequest(body: Record<string, unknown>): str
     stream: request.stream,
     size: request.size ?? null,
     quality: request.quality ?? null,
+    complexity: request.complexity ?? null,
     output_format: request.output_format ?? null,
+    frame_count: request.frame_count ?? null,
+    frame_duration_ms: request.frame_duration_ms ?? null,
     image_inputs: request.images.length,
     has_mask: !!request.mask,
+    has_markup: !!request.markup,
   })
 }

@@ -1,7 +1,9 @@
+import { readBoundedText } from '../../http/bodyLimits'
 import { createHash, randomUUID } from 'node:crypto'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 import { emptyUsage, type UsageData } from '../types'
+import { imageOutputMime } from './imageModels'
 import type { BufferedImageConversion, NamedSseEvent, OpenAIImagesRequestBody } from './images'
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -27,19 +29,29 @@ export function parseNativeImageUsage(value: unknown): UsageData {
     imageInputTokens: imageInput, imageOutputTokens: tokens(source?.output_tokens) }
 }
 
+function parseSvgUsage(value: unknown): UsageData['svgUsage'] {
+  const row = object(value)
+  const model = text(row?.model).trim()
+  if (!row || !model || model.length > 200) return undefined
+  return { model, inputTokens: tokens(row.input_tokens), outputTokens: tokens(row.output_tokens),
+    reasoningTokens: Math.min(tokens(row.reasoning_tokens), tokens(row.output_tokens)) }
+}
+
 export function buildNativeImageRequest(request: OpenAIImagesRequestBody): Record<string, unknown> {
   const body: Record<string, unknown> = { model: request.model, prompt: request.prompt }
-  for (const key of ['size', 'quality', 'background', 'output_format', 'moderation', 'input_fidelity'] as const) {
+  for (const key of ['size', 'quality', 'background', 'output_format', 'moderation', 'input_fidelity', 'complexity', 'safety_identifier', 'user'] as const) {
     if (typeof request[key] === 'string' && request[key]) body[key] = request[key].trim()
   }
-  for (const key of ['output_compression', 'partial_images'] as const) {
+  for (const key of ['output_compression', 'partial_images', 'frame_count', 'frame_duration_ms'] as const) {
     if (typeof request[key] === 'number') body[key] = request[key]
   }
   if (request.n > 1) body.n = request.n
   if (request.stream) body.stream = true
+  if (object(request.svg)) body.svg = request.svg
   if (request.__image_endpoint === 'edits') {
     body.images = request.images.map(image => ({ image_url: image.image_url }))
     if (request.mask) body.mask = { image_url: request.mask.image_url }
+    if (request.markup) body.markup = { image_url: request.markup.image_url }
   }
   return body
 }
@@ -55,7 +67,7 @@ export async function relayNativeImages(token: string, request: OpenAIImagesRequ
   // Some upstream accounts return JSON despite stream=true. Preserve the
   // requested Image SSE protocol with native completion/error events.
   if (request.stream && response.ok && !(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
-    const result = convertNativeImageResponse(await response.text(), { ...request, response_format: 'b64_json' })
+    const result = convertNativeImageResponse(await readBoundedText(response), { ...request, response_format: 'b64_json' })
     const body = object(result.body)!
     const entries = Array.isArray(body.data) ? body.data : []
     const events: Record<string, unknown>[] = entries.map((entry, index) => ({ ...object(entry), type: `${prefix(request)}.completed`, model: request.model,
@@ -84,8 +96,7 @@ const incomplete = (): NativeFailure => ({ code: 'image_generation_no_output', t
   message: 'Image stream ended without a final image.' })
 function dataUrl(row: Record<string, unknown>, request: OpenAIImagesRequestBody): string {
   const format = text(row.output_format) || text(request.output_format) || 'png'
-  const mime = format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png'
-  return `data:${mime};base64,${text(row.b64_json)}`
+  return `data:${imageOutputMime(format)};base64,${text(row.b64_json)}`
 }
 function imageKey(row: Record<string, unknown>): string {
   return text(row.id) || (typeof row.image_index === 'number' ? `index:${row.image_index}` : createHash('sha256').update(text(row.b64_json)).digest('hex'))
@@ -100,7 +111,9 @@ export function createNativeImagesUsageParser(request: OpenAIImagesRequestBody) 
     feed(raw: unknown): void {
       const row = object(raw)
       if (!row) return
-      if (object(row.usage)) usage = parseNativeImageUsage(row.usage)
+      if (object(row.usage)) usage = { ...parseNativeImageUsage(row.usage), ...(usage.svgUsage ? { svgUsage: usage.svgUsage } : {}) }
+      const svgUsage = parseSvgUsage(row.svg_usage)
+      if (svgUsage) usage.svgUsage = svgUsage
       failure ??= failureFrom(row)
       if (text(row.type) === `${prefix(request)}.completed` && text(row.b64_json)) finals.add(imageKey(row))
       if (text(row.size)) size = text(row.size)
@@ -145,11 +158,13 @@ export function convertNativeImageResponse(textBody: string, request: OpenAIImag
   try { root = object(JSON.parse(textBody)) } catch { /* Streaming transcript is parsed below. */ }
   if (root) {
     const entries = Array.isArray(root.data) ? root.data.map(object).filter((row): row is Record<string, unknown> => !!row && !!text(row.b64_json)) : []
-    const usage = { ...parseNativeImageUsage(root.usage), imageCount: entries.length, imageModel: request.model, imageSize: text(root.size) || text(request.size) || undefined }
+    const svgUsage = parseSvgUsage(root.svg_usage)
+    const usage = { ...parseNativeImageUsage(root.usage), ...(svgUsage ? { svgUsage } : {}),
+      imageCount: entries.length, imageModel: request.model, imageSize: text(root.size) || text(request.size) || undefined }
     const failure = failureFrom(root) ?? (entries.length ? null : incomplete())
     if (failure) return { body: { ...root, error: failure }, usage, status: 'error', httpStatus: failure.status,
       failureSource: root.error ? 'upstream' : 'missing_output' }
-    return { body: { ...root, data: entries.map(row => {
+    return { body: { ...root, output_format: text(root.output_format) || text(request.output_format) || 'png', data: entries.map(row => {
       if (request.response_format !== 'url') return row
       const { b64_json: _image, ...rest } = row
       return { ...rest, url: dataUrl({ ...root, ...row }, request) }
@@ -166,6 +181,7 @@ export function convertNativeImageResponse(textBody: string, request: OpenAIImag
   for (const row of events) {
     parser.feed(row)
     if (row.usage) last.usage = row.usage
+    if (row.svg_usage) last.svg_usage = row.svg_usage
     if (row.type !== `${prefix(request)}.completed` || !text(row.b64_json)) continue
     last = { ...last, ...row }
     images.set(imageKey(row), request.response_format === 'url'
@@ -173,7 +189,8 @@ export function convertNativeImageResponse(textBody: string, request: OpenAIImag
   }
   const failure = parser.failure()
   const body = { created: last.created_at ?? Math.floor(Date.now() / 1000), data: [...images.values()],
-    model: request.model, output_format: last.output_format, size: last.size, quality: last.quality, background: last.background, usage: last.usage }
+    model: request.model, output_format: last.output_format ?? request.output_format, size: last.size, quality: last.quality, background: last.background, usage: last.usage,
+    ...(last.svg_usage ? { svg_usage: last.svg_usage } : {}) }
   return { body: failure ? { ...body, error: failure } : body, usage: parser.result(),
     ...(failure ? { status: 'error' as const, httpStatus: failure.status, failureSource: failure.code === 'image_generation_no_output' ? 'missing_output' as const : 'upstream' as const } : {}) }
 }

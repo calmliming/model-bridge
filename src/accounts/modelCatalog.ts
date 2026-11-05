@@ -47,17 +47,19 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 const inFlight = new Map<string, Promise<unknown>>()
-export function syncAccountCatalog(id: string): Promise<unknown> {
+export function syncAccountCatalog(id: string, options: { force?: boolean } = { force: true }): Promise<unknown> {
   const pending = inFlight.get(id)
   if (pending) return pending
-  const work = sync(id).finally(() => inFlight.delete(id))
+  const work = sync(id, options.force === true).finally(() => inFlight.delete(id))
   inFlight.set(id, work)
   return work
 }
-async function sync(id: string) {
+async function sync(id: string, force: boolean) {
   const account = await getAccount(id)
   if (!account) throw new Error('账号不存在')
   if (account.status === 'disabled') throw new Error('停用账号不能同步目录')
+  const fresh = readCatalogSnapshot(account.metadata, catalogSourceKey(account.provider, account.proxyUrl))
+  if (!force && fresh && Date.now() - fresh.syncedAt < CATALOG_REFRESH_MS) return fresh
   const endpoint = catalogEndpoint(account.provider, account.proxyUrl)
   const attemptAt = Date.now()
   try {
@@ -72,11 +74,11 @@ async function sync(id: string) {
     if (!response.ok) { await response.body?.cancel(); throw new Error(`上游返回 HTTP ${response.status}`) }
     const models = parseModelCatalog(await boundedJson(response))
     const snapshot = { version: 1 as const, sourceKey: catalogSourceKey(account.provider, account.proxyUrl), syncedAt: Date.now(), models }
-    await updateAccountMetadata(id, { modelCatalog: snapshot, modelCatalogAttemptAt: attemptAt, modelCatalogError: null })
+    await updateAccountMetadata(id, { modelCatalog: snapshot, modelCatalogAttemptAt: attemptAt, modelCatalogError: null }, { attemptAt, provider: account.provider, proxyUrl: account.proxyUrl })
     return snapshot
   } catch (error) {
     const reason = error instanceof Error && /^上游返回 HTTP \d{3}$/.test(error.message) ? error.message : '同步失败，请检查上游连通性和目录接口'
-    await updateAccountMetadata(id, { modelCatalogAttemptAt: attemptAt, modelCatalogError: reason })
+    await updateAccountMetadata(id, { modelCatalogAttemptAt: attemptAt, modelCatalogError: reason }, { attemptAt, provider: account.provider, proxyUrl: account.proxyUrl })
     throw new Error(reason)
   }
 }
@@ -132,7 +134,7 @@ export function startModelCatalogJob(): () => Promise<void> {
       [CATALOG_PROVIDERS, Date.now() - CATALOG_REFRESH_MS])
       for (const row of rows) {
         if (stopping) break
-        await syncAccountCatalog(row.id).catch(() => {})
+        await syncAccountCatalog(row.id, { force: false }).catch(() => {})
       }
     })().catch(() => console.error('[model-catalog] refresh sweep failed')).finally(() => { running = null })
   }, 60_000)

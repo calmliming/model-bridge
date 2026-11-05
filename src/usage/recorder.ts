@@ -1,3 +1,4 @@
+import { WriteExecutor } from './writeExecutor'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { config } from '../config'
@@ -48,11 +49,13 @@ export interface UsageRecord {
   subscriptionQuotaMode?: SubscriptionQuotaMode
 }
 
+const executor = new WriteExecutor(config.USAGE_WRITE_CONCURRENCY, config.USAGE_WRITE_QUEUE_MAX)
 const pendingUsageWrites = new Set<Promise<boolean>>()
 
 interface Settlement {
   unroundedCost: number; baseCost: number; cost: number
   price: TierPrice | null; imagePrice: TierPrice | null
+  svgPrice?: TierPrice | null
   recordedAt: number; liveRequestId?: string
 }
 interface DeferredUsage { record: UsageRecord; settlement: Settlement }
@@ -67,8 +70,12 @@ function settlementFor(record: UsageRecord): Settlement {
   const baseCost = roundUsd(unroundedCost)
   const price = record.priceSnapshot ?? resolveUsagePrice(record.provider, record.model, usage, pricedAt)
   const imagePrice = record.priceSnapshot ?? (usage.imageModel ? resolvePrice(record.provider, usage.imageModel, pricedAt) : price)
+  const svgPrice = usage.svgUsage ? resolveUsagePrice(record.provider, usage.svgUsage.model, {
+    inputTokens: usage.svgUsage.inputTokens, outputTokens: usage.svgUsage.outputTokens,
+    reasoningTokens: usage.svgUsage.reasoningTokens, cacheReadTokens: 0, cacheCreateTokens: 0,
+  }, pricedAt) : undefined
   const multiplier = Number.isFinite(record.multiplier) && record.multiplier! > 0 ? record.multiplier! : 1
-  return { unroundedCost, baseCost, cost: roundUsd(baseCost * multiplier), price, imagePrice,
+  return { unroundedCost, baseCost, cost: roundUsd(baseCost * multiplier), price, imagePrice, ...(svgPrice !== undefined ? { svgPrice } : {}),
     recordedAt: Date.now(), liveRequestId: currentLiveRequestId() }
 }
 
@@ -82,7 +89,7 @@ async function persistUsage(record: UsageRecord, snapshot?: Settlement): Promise
   try {
     const usage = { ...record.usage }
     if (record.reasoningEffort) usage.reasoningEffort = record.reasoningEffort
-    const { unroundedCost, baseCost, cost, price, imagePrice, recordedAt, liveRequestId } = snapshot ?? settlementFor(record)
+    const { unroundedCost, baseCost, cost, price, imagePrice, svgPrice, recordedAt, liveRequestId } = snapshot ?? settlementFor(record)
     // The auth gate makes an optimistic subscription choice. Re-check the
     // exact request cost under the subscription row lock below, then fall back
     // to the wallet when this request would cross any configured window.
@@ -163,7 +170,8 @@ async function persistUsage(record: UsageRecord, snapshot?: Settlement): Promise
         record.upstreamRequestId?.trim().slice(0, 200) || null,
         usage.serviceTier?.slice(0, 100) || null,
         usage.reasoningEffort?.slice(0, 100) || null,
-        JSON.stringify({ price, imagePrice, ...(subscriptionPointMultiplier != null ? { subscriptionPointMultiplier } : {}) }),
+        JSON.stringify({ price, imagePrice, ...(usage.svgUsage ? { svg: { ...usage.svgUsage, price: svgPrice } } : {}),
+          ...(subscriptionPointMultiplier != null ? { subscriptionPointMultiplier } : {}) }),
         record.usage.imageCacheReadTokens ?? 0,
         record.usage.usageSource ?? 'unknown',
         billTo === 'subscription' ? record.subscriptionId ?? null : null,
@@ -202,7 +210,11 @@ async function persistUsage(record: UsageRecord, snapshot?: Settlement): Promise
 }
 
 export function recordUsage(record: UsageRecord): Promise<boolean> {
-  const write = persistUsage(record)
+  const write = executor.run(() => persistUsage(record)).catch(async () => {
+    // A delivered upstream result must remain recoverable even under overload.
+    await recordStreamUsage(record)
+    return false
+  })
   return trackWrite(write)
 }
 
@@ -223,7 +235,7 @@ export function recordStreamUsage(record: UsageRecord): Promise<boolean> {
     const id = createHash('sha256').update(deferred.record.idempotencyKey!).digest('hex').slice(0, 24)
     try { await outbox.put(id, deferred) }
     catch { console.error('[usage-outbox] write failed; attempting immediate database settlement:', id) }
-    const recorded = await persistUsage(deferred.record, deferred.settlement)
+    const recorded = await executor.run(() => persistUsage(deferred.record, deferred.settlement)).catch(() => false)
     if (recorded) {
       try { await outbox.ack(id) } catch { console.error('[usage-outbox] acknowledgement failed; idempotent replay retained:', id) }
     }
@@ -241,7 +253,7 @@ export function replayPendingUsage(now = Date.now()): Promise<void> {
         console.error('[usage-outbox] invalid settlement retained:', entry.id)
         continue
       }
-      if (await persistUsage(record, settlement)) await outbox.ack(entry.id)
+      if (await executor.run(() => persistUsage(record, settlement)).catch(() => false)) await outbox.ack(entry.id)
       else { await outbox.defer(entry, now); break }
     }
   })().finally(() => { replaying = null })

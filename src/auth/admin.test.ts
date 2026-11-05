@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../config', () => ({ config: mocks.config }))
 vi.mock('../db/settings', () => ({ getSetting: mocks.getSetting, setSetting: mocks.setSetting }))
-vi.mock('../db/index', () => ({ pool: { connect: mocks.connect } }))
+vi.mock('../db/index', () => ({ pool: { connect: mocks.connect, query: mocks.query } }))
 
 import { changeAdminPassword, ensureAdmin, verifyAdminCredentials } from './admin'
 

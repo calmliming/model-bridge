@@ -1,3 +1,4 @@
+import { assertRegistrationEmailAllowed } from './emailBlacklist'
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'node:crypto'
 import { pool } from '../db/index'
@@ -42,6 +43,7 @@ export async function signInGoogleUser(input: {
     if (row?.status !== undefined && row.status !== 'active') {
       throw new UserManagerError('账号已停用，请联系管理员', 403)
     }
+    if (!row) await assertRegistrationEmailAllowed(email)
     await input.consumeProof()
     const now = Date.now()
     if (row) {

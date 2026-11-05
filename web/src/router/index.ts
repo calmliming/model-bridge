@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/mcp/authorize', name: 'mcp-authorize', component: () => import('../views/McpView.vue'), meta: { public: true } },
     {
       path: '/',
       name: 'landing',
@@ -49,6 +50,7 @@ export const router = createRouter({
         { path: 'subscription-plans', name: 'subscription-plans', component: () => import('../views/SubscriptionPlansView.vue') },
         { path: 'stats', name: 'stats', component: () => import('../views/StatsView.vue') },
         { path: 'docs', name: 'docs', component: () => import('../views/DocsView.vue') },
+        { path: 'management', name: 'management', component: () => import('../views/ManagementView.vue') },
         { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
       ],
     },
@@ -60,6 +62,7 @@ export const router = createRouter({
         { path: '', name: 'user-overview', component: () => import('../views/UserOverviewView.vue') },
         { path: 'models', name: 'user-models', component: () => import('../views/ModelPlazaView.vue') },
         { path: 'keys', name: 'user-keys', component: () => import('../views/UserKeysView.vue') },
+        { path: 'mcp', name: 'user-mcp', component: () => import('../views/McpView.vue') },
         { path: 'usage', name: 'user-usage', component: () => import('../views/UserUsageView.vue') },
         { path: 'logs', name: 'user-logs', component: () => import('../views/RequestLogsView.vue') },
         { path: 'docs', redirect: { name: 'api-docs' } },

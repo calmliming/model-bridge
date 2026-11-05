@@ -1,3 +1,4 @@
+import { readBoundedText } from '../http/bodyLimits'
 import { fetchAccountMetadata as fetchGeminiAccountMetadata } from '../providers/gemini/oauth'
 import { fetchAccountMetadata as fetchAntigravityMetadata } from '../providers/antigravity/oauth'
 import { fetchAntigravityModels } from '../providers/antigravity/quota'
@@ -61,6 +62,7 @@ const KIMI_MESSAGES_URL = 'https://api.moonshot.cn/anthropic/v1/messages'
 // fallback when the catalog cannot be read.
 const OPENAI_PROBE_MODELS = [
   'gpt-6.1-sol',
+  'gpt-6.1-terra',
   'gpt-6-astra',
   'gpt-6-sol',
   'gpt-6-luna',
@@ -117,7 +119,7 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 
 async function limitedBody(response: Response): Promise<string> {
   try {
-    return (await response.text()).slice(0, 800)
+    return (await readBoundedText(response, 64 * 1024)).slice(0, 800)
   } catch {
     return ''
   }

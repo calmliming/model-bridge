@@ -369,6 +369,10 @@ export async function updateUser(input: {
   /** null clears the limit (unlimited); undefined leaves it unchanged. */
   concurrencyLimit?: number | null
 }): Promise<UserView | null> {
+  if (input.status === 'disabled') {
+    const protectedUser = await pool.query<{ value: string }>("SELECT value FROM settings WHERE key = 'admin.user_id'")
+    if (protectedUser.rows[0]?.value === input.id) throw new UserManagerError('不能禁用系统管理员账户', 400)
+  }
   const patches: string[] = []
   const values: unknown[] = []
   if (input.name !== undefined) {
@@ -385,13 +389,19 @@ export async function updateUser(input: {
   }
   if (!patches.length) return getUserById(input.id)
   values.push(input.id)
-  const { rows } = await pool.query<Record<string, unknown>>(
-    `UPDATE users SET ${patches.join(', ')}
-     WHERE id = $${values.length}
-     RETURNING id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at`,
-    values
-  )
-  return rows[0] ? asUser(rows[0]) : null
+  const connection = input.status === 'disabled' ? await pool.connect() : null
+  try {
+    if (connection) { await connection.query('BEGIN'); await connection.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [input.id]) }
+    const { rows } = await (connection ?? pool).query<Record<string, unknown>>(
+      `UPDATE users SET ${patches.join(', ')} WHERE id = $${values.length}
+       RETURNING id, email, name, status, concurrency_limit, balance_micros, accepted_at, last_login_at, created_at`, values)
+    if (connection) {
+      await connection.query('UPDATE mcp_grants SET revoked_at=$2 WHERE user_id=$1 AND revoked_at IS NULL', [input.id, Date.now()])
+      await connection.query('COMMIT')
+    }
+    return rows[0] ? asUser(rows[0]) : null
+  } catch (error) { if (connection) await connection.query('ROLLBACK').catch(() => {}); throw error }
+  finally { connection?.release() }
 }
 
 export async function listUserUsage(

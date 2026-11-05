@@ -395,6 +395,7 @@ function confirmSystemUpdate() {
 </script>
 
 <template>
+  <div class="card mb-5 p-4"><a href="/management" class="font-medium text-primary-600">管理访问与策略 →</a><p class="mt-1 text-sm text-gray-500">管理受限 API Key、MCP、邮箱黑名单和生图策略。</p></div>
   <div class="settings-page">
     <nav class="settings-nav" aria-label="设置分类">
       <button v-for="section in settingSections" :key="section.id" type="button" :aria-current="activeSection === section.id ? 'page' : undefined"

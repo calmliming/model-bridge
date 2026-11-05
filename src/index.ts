@@ -1,3 +1,10 @@
+import { audit, fullPolicy } from './management/access'
+import { registerMcpRoutes } from './management/mcp'
+import { ZodError } from 'zod'
+import { registerManagementRoutes } from './management/routes'
+import { startAdminSessionVersions, stopAdminSessionVersions } from './auth/sessionVersion'
+import { registerIngressMemory } from './http/ingressMemory'
+import { stopStickyCleanup } from './accounts/session'
 import { closeAntigravityDispatcher } from './providers/antigravity/client'
 import { existsSync } from 'node:fs'
 import type { Server } from 'node:http'
@@ -49,6 +56,7 @@ async function main(): Promise<void> {
   const stopUsageRetryJob = await startUsageRetryJob()
   const stopPricingOverrideReload = await startPricingOverrideReload(config.PRICING_OVERRIDE_FILE)
   await ensureAdmin()
+  await startAdminSessionVersions()
   await warnUnsafeStoredUpstreamUrls()
 
   // 初始化支付提供商
@@ -67,9 +75,12 @@ async function main(): Promise<void> {
 
   const app = Fastify({
     logger: true,
+    requestTimeout: config.UPLOAD_TIMEOUT_MS,
     bodyLimit: 32 * 1024 * 1024, // 32 MB — room for large prompts / inline images
     trustProxy: TRUSTED_LOCAL_PROXIES,
   })
+
+  registerIngressMemory(app)
 
   let stopTokenRefreshJob: () => Promise<void> = async () => {}
   let stopQuotaAutopauseJob: () => Promise<void> = async () => {}
@@ -79,6 +90,8 @@ async function main(): Promise<void> {
   let antigravityCallbackServer: Server | null = null
 
   app.addHook('onClose', async () => {
+    stopStickyCleanup()
+    await stopAdminSessionVersions()
     await stopPricingOverrideReload()
     await Promise.all([stopTokenRefreshJob(), stopQuotaAutopauseJob(), stopModelCatalogJob(), stopMediaTaskJob()])
     await Promise.all([closeOauthCallbackServer(oauthCallbackServer), closeOauthCallbackServer(antigravityCallbackServer)])
@@ -98,6 +111,18 @@ async function main(): Promise<void> {
 
   registerAuthRoutes(app)
   registerAdminRoutes(app)
+  registerManagementRoutes(app)
+  registerMcpRoutes(app)
+  app.addHook('onResponse', async (request, reply) => {
+    const user = request.user as { role?: string; sub?: string } | undefined
+    if (request.url.startsWith('/api/admin/') && user?.role === 'admin') {
+      try { await audit({ actor: 'admin:' + (user.sub ?? 'admin'), policy: fullPolicy() }, request.method + ' ' + (request.routeOptions.url ?? '/api/admin'), null, String(reply.statusCode)) }
+      catch { request.log.warn('Management audit storage is unavailable') }
+    }
+  })
+  app.addHook('onError', async (_request, _reply, error) => {
+    if (error instanceof ZodError) Object.assign(error, { statusCode: 400 })
+  })
   registerOperationsRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)

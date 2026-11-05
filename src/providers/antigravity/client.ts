@@ -1,3 +1,4 @@
+import { readBoundedText } from '../../http/bodyLimits'
 import { ProxyAgent } from 'undici'
 import { config } from '../../config'
 import { fetchWithConnectTimeout } from '../../http/upstream'
@@ -39,7 +40,7 @@ export async function antigravityJson(token: string, action: 'loadCodeAssist' | 
   const response = await fetchAntigravity(`https://${host}/v1internal:${action}`, {
     method: 'POST', headers: antigravityHeaders(token), body: JSON.stringify(body), signal: AbortSignal.timeout(30_000),
   })
-  if (!response.ok) throw new Error(`${action} failed (${response.status}): ${googleErrorMessage(response.status, await response.text())}`)
+  if (!response.ok) throw new Error(`${action} failed (${response.status}): ${googleErrorMessage(response.status, await readBoundedText(response))}`)
   const data = object(await response.json())
   if (!data) throw new Error(`${action} returned invalid JSON`)
   if (data.error) throw new Error(`${action} failed (400): ${googleErrorMessage(400, JSON.stringify(data))}`)

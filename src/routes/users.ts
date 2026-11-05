@@ -81,7 +81,7 @@ const updateKeySchema = z
 const idParamSchema = z.object({ id: z.string().min(1) })
 
 const paginationQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
+  page: z.coerce.number().int().positive().max(100_000).default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 })
 

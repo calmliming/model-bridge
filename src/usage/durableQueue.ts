@@ -20,6 +20,9 @@ export class DurableQueue<T> {
   async init(): Promise<void> { await mkdir(this.directory, { recursive: true, mode: 0o700 }) }
 
   private async syncDirectory(): Promise<void> {
+    // Windows does not support fsync on directory handles. File data is still
+    // synced before atomic rename; other platforms retain directory durability.
+    if (process.platform === 'win32') return
     const handle = await open(this.directory, 'r')
     try { await handle.sync() } finally { await handle.close() }
   }

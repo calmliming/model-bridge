@@ -1,3 +1,4 @@
+import { assertRegistrationEmailAllowed } from './emailBlacklist'
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { config } from '../config'
@@ -57,6 +58,7 @@ export async function beginEmailRegistration(input: { email: string; password: s
   const password = userPasswordSchema.parse(input.password)
   assertConfigured()
   const email = normalizeEmail(input.email)
+  await assertRegistrationEmailAllowed(email)
   await assertEmailAvailable(email)
 
   const now = Date.now()
@@ -83,6 +85,7 @@ export async function beginEmailRegistration(input: { email: string; password: s
 export async function resendEmailRegistrationCode(emailInput: string): Promise<{ expiresAt: number; resendAfter: number }> {
   assertConfigured()
   const email = normalizeEmail(emailInput)
+  await assertRegistrationEmailAllowed(email)
   const now = Date.now()
   const id = randomBytes(16).toString('hex')
   const code = newCode()
@@ -108,6 +111,7 @@ export async function resendEmailRegistrationCode(emailInput: string): Promise<{
 export async function verifyEmailRegistration(emailInput: string, code: string): Promise<UserView> {
   assertConfigured()
   const email = normalizeEmail(emailInput)
+  await assertRegistrationEmailAllowed(email)
   const client = await pool.connect()
   let committed = false
   let userId: string

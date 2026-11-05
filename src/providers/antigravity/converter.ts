@@ -1,3 +1,4 @@
+import { neutralizeSystemIdentity, neutralizeSystemInstruction } from './identity'
 import { sanitizeGeminiBody } from '../gemini/relay'
 import { object } from './client'
 import { antigravityThinking } from './thinking'
@@ -86,7 +87,7 @@ export function messagesToGemini(body: Record<string, unknown>, model: string): 
   if (body.system != null) {
     const parts = blocks(body.system).map(block => {
       if (block.type !== 'text' || typeof block.text !== 'string') throw new AntigravityRequestError('System instructions must be text')
-      return { text: block.text }
+      return { text: neutralizeSystemIdentity(block.text) }
     })
     result.systemInstruction = { role: 'user', parts }
   }
@@ -126,6 +127,7 @@ export function messagesToGemini(body: Record<string, unknown>, model: string): 
 }
 
 export function prepareAntigravityGemini(body: Record<string, unknown>, model: string): Record<string, unknown> {
+  if (body.systemInstruction !== undefined) body = { ...body, systemInstruction: neutralizeSystemInstruction(body.systemInstruction) }
   const cleaned = { ...sanitizeGeminiBody(body, model) }
   const tools = Array.isArray(cleaned.tools) ? cleaned.tools.map(object) : []
   if (tools.some(tool => Array.isArray(tool?.functionDeclarations) && tool.functionDeclarations.length)

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accountGroups, accounts } from '../db/schema'
 import { decrypt, encrypt } from '../crypto'
@@ -43,6 +43,7 @@ export interface CreateAccountInput {
 }
 
 export interface AccountUpdatePatch {
+  imageSizeTiers?: Array<'1K' | '2K' | '4K'>
   upstreamRequestIdHeader?: string | null
   status?: 'active' | 'disabled'
   weight?: number
@@ -183,6 +184,7 @@ export async function listAccounts() {
     ...account,
     upstreamRequestIdHeader: typeof metadataObject(metadata).upstreamRequestIdHeader === 'string'
       ? metadataObject(metadata).upstreamRequestIdHeader : null,
+    imageSizeTiers: metadataObject(metadata).imageSizeTiers ?? [],
     planType: openAIPlanType(account.provider, metadata),
     currentConcurrency: await currentConcurrency(accountConcurrencyKey(account.id)),
     groups: groupsByAccount.get(account.id) ?? [],
@@ -233,6 +235,7 @@ export async function deleteAccount(id: string): Promise<void> {
 async function applyAccountPatch(id: string, patch: AccountUpdatePatch): Promise<void> {
   const account = await getAccount(id)
   if (!account) throw new Error('account not found')
+  if (patch.imageSizeTiers !== undefined) await updateAccountMetadata(id, { imageSizeTiers: patch.imageSizeTiers })
   if (patch.status) await setAccountStatus(id, patch.status)
   if (patch.weight !== undefined) await setAccountWeight(id, patch.weight)
   if (patch.concurrencyLimit !== undefined) await setAccountConcurrencyLimit(id, patch.concurrencyLimit)
@@ -304,18 +307,23 @@ export async function deleteAccounts(ids: string[]): Promise<AccountBatchResult>
 }
 
 /** Updates provider-specific metadata cached on an account. */
-export async function updateAccountMetadata(id: string, metadata: Record<string, unknown>): Promise<void> {
-  return mergeAccountMetadata(db, id, metadata)
+interface CatalogMetadataGuard { attemptAt: number; provider: string; proxyUrl: string | null }
+export async function updateAccountMetadata(id: string, metadata: Record<string, unknown>, guard?: CatalogMetadataGuard): Promise<void> {
+  return mergeAccountMetadata(db, id, metadata, guard)
 }
 
-async function mergeAccountMetadata(store: AccountStore, id: string, metadata: Record<string, unknown>): Promise<void> {
+async function mergeAccountMetadata(store: AccountStore, id: string, metadata: Record<string, unknown>, guard?: CatalogMetadataGuard): Promise<void> {
   const patch = JSON.stringify(metadata)
+  const condition = guard ? and(eq(accounts.id, id), eq(accounts.provider, guard.provider),
+    sql`${accounts.proxyUrl} IS NOT DISTINCT FROM ${guard.proxyUrl}`,
+    sql`(CASE WHEN (${accounts.metadata}->>'modelCatalogAttemptAt') ~ '^[0-9]{1,15}$'
+      THEN (${accounts.metadata}->>'modelCatalogAttemptAt')::bigint ELSE 0 END) <= ${guard.attemptAt}`) : eq(accounts.id, id)
   await store.update(accounts)
     // PostgreSQL performs the same shallow merge as object spread, atomically.
     // This prevents concurrent quota, identity, and balance refreshes from
     // overwriting one another after reading an older metadata snapshot.
     .set({ metadata: sql`COALESCE(${accounts.metadata}, '{}'::jsonb) || ${patch}::jsonb` })
-    .where(eq(accounts.id, id))
+    .where(condition)
 }
 
 /** Stores the latest non-secret quota snapshot observed from upstream headers. */

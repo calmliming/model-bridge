@@ -5,13 +5,16 @@ function row(value: unknown): Row | null {
 }
 
 /** Repair only absent/null fields; complete native payloads retain their bytes. */
-export function createResponsesFieldNormalizer() {
+export function createResponsesFieldNormalizer(options?: { restoreInstructions: boolean; instructions: unknown }) {
   let timestamp: number | undefined
   let sequence = 0
   let snapshot: Row = {}
   let started = false
   const createdAt = () => timestamp ??= Math.floor(Date.now() / 1000)
   const response = (value: Row): Row => {
+    if (options?.restoreInstructions && 'instructions' in value && JSON.stringify(value.instructions) !== JSON.stringify(options.instructions)) {
+      value = { ...value, instructions: options.instructions }
+    }
     snapshot = { ...snapshot, ...value }
     if (typeof value.created_at === 'number' && Number.isFinite(value.created_at)) timestamp ??= value.created_at
     return value.created_at == null ? { ...value, created_at: createdAt() } : value

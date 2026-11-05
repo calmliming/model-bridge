@@ -1,3 +1,4 @@
+import { revokeAdminSessions } from './sessionVersion'
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'node:crypto'
 import { config } from '../config'
@@ -213,5 +214,6 @@ export async function changeAdminPassword(currentPassword: string, newPassword: 
   const nextHash = bcrypt.hashSync(adminPasswordSchema.parse(newPassword), BCRYPT_ROUNDS)
   await setSetting(PASSWORD_HASH_KEY, nextHash)
   await ensureAdminUser(nextHash)
+  await revokeAdminSessions()
   return true
 }

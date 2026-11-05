@@ -93,6 +93,7 @@ function priceSummary(model: PlazaModel) {
   const price = currentPrice(model)
   if (model.video) return `${formatPrice(price.videoSecond480Price ?? 0)} / 秒起（480p）`
   if (model.imageRequestPrice != null) return `${formatPrice(price.imageRequestPrice ?? 0)} / 次`
+  if (model.image) return `文本输入 ${formatPrice(price.inputPrice)} · 图片输出 ${formatPrice(price.imageOutputPrice ?? 0)} / 百万 Tokens`
   return `输入 ${formatPrice(price.inputPrice)} · 输出 ${formatPrice(price.outputPrice)} / 百万 Tokens`
 }
 function toggleCompare(model: PlazaModel) {
@@ -142,6 +143,7 @@ function callExample(model: PlazaModel): string {
     const path = model.video ? 'videos' : 'images/generations'
     return `curl ${base}/api/media/v1/${path} \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(body, null, 2)}'${model.video ? '\n\n# 使用返回的 id 查询结果\ncurl ' + base + '/api/media/v1/videos/media_TASK_ID \\\n  -H "Authorization: Bearer mb-xxxxxxxx"' : ''}`
   }
+  if (model.image && model.provider === 'gemini') return `curl ${base}/v1beta/models/${model.id}:generateContent -H "x-goog-api-key: mb-xxxxxxxx" -H "Content-Type: application/json" -d '${JSON.stringify({ contents: [{ role: 'user', parts: [{ text: '一只在窗边看雨的橘猫' }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }, null, 2)}'`
   if (model.image) return `curl ${base}/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ model: model.id, prompt: '一只在窗边看雨的橘猫', quality: 'high', size: '1024x1024' }, null, 2)}'`
   if (model.provider === 'claude') {
     return [

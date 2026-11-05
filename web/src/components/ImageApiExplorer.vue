@@ -19,13 +19,17 @@ const emit = defineEmits<{ (event: 'requestAuthorization'): void }>()
 const message = useMessage()
 
 const prompt = ref('')
-const model = ref(props.provider === 'media' ? 'gpt-image-2.5' : props.mode === 'edit' ? 'gpt-image-2.5-sunburst' : 'gpt-image-2.5-flare')
+const model = ref(props.provider === 'media' ? 'gpt-image-2.5' : props.mode === 'edit' ? 'gpt-image-2.6-sunburst' : 'gpt-image-2.6-flare')
 const quality = ref('auto')
 const background = ref('auto')
 const requestedOutputFormat = ref('png')
+const complexity = ref('high')
+const frameCount = ref('9')
+const frameDuration = ref('200')
 const size = ref('1024x1024')
 const responseFormat = ref<'url' | 'b64_json'>('url')
 const imageFile = ref<File | null>(null)
+const markupFile = ref<File | null>(null)
 const inputPreviewUrl = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
@@ -36,6 +40,18 @@ let requestController: AbortController | null = null
 
 const isEdit = computed(() => props.mode === 'edit')
 const isMedia = computed(() => props.provider === 'media')
+const isImage26 = computed(() => !isMedia.value && /^gpt-image-2\.6-(flare|sunburst)$/.test(model.value))
+const supportsMarkup = computed(() => !isMedia.value && isEdit.value && /^gpt-image-2\.[56]-(flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.value))
+const outputFormatOptions = computed(() => ['png', 'webp', 'jpeg', ...(isImage26.value && !isEdit.value ? ['svg', 'gif'] : [])])
+const nativeParameters = computed(() => ({
+  output_format: requestedOutputFormat.value,
+  ...(isImage26.value ? { complexity: complexity.value } : {}),
+  ...(isImage26.value && requestedOutputFormat.value === 'gif' ? { frame_count: Number(frameCount.value), frame_duration_ms: Number(frameDuration.value) } : {}),
+}))
+watch([model, requestedOutputFormat], () => {
+  if (!outputFormatOptions.value.includes(requestedOutputFormat.value)) requestedOutputFormat.value = 'png'
+  if (!['png', 'webp'].includes(requestedOutputFormat.value) && background.value === 'transparent') background.value = 'auto'
+})
 const basicImageModel = computed(() => isMedia.value && ['gpt-image-2', 'gpt-image-2.5'].includes(model.value))
 const qualityOptions = computed(() => (isMedia.value ? basicImageModel.value ? ['auto'] : model.value === 'gpt-image-2-vip' ? ['medium']
   : model.value.endsWith('-flare') ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh', 'max']
@@ -58,7 +74,7 @@ const responseRecord = computed<Record<string, unknown> | null>(() =>
 
 const outputFormat = computed(() => {
   const value = responseRecord.value?.output_format
-  return typeof value === 'string' && value ? value : 'png'
+  return typeof value === 'string' && value ? value : requestedOutputFormat.value
 })
 
 const resultRows = computed<ImageResultRow[]>(() => {
@@ -74,7 +90,7 @@ const outputImages = computed(() => {
       images.push({ src: item.url, revisedPrompt: item.revised_prompt })
     } else if (typeof item.b64_json === 'string' && item.b64_json) {
       const format = outputFormat.value === 'jpg' ? 'jpeg' : outputFormat.value
-      images.push({ src: `data:image/${format};base64,${item.b64_json}`, revisedPrompt: item.revised_prompt })
+      images.push({ src: `data:image/${format === 'svg' ? 'svg+xml' : format};base64,${item.b64_json}`, revisedPrompt: item.revised_prompt })
     }
   }
   return images
@@ -100,9 +116,10 @@ const generatedCurl = computed(() => {
       `  -F "size=${size.value}" \\`,
       `  -F "quality=${quality.value}" \\`,
       `  -F "background=${background.value}" \\`,
-      ...(!isMedia.value ? [`  -F "output_format=${requestedOutputFormat.value}" \\`] : []),
+      ...(!isMedia.value ? Object.entries(nativeParameters.value).map(([field, value]) => `  -F "${field}=${value}" \\`) : []),
       `  -F "response_format=${responseFormat.value}" \\`,
-      `  -F "image=@./${imageFile.value?.name || 'source.png'}"`,
+      `  -F "image=@./${imageFile.value?.name || 'source.png'}"${supportsMarkup.value && markupFile.value ? ' \\' : ''}`,
+      ...(supportsMarkup.value && markupFile.value ? [`  -F "markup=@./${markupFile.value.name};type=image/png"`] : []),
     ].join('\n')
   }
   return [
@@ -113,7 +130,7 @@ const generatedCurl = computed(() => {
       model: model.value,
       prompt: prompt.value || '一只坐在窗边的橘猫',
       size: size.value,
-      quality: quality.value, background: background.value, ...(!isMedia.value ? { output_format: requestedOutputFormat.value } : {}),
+      quality: quality.value, background: background.value, ...(!isMedia.value ? nativeParameters.value : {}),
       response_format: responseFormat.value,
     }, null, 2)}'`,
   ].join('\n')
@@ -133,15 +150,29 @@ function errorFromBody(body: unknown, fallback: string): string {
 function onFileSelected(event: Event): void {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
   errorMessage.value = ''
-  if (file && file.size > 20 * 1024 * 1024) {
+  const maxMb = isMedia.value ? 20 : 50
+  if (file && (file.size > maxMb * 1024 * 1024 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type))) {
     imageFile.value = null
     ;(event.target as HTMLInputElement).value = ''
-    errorMessage.value = '图片文件不能超过 20 MB。'
+    errorMessage.value = `请选择不超过 ${maxMb} MB 的 PNG、JPEG 或 WebP 图片。`
     return
   }
   if (inputPreviewUrl.value) URL.revokeObjectURL(inputPreviewUrl.value)
   imageFile.value = file
   inputPreviewUrl.value = file ? URL.createObjectURL(file) : ''
+}
+
+function onMarkupSelected(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  if (file && (file.type !== 'image/png' || file.size > 50 * 1024 * 1024)) {
+    markupFile.value = null
+    input.value = ''
+    errorMessage.value = '标注层须为不超过 50 MB 的透明 PNG。'
+    return
+  }
+  markupFile.value = file
+  errorMessage.value = ''
 }
 
 async function runTest(): Promise<void> {
@@ -180,9 +211,10 @@ async function runTest(): Promise<void> {
       form.append('size', size.value)
       form.append('quality', quality.value)
       form.append('background', background.value)
-      if (!isMedia.value) form.append('output_format', requestedOutputFormat.value)
+      if (!isMedia.value) for (const [field, value] of Object.entries(nativeParameters.value)) form.append(field, String(value))
       form.append('response_format', responseFormat.value)
       form.append('image', imageFile.value!)
+      if (supportsMarkup.value && markupFile.value) form.append('markup', markupFile.value)
       body = form
     } else {
       headers['Content-Type'] = 'application/json'
@@ -190,7 +222,7 @@ async function runTest(): Promise<void> {
         model: model.value,
         prompt: prompt.value.trim(),
         size: size.value,
-        quality: quality.value, background: background.value, ...(!isMedia.value ? { output_format: requestedOutputFormat.value } : {}),
+        quality: quality.value, background: background.value, ...(!isMedia.value ? nativeParameters.value : {}),
         response_format: responseFormat.value,
       })
     }
@@ -310,15 +342,21 @@ onBeforeUnmount(() => {
         <label v-if="isEdit" class="field-group">
           <span>原始图片 <b>必填</b></span>
           <span class="file-picker">
-            <input type="file" accept="image/*" @change="onFileSelected" />
+            <input type="file" accept="image/png,image/jpeg,image/webp" @change="onFileSelected" />
             <span class="file-picker-copy">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-6L12 6m0 0 4.5 4.5M12 6v12" />
               </svg>
               <strong>{{ imageFile?.name || '选择图片文件' }}</strong>
-              <small>PNG、JPEG 或 WebP，最大 20 MB</small>
+              <small>PNG、JPEG 或 WebP，最大 {{ isMedia ? 20 : 50 }} MB</small>
             </span>
           </span>
+        </label>
+
+        <label v-if="supportsMarkup" class="field-group">
+          <span>标注层（可选）</span>
+          <input type="file" accept="image/png" @change="onMarkupSelected" />
+          <small>上传与原图同尺寸的透明 PNG，用圈选或草图标明编辑位置，最大 50 MB。</small>
         </label>
 
         <label class="field-group">
@@ -334,7 +372,8 @@ onBeforeUnmount(() => {
         <div class="field-row">
           <label class="field-group">
             <span>模型</span>
-            <UiInput v-model:value="model" placeholder="gpt-image-2.5-flare" />
+            <UiInput v-model:value="model" :list="!isMedia ? `image-models-${mode}` : undefined" :placeholder="isMedia ? 'gpt-image-2.5' : 'gpt-image-2.6-flare'" />
+            <datalist v-if="!isMedia" :id="`image-models-${mode}`"><option v-for="id in ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2']" :key="id" :value="id" /></datalist>
           </label>
           <label class="field-group">
             <span>尺寸</span>
@@ -352,9 +391,14 @@ onBeforeUnmount(() => {
 
         <div class="field-row">
           <label class="field-group"><span>品质</span><UiSelect v-model:value="quality" :options="qualityOptions" /></label>
-          <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, ...(!basicImageModel ? [{ label: '透明（PNG/WebP）', value: 'transparent' }] : [])]" /></label>
+          <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, ...(!basicImageModel && (isMedia || ['png', 'webp'].includes(requestedOutputFormat)) ? [{ label: '透明（PNG/WebP）', value: 'transparent' }] : [])]" /></label>
         </div>
-        <label v-if="!isMedia" class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="['png', 'webp', 'jpeg'].map(value => ({ label: value.toUpperCase(), value }))" /></label>
+        <label v-if="!isMedia" class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="outputFormatOptions.map(value => ({ label: value.toUpperCase(), value }))" /></label>
+        <label v-if="isImage26" class="field-group"><span>构图复杂度</span><UiSelect v-model:value="complexity" :options="[{ label: '低', value: 'low' }, { label: '中', value: 'medium' }, { label: '高（默认）', value: 'high' }]" /></label>
+        <div v-if="isImage26 && requestedOutputFormat === 'gif'" class="field-row">
+          <label class="field-group"><span>帧数（2–16）</span><UiInput v-model:value="frameCount" inputmode="numeric" /></label>
+          <label class="field-group"><span>每帧时长（20–2000 毫秒）</span><UiInput v-model:value="frameDuration" inputmode="numeric" /></label>
+        </div>
         <label class="field-group">
           <span>响应格式</span>
           <UiSelect

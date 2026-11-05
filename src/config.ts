@@ -59,7 +59,7 @@ function loadEnvFile(path: string): void {
 const isTestEnvironment = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true'
 if (!isTestEnvironment) loadEnvFile(ENV_PATH)
 
-if (isLocalDevelopment && blankToUndefined(process.env.APP_ENV) !== 'local') {
+if (isLocalDevelopment && !isTestEnvironment && blankToUndefined(process.env.APP_ENV) !== 'local') {
   // 不是错误，只是提醒：模式由 .env.local 决定，环境变量说了不算。
   console.warn(`[config] 本地模式（已加载 ${ENV_PATH}）；环境变量 APP_ENV=${process.env.APP_ENV ?? '(未设置)'} 已被忽略`)
 }
@@ -213,6 +213,26 @@ const schema = z.object({
     blankToUndefined,
     z.coerce.number().int().min(1).max(120).default(30),
   ),
+  MCP_PUBLIC_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => {
+    const u = new URL(value)
+    return (u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(u.hostname))) && u.pathname === '/api/mcp' && !u.username && !u.password && !u.hash && !u.search
+  }, 'must be an HTTPS /api/mcp URL (HTTP is allowed on loopback)').optional()),
+  MCP_FRONTEND_URL: z.preprocess(blankToUndefined, z.string().url().refine(value => { const u = new URL(value); return !u.username && !u.password && (u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(u.hostname))) }).optional()),
+  CN_QUOTA_EXHAUSTED_COOLDOWN_MS: z.coerce.number().int().min(1000).max(86_400_000).default(1_800_000),
+  CN_RATE_LIMIT_COOLDOWN_MS: z.coerce.number().int().min(0).max(60_000).default(5_000),
+  GEMINI_SAME_ACCOUNT_RETRIES: z.coerce.number().int().min(0).max(10).default(4),
+  UPSTREAM_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(180_000),
+  STREAM_DRAIN_TIMEOUT_MS: z.coerce.number().int().min(0).max(30_000).default(3_000),
+  SSE_EVENT_MAX_BYTES: z.coerce.number().int().min(1024).max(256 * 1024 * 1024).default(64 * 1024 * 1024),
+  SSE_EVENT_MAX_LINES: z.coerce.number().int().min(1).max(100_000).default(4096),
+  UPSTREAM_MEMORY_MAX_BYTES: z.coerce.number().int().min(131072).max(2 ** 31).default(256 * 1024 * 1024),
+  UPSTREAM_BUFFER_MAX_BYTES: z.coerce.number().int().min(1024).max(256 * 1024 * 1024).default(64 * 1024 * 1024),
+  STREAM_PEEK_MAX_BYTES: z.coerce.number().int().min(1024).max(64 * 1024 * 1024).default(4 * 1024 * 1024),
+  INGRESS_MEMORY_MAX_BYTES: z.coerce.number().int().min(131072).max(2 ** 31).default(256 * 1024 * 1024),
+  UPLOAD_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  USAGE_WRITE_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(8),
+  USAGE_WRITE_QUEUE_MAX: z.coerce.number().int().min(1).max(10_000).default(256),
+  DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300_000).default(30_000),
   GEMINI_OAUTH_CLIENT_ID: z.string().optional(),
   GEMINI_OAUTH_CLIENT_SECRET: z.string().optional(),
   ANTIGRAVITY_OAUTH_CLIENT_ID: z.preprocess(blankToUndefined, z.string().default('1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com')),

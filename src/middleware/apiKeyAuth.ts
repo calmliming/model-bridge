@@ -14,6 +14,7 @@ export interface AuthedApiKey {
   allowedModels: string[] | null
   modelMappings: Record<string, string> | null
   accountGroupId: string | null
+  imageBillingMode?: 'tokens' | 'per_image' | 'both'
   groupMultiplier: number
   groupAllowedModels?: string[] | null
   rateLimit: number | null
@@ -148,6 +149,7 @@ async function authenticateApiKey(request: FastifyRequest, reply: FastifyReply, 
     allowedModels: record.allowedModels ?? null,
     modelMappings: record.modelMappings ?? null,
     accountGroupId: record.accountGroupId ?? null,
+    imageBillingMode: (record.imageBillingMode ?? 'both') as 'tokens' | 'per_image' | 'both',
     groupMultiplier: record.groupMultiplier ?? 1,
     groupAllowedModels: record.groupAllowedModels ?? null,
     rateLimit: record.rateLimit ?? null,

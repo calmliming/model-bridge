@@ -27,6 +27,9 @@ interface StickyBinding {
 }
 
 const bindings = new Map<string, StickyBinding>()
+const sweepTimer = setInterval(() => sweepExpired(Date.now()), 60_000)
+sweepTimer.unref()
+export function stopStickyCleanup(): void { clearInterval(sweepTimer); bindings.clear() }
 const stickyKey = (sessionKey: string) => `mb:sticky:${sessionKey}`
 
 function sweepExpired(now: number): void {
@@ -54,6 +57,8 @@ export async function getStickyAccountId(
     bindings.delete(sessionKey)
     return null
   }
+  bindings.delete(sessionKey)
+  bindings.set(sessionKey, binding)
   return binding.accountId
 }
 
@@ -72,7 +77,8 @@ export async function bindStickyAccount(
     }
     return
   }
-  if (bindings.size >= SWEEP_THRESHOLD) sweepExpired(now)
+  bindings.delete(sessionKey)
+  if (bindings.size >= SWEEP_THRESHOLD) bindings.delete(bindings.keys().next().value!)
   bindings.set(sessionKey, { accountId, expiresAt: now + STICKY_TTL_MS })
 }
 

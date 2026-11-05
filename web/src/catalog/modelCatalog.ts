@@ -238,6 +238,15 @@ function deepseekPriceSchedule(offPeak: ModelTokenPrice, peak: ModelTokenPrice, 
 }
 
 export const MODEL_CATALOG: PlazaModel[] = ([
+  ...(['flare', 'sunburst'] as const).map(variant => ({
+    id: `gpt-image-2.6-${variant}`, name: `GPT Image 2.6 ${variant === 'flare' ? 'Flare' : 'Sunburst'}`,
+    provider: 'openai' as const, image: true, categories: ['image', 'multimodal'],
+    tags: ['图像生成 / 编辑', 'SVG / GIF', '复杂度调节'],
+    description: variant === 'flare' ? '面向快速生成与迭代，支持标记引导编辑及 SVG、GIF 输出。按上游实际 Token 用量计费。'
+      : '面向精细构图与编辑，支持标记引导编辑及 SVG、GIF 输出。按上游实际 Token 用量计费。',
+    context: '1K–4K', inputPrice: 5, outputPrice: 0, cacheReadPrice: 1.25,
+    imageInputPrice: 8, imageCacheReadPrice: 2, imageOutputPrice: 30, badge: 'new' as const,
+  })),
   ...Object.entries({ 'gpt-image-2': 0.0042, 'gpt-image-2-vip': 0.014, 'gpt-image-2.5': 0.0042,
     'gpt-image-2.5-flare': 0.014, 'gpt-image-2.5-sunburst': 0.0168 }).map(([id, imageRequestPrice]): PlazaModel => ({
       id, name: id.replace('gpt-image-', 'GPT Image ').replaceAll('-', ' '), provider: 'openai', channel: 'modelbridge', image: true, categories: ['image', 'multimodal'],
@@ -365,6 +374,9 @@ export const MODEL_CATALOG: PlazaModel[] = ([
 
   // --- OpenAI --------------------------------------------------------------
   {
+    id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', provider: 'openai', categories: ['chat', 'reasoning', 'multimodal'], tags: ['视觉', '工具调用', '1M 上下文'], description: '高效视觉推理与计算机操作模型。', context: '1.05M', inputPrice: 1, outputPrice: 5, cacheReadPrice: 0.05, badge: 'new',
+  },
+  {
     id: 'gpt-6.1-sol',
     name: 'GPT-6.1 Sol',
     provider: 'openai',
@@ -463,6 +475,11 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     outputPrice: 30
   },
 
+  ...[
+    { id: 'gemini-3.1-flash-lite-image', name: 'Gemini 3.1 Flash Lite Image', inputPrice: 0.25, outputPrice: 1.5, imageOutputPrice: 30 },
+    { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash Image', inputPrice: 0.5, outputPrice: 3, imageOutputPrice: 60 },
+    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro Image', inputPrice: 2, outputPrice: 12, imageOutputPrice: 120 },
+  ].map(model => ({ ...model, provider: 'gemini' as const, image: true, imageInputPrice: model.inputPrice, categories: ['multimodal'], tags: ['图片生成', '图片编辑'], description: '通过 Gemini 原生接口生成和编辑图片，图片与文本 Token 分别计费。', context: model.id.includes('lite-image') ? '1K' : '1K/2K/4K' })),
   // --- Google / Gemini -----------------------------------------------------
   {
     id: 'gemini-4-argon',
@@ -551,28 +568,28 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     cacheReadPrice: 0.03
   },
   {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro',
+    id: 'gemini-3.1-pro-preview-customtools',
+    name: 'Gemini 3.1 Pro Customtools',
     provider: 'gemini',
     categories: ['chat', 'reasoning', 'multimodal'],
     tags: ['长上下文', '多模态'],
-    description: '成熟稳定的多模态推理模型，长上下文场景表现优秀。',
+    description: '支持自定义工具调用的 Gemini Pro 模型。',
     context: '1M',
-    inputPrice: 1.25,
-    outputPrice: 10,
-    cacheReadPrice: 0.125
+    inputPrice: 2,
+    outputPrice: 12,
+    cacheReadPrice: 0.2
   },
   {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
+    id: 'gemini-3-flash',
+    name: 'Gemini 3 Flash',
     provider: 'gemini',
     categories: ['chat', 'lightweight', 'multimodal'],
     tags: ['高速', '低成本'],
     description: '轻量高速多模态模型，适合实时与高并发场景。',
     context: '1M',
-    inputPrice: 0.3,
-    outputPrice: 2.5,
-    cacheReadPrice: 0.03
+    inputPrice: 0.5,
+    outputPrice: 3,
+    cacheReadPrice: 0.05
   },
 
   // --- DeepSeek ------------------------------------------------------------
@@ -982,8 +999,8 @@ export function withAutoSurfacedModels(
   const known = new Set(staticCatalog.map((m) => m.id))
   const extra: PlazaModel[] = []
   for (const id of Object.keys(livePrices).sort()) {
-    // The plaza offers the five platform-supplied image models only. Native
-    // image aliases and snapshots may have prices, but must not reappear here.
+    // Only explicitly curated image cards are surfaced. Native aliases and
+    // snapshots may have prices, but must not create duplicate image cards.
     if (known.has(id) || id.toLowerCase().startsWith('gpt-image-')) continue
     const provider = inferProviderFromModelId(id)
     if (!provider) continue

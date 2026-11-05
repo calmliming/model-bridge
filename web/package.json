@@ -27,11 +27,13 @@
     "vue-tsc": "^2.1.0"
   },
   "overrides": {
-    "postcss-selector-parser": "^7.1.6"
+    "postcss-selector-parser": "^7.1.6",
+    "follow-redirects": "1.16.2"
   },
   "allowScripts": {
     "esbuild@0.21.5": true,
     "vue-demi@0.14.10": true,
     "fsevents": false
-  }
+  },
+  "version": "0.3.1"
 }

@@ -179,6 +179,7 @@ export async function findApiKeyBySecret(secret: string) {
       userConcurrencyLimit: users.concurrencyLimit,
       userEmail: users.email,
       groupMultiplier: accountGroups.rateMultiplier,
+      imageBillingMode: accountGroups.imageBillingMode,
       groupAllowedModels: accountGroups.allowedModels,
     })
     .from(apiKeys)

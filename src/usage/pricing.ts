@@ -1,8 +1,8 @@
 import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
-import { IMAGE_25_MODELS, isImage25Model } from '../providers/openai/imageModels'
-import { isGpt61SolModel } from '../providers/openai/models'
+import { NATIVE_IMAGE_MODELS, isNativeImageModel } from '../providers/openai/imageModels'
+import { isGpt61SolModel, isGpt61TerraModel } from '../providers/openai/models'
 import { roundUsd } from '../wallet/money'
 import { GRSAI_IMAGE_PRICES, GRSAI_VIDEO_PRICES, GRSAI_MODELS } from '../providers/grsai/models'
 
@@ -235,6 +235,8 @@ const OPENAI_GPT6_LUNA: TierPrice = {
 // GPT-6.1 Sol (public 2026-09-29). Same input/output as gpt-6 Sol, but cached
 // input halves to $0.10. Cache writes stay at 1.25× input.
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+const OPENAI_GPT61_TERRA: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.05 }
 const OPENAI_GPT61_SOL: TierPrice = {
   input: 2,
   output: 10,
@@ -248,7 +250,7 @@ const OPENAI_ASTRA: TierPrice = {
   cacheWrite: 12.5,
   cacheRead: 1
 }
-// Official Image 2.5 model cards, checked 2026-09-13. Keep independent of Image 2.
+// Official Image 2.5/2.6 model cards, checked 2026-11-05. Independent of Image 2.
 const OPENAI_IMAGE_25: TierPrice = {
   input: 5,
   output: 0,
@@ -295,6 +297,7 @@ function openaiPrice(model: string): TierPrice {
   if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
   // "gpt-6.1-sol" misses the gpt-6 branch below ("." after the 6), and the
   // dashed "gpt-6-1-sol" would hit it and bill the older cache-read rate.
+  if (isGpt61TerraModel(model)) return OPENAI_GPT61_TERRA
   if (isGpt61SolModel(model)) return OPENAI_GPT61_SOL
   // gpt-6 Sol/Luna must be matched before the gpt-5.6 branch below: their ids
   // contain neither "5.6" nor "5-6", so without this they would fall all the
@@ -308,7 +311,7 @@ function openaiPrice(model: string): TierPrice {
     return OPENAI_GPT6_SOL
   }
   const m = model.toLowerCase()
-  if (isImage25Model(m)) return OPENAI_IMAGE_25
+  if (isNativeImageModel(m)) return OPENAI_IMAGE_25
   if (m.startsWith('gpt-image-2')) return OPENAI_IMAGE_2
   if (m.startsWith('gpt-image-1.5')) return OPENAI_IMAGE_15
   if (m.startsWith('gpt-image-1-mini')) return OPENAI_IMAGE_MINI
@@ -333,6 +336,7 @@ function openaiPrice(model: string): TierPrice {
 // page on 2026-09-03). Gemini 3.8/3.7/3.6 Flash share introductory pricing
 // through 2026-12-31, then move to the published standard rate.
 // ---------------------------------------------------------------------------
+const GEMINI_3_FLASH: TierPrice = { input: 0.5, output: 3, cacheWrite: 0, cacheRead: 0.05 }
 const GEMINI_31_PRO: TierPrice = {
   input: 2,
   output: 12,
@@ -394,12 +398,22 @@ const GEMINI_STALE_FLASH: TierPrice = {
   cacheRead: 0.075
 }
 
+export function isGeminiImageModel(model: string): boolean {
+  return /^gemini-(?:2\.5-flash|3(?:\.1)?-(?:pro|flash(?:-lite)?))-image/i.test(model)
+}
+function geminiImagePrice(model: string): TierPrice {
+  const lite = /flash-lite-image/i.test(model), pro = /pro-image/i.test(model)
+  const input = lite ? 0.25 : pro ? 2 : 0.5
+  return { input, output: lite ? 1.5 : pro ? 12 : 3, cacheWrite: 0, cacheRead: 0, imageInput: input, imageOutput: lite ? 30 : pro ? 120 : 60 }
+}
 function geminiPrice(model: string, atMs: number): TierPrice {
+  if (isGeminiImageModel(model)) return geminiImagePrice(model)
   const m = model.toLowerCase()
   if (ARGON_MODEL.test(m)) {
     return m.startsWith('gemini-4-argon-cyber-permissive') || atMs >= GEMINI_ARGON_STANDARD_AT
       ? GEMINI_ARGON_STANDARD : GEMINI_ARGON_PROMO
   }
+  if (/^gemini-3-flash(?:$|-)/.test(m)) return GEMINI_3_FLASH
   if (m.includes('2.5-pro')) return GEMINI_25_PRO
   if (m.includes('2.5-flash')) return GEMINI_25_FLASH
   if (m.includes('3.5-flash-lite')) return GEMINI_35_FLASH_LITE
@@ -737,6 +751,7 @@ interface SeedRow {
 }
 
 const SEED_ROWS: SeedRow[] = [
+  ...['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'].map(model => ({ provider: 'gemini', model, price: geminiImagePrice(model) })),
   ...GRSAI_MODELS.map(model => ({ provider: 'grsai', model, price: builtinPrice('grsai', model, Date.now())! })),
   // Claude — generic tiers + the legacy Opus 4.1 exception.
   { provider: 'claude', model: 'opus', price: CLAUDE_OPUS_REDUCED },
@@ -758,6 +773,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
+  { provider: 'openai', model: 'gpt-6.1-terra', price: OPENAI_GPT61_TERRA },
   { provider: 'openai', model: 'gpt-6.1-sol', price: OPENAI_GPT61_SOL },
   { provider: 'openai', model: 'gpt-6-sol', price: OPENAI_GPT6_SOL },
   { provider: 'openai', model: 'gpt-6-luna', price: OPENAI_GPT6_LUNA },
@@ -765,7 +781,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt-5.6-terra', price: OPENAI_GPT56_TERRA },
   { provider: 'openai', model: 'gpt-5.6-luna', price: OPENAI_GPT56_LUNA },
   { provider: 'openai', model: 'gpt-image-2', price: OPENAI_IMAGE_2 },
-  ...IMAGE_25_MODELS.map((model) => ({
+  ...NATIVE_IMAGE_MODELS.map((model) => ({
     provider: 'openai',
     model,
     price: OPENAI_IMAGE_25
@@ -785,6 +801,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'openai', model: 'gpt', price: OPENAI_GPT5 },
   { provider: 'openai', model: 'mini', price: OPENAI_MINI },
   // Gemini — exact rows for the discoverable models + generic fallbacks.
+  { provider: 'gemini', model: 'gemini-3-flash', price: GEMINI_3_FLASH },
+  { provider: 'gemini', model: 'gemini-3.1-pro-preview-customtools', price: GEMINI_31_PRO },
   { provider: 'gemini', model: 'gemini-4-argon', price: GEMINI_ARGON_PROMO },
   { provider: 'gemini', model: 'gemini-4-argon-cyber-permissive', price: GEMINI_ARGON_STANDARD },
   {
@@ -1106,7 +1124,7 @@ export async function loadPricing(): Promise<void> {
       ...(row.video_second_1080_price != null ? { videoSecond1080: Number(row.video_second_1080_price) } : {}),
       imageCacheRead:
         row.image_cache_read_price == null
-          ? isImage25Model(row.model)
+          ? isNativeImageModel(row.model)
             ? OPENAI_IMAGE_25.imageCacheRead
             : undefined
           : Number(row.image_cache_read_price)
@@ -1220,10 +1238,11 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // New families must not inherit a generic or sibling substring price.
   if (HAIKU_55_MODEL.test(model)
     && ['claude', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
+  if (isGeminiImageModel(model) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
   if (ARGON_MODEL.test(model) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
   if (
     (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) ||
-      isGpt61SolModel(normalizedModel) || isImage25Model(normalizedModel)) &&
+      isGpt61SolModel(normalizedModel) || isGpt61TerraModel(normalizedModel) || isNativeImageModel(normalizedModel)) &&
     (provider === 'openai' || provider === 'sub2api')
   ) {
     return builtinPrice(provider, model, atMs)
@@ -1317,7 +1336,9 @@ export function calculateUsageCost(provider: string, model: string, usage: Usage
   const p = priceSnapshot ?? resolveUsagePrice(provider, model, usage, atMs)
   if (!p) return 0
   const imagePrice = priceSnapshot ?? (usage.imageModel ? resolvePrice(provider, usage.imageModel, atMs) : p)
-  const cost =
+  const imageMode = usage.imageBillingMode ?? 'both'
+  const tokenFactor = imageMode === 'per_image' && p.imageRequest != null ? 0 : 1
+  const cost = tokenFactor *
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +
       usage.cacheCreateTokens * p.cacheWrite +
@@ -1328,7 +1349,11 @@ export function calculateUsageCost(provider: string, model: string, usage: Usage
     1_000_000
   const videoRate = usage.videoResolution === '1080p' ? p.videoSecond1080
     : usage.videoResolution === '768p' ? p.videoSecond768 : p.videoSecond480
-  return cost + (provider === 'grsai' ? Number((usage.imageCount ?? 0) > 0) : Math.max(0, usage.imageCount ?? 0)) * (p.imageRequest ?? 0)
+  const svg = usage.svgUsage
+  const svgPrice = svg ? resolveUsagePrice(provider, svg.model, { inputTokens: svg.inputTokens, outputTokens: svg.outputTokens,
+    reasoningTokens: svg.reasoningTokens, cacheReadTokens: 0, cacheCreateTokens: 0 }, atMs) : null
+  const svgCost = svg && svgPrice ? tokenFactor * (svg.inputTokens * svgPrice.input + svg.outputTokens * svgPrice.output) / 1_000_000 : 0
+  return cost + svgCost + (provider === 'grsai' ? Number((usage.imageCount ?? 0) > 0) : Math.max(0, usage.imageCount ?? 0)) * (imageMode === 'tokens' ? 0 : (p.imageRequest ?? 0))
     + Math.max(0, usage.videoSeconds ?? 0) * (videoRate ?? 0)
 }
 

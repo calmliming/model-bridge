@@ -1,3 +1,5 @@
+import { readWithDeadline, SseBudget, UpstreamResourceError } from '../../http/bodyLimits'
+import { config } from '../../config'
 import { cancelUpstreamResponse } from '../../http/cancellation'
 
 /** A semantic Responses terminal, including protocol errors, ends generation. */
@@ -19,14 +21,20 @@ export async function readResponsesSse(response: Response): Promise<string> {
   let buffer = ''
   let transcript = ''
   let terminal = false
+  let bytes = 0
+  const budget = new SseBudget()
   try {
     while (!terminal) {
-      const { done, value } = await reader.read()
+      const { done, value } = await readWithDeadline(reader)
       if (done) {
         transcript += buffer + decoder.decode()
         break
       }
-      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n')
+      bytes += value.byteLength
+      if (bytes > config.UPSTREAM_BUFFER_MAX_BYTES) throw new UpstreamResourceError('response_too_large', 'Buffered response is too large.')
+      const text = decoder.decode(value, { stream: true })
+      budget.feed(text)
+      buffer = (buffer + text).replace(/\r\n/g, '\n')
       let sep: number
       while ((sep = buffer.indexOf('\n\n')) !== -1) {
         const block = buffer.slice(0, sep)
@@ -38,6 +46,10 @@ export async function readResponsesSse(response: Response): Promise<string> {
         }
       }
     }
+  } catch (error) {
+    void reader.cancel().catch(() => {})
+    await cancelUpstreamResponse(response)
+    throw error
   } finally {
     reader.releaseLock()
     if (terminal) await cancelUpstreamResponse(response)

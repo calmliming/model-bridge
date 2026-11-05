@@ -29,6 +29,7 @@ export type UsageSource = 'upstream' | 'partial' | 'missing' | 'unknown'
 
 /** Token counts extracted from one relayed request. */
 export interface UsageData {
+  imageBillingMode?: 'tokens' | 'per_image' | 'both'
   usageSource?: UsageSource
   /** Actual processing tier reported upstream; not the requested tier. */
   serviceTier?: string
@@ -57,6 +58,8 @@ export interface UsageData {
   imageSize?: string
   /** GPT Image model that produced the output. */
   imageModel?: string
+  /** SVG author usage is separate from the image used as its reference. */
+  svgUsage?: { model: string; inputTokens: number; outputTokens: number; reasoningTokens: number }
   /** Successfully generated video duration, billed per second. */
   videoSeconds?: number
   videoResolution?: '480p' | '768p' | '1080p'

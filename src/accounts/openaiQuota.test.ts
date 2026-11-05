@@ -36,7 +36,8 @@ vi.mock('../providers/openai/quota', async (importOriginal) => {
   }
 })
 
-import { OpenAIQuotaError, queryOpenAIAccountQuota, resetOpenAIAccountQuota } from './openaiQuota'
+import { OpenAIQuotaError, queryOpenAIAccountQuota, queryOpenAIAccountQuotaReadOnly, resetOpenAIAccountQuota } from './openaiQuota'
+import { encrypt } from '../crypto'
 
 const quota: AccountQuotaSnapshot = {
   source: 'openai',
@@ -44,6 +45,24 @@ const quota: AccountQuotaSnapshot = {
   windows: [],
   resetCredits: 2,
 }
+
+describe('machine quota read permissions', () => {
+  it('queries with a valid stored token without credential recovery or scheduling changes', async () => {
+    manager.getAccount.mockResolvedValue({ ...openAIAccount({ openai: { chatgptAccountId: 'read-only-account' } }), oauthAccessToken: encrypt('read-token'), tokenExpiresAt: Date.now() + 3_600_000 })
+    openaiProvider.fetchOpenAIQuota.mockResolvedValue(quota)
+    await expect(queryOpenAIAccountQuotaReadOnly('acct-1')).resolves.toMatchObject({ quota })
+    expect(openaiProvider.fetchOpenAIQuota).toHaveBeenCalledWith('read-token', 'read-only-account')
+    expect(manager.ensureFreshToken).not.toHaveBeenCalled()
+    expect(manager.refreshAccountToken).not.toHaveBeenCalled()
+    expect(scheduler.clearAccountCooldown).not.toHaveBeenCalled()
+  })
+  it.each(['disabled', 'expired', 'reauth'])('requires administrator recovery for %s credentials', async state => {
+    manager.getAccount.mockResolvedValue({ ...openAIAccount({ openai: { chatgptAccountId: 'read-only-account' }, ...(state === 'reauth' ? { reauth: { required: true } } : {}) }), status: state === 'disabled' ? 'disabled' : 'active', tokenExpiresAt: state === 'expired' ? Date.now() - 1 : Date.now() + 3_600_000 })
+    await expect(queryOpenAIAccountQuotaReadOnly('acct-1')).rejects.toMatchObject({ statusCode: 409 })
+    expect(openaiProvider.fetchOpenAIQuota).not.toHaveBeenCalled()
+    expect(manager.refreshAccountToken).not.toHaveBeenCalled()
+  })
+})
 
 function openAIAccount(metadata: unknown) {
   return {

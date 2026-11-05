@@ -52,8 +52,19 @@ async function boundedText(response: Response): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+const inFlight = new Map<string, Promise<Manifest>>()
+
+export function fetchCodexManifest(input: Parameters<typeof fetchManifest>[0]): Promise<Manifest> {
+  const key = input.accountId + ':' + input.clientVersion
+  const pending = inFlight.get(key)
+  if (pending) return pending
+  const work = fetchManifest(input).finally(() => inFlight.delete(key))
+  inFlight.set(key, work)
+  return work
+}
+
 /** Fetches (or reuses for 60s) the upstream manifest for one account and client version. */
-export async function fetchCodexManifest(input: {
+async function fetchManifest(input: {
   accountId: string
   token: string
   chatgptAccountId?: string | null

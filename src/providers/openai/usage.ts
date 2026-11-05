@@ -2,6 +2,7 @@ import { hasReportedUsage } from '../usageSource'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
 interface OpenAIUsage {
+  prompt_cache_hit_tokens?: number
   input_tokens?: number
   output_tokens?: number
   input_tokens_details?: {
@@ -35,7 +36,7 @@ export function parseOpenAIUsagePayload(u: OpenAIUsage | undefined): UsageData {
   const usage = usageWithCachedInput(
     u?.input_tokens,
     u?.output_tokens,
-    u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens,
+    u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens ?? u?.prompt_cache_hit_tokens,
     u?.output_tokens_details?.reasoning_tokens,
     cacheWriteOf(u),
   )

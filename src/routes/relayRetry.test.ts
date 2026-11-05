@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config'
 import { classifyBufferedResponsesFailure, classifyUpstreamFailure, isCloudflareBotBlockResponse } from './relay'
 
 const now = Date.parse('2026-10-26T10:00:00Z')
@@ -6,6 +7,26 @@ beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(now) })
 afterEach(() => { vi.restoreAllMocks() })
 const overload = { code: 'server_is_overloaded', message: 'Our servers are currently overloaded. Please try again later.' }
 const failed = (error: Record<string, unknown>) => `data: ${JSON.stringify({ type: 'response.failed', response: { error } })}\n\n`
+
+describe('CN reset hint boundaries', () => {
+  it('uses the short fallback for a Kimi Retry-After zero instead of a past deadline', async () => {
+    const error = { error: { message: "You've reached your concurrent request limit. Please wait for your ongoing requests to finish and try again." } }
+    const failure = await classifyUpstreamFailure('kimi', Response.json(error, { status: 403, headers: { 'retry-after': '0' } }))
+    expect(failure.resetAt).toBe(now + config.CN_RATE_LIMIT_COOLDOWN_MS)
+  })
+  it('uses the quota fallback when an exhaustion reset timestamp is already past', async () => {
+    const failure = await classifyUpstreamFailure('qwen', Response.json({ error: { message: '余额不足' } }, { status: 402, headers: { 'x-ratelimit-reset-requests': String((now - 1000) / 1000) } }))
+    expect(failure.resetAt).toBe(now + config.CN_QUOTA_EXHAUSTED_COOLDOWN_MS)
+  })
+  it('respects a future provider hint even with the short fallback disabled', async () => {
+    const previous = config.CN_RATE_LIMIT_COOLDOWN_MS
+    config.CN_RATE_LIMIT_COOLDOWN_MS = 0
+    try {
+      const failure = await classifyUpstreamFailure('qwen', Response.json({ error: { message: '请求频率限制' } }, { status: 429, headers: { 'retry-after': '10' } }))
+      expect(failure).toMatchObject({ penalty: 'rate_limited', resetAt: now + 10000 })
+    } finally { config.CN_RATE_LIMIT_COOLDOWN_MS = previous }
+  })
+})
 
 describe('request overload retry hints', () => {
   it.each<{ headers: Record<string, string>; delay: number }>([

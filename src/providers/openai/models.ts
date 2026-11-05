@@ -19,7 +19,7 @@ export function isOpenAIReasoningModel(model: unknown): boolean {
 export function acceptsOpenAISamplingParams(model: unknown, reasoningEffort: unknown): boolean {
   if (!isOpenAIReasoningModel(model)) return true
   // GPT-6 Sol/Luna accept sampling controls when reasoning is turned off.
-  return reasoningEffort === 'none' && typeof model === 'string' && /^gpt-6-(?:sol|luna)(?:$|-)/i.test(model.trim())
+  return reasoningEffort === 'none' && typeof model === 'string' && (/^gpt-6-(?:sol|luna)(?:$|-)/i.test(model.trim()) || isGpt61TerraModel(model))
 }
 
 /** Retirement applies to ChatGPT subscription upstreams, not API-key gateways. */
@@ -35,4 +35,29 @@ export function validateOpenAISubscriptionModel(model: string): string {
     })
   }
   return model
+}
+
+/** Terra accepts disabled reasoning; both canonical spellings share pricing. */
+export function isGpt61TerraModel(model: unknown): boolean {
+  return typeof model === 'string' && /^gpt-6[.-]1-terra(?:$|-)/i.test(model.trim())
+}
+
+export function normalizeTerraRequest(body: Record<string, unknown>): Record<string, unknown> {
+  if (!isGpt61TerraModel(body.model)) return body
+  const out = { ...body }
+  const alias = /^gpt-6[.-]1-terra(?:-(none|low|medium|high|xhigh|max))?$/i.exec(String(body.model).trim())
+  const reasoning = body.reasoning && typeof body.reasoning === 'object' && !Array.isArray(body.reasoning) ? body.reasoning as Record<string, unknown> : {}
+  const explicit = reasoning.effort ?? body.reasoning_effort
+  const effort = explicit ?? alias?.[1]?.toLowerCase() ?? 'medium'
+  if (typeof effort !== 'string' || !['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) {
+    throw Object.assign(new Error('Unsupported GPT-6.1 Terra reasoning effort'), { statusCode: 400, code: 'unsupported_reasoning_effort' })
+  }
+  if (alias?.[1] && explicit !== undefined && explicit !== alias[1].toLowerCase()) {
+    throw Object.assign(new Error('Model alias and explicit reasoning effort disagree'), { statusCode: 400, code: 'conflicting_reasoning_effort' })
+  }
+  if (alias) out.model = 'gpt-6.1-terra'
+  if (Array.isArray(body.messages)) out.reasoning_effort = effort
+  else out.reasoning = { ...reasoning, effort }
+  if (effort !== 'none') for (const key of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) delete out[key]
+  return out
 }

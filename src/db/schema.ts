@@ -35,6 +35,7 @@ export const accountGroups = pgTable('account_groups', {
   // Billing markup applied to usage charged through this group. 1.0 = list
   // price; <1 discounts, >1 marks up. Keys bound to the group bill at this rate.
   rateMultiplier: doublePrecision('rate_multiplier').notNull().default(1),
+  imageBillingMode: text('image_billing_mode').notNull().default('both'),
   createdAt: epochMs('created_at'),
 })
 

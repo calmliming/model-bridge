@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     release,
     connect,
     calculateUsageCost: vi.fn(),
+    resolveUsagePrice: vi.fn(),
     debitWalletForUsage: vi.fn(),
     consumeSubscriptionUsage: vi.fn(),
     consumeWeightedSubscriptionUsage: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock('../db/index', () => ({
 vi.mock('./pricing', () => ({
   calculateUsageCost: mocks.calculateUsageCost,
   resolvePrice: () => null,
-  resolveUsagePrice: () => null,
+  resolveUsagePrice: mocks.resolveUsagePrice,
 }))
 
 vi.mock('../wallet/manager', () => ({
@@ -78,6 +79,7 @@ beforeEach(async () => {
   await rm(mocks.outboxDirectory, { recursive: true, force: true })
   vi.clearAllMocks()
   mocks.query.mockResolvedValue({ rows: [], rowCount: 0 })
+  mocks.resolveUsagePrice.mockReturnValue(null)
   mocks.consumeSubscriptionUsage.mockResolvedValue(true)
   mocks.consumeWeightedSubscriptionUsage.mockImplementation(async (_client, _id, points) => points)
 })
@@ -85,6 +87,25 @@ afterAll(async () => { await rm(mocks.outboxDirectory, { recursive: true, force:
 
 describe('durable streamed usage recovery', () => {
   const queue = new DurableQueue<any>(join(mocks.outboxDirectory, usageOutboxNamespace(config.DATABASE_URL)))
+  it('replays SVG author usage with its original billing price and total', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const authorPrice = { input: 0.1, output: 0.5, cacheWrite: 0.125, cacheRead: 0.01 }
+      mocks.calculateUsageCost.mockReturnValue(0.030535)
+      mocks.resolveUsagePrice.mockReturnValue(authorPrice)
+      mocks.query.mockRejectedValueOnce(new Error('database unavailable'))
+      expect(await recordStreamUsage(baseRecord({ provider: 'openai', model: 'gpt-image-2.6-flare', usage: { ...USAGE,
+        svgUsage: { model: 'gpt-6-luna', inputTokens: 100, outputTokens: 50, reasoningTokens: 20 } } }))).toBe(false)
+      expect((await queue.pending())[0]?.payload.settlement.svgPrice).toEqual(authorPrice)
+      mocks.resolveUsagePrice.mockReturnValue({ ...authorPrice, output: 999 })
+      mocks.calculateUsageCost.mockReturnValue(999)
+      await replayPendingUsage()
+      expect(insertParams()[19]).toBe(0.030535)
+      expect(JSON.parse(String(insertParams()[34]))).toMatchObject({ svg: { model: 'gpt-6-luna', inputTokens: 100, outputTokens: 50, price: authorPrice } })
+      expect(mocks.calculateUsageCost).toHaveBeenCalledTimes(1)
+      expect(await queue.pending()).toEqual([])
+    } finally { error.mockRestore() }
+  })
 
   it('automatically recovers pending usage on worker startup and stops cleanly', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})

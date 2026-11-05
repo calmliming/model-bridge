@@ -892,6 +892,52 @@ describe('Codex request headers', () => {
 })
 
 describe('upstream request compatibility', () => {
+  it.each([
+    ['gpt-image-2.6-flare', false], ['gpt-image-2.6-flare', true],
+    ['gpt-image-2.6-sunburst', false], ['gpt-image-2.6-sunburst', true],
+  ] as const)('routes %s through native images for stream=%s', (model, stream) => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(stream
+      ? sse([{ type: 'image_generation.completed', b64_json: 'AAAA', usage: { output_tokens: 20 } }])
+      : new Response(JSON.stringify({ data: [{ b64_json: 'AAAA' }], usage: { output_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model, prompt: 'Draw', complexity: 'low', stream }, '/api/openai/v1/images/generations')
+    expect(response.status).toBe(200)
+    expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://chatgpt.com/backend-api/codex/images/generations')
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model, complexity: 'low' })
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[15]).toBe(20)
+  }))
+
+  it('preserves SVG MIME and author billing metadata after a public model mapping', () => withRelay(async request => {
+    mocks.key.modelMappings = { drawing: 'gpt-image-2.6-sunburst' }
+    mocks.key.allowedModels = ['drawing']
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ b64_json: 'PHN2Zy8+' }], usage: { output_tokens: 100 },
+      svg_usage: { model: 'gpt-6-luna', input_tokens: 100, output_tokens: 50, reasoning_tokens: 20 } }), { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model: 'drawing', prompt: 'Draw', output_format: 'svg', response_format: 'url' }, '/v1/images/generations')
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body)).toMatchObject({ output_format: 'svg', data: [{ url: 'data:image/svg+xml;base64,PHN2Zy8+' }] })
+    expect(JSON.parse(String(mocks.logs[0]?.[34]))).toMatchObject({ svg: { model: 'gpt-6-luna', inputTokens: 100, outputTokens: 50, reasoningTokens: 20 } })
+    expect(mocks.logs[0]?.[36]).toBe('upstream')
+  }))
+
+  it('does not retry an SVG failure that has already consumed author tokens', () => withRelay(async request => {
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null })
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'Stopped' },
+      svg_usage: { model: 'gpt-6-luna', input_tokens: 100, output_tokens: 50 } }), { status: 429, headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model: 'gpt-image-2.6-flare', prompt: 'Draw', output_format: 'svg' }, '/v1/images/generations')
+    expect(response.status).toBe(429)
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(mocks.logs[0]?.[34]))).toMatchObject({ svg: { inputTokens: 100, outputTokens: 50 } })
+  }))
+
+  it('rejects incompatible Image 2.6 parameters after mapping before selecting an account', () => withRelay(async request => {
+    mocks.key.modelMappings = { drawing: 'gpt-image-2.6-flare' }
+    const response = await request({ model: 'drawing', prompt: 'Draw', output_format: 'gif', stream: true }, '/v1/images/generations')
+    expect(response.status).toBe(400)
+    expect(mocks.fetch).not.toHaveBeenCalled()
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+    expect(mocks.logs).toHaveLength(0)
+  }))
+
   it.each([false, true])('routes Image 2.5 directly and records cache/image buckets for stream=%s', stream => withRelay(async request => {
     const model = 'gpt-image-2.5-sunburst'
     const usage = { input_tokens: 1000, output_tokens: 500, input_tokens_details: { image_tokens: 600, cached_tokens: 300, cached_tokens_details: { image_tokens: 200, text_tokens: 100 } } }
@@ -1482,6 +1528,51 @@ describe('MiniMax and group admission', () => {
   }))
 })
 
+describe('bounded completion and cancellation follow-ups', () => {
+  it('converts SSE without the content-type and cancels a connection kept open after completion', () => withRelay(async request => {
+    mocks.key.allowedProviders = ['openai']
+    let cancelled = false
+    mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: 'response.completed', response: { id: 'resp_fixture', object: 'response', model: 'gpt-6.1-sol', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'completed without header' }] }], usage: { input_tokens: 20, output_tokens: 4 } } })}\n\n`)) },
+      cancel() { cancelled = true },
+    }), { headers: { 'content-type': 'text/plain' } }))
+    const result = await request({ model: 'gpt-6.1-sol', messages: [{ role: 'user', content: 'Hi' }], stream: false }, '/api/openai/v1/chat/completions')
+    expect(result.status).toBe(200)
+    expect(JSON.parse(result.body).choices[0].message.content).toBe('completed without header')
+    expect(cancelled).toBe(true)
+    expect(mocks.logs[0]?.slice(9, 11)).toEqual([20, 4])
+  }))
+
+  it('settles usage arriving shortly after the downstream has disconnected', async () => {
+    mocks.key.allowedProviders = ['claude']
+    mocks.key.concurrencyLimit = 1
+    let abortedBeforeTail = false
+    mocks.fetch.mockImplementation(async () => {
+      const signal = upstreamSignal()!
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"type":"message_start","message":{"usage":{"input_tokens":42}}}\n\n'))
+        setTimeout(() => {
+          abortedBeforeTail = signal.aborted
+          if (signal.aborted) { controller.error(signal.reason); return }
+          controller.enqueue(new TextEncoder().encode('data: {"type":"message_delta","usage":{"output_tokens":17}}\n\ndata: {"type":"message_stop"}\n\n'))
+          controller.close()
+        }, 100)
+      } }), { headers: { 'content-type': 'text/event-stream' } })
+    })
+    const app = Fastify(); registerRelayRoutes(app)
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    const client = new AbortController()
+    try {
+      const result = await fetch(`${origin}/v1/messages`, { method: 'POST', headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' }, body: JSON.stringify({ model: 'claude-sonnet-5', stream: true, messages: [{ role: 'user', content: 'Hi' }] }), signal: client.signal })
+      const reader = result.body!.getReader(); await reader.read(); client.abort(); await reader.cancel().catch(() => {})
+      await vi.waitFor(() => expect(mocks.logs).toHaveLength(1), { timeout: 3000 })
+      expect(abortedBeforeTail).toBe(false)
+      expect(mocks.logs[0]?.slice(9, 11)).toEqual([42, 17])
+      expect(mocks.penalizeAccount).not.toHaveBeenCalled()
+    } finally { client.abort(); await app.close(); await waitForPendingUsage() }
+  })
+})
+
 describe('client cancellation', () => {
   it.each([{ headersSent: false, provider: 'claude' }, { headersSent: true, provider: 'claude' },
     { headersSent: false, provider: 'qwen' }, { headersSent: true, provider: 'qwen' },
@@ -1536,12 +1627,13 @@ describe('client cancellation', () => {
         await reader.cancel().catch(() => {})
       } else client.abort()
       await result
+      // Cancellation after headers has a finite usage-drain window.
       await vi.waitFor(async () => {
         expect(canceled).toBe(true)
         expect(await currentConcurrency('account:account-1')).toBe(0)
         expect(await currentConcurrency('key-1')).toBe(0)
         expect(await currentConcurrency('user:user-1')).toBe(0)
-      })
+      }, { timeout: config.STREAM_DRAIN_TIMEOUT_MS + 2000 })
       expect(mocks.fetch).toHaveBeenCalledOnce()
       expect(mocks.penalizeAccount).not.toHaveBeenCalled()
       expect(mocks.penalizeAccountModel).not.toHaveBeenCalled()

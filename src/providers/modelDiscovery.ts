@@ -2,7 +2,7 @@ import { isAllowedModel, isGroupModelAllowed } from '../keys/modelAllowlist'
 import { mapRequestedModel } from '../keys/modelMapping'
 import type { ProviderId } from './types'
 import type { CatalogModel } from './modelCatalog'
-import { IMAGE_25_MODELS } from './openai/imageModels'
+import { NATIVE_IMAGE_MODELS } from './openai/imageModels'
 import { isRetiredOpenAISubscriptionModel } from './openai/models'
 import { isForwardableDeepseekModel } from './deepseek/converter'
 import { isRetiredXiaomiModel } from './xiaomi/converter'
@@ -45,6 +45,7 @@ const CREATED_AT = 1_704_067_200
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grsai'>, string[]> = {
   claude: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
+    'gpt-6.1-terra',
     'gpt-6.1-sol',
     'gpt-6-astra',
     'gpt-6-sol',
@@ -58,7 +59,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
     // filter below rejects it after mappings. Historical pricing stays intact.
     'gpt-5.5',
     'gpt-image-2',
-    ...IMAGE_25_MODELS
+    ...NATIVE_IMAGE_MODELS
   ],
   gemini: [
     'gemini-4-argon',
@@ -68,8 +69,11 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
     'gemini-3.1-pro-preview',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash'
+    'gemini-3-flash',
+    'gemini-3.1-pro-preview-customtools',
+    'gemini-3.1-flash-lite-image',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image-preview'
   ],
   deepseek: ['deepseek-flash', 'deepseek-v4-pro'],
   // MiMo V2.5 is retired (see isRetiredXiaomiModel); V2.6 replaces it.

@@ -588,6 +588,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <div class="card mb-5 p-4"><a href="/app/mcp" class="font-medium text-primary-600">连接 MCP 应用 →</a><p class="mt-1 text-sm text-gray-500">授权应用只读查询自己的余额和用量。</p></div>
   <div class="user-overview">
     <UiSpin :show="loading">
       <div class="overview-hero">

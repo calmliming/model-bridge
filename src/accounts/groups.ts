@@ -7,6 +7,7 @@ export interface CreateGroupInput {
   name: string
   description?: string | null
   rateMultiplier?: number
+  imageBillingMode?: 'tokens' | 'per_image' | 'both'
   allowedModels?: string[] | null
 }
 
@@ -14,6 +15,7 @@ export interface UpdateGroupPatch {
   name?: string
   description?: string | null
   rateMultiplier?: number
+  imageBillingMode?: 'tokens' | 'per_image' | 'both'
   allowedModels?: string[] | null
 }
 
@@ -30,6 +32,7 @@ export async function createGroup(input: CreateGroupInput): Promise<{ id: string
     id,
     name: input.name,
     description: input.description ?? null,
+    imageBillingMode: input.imageBillingMode ?? 'both',
     allowedModels: input.allowedModels ?? null,
     rateMultiplier: normalizeMultiplier(input.rateMultiplier),
   })
@@ -43,6 +46,7 @@ export async function listGroups() {
       id: accountGroups.id,
       name: accountGroups.name,
       description: accountGroups.description,
+      imageBillingMode: accountGroups.imageBillingMode,
       allowedModels: accountGroups.allowedModels,
       rateMultiplier: accountGroups.rateMultiplier,
       createdAt: accountGroups.createdAt,
@@ -67,6 +71,7 @@ export async function groupExists(id: string): Promise<boolean> {
 /** Updates a group's name/description/multiplier. Only provided fields change. */
 export async function updateGroup(id: string, patch: UpdateGroupPatch): Promise<void> {
   const set: Record<string, unknown> = {}
+  if (patch.imageBillingMode !== undefined) set.imageBillingMode = patch.imageBillingMode
   if (patch.name !== undefined) set.name = patch.name
   if (patch.description !== undefined) set.description = patch.description
   if (patch.allowedModels !== undefined) set.allowedModels = patch.allowedModels

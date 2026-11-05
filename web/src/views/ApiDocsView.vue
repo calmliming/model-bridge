@@ -14,6 +14,7 @@ type DocSection =
   | 'image-generation' | 'image-edit'
   | 'image-gpt-image-2' | 'image-gpt-image-25' | 'image-gpt-image-vip'
   | 'image-gpt-image-flare' | 'image-gpt-image-sunburst'
+  | 'image-gpt-image-26'
   | 'video-generation' | 'video-result' | 'video-async' | 'video-minimax-h3'
   | 'streaming' | 'models' | 'errors' | 'integration'
 
@@ -146,6 +147,7 @@ const navigationGroups: NavigationGroup[] = [
     label: '图片模型',
     items: [
       { id: 'image-generation', label: '图片接口通用说明', icon: 'image-generation', description: '/images/generations', method: 'POST' },
+      { id: 'image-gpt-image-26', label: 'GPT Image 2.6', icon: 'image-generation', description: 'Flare / Sunburst · SVG / GIF', method: 'POST' },
       { id: 'image-gpt-image-2', label: 'gpt-image-2', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
       { id: 'image-gpt-image-25', label: 'gpt-image-2.5', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
       { id: 'image-gpt-image-vip', label: 'gpt-image-2-vip', icon: 'image-generation', description: '1K–4K · medium', method: 'POST' },
@@ -1056,12 +1058,31 @@ anthropic-version: 2023-06-01</code></pre>
           </section>
         </section>
 
+        <section v-else-if="activeSection === 'image-gpt-image-26'" class="article-body">
+          <div class="endpoint-bar"><span class="method-post">POST</span><code>{{ baseOrigin }}/api/openai/v1/images/generations</code><UiButton size="tiny" secondary @click="copy(`${baseOrigin}/api/openai/v1/images/generations`)">复制地址</UiButton></div>
+          <p class="doc-copy"><code>gpt-image-2.6-flare</code> 面向快速迭代，<code>gpt-image-2.6-sunburst</code> 面向精细构图与编辑。使用已开通 OpenAI 权限的 Key；可用性以账号实际模型权限为准。</p>
+          <section class="article-section">
+            <h2>参数与计费</h2>
+            <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody>
+              <tr><td><code>complexity</code></td><td>low / medium / high，默认 high；控制构图规划，与 quality 独立。</td></tr>
+              <tr><td><code>output_format</code></td><td>生成支持 png / jpeg / webp / svg / gif；编辑支持 png / jpeg / webp。</td></tr>
+              <tr><td><code>SVG</code></td><td>n=1，不支持流式、partial_images、output_compression 或 prompt_rewriter。可传 svg.model 与 svg.reasoning.effort 选择作者模型，须有相应上游权限。</td></tr>
+              <tr><td><code>GIF</code></td><td>frame_count 为 2–16，默认 9；frame_duration_ms 为 20–2000，默认 200。不支持流式、partial_images、output_compression 或 prompt_rewriter。</td></tr>
+              <tr><td><code>markup</code></td><td>编辑时上传与首张原图同尺寸的透明 PNG（最大 50 MB）；JSON 使用含 image_url 的对象，不能与 mask 或 prompt_rewriter 合用。</td></tr>
+            </tbody></table></div>
+            <p class="doc-copy">每百万 Token：文本输入 $5、缓存读取 $1.25；图片输入 $8、图片缓存读取 $2、图片输出 $30。SVG 作者用量按返回的 svg_usage.model 单独计价。分组倍率与人工价格配置仍会生效。</p>
+            <p class="doc-note">响应保留 Base64；response_format=url 会转换为对应 MIME 类型的 data URL。SVG 和 GIF 需要账号具备相应上游权限。</p>
+          </section>
+          <section class="article-section"><h2>生成与格式调试</h2><ImageApiExplorer :api-key="testerApiKey" mode="generation" :base-url="`${baseOrigin}/api/openai/v1`" @request-authorization="openAuthorization" /></section>
+          <section class="article-section"><h2>编辑与标注调试</h2><p class="doc-copy">编辑接口为 <code>/api/openai/v1/images/edits</code>，支持 JSON 或 multipart 上传。</p><ImageApiExplorer :api-key="testerApiKey" mode="edit" :base-url="`${baseOrigin}/api/openai/v1`" @request-authorization="openAuthorization" /></section>
+        </section>
+
         <section v-else-if="activeSection === 'image-generation'" class="article-body">
           <div class="endpoint-bar">
             <span class="method-post">POST</span><code>{{ baseOrigin }}/api/media/v1/images/generations</code>
             <UiButton size="tiny" secondary @click="copy(`${baseOrigin}/api/media/v1/images/generations`)">复制地址</UiButton>
           </div>
-          <p class="doc-copy">所有图片模型共用这一组请求与响应约定：请求体为 <code>application/json</code>，一次请求生成一张图片，响应结构与 OpenAI Images 一致。标准路径 <code>{{ apiBaseUrl }}/images/generations</code> 完全等价——只开通图片 / 视频权限的 Key 会自动落到同一渠道，同时开通文本权限时推荐显式使用 <code>/api/media/v1</code>。</p>
+          <p class="doc-copy">下列平台图片渠道模型共用这一组请求与响应约定：请求体为 <code>application/json</code>，一次请求生成一张图片，响应结构与 OpenAI Images 一致。标准路径 <code>{{ apiBaseUrl }}/images/generations</code> 完全等价——只开通图片 / 视频权限的 Key 会自动落到同一渠道，同时开通文本权限时推荐显式使用 <code>/api/media/v1</code>。GPT Image 2.6 使用独立的 OpenAI 接入入口，详见左侧型号说明。</p>
 
           <section class="article-section">
             <h2>模型与参数契约</h2>

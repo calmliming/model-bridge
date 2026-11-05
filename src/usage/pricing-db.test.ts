@@ -71,6 +71,16 @@ describe('scheduled database price overrides', () => {
     await loadPricing()
     expect(resolvePrice('openai', 'gpt-image-2.5-flare')).toMatchObject({ input: 5, imageInput: 8, imageCacheRead: 2, imageOutput: 30 })
   })
+  it('keeps Image 2.6 prices independent while honoring exact operator overrides', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ ...priceRow('gpt-image-2', 1, 2, 0.1, 'openai'), image_input_price: 1, image_output_price: 2 }] })
+    await loadPricing()
+    for (const model of ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']) {
+      expect(resolvePrice('openai', model)).toMatchObject({ input: 5, imageInput: 8, imageCacheRead: 2, imageOutput: 30 })
+    }
+    mocks.query.mockResolvedValue({ rows: [{ ...priceRow('gpt-image-2.6-flare', 9, 0, 1, 'openai'), image_input_price: 10, image_output_price: 40 }] })
+    await loadPricing()
+    expect(resolvePrice('openai', 'gpt-image-2.6-flare')).toMatchObject({ input: 9, imageInput: 10, imageOutput: 40, imageCacheRead: 2 })
+  })
   it('bills gemini-3.7-flash at the promo rate and switches over in 2027', async () => {
     // The seeded row holds the promo tuple, which isManagedScheduledDefault
     // recognises, so resolvePrice discards it and falls through to the built-in

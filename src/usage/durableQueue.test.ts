@@ -15,7 +15,8 @@ describe('durable encrypted usage queue', () => {
     const files = await readdir(directory)
     expect(files).toEqual([`${id}.pending`])
     expect(await readFile(join(directory, files[0]!), 'utf8')).not.toContain('private request')
-    expect((await stat(join(directory, files[0]!))).mode & 0o777).toBe(0o600)
+    // POSIX mode bits are not ACLs on Windows; ciphertext is checked on all platforms.
+    if (process.platform !== 'win32') expect((await stat(join(directory, files[0]!))).mode & 0o777).toBe(0o600)
     const queue = new DurableQueue(directory)
     expect((await queue.pending())[0]!.payload).toEqual({ prompt: 'private request', cost: 1.25 })
     await queue.ack(id)

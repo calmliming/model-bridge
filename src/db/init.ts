@@ -1,3 +1,4 @@
+import { initManagementDb } from '../management/schema'
 import { pool } from './index'
 
 /**
@@ -35,6 +36,7 @@ export async function initDb(): Promise<void> {
     );
 
     ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS allowed_models JSONB;
+    ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS image_billing_mode TEXT NOT NULL DEFAULT 'both';
 
     CREATE TABLE IF NOT EXISTS account_group_members (
       account_id TEXT NOT NULL,
@@ -513,6 +515,8 @@ export async function initDb(): Promise<void> {
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS subscription_id TEXT;
     ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS subscription_points DOUBLE PRECISION;
   `)
+
+  await initManagementDb()
 
   // One-time backfill: migrate the legacy single-group accounts.group_id into
   // the many-to-many membership table. Gated by a settings flag so it runs

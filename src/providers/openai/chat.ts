@@ -33,6 +33,7 @@ interface ChatToolCall {
 }
 
 interface ResponsesUsage {
+  prompt_cache_hit_tokens?: number
   input_tokens?: number
   output_tokens?: number
   input_tokens_details?: {
@@ -323,7 +324,7 @@ function usageDataFromResponses(usage: ResponsesUsage | undefined): UsageData {
   return usageWithCachedInput(
     usage?.input_tokens,
     usage?.output_tokens,
-    d?.cached_tokens ?? usage?.cached_tokens,
+    d?.cached_tokens ?? usage?.cached_tokens ?? usage?.prompt_cache_hit_tokens,
     undefined,
     d?.cache_write_tokens ?? d?.cache_creation_tokens ?? usage?.cache_creation_tokens,
   )
@@ -333,7 +334,7 @@ function chatUsageFromResponses(usage: ResponsesUsage | undefined): ChatUsage | 
   if (!usage) return undefined
   const prompt = usage.input_tokens ?? 0
   const completion = usage.output_tokens ?? 0
-  const cached = usage.input_tokens_details?.cached_tokens ?? usage.cached_tokens ?? 0
+  const cached = usage.input_tokens_details?.cached_tokens ?? usage.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0
   return {
     prompt_tokens: prompt,
     completion_tokens: completion,

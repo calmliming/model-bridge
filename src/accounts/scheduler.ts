@@ -1,3 +1,4 @@
+import { accountAllowsImageTier, imageTierPreference, type ImageSizeTier } from '../providers/openai/imageSizeTiers'
 import { and, eq, inArray, lte, ne, notExists, sql } from 'drizzle-orm'
 import { db } from '../db/index'
 import { accountGroupMembers, accounts } from '../db/schema'
@@ -45,6 +46,7 @@ export async function pickAccount(
   sessionKey?: string | null,
   groupId?: string | null,
   model?: string | null,
+  imageTier?: ImageSizeTier | 'auto',
 ) {
   const now = Date.now()
   await clearExpiredAccountCooldowns(now)
@@ -98,9 +100,13 @@ export async function pickAccount(
           ),
         ))
 
+  if (provider === 'openai' && imageTier && imageTier !== 'auto' && rows.length && rows.every(a => !accountAllowsImageTier(a.metadata, imageTier))) {
+    throw Object.assign(new Error('No account in this group supports the requested image size tier'), { statusCode: 400, code: 'image_size_tier_unavailable' })
+  }
   const available = rows.filter(
     (a) =>
       !exclude.includes(a.id) &&
+      (!imageTier || imageTier === 'auto' || provider !== 'openai' || accountAllowsImageTier(a.metadata, imageTier)) &&
       (!a.cooldownUntil || a.cooldownUntil < now) &&
       !(model && (modelCooldownUntil(a.metadata, model) ?? 0) > now),
   )
@@ -121,6 +127,7 @@ export async function pickAccount(
   // an account has no known reset time.
   if (provider === 'openai' && (await getOpenAiSchedulingStrategy()) === 'prefer_soonest_reset') {
     available.sort((a, b) => {
+      if (imageTier === 'auto') { const diff = imageTierPreference(a.metadata) - imageTierPreference(b.metadata); if (diff) return diff }
       const aReset = soonestReset(a.metadata, now)
       const bReset = soonestReset(b.metadata, now)
       // Unknown resets are both Infinity; subtracting them would return NaN

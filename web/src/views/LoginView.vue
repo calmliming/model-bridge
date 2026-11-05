@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api, errMsg } from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -9,6 +9,12 @@ import GoogleSignIn from '../components/GoogleSignIn.vue'
 import BrandLogo from '../components/BrandLogo.vue'
 
 const router = useRouter()
+const route = useRoute()
+function goAfterLogin(name: string) {
+  const target = route.query.returnTo
+  return typeof target === 'string' && target.startsWith('/') && !target.startsWith('//') && !target.includes('\\')
+    ? router.push(target) : router.push({ name })
+}
 const message = useMessage()
 const auth = useAuthStore()
 
@@ -67,7 +73,7 @@ function resetTurnstile() {
 
 function googleSignedIn(session: { token: string; user: { email: string } }) {
   auth.setSession(session.token, session.user.email, 'user')
-  void router.push({ name: 'user-overview' })
+  void goAfterLogin('user-overview')
 }
 
 function setMode(next: 'login' | 'register') {
@@ -96,10 +102,10 @@ async function login() {
     })
     if (data.role === 'admin') {
       auth.setSession(data.token, data.username, 'admin')
-      void router.push({ name: 'overview' })
+      void goAfterLogin('overview')
     } else {
       auth.setSession(data.token, data.user.email, 'user')
-      void router.push({ name: 'user-overview' })
+      void goAfterLogin('user-overview')
     }
   } catch (e) {
     resetTurnstile()
@@ -158,7 +164,7 @@ async function verifyRegistration() {
     const { data } = await api.post('/auth/register/verify', { email: regEmail.value.trim(), code })
     auth.setSession(data.token, data.user.email, 'user')
     message.success('邮箱验证成功，注册完成')
-    void router.push({ name: 'user-overview' })
+    void goAfterLogin('user-overview')
   } catch (e) {
     formError.value = errMsg(e, '验证失败，请检查验证码后重试')
   } finally {

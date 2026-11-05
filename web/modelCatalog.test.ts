@@ -87,16 +87,19 @@ describe('current provider model catalog', () => {
     expect(media.map(model => model.id)).toEqual(['gpt-image-2', 'gpt-image-2-vip', 'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'minimax-h3'])
     expect(media.filter(model => model.image).every(model => model.provider === 'openai')).toBe(true)
     expect(model('minimax-h3').provider).toBe('minimax')
-    expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(13)
+    expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(16)
     expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(5)
-    expect(MODEL_CATALOG).toHaveLength(61)
-    expect(MODEL_CATALOG.filter(model => model.image)).toEqual(media.filter(model => model.image))
+    expect(MODEL_CATALOG).toHaveLength(67)
+    const nativeImages = MODEL_CATALOG.filter(model => model.image && model.provider === 'openai' && !model.channel)
+    expect(nativeImages.map(model => model.id)).toEqual(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])
+    expect(nativeImages.every(model => model.imageRequestPrice == null && model.imageOutputPrice === 30 && model.imageCacheReadPrice === 2)).toBe(true)
+    expect(MODEL_CATALOG.filter(model => model.image && model.provider === 'gemini')).toHaveLength(3)
     // Price refreshes must not restore native snapshots or image aliases, but
     // discovering new text models should continue to work.
     const refreshed = withAutoSurfacedModels(Object.fromEntries([
       'gpt-image-2.5-flare-2026-09-08', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-3', 'gpt-new-text-model',
     ].map(id => [id, { inputPrice: 5, outputPrice: 30 }])))
-    expect(refreshed.catalog.filter(model => model.id.startsWith('gpt-image-'))).toEqual(media.filter(model => model.image))
+    expect(refreshed.catalog.filter(model => model.id.startsWith('gpt-image-'))).toEqual([...nativeImages, ...media.filter(model => model.image)])
     expect(refreshed.autoSurfacedIds).toEqual(['gpt-new-text-model'])
     expect(Object.values(PROVIDERS).some(provider => provider.label === 'Model Bridge')).toBe(false)
     expect(JSON.stringify({ models: MODEL_CATALOG, providers: PROVIDERS })).not.toMatch(/grsai|第三方供应商/i)

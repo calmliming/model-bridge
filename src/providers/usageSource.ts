@@ -20,7 +20,7 @@ export function createUsageSourceTracker() {
       const message = row(root.message)
       const type = typeof root.type === 'string' ? root.type : ''
       const usage = root.usage ?? response?.usage ?? message?.usage ?? root.usageMetadata ?? response?.usageMetadata
-      const hasUsage = hasReportedUsage(usage)
+      const hasUsage = hasReportedUsage(usage) || hasReportedUsage(root.svg_usage)
       seen ||= hasUsage
       const candidates = root.candidates ?? response?.candidates
       const blockReason = row(root.promptFeedback ?? response?.promptFeedback)?.blockReason
@@ -35,7 +35,7 @@ export function createUsageSourceTracker() {
       // must not promote an earlier partial snapshot to a complete count.
       finalUsage ||= (claudeTerminal && claudeOutput) || (hasUsage && (
         buffered || responseDone || geminiTerminal ||
-        /(?:image_generation|image_generation_call)\.completed$/.test(type) ||
+        /(?:image_generation|image_edit|image_generation_call)\.completed$/.test(type) ||
         (typeof u?.prompt_tokens === 'number' && typeof u?.completion_tokens === 'number')
       ))
     },

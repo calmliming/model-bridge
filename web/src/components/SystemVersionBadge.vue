@@ -42,7 +42,7 @@ const dialog = useDialog()
 
 const rootEl = ref<HTMLElement | null>(null)
 const dropdownOpen = ref(false)
-const appVersion = ref<string | null>(null)
+const appVersion = ref<string | null>(import.meta.env.VITE_APP_VERSION ?? null)
 const appCommit = ref<string | null>(null)
 const updateCheck = ref<UpdateCheck | null>(null)
 const checkingUpdates = ref(false)

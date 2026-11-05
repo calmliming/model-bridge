@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { isProviderAllowed, listGeminiModels, listModelIdsForKey, listOpenAIStyleModels, type ModelDiscoveryKey } from './modelDiscovery'
-const image25Models = [
+const nativeImageModels = [
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
   'gpt-image-2.5-flare-2026-09-08',
-  'gpt-image-2.5-sunburst-2026-09-08'
+  'gpt-image-2.5-sunburst-2026-09-08',
+  'gpt-image-2.6-flare',
+  'gpt-image-2.6-sunburst'
 ]
 
 describe('model discovery', () => {
@@ -174,7 +176,8 @@ describe('model discovery', () => {
     })
     expect(models).toEqual(
       expect.arrayContaining([
-        'gpt-6.1-sol',
+        'gpt-6.1-terra',
+      'gpt-6.1-sol',
         'claude-fable-5-1',
         'claude-sonnet-5-5',
         'claude-sonnet-5',
@@ -214,6 +217,7 @@ describe('model discovery', () => {
     expect(isProviderAllowed('openai', key)).toBe(true)
     expect(isProviderAllowed('deepseek', key)).toBe(false)
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
@@ -222,7 +226,7 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-image-2',
-      ...image25Models
+      ...nativeImageModels
     ])
   })
 
@@ -232,6 +236,7 @@ describe('model discovery', () => {
       allowedModels: ['gpt-*', 'deepseek-v4-pro']
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
@@ -240,7 +245,7 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-image-2',
-      ...image25Models,
+      ...nativeImageModels,
       'deepseek-v4-pro',
       'gpt-image-2-vip',
       'gpt-image-2.5'
@@ -267,6 +272,7 @@ describe('model discovery', () => {
       modelMappings: { 'gpt-public': 'gpt-5.4' }
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
       'gpt-6-sol',
@@ -275,7 +281,7 @@ describe('model discovery', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-image-2',
-      ...image25Models,
+      ...nativeImageModels,
       'gpt-public'
     ])
   })
@@ -334,17 +340,18 @@ describe('model discovery', () => {
         supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
-        name: 'models/gemini-2.5-pro',
+        name: 'models/gemini-3-flash',
         version: '001',
-        displayName: 'Gemini 2.5 Pro',
+        displayName: 'Gemini 3 Flash',
         supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
       },
       {
-        name: 'models/gemini-2.5-flash',
+        name: 'models/gemini-3.1-pro-preview-customtools',
         version: '001',
-        displayName: 'Gemini 2.5 Flash',
+        displayName: 'Gemini 3.1 Pro Preview Customtools',
         supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
-      }
+      },
+      ...[['gemini-3.1-flash-lite-image', 'Gemini 3.1 Flash Lite Image'], ['gemini-3.1-flash-image-preview', 'Gemini 3.1 Flash Image Preview'], ['gemini-3-pro-image-preview', 'Gemini 3 Pro Image Preview']].map(([id, name]) => ({ name: 'models/' + id, displayName: name, version: '001', supportedGenerationMethods: ['generateContent', 'streamGenerateContent'] }))
     ])
   })
 })

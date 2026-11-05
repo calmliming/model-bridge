@@ -1,3 +1,4 @@
+import { validAdminSessionVersion } from '../auth/sessionVersion'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 
 /**
@@ -11,8 +12,12 @@ export async function requireAdmin(
   try {
     await request.jwtVerify()
     const role = (request.user as { role?: string } | undefined)?.role
-    if (role && role !== 'admin') {
+    if (role !== 'admin') {
       void reply.code(403).send({ error: 'admin access required' })
+      return
+    }
+    if (!validAdminSessionVersion((request.user as { ver?: number }).ver)) {
+      void reply.code(401).send({ error: 'admin session revoked; please sign in again' })
       return
     }
   } catch {
