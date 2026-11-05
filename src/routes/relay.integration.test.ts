@@ -207,6 +207,35 @@ async function withRelay(run: (request: (
 }
 
 describe('GrsAI image relay', () => {
+  it.each([
+    ['/v1/images/generations', null, false, false],
+    ['/v1/images/generations', ['openai', 'grsai'], true, true],
+    ['/api/media/v1/images/generations', ['grsai'], false, false],
+    ['/api/grsai/v1/images/generations', ['grsai'], false, true],
+    ['/v1/images/edits', ['openai', 'grsai'], true, false],
+    ['/api/media/v1/images/edits', ['grsai'], false, true],
+  ] as const)('routes Image 2.6 basic on %s (providers=%j, alias=%s, stream=%s)', async (url, providers, alias, stream) => {
+    mocks.key.allowedProviders = providers
+    mocks.key.accountGroupId = 'image-group'
+    if (alias) mocks.key.modelMappings = { picture: 'gpt-image-2.6' }
+    mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'supplier-26', status: 'succeeded', results: [{ url: 'https://files.example.com/cat.gif' }] }))
+    await withRelay(async request => {
+      const edits = url.endsWith('/edits')
+      const images = ['https://example.com/input.png']
+      const response = await request({ model: alias ? 'picture' : 'gpt-image-2.6', prompt: 'cat', size: '1024x1024', quality: 'auto',
+        response_format: 'url', stream, ...(edits ? { images } : {}) }, url)
+      expect(response.status).toBe(200)
+      expect(mocks.pickAccount.mock.calls[0]![0]).toBe('grsai')
+      expect(mocks.pickAccount.mock.calls[0]![3]).toBe('image-group')
+      expect(mocks.fetch).toHaveBeenCalledOnce()
+      expect(mocks.fetch.mock.calls[0]![0]).toBe('https://grsai.dakka.com.cn/v1/api/generate')
+      expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body)).toMatchObject({ model: 'gpt-image-2.6', quality: 'auto', aspectRatio: '1024x1024', images: edits ? images : [] })
+      expect(mocks.logs[0]![4]).toBe('grsai')
+      expect(mocks.logs[0]![16]).toBe(1)
+      expect(response.body).toContain('https://files.example.com/cat.gif')
+      if (stream) expect(response.body).toContain(`event: ${edits ? 'image_edit' : 'image_generation'}.completed`)
+    })
+  })
   it.each([false, true])('routes supplier-only keys on the standard path, stream=%s', async stream => {
     mocks.key.allowedProviders = ['grsai']
     mocks.key.accountGroupId = 'image-group'

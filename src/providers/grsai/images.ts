@@ -11,7 +11,8 @@ export function buildGrsaiImageRequest(body: OpenAIImagesRequestBody) {
   if (!isGrsaiImageModel(body.model)) throw new ProviderRequestError('invalid_image_model', 'unsupported GPT Image model')
   if (body.n !== 1) throw new ProviderRequestError('invalid_image_request', 'image generation supports n=1; submit separate requests for multiple images')
   if (body.images.some(image => image.file_id)) throw new ProviderRequestError('invalid_image_request', 'image edits require image URLs or base64 instead of file_id')
-  for (const field of ['output_format', 'output_compression', 'partial_images', 'moderation', 'input_fidelity', 'style']) {
+  for (const field of ['output_format', 'output_compression', 'partial_images', 'moderation', 'input_fidelity', 'style',
+    'complexity', 'frame_count', 'frame_duration_ms', 'markup', 'prompt_rewriter', 'svg']) {
     if (body[field] != null) throw new ProviderRequestError('invalid_image_request', `image generation does not support ${field}`)
   }
   return parseGrsaiGenerateRequest({ model: body.model, prompt: body.prompt, replyType: 'json',

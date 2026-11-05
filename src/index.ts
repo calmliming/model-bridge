@@ -6,12 +6,10 @@ import { startAdminSessionVersions, stopAdminSessionVersions } from './auth/sess
 import { registerIngressMemory } from './http/ingressMemory'
 import { stopStickyCleanup } from './accounts/session'
 import { closeAntigravityDispatcher } from './providers/antigravity/client'
-import { existsSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { join } from 'node:path'
 import Fastify from 'fastify'
 import fastifyJwt from '@fastify/jwt'
-import fastifyStatic from '@fastify/static'
 import fastifyFormbody from '@fastify/formbody'
 import { config } from './config'
 import { pool } from './db/index'
@@ -29,6 +27,7 @@ import { registerRelayRoutes } from './routes/relay'
 import { registerUsageRoutes } from './routes/usage'
 import { registerPaymentCallbackRoutes } from './routes/payment-callback'
 import { registerSecurityHeaders } from './middleware/securityHeaders'
+import { registerDashboardRoutes } from './http/dashboard'
 import { startTokenRefreshJob } from './jobs/tokenRefresh'
 import { startQuotaAutopauseJob } from './jobs/quotaAutopause'
 import { closeOauthCallbackServer, startOauthCallbackServer } from './oauthCallback'
@@ -107,6 +106,9 @@ async function main(): Promise<void> {
   registerSecurityHeaders(app)
   app.addHook('onRequest', panelRateLimit)
 
+  // Register browser navigation before relay routes sharing the /models URL.
+  await registerDashboardRoutes(app, join(process.cwd(), 'web', 'dist'))
+
   app.get('/health', async () => ({ status: 'ok', service: 'model-bridge' }))
 
   registerAuthRoutes(app)
@@ -131,25 +133,6 @@ async function main(): Promise<void> {
   registerUsageRoutes(app)
   registerPaymentCallbackRoutes(app)
   await registerWaffoRoutes(app)
-
-  // Serve the built admin dashboard (web/dist) if it has been built.
-  const webDist = join(process.cwd(), 'web', 'dist')
-  if (existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist })
-    app.setNotFoundHandler((request, reply) => {
-      if (
-        request.url.startsWith('/api') ||
-        request.url.startsWith('/v1') ||
-        request.url.startsWith('/v1beta') ||
-        request.url.startsWith('/health')
-      ) {
-        return reply.code(404).send({ error: 'not found' })
-      }
-      return reply.sendFile('index.html') // SPA history fallback
-    })
-  } else {
-    app.log.warn('web/dist not found — run "npm run build" in web/ to serve the dashboard')
-  }
 
   await app.listen({ port: config.PORT, host: config.HOST })
   app.log.info({ trustedProxies: TRUSTED_LOCAL_PROXIES }, 'local proxy forwarding enabled')

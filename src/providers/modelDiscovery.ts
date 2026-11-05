@@ -116,7 +116,7 @@ const PROVIDERS: ProviderId[] = [
 
 function inferProvider(model: string): ProviderId | null {
   const lower = model.toLowerCase()
-  if (lower === 'minimax-h3' || lower === 'gpt-image-2-vip' || lower === 'gpt-image-2.5') return 'grsai'
+  if (lower === 'minimax-h3' || lower === 'gpt-image-2-vip' || lower === 'gpt-image-2.5' || lower === 'gpt-image-2.6') return 'grsai'
   if (lower.startsWith('claude-')) return 'claude'
   if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3')) return 'openai'
   if (lower.startsWith('gemini-')) return 'gemini'

@@ -6,12 +6,12 @@ import { buildGrsaiImageRequest, createGrsaiImageStream, grsaiImageUsage, relayG
 import { parseOpenAIImagesRequest } from '../openai/images'
 import { estimateCost } from '../../usage/pricing'
 import { emptyUsage } from '../types'
-import { listModelIdsForKey, listOpenAIStyleModels } from '../modelDiscovery'
+import { inferProviderForModel, listModelIdsForKey, listOpenAIStyleModels } from '../modelDiscovery'
 
 const video = { model: 'minimax-h3', prompt: 'camera follows a cat', aspectRatio: 'landscape', resolution: '768p', duration: 10 }
 const image = (fields = {}) => parseOpenAIImagesRequest({ model: 'gpt-image-2.5-flare', prompt: 'cat', response_format: 'url', ...fields }, 'application/json', 'generations', { deferModelValidation: true })
 const completed = { id: 'supplier-task-1', status: 'succeeded', results: [{ url: 'https://files.example.com/image.png' }] }
-beforeEach(() => { vi.clearAllMocks() })
+beforeEach(() => { vi.resetAllMocks() })
 
 describe('GrsAI parameters', () => {
   it('normalizes documented nodes and suffixes while rejecting unsafe URLs', () => {
@@ -35,6 +35,26 @@ describe('GrsAI parameters', () => {
     expect(() => parseGrsaiGenerateRequest({ model: 'gpt-image-2.5-flare', prompt: 'cat', aspectRatio: '16:9' })).toThrow('WIDTHxHEIGHT')
     expect(() => parseGrsaiGenerateRequest({ model: 'gpt-image-2.5-flare', prompt: 'cat', quality: 'max' })).toThrow('quality')
     expect(parseGrsaiGenerateRequest({ model: 'gpt-image-2.5-sunburst', prompt: 'cat', quality: 'max', aspectRatio: '2880x2880', background: 'transparent' }).quality).toBe('max')
+  })
+  it.each(['auto', '16:9', '1024x1024', '1536x1024'])('accepts Image 2.6 basic parameters with size=%s', size => {
+    expect(buildGrsaiImageRequest(image({ model: 'gpt-image-2.6', quality: 'auto', size })))
+      .toMatchObject({ model: 'gpt-image-2.6', quality: 'auto', aspectRatio: size, replyType: 'json' })
+  })
+  it.each([
+    [{ size: '2048x2048' }, '1K'],
+    [{ quality: 'high' }, 'quality'],
+    [{ background: 'transparent' }, 'transparent'],
+    [{ n: 2 }, 'n=1'],
+    [{ output_format: 'gif' }, 'output_format'],
+    [{ frame_count: 9 }, 'frame_count'],
+    [{ frame_duration_ms: 200 }, 'frame_duration_ms'],
+    [{ complexity: 'high' }, 'complexity'],
+    [{ markup: { image_url: 'https://example.com/markup.png' } }, 'markup'],
+    [{ prompt_rewriter: true }, 'prompt_rewriter'],
+    [{ svg: { model: 'gpt-6-luna' } }, 'svg'],
+  ] as const)('rejects unsupported Image 2.6 basic fields %j before generation', (fields, error) => {
+    expect(() => buildGrsaiImageRequest(image({ model: 'gpt-image-2.6', ...fields }))).toThrow(error)
+    expect(mocks.fetch).not.toHaveBeenCalled()
   })
   it('translates edits and rejects unsupported parameters before generation', () => {
     const edit = parseOpenAIImagesRequest({ model: 'gpt-image-2-vip', prompt: 'edit', images: ['https://example.com/input.png'], mask: 'data:image/png;base64,YQ==', quality: 'medium', size: '2048x2048' }, 'application/json', 'edits', { deferModelValidation: true })
@@ -94,6 +114,17 @@ describe('GrsAI transport', () => {
     expect(mocks.fetch).toHaveBeenCalledOnce()
     expect(mocks.mediaFetch).toHaveBeenCalledExactlyOnceWith(completed.results[0]!.url, expect.any(AbortSignal))
   })
+  it.each(['url', 'b64_json'])('preserves Image 2.6 GIF output for response_format=%s', async response_format => {
+    const url = 'https://files.example.com/animation.gif'
+    const gif = Buffer.from('GIF89a')
+    mocks.fetch.mockResolvedValueOnce(Response.json({ ...completed, results: [{ url }] }))
+    mocks.mediaFetch.mockResolvedValueOnce(new Response(gif, { headers: { 'content-type': 'image/gif' } }))
+    const response = await relayGrsaiImages('secret', image({ model: 'gpt-image-2.6', quality: 'auto', response_format }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ data: response_format === 'url' ? [{ url }] : [{ b64_json: gif.toString('base64') }], usage: { image_count: 1 } })
+    expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body)).toMatchObject({ model: 'gpt-image-2.6', quality: 'auto' })
+    expect(mocks.mediaFetch).toHaveBeenCalledTimes(response_format === 'url' ? 0 : 1)
+  })
   it('fails closed when a generated image URL is rejected by the public-only downloader', async () => {
     mocks.fetch.mockResolvedValueOnce(Response.json(completed))
     mocks.mediaFetch.mockRejectedValueOnce(new Error('upstream URL resolves to a non-public address'))
@@ -122,12 +153,28 @@ describe('GrsAI discovery and media prices', () => {
     const key = { allowedProviders: ['grsai'], allowedModels: null, modelMappings: { picture: 'gpt-image-2' } }
     expect(listModelIdsForKey(key)).toContain('minimax-h3')
     expect(listModelIdsForKey(key)).toContain('gpt-image-2.5-flare')
+    expect(listModelIdsForKey(key)).toContain('gpt-image-2.6')
     expect(listModelIdsForKey(key)).toContain('picture')
     expect(listOpenAIStyleModels(key).every(model => model.owned_by === 'modelbridge')).toBe(true)
     expect(listModelIdsForKey({ ...key, groupAllowedModels: ['minimax-h3'] })).toEqual(['minimax-h3'])
   })
+  it('discovers Image 2.6 basic and aliases under the media provider while keeping native variants on OpenAI', () => {
+    const key = { allowedProviders: ['openai', 'grsai'], allowedModels: ['gpt-image-2.6', 'picture'], modelMappings: { picture: 'gpt-image-2.6' } }
+    expect(inferProviderForModel('gpt-image-2.6')).toBe('grsai')
+    expect(inferProviderForModel('gpt-image-2.6-flare')).toBe('openai')
+    expect(inferProviderForModel('gpt-image-2.6-sunburst')).toBe('openai')
+    expect(listOpenAIStyleModels(key)).toEqual([
+      expect.objectContaining({ id: 'gpt-image-2.6', owned_by: 'modelbridge' }),
+      expect.objectContaining({ id: 'picture', owned_by: 'modelbridge' }),
+    ])
+    expect(listModelIdsForKey(key, 'openai')).toEqual([])
+    expect(listModelIdsForKey({ ...key, groupAllowedModels: ['picture'] })).toEqual(['picture'])
+  })
   it('bills images per request and H3 per resolution/second without token prices', () => {
     expect(estimateCost('grsai', 'gpt-image-2.5', { ...emptyUsage(), imageCount: 1 })).toBe(0.0042)
+    expect(estimateCost('grsai', 'gpt-image-2.6', { ...emptyUsage(), imageCount: 1 })).toBe(0.0042)
+    expect(estimateCost('grsai', 'gpt-image-2.6', { ...emptyUsage(), imageCount: 3 })).toBe(0.0042)
+    expect(estimateCost('grsai', 'gpt-image-2.6', emptyUsage())).toBe(0)
     expect(estimateCost('grsai', 'gpt-image-2.5-flare', { ...emptyUsage(), imageCount: 1 })).toBe(0.014)
     expect(estimateCost('grsai', 'minimax-h3', { ...emptyUsage(), videoSeconds: 10, videoResolution: '1080p' })).toBe(0.21)
     expect(estimateCost('grsai', 'minimax-h3', { ...emptyUsage(), videoSeconds: 5, videoResolution: '768p' })).toBe(0.049)

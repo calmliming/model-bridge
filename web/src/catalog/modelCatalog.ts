@@ -247,12 +247,13 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     context: '1K–4K', inputPrice: 5, outputPrice: 0, cacheReadPrice: 1.25,
     imageInputPrice: 8, imageCacheReadPrice: 2, imageOutputPrice: 30, badge: 'new' as const,
   })),
-  ...Object.entries({ 'gpt-image-2': 0.0042, 'gpt-image-2-vip': 0.014, 'gpt-image-2.5': 0.0042,
+  ...Object.entries({ 'gpt-image-2': 0.0042, 'gpt-image-2-vip': 0.014, 'gpt-image-2.5': 0.0042, 'gpt-image-2.6': 0.0042,
     'gpt-image-2.5-flare': 0.014, 'gpt-image-2.5-sunburst': 0.0168 }).map(([id, imageRequestPrice]): PlazaModel => ({
       id, name: id.replace('gpt-image-', 'GPT Image ').replaceAll('-', ' '), provider: 'openai', channel: 'modelbridge', image: true, categories: ['image', 'multimodal'],
-      tags: ['图像生成', '生成 / 编辑'],
-      description: 'GPT 图片生成和编辑，支持图片接口及异步任务。成功后按次计费。',
-      context: ['gpt-image-2', 'gpt-image-2.5'].includes(id) ? '1K' : '1K–4K',
+      tags: ['图像生成', '生成 / 编辑', ...(id === 'gpt-image-2.6' ? ['GIF'] : [])],
+      description: id === 'gpt-image-2.6' ? 'GPT Image 2.6 图片生成和编辑，支持 1K 与 GIF、图片接口及异步任务。成功后按次计费。'
+        : 'GPT 图片生成和编辑，支持图片接口及异步任务。成功后按次计费。',
+      context: ['gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.6'].includes(id) ? '1K' : '1K–4K',
       inputPrice: 0, outputPrice: 0, imageRequestPrice,
     })),
   { id: 'minimax-h3', name: 'MiniMax H3', provider: 'minimax', channel: 'modelbridge', video: true,

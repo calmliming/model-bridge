@@ -40,7 +40,7 @@ export function parseGrsaiGenerateRequest(raw: unknown): GrsaiGenerateRequest {
     if (body.quality || body.background || body.mask) invalid('quality, background and mask are image-only parameters')
   } else {
     if (body.audios || body.resolution || body.duration || body.seed != null) invalid('audios, resolution, duration and seed are video-only parameters')
-    const basic = ['gpt-image-2', 'gpt-image-2.5'].includes(body.model)
+    const basic = ['gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.6'].includes(body.model)
     const allowedQuality = basic ? ['auto'] : body.model === 'gpt-image-2-vip' ? ['medium']
       : body.model.endsWith('-flare') ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh', 'max']
     if (body.quality && !allowedQuality.includes(body.quality)) invalid(`quality for ${body.model} must be ${allowedQuality.join(', ')}`)

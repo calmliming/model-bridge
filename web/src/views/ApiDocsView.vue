@@ -14,7 +14,7 @@ type DocSection =
   | 'image-generation' | 'image-edit'
   | 'image-gpt-image-2' | 'image-gpt-image-25' | 'image-gpt-image-vip'
   | 'image-gpt-image-flare' | 'image-gpt-image-sunburst'
-  | 'image-gpt-image-26'
+  | 'image-gpt-image-26' | 'image-gpt-image-26-media'
   | 'video-generation' | 'video-result' | 'video-async' | 'video-minimax-h3'
   | 'streaming' | 'models' | 'errors' | 'integration'
 
@@ -147,9 +147,10 @@ const navigationGroups: NavigationGroup[] = [
     label: '图片模型',
     items: [
       { id: 'image-generation', label: '图片接口通用说明', icon: 'image-generation', description: '/images/generations', method: 'POST' },
-      { id: 'image-gpt-image-26', label: 'GPT Image 2.6', icon: 'image-generation', description: 'Flare / Sunburst · SVG / GIF', method: 'POST' },
+      { id: 'image-gpt-image-26', label: 'GPT Image 2.6 Flare / Sunburst', icon: 'image-generation', description: 'OpenAI · SVG / GIF', method: 'POST' },
       { id: 'image-gpt-image-2', label: 'gpt-image-2', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
       { id: 'image-gpt-image-25', label: 'gpt-image-2.5', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
+      { id: 'image-gpt-image-26-media', label: 'gpt-image-2.6', icon: 'image-generation', description: '1K · GIF · 按次计费', method: 'POST' },
       { id: 'image-gpt-image-vip', label: 'gpt-image-2-vip', icon: 'image-generation', description: '1K–4K · medium', method: 'POST' },
       { id: 'image-gpt-image-flare', label: 'gpt-image-2.5-flare', icon: 'image-generation', description: '1K–4K · 三档质量', method: 'POST' },
       { id: 'image-gpt-image-sunburst', label: 'gpt-image-2.5-sunburst', icon: 'image-generation', description: '1K–4K · 五档质量', method: 'POST' },
@@ -210,10 +211,10 @@ const filteredNavigationGroups = computed(() => {
 })
 
 const generationParameters: ParameterRow[] = [
-  { name: 'model', type: 'string', required: true, defaultValue: '—', description: '图片模型：gpt-image-2、gpt-image-2-vip、gpt-image-2.5、gpt-image-2.5-flare、gpt-image-2.5-sunburst。' },
+  { name: 'model', type: 'string', required: true, defaultValue: '—', description: '图片模型：gpt-image-2、gpt-image-2-vip、gpt-image-2.5、gpt-image-2.6、gpt-image-2.5-flare、gpt-image-2.5-sunburst。' },
   { name: 'prompt', type: 'string', required: true, defaultValue: '—', description: '描述目标图片的提示词，最长 10 万字符。' },
   { name: 'size', type: 'string', required: false, defaultValue: 'auto', description: '基础款支持 auto、比例（如 16:9）或 1K 像素值；VIP / Flare / Sunburst 支持 1K–4K 像素值，宽高比不超过 3:1，像素值须为 16 的倍数。' },
-  { name: 'quality', type: 'string', required: false, defaultValue: '模型默认', description: 'gpt-image-2 与 2.5 仅 auto；vip 仅 medium；flare 支持 low / medium / high；sunburst 另有 xhigh / max。' },
+  { name: 'quality', type: 'string', required: false, defaultValue: '模型默认', description: 'gpt-image-2、2.5 与 2.6 基础款仅 auto；vip 仅 medium；flare 支持 low / medium / high；sunburst 另有 xhigh / max。' },
   { name: 'background', type: 'string', required: false, defaultValue: 'auto', description: 'auto、opaque 或 transparent；基础款不支持透明背景。' },
   { name: 'n', type: 'integer', required: false, defaultValue: '1', description: '固定为 1，批量出图请提交多个请求；n 大于 1 会返回 400。' },
   { name: 'response_format', type: 'string', required: false, defaultValue: 'b64_json', description: 'url 直接返回图片地址；b64_json 由平台代下载后返回 Base64，图片地址不可访问时会报 502。' },
@@ -510,6 +511,34 @@ const imageModelDocs: MediaModelDoc[] = [
   -H "Authorization: Bearer mb-xxxxxxxx" \\
   -H "Content-Type: application/json" \\
   -d '{"model":"gpt-image-2.5","prompt":"雨夜霓虹街道，电影感","size":"1024x1024","response_format":"url"}'`,
+  },
+  {
+    section: 'image-gpt-image-26-media', modelId: 'gpt-image-2.6', label: 'gpt-image-2.6',
+    summary: '2.6 代基础款，支持 1K 图片与 GIF，使用图片 / 视频权限并按次计费。',
+    endpoint: '/api/media/v1/images/generations',
+    params: [
+      { name: 'model', type: 'string', required: true, defaultValue: '—', description: '固定为 gpt-image-2.6。' },
+      { name: 'prompt', type: 'string', required: true, defaultValue: '—', description: '提示词，最长 10 万字符。' },
+      { name: 'size', type: 'string', required: false, defaultValue: 'auto', description: 'auto、比例（16:9 等）或 1K 像素值（如 1024x1024）；不支持 2K / 4K。' },
+      { name: 'quality', type: 'string', required: false, defaultValue: 'auto', description: '只支持 auto，传其它值返回 400。' },
+      { name: 'background', type: 'string', required: false, defaultValue: 'auto', description: 'auto 或 opaque；不支持 transparent。' },
+      { name: 'response_format / stream', type: '—', required: false, defaultValue: 'b64_json / false', description: '支持 url / b64_json 及 SSE 最终结果。' },
+    ],
+    traits: [
+      { name: '分辨率', value: '1K' },
+      { name: '质量档', value: 'auto' },
+      { name: '输出能力', value: '图片 / GIF' },
+      { name: '参考图编辑', value: '走 /images/edits' },
+    ],
+    pricing: '按成功生成的次数计费，与 gpt-image-2.5 同价；失败与违规不计费。',
+    example: `curl ${baseOrigin.value}/api/media/v1/images/generations \\
+  -H "Authorization: Bearer mb-xxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"gpt-image-2.6","prompt":"一只坐在窗边的橘猫，午后阳光","size":"1024x1024","quality":"auto","response_format":"url"}'`,
+    notes: [
+      '模型列表标注支持 GIF；上游文档未提供独立的输出格式或帧数参数，此通道不接受 output_format、frame_count、frame_duration_ms。',
+      '此型号使用图片 / 视频权限；gpt-image-2.6-flare 与 gpt-image-2.6-sunburst 使用独立的 OpenAI 通道和 Token 计费。',
+    ],
   },
   {
     section: 'image-gpt-image-vip', modelId: 'gpt-image-2-vip', label: 'gpt-image-2-vip',
@@ -1082,7 +1111,7 @@ anthropic-version: 2023-06-01</code></pre>
             <span class="method-post">POST</span><code>{{ baseOrigin }}/api/media/v1/images/generations</code>
             <UiButton size="tiny" secondary @click="copy(`${baseOrigin}/api/media/v1/images/generations`)">复制地址</UiButton>
           </div>
-          <p class="doc-copy">下列平台图片渠道模型共用这一组请求与响应约定：请求体为 <code>application/json</code>，一次请求生成一张图片，响应结构与 OpenAI Images 一致。标准路径 <code>{{ apiBaseUrl }}/images/generations</code> 完全等价——只开通图片 / 视频权限的 Key 会自动落到同一渠道，同时开通文本权限时推荐显式使用 <code>/api/media/v1</code>。GPT Image 2.6 使用独立的 OpenAI 接入入口，详见左侧型号说明。</p>
+          <p class="doc-copy">下列平台图片渠道模型共用这一组请求与响应约定：请求体为 <code>application/json</code>，一次请求生成一张图片，响应结构与 OpenAI Images 一致。标准路径 <code>{{ apiBaseUrl }}/images/generations</code> 完全等价——只开通图片 / 视频权限的 Key 会自动落到同一渠道，同时开通文本权限时推荐显式使用 <code>/api/media/v1</code>。<code>gpt-image-2.6</code> 属于此按次计费渠道；<code>gpt-image-2.6-flare</code> / <code>gpt-image-2.6-sunburst</code> 使用独立的 OpenAI 接入入口，详见左侧型号说明。</p>
 
           <section class="article-section">
             <h2>模型与参数契约</h2>
@@ -1095,6 +1124,7 @@ anthropic-version: 2023-06-01</code></pre>
             <div class="table-wrap"><table class="doc-table"><thead><tr><th>模型</th><th>分辨率</th><th>quality</th><th>透明背景</th></tr></thead><tbody>
               <tr><td><code>gpt-image-2</code></td><td>1K</td><td>auto</td><td>不支持</td></tr>
               <tr><td><code>gpt-image-2.5</code></td><td>1K</td><td>auto</td><td>不支持</td></tr>
+              <tr><td><code>gpt-image-2.6</code></td><td>1K</td><td>auto</td><td>不支持</td></tr>
               <tr><td><code>gpt-image-2-vip</code></td><td>1K–4K</td><td>medium</td><td>支持</td></tr>
               <tr><td><code>gpt-image-2.5-flare</code></td><td>1K–4K</td><td>low / medium / high</td><td>支持</td></tr>
               <tr><td><code>gpt-image-2.5-sunburst</code></td><td>1K–4K</td><td>low / medium / high / xhigh / max</td><td>支持</td></tr>

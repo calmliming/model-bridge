@@ -248,7 +248,8 @@ describe('model discovery', () => {
       ...nativeImageModels,
       'deepseek-v4-pro',
       'gpt-image-2-vip',
-      'gpt-image-2.5'
+      'gpt-image-2.5',
+      'gpt-image-2.6'
     ])
   })
 

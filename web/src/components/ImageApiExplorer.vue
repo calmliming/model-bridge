@@ -52,7 +52,7 @@ watch([model, requestedOutputFormat], () => {
   if (!outputFormatOptions.value.includes(requestedOutputFormat.value)) requestedOutputFormat.value = 'png'
   if (!['png', 'webp'].includes(requestedOutputFormat.value) && background.value === 'transparent') background.value = 'auto'
 })
-const basicImageModel = computed(() => isMedia.value && ['gpt-image-2', 'gpt-image-2.5'].includes(model.value))
+const basicImageModel = computed(() => isMedia.value && ['gpt-image-2', 'gpt-image-2.5', 'gpt-image-2.6'].includes(model.value))
 const qualityOptions = computed(() => (isMedia.value ? basicImageModel.value ? ['auto'] : model.value === 'gpt-image-2-vip' ? ['medium']
   : model.value.endsWith('-flare') ? ['low', 'medium', 'high'] : ['low', 'medium', 'high', 'xhigh', 'max']
   : ['auto', 'low', 'medium', 'high', 'xhigh', 'max']).map(value => ({ label: value, value })))
