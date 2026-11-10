@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink } from 'vue-router'
 import { useMessage } from '../composables/useMessage'
 import { api } from '../api/client'
 import {
   CATEGORIES,
-  MODEL_CATALOG,
   PROVIDERS,
   resolveModelPrice,
   withAutoSurfacedModels,
@@ -16,10 +15,6 @@ import {
 } from '../catalog/modelCatalog'
 
 const message = useMessage()
-const route = useRoute()
-const isAdmin = computed(() => route.meta.role === 'admin')
-const accountCount = ref<number | null>(null)
-const sortOrder = ref('default')
 const compareIds = ref<string[]>([])
 const showCompare = ref(false)
 
@@ -43,7 +38,6 @@ async function refreshPrices() {
 
 onMounted(() => {
   void refreshPrices()
-  if (isAdmin.value) void api.get('/admin/accounts').then(({ data }) => { accountCount.value = data.accounts.length }).catch(() => {})
   priceClockTimer = setInterval(() => {
     priceClock.value = Date.now()
     void refreshPrices()
@@ -57,6 +51,7 @@ onUnmounted(() => {
 
 // Filter by model manufacturer; the supply channel is shown on media cards.
 const providerList = Object.values(PROVIDERS)
+const providerOptions = [{ label: '全部厂商', value: 'all' }, ...providerList.map(provider => ({ label: provider.label, value: provider.id }))]
 
 const categoryTabs = [{ key: 'all', label: '全部' }, ...CATEGORIES]
 const categoryLabel = (key: string) => CATEGORIES.find((c) => c.key === key)?.label ?? key
@@ -69,7 +64,7 @@ const autoSurfaced = computed(() => new Set(surfaced.value.autoSurfacedIds))
 
 const filtered = computed(() => {
   const kw = search.value.trim().toLowerCase()
-  const models = catalog.value.filter((m) => {
+  return catalog.value.filter((m) => {
     if (activeCategory.value !== 'all' && !m.categories.includes(activeCategory.value)) return false
     if (activeProvider.value !== 'all' && m.provider !== activeProvider.value) return false
     if (kw) {
@@ -78,17 +73,9 @@ const filtered = computed(() => {
     }
     return true
   })
-  if (sortOrder.value === 'name') models.sort((a, b) => a.name.localeCompare(b.name))
-  if (sortOrder.value === 'price') models.sort((a, b) => billingGroup(a) - billingGroup(b) || startingPrice(a) - startingPrice(b))
-  return models
 })
 
 const compareModels = computed(() => catalog.value.filter(model => compareIds.value.includes(`${model.provider}:${model.id}`)))
-const billingGroup = (model: PlazaModel) => model.video ? 2 : model.imageRequestPrice != null ? 1 : 0
-function startingPrice(model: PlazaModel) {
-  const price = currentPrice(model)
-  return model.video ? price.videoSecond480Price ?? 0 : model.imageRequestPrice != null ? price.imageRequestPrice ?? 0 : price.inputPrice
-}
 function priceSummary(model: PlazaModel) {
   const price = currentPrice(model)
   if (model.video) return `${formatPrice(price.videoSecond480Price ?? 0)} / 秒起（480p）`
@@ -258,12 +245,10 @@ function openDetail(model: PlazaModel) {
           <span class="text-gray-400 dark:text-dark-500">{{ providerCount(p.id) }}</span>
         </button>
       </div>
-      <div class="flex flex-wrap items-end gap-3">
-        <label class="min-w-0 flex-1 sm:hidden"><span class="field-label text-xs">厂商</span><select v-model="activeProvider" class="input" aria-label="模型厂商"><option value="all">全部厂商</option><option v-for="provider in providerList" :key="provider.id" :value="provider.id">{{ provider.label }}</option></select></label>
-        <label class="min-w-0 flex-1 sm:max-w-60"><span class="field-label text-xs">排序</span><select v-model="sortOrder" class="input" aria-label="模型排序"><option value="default">默认顺序</option><option value="price">起价升序（同单位）</option><option value="name">模型名称</option></select></label>
-        <div v-if="isAdmin" class="flex flex-wrap gap-3 text-sm text-primary-700"><span v-if="accountCount != null" class="text-gray-500">已接入 {{ accountCount }} 个账号</span><RouterLink to="/model-catalog" class="hover:underline">动态模型</RouterLink><RouterLink to="/accounts" class="hover:underline">上游账户</RouterLink></div>
+      <div class="sm:hidden">
+        <span class="field-label text-xs">厂商</span>
+        <UiSelect v-model:value="activeProvider" :options="providerOptions" aria-label="模型厂商" />
       </div>
-      <p class="text-xs leading-5 text-gray-500">这里展示模型目录与基础价格；实际可调用范围由 API Key 权限、账号池和额度决定。</p>
       <div v-if="compareModels.length" class="flex flex-wrap items-center gap-3 rounded-xl border border-primary-200 bg-primary-50 p-3 text-sm dark:border-primary-800 dark:bg-primary-900/20"><span>待对比：{{ compareModels.map(model => model.name).join('、') }}</span><UiButton size="small" type="primary" :disabled="compareModels.length < 2" @click="showCompare = true">对比模型（{{ compareModels.length }}）</UiButton><UiButton size="small" quaternary @click="compareIds = []">清空</UiButton></div>
     </div>
 

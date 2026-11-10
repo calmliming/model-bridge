@@ -47,19 +47,19 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 const inFlight = new Map<string, Promise<unknown>>()
-export function syncAccountCatalog(id: string, options: { force?: boolean } = { force: true }): Promise<unknown> {
+export function syncAccountCatalog(id: string): Promise<unknown> {
   const pending = inFlight.get(id)
   if (pending) return pending
-  const work = sync(id, options.force === true).finally(() => inFlight.delete(id))
+  const work = sync(id).finally(() => inFlight.delete(id))
   inFlight.set(id, work)
   return work
 }
-async function sync(id: string, force: boolean) {
+async function sync(id: string) {
   const account = await getAccount(id)
   if (!account) throw new Error('账号不存在')
   if (account.status === 'disabled') throw new Error('停用账号不能同步目录')
   const fresh = readCatalogSnapshot(account.metadata, catalogSourceKey(account.provider, account.proxyUrl))
-  if (!force && fresh && Date.now() - fresh.syncedAt < CATALOG_REFRESH_MS) return fresh
+  if (fresh && Date.now() - fresh.syncedAt < CATALOG_REFRESH_MS) return fresh
   const endpoint = catalogEndpoint(account.provider, account.proxyUrl)
   const attemptAt = Date.now()
   try {
@@ -81,18 +81,6 @@ async function sync(id: string, force: boolean) {
     await updateAccountMetadata(id, { modelCatalogAttemptAt: attemptAt, modelCatalogError: reason }, { attemptAt, provider: account.provider, proxyUrl: account.proxyUrl })
     throw new Error(reason)
   }
-}
-
-export async function listAccountCatalogs() {
-  const { rows } = await pool.query('SELECT id, name, provider, status, proxy_url, metadata FROM accounts ORDER BY created_at DESC')
-  return rows.map(row => {
-    const snapshot = readCatalogSnapshot(row.metadata, catalogSourceKey(row.provider, row.proxy_url))
-    return { id: row.id, name: row.name, provider: row.provider, status: row.status,
-      supported: (CATALOG_PROVIDERS as readonly string[]).includes(row.provider),
-      syncedAt: snapshot?.syncedAt ?? null, stale: !snapshot || Date.now() - snapshot.syncedAt > CATALOG_REFRESH_MS,
-      error: typeof row.metadata?.modelCatalogError === 'string' ? row.metadata.modelCatalogError : null,
-      models: snapshot?.models ?? [] }
-  })
 }
 
 export async function cachedAccountCatalogs(groupId: string | null, providers: readonly string[]) {
@@ -134,7 +122,7 @@ export function startModelCatalogJob(): () => Promise<void> {
       [CATALOG_PROVIDERS, Date.now() - CATALOG_REFRESH_MS])
       for (const row of rows) {
         if (stopping) break
-        await syncAccountCatalog(row.id, { force: false }).catch(() => {})
+        await syncAccountCatalog(row.id).catch(() => {})
       }
     })().catch(() => console.error('[model-catalog] refresh sweep failed')).finally(() => { running = null })
   }, 60_000)

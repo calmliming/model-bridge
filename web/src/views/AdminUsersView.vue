@@ -53,6 +53,11 @@ const users = ref<UserRow[]>([])
 const loading = ref(true)
 const search = ref('')
 const statusFilter = ref('all')
+const statusOptions = [
+  { label: '全部状态', value: 'all' },
+  { label: '已启用', value: 'active' },
+  { label: '已禁用', value: 'disabled' },
+]
 const managedUser = ref<UserRow | null>(null)
 const filteredUsers = computed(() => users.value.filter(row => `${row.name} ${row.email}`.toLowerCase().includes(search.value.trim().toLowerCase()) && (statusFilter.value === 'all' || row.status === statusFilter.value)))
 const showInvite = ref(false)
@@ -471,7 +476,10 @@ onMounted(load)
 <template>
   <div>
     <div class="page-head">
-      <div class="flex min-w-0 flex-1 flex-wrap gap-3"><UiInput v-model:value="search" aria-label="搜索用户" placeholder="搜索名称或邮箱" class="!w-full sm:!w-72" /><select v-model="statusFilter" class="input !w-auto" aria-label="用户状态"><option value="all">全部用户</option><option value="active">启用</option><option value="disabled">禁用</option></select></div>
+      <div class="flex min-w-0 flex-1 flex-wrap gap-3">
+        <UiInput v-model:value="search" aria-label="搜索用户" placeholder="搜索名称或邮箱" class="!w-full sm:!w-72" />
+        <UiSelect v-model:value="statusFilter" class="w-32" :options="statusOptions" aria-label="用户状态" />
+      </div>
       <UiButton type="primary" @click="showInvite = true">邀请用户</UiButton>
     </div>
 

@@ -60,6 +60,11 @@ const groups = ref<AccountGroup[]>([])
 const users = ref<UserRow[]>([])
 const search = ref('')
 const statusFilter = ref('all')
+const statusOptions = [
+  { label: '全部状态', value: 'all' },
+  { label: '已启用', value: 'enabled' },
+  { label: '已禁用', value: 'disabled' },
+]
 const showAllColumns = ref(false)
 const actionKey = ref<ApiKey | null>(null)
 const filteredKeys = computed(() => keys.value.filter(row => {
@@ -1066,7 +1071,7 @@ onMounted(() => {
     <div class="page-head">
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-3">
         <UiInput v-model:value="search" aria-label="搜索密钥或用户" placeholder="搜索名称、用户邮箱或密钥前缀" class="!w-full sm:!w-72" />
-        <select v-model="statusFilter" class="input !w-auto" aria-label="密钥状态"><option value="all">全部状态</option><option value="enabled">已启用</option><option value="disabled">已禁用</option></select>
+        <UiSelect v-model:value="statusFilter" class="w-32" :options="statusOptions" aria-label="密钥状态" />
         <span class="text-sm text-gray-500">{{ filteredKeys.length }} 个 Key</span>
       </div>
       <UiButton type="primary" @click="openCreate">新建 Key</UiButton>

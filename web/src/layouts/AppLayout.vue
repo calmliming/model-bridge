@@ -85,14 +85,6 @@ const menuGroups: MenuGroup[] = [
     ],
   },
   {
-    id: 'resources',
-    label: '服务与模型',
-    items: [
-      { to: '/model-catalog', key: 'model-catalog', label: '动态模型', icon: 'models' },
-      { to: '/channel-health', key: 'channel-health', label: '渠道健康', icon: 'stats' },
-    ],
-  },
-  {
     id: 'scheduling',
     label: '账号与调度',
     items: [
@@ -145,8 +137,6 @@ const menuGroups: MenuGroup[] = [
 const titleMap: Record<string, string> = {
   overview: '仪表盘',
   models: '模型广场',
-  'model-catalog': '动态模型目录',
-  'channel-health': '渠道健康',
   logs: '调用日志',
   accounts: '上游账户',
   'account-groups': '分组管理',
@@ -164,8 +154,6 @@ const titleMap: Record<string, string> = {
 const subtitleMap: Record<string, string> = {
   overview: '欢迎回来！这里是系统运行概览。',
   models: '浏览各服务商可用模型、能力分类与计费价格。',
-  'model-catalog': '同步账号模型目录，查看上游报告的能力。',
-  'channel-health': '观察上游错误率、延迟和当前告警。',
   logs: '查看调用日志、图片视频生成进度和模型厂家。',
   accounts: '管理上游服务账号、可用状态和调度能力。',
   'account-groups': '维护账号分组、计费倍率和组内成员权重。',

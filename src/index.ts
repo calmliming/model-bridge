@@ -40,7 +40,6 @@ import { warnUnsafeStoredUpstreamUrls } from './accounts/manager'
 import { panelRateLimit } from './middleware/panelRateLimit'
 import { closeUpstreamDispatcher } from './http/upstream'
 import { startModelCatalogJob } from './accounts/modelCatalog'
-import { registerOperationsRoutes } from './routes/operations'
 import { registerMediaRoutes } from './routes/media'
 import { startMediaTaskJob } from './media/tasks'
 import { registerRequestLogRoutes } from './routes/requestLogs'
@@ -125,7 +124,6 @@ async function main(): Promise<void> {
   app.addHook('onError', async (_request, _reply, error) => {
     if (error instanceof ZodError) Object.assign(error, { statusCode: 400 })
   })
-  registerOperationsRoutes(app)
   registerUserRoutes(app)
   registerRelayRoutes(app)
   registerMediaRoutes(app)

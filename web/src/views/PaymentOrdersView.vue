@@ -31,6 +31,7 @@ const search = ref(''), status = ref(''), dateFrom = ref(''), dateEnd = ref('')
 const appliedFilters = ref<Record<string, unknown>>({})
 let loadVersion = 0
 const statusLabel: Record<PaymentOrder['status'], string> = { pending: '待支付', paid: '已入账', canceled: '已取消', expired: '已过期' }
+const statusOptions = [{ label: '全部状态', value: '' }, ...Object.entries(statusLabel).map(([value, label]) => ({ label, value }))]
 const providerLabel = (value: string) => ({ manual: '线下转账', alipay: '支付宝', alipay_web: '支付宝网页', wechat: '微信支付', waffo: 'Waffo' } as Record<string, string>)[value] || value
 
 function applyFilters() {
@@ -136,7 +137,10 @@ onMounted(load)
   <div>
     <form class="order-filters" @submit.prevent="applyFilters">
       <label class="min-w-0"><span class="field-label">订单 / 用户</span><UiInput v-model:value="search" placeholder="订单号、名称或邮箱" /></label>
-      <label class="min-w-0"><span class="field-label">状态</span><select v-model="status" class="input"><option value="">全部状态</option><option v-for="(label, value) in statusLabel" :key="value" :value="value">{{ label }}</option></select></label>
+      <div class="min-w-0">
+        <span class="field-label">状态</span>
+        <UiSelect v-model:value="status" :options="statusOptions" aria-label="订单状态" />
+      </div>
       <label class="min-w-0"><span class="field-label">开始日期</span><input v-model="dateFrom" type="date" class="input min-w-0" /></label>
       <label class="min-w-0"><span class="field-label">结束日期</span><input v-model="dateEnd" type="date" class="input min-w-0" /></label>
       <div class="flex flex-wrap gap-2"><UiButton type="primary" native-type="submit">查询</UiButton><UiButton @click="resetFilters">重置</UiButton></div>

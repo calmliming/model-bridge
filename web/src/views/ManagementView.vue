@@ -1,15 +1,29 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api, errMsg } from '../api/client'
 
 const error = ref(''), notice = ref(''), busy = ref(false)
-const keys = ref<any[]>([]), audit = ref<any[]>([]), accounts = ref<any[]>([]), groups = ref<any[]>([])
+const keys = ref<any[]>([]), audit = ref<any[]>([]), accounts = ref<any[]>([])
+const groups = ref<Array<{ id: string; name: string; imageBillingMode?: string }>>([])
 const permissions = ref<string[]>([]), selectedPermissions = ref(['accounts.read'])
 const name = ref(''), accountScope = ref(''), groupScope = ref(''), ips = ref(''), days = ref(30), secret = ref('')
 const savedEmails = ref('')
 const emails = ref(''), matches = ref<any[]>([]), auditPage = ref(1)
 const accountIds = ref<string[]>([]), tiers = ref(['1K', '2K', '4K'])
 const groupId = ref(''), billingMode = ref('both')
+const billingModeOptions = [
+  { label: 'Token + 按张费用', value: 'both', description: '按 Token 计费，另计已配置的每张费用' },
+  { label: '仅 Token', value: 'tokens' },
+  { label: '按实际张数', value: 'per_image', description: '需要配置模型每张单价' },
+]
+const groupOptions = computed(() => [
+  { label: '选择分组', value: '' },
+  ...groups.value.map(group => ({
+    label: group.name,
+    value: group.id,
+    description: billingModeOptions.find(option => option.value === group.imageBillingMode)?.label ?? 'Token + 按张费用',
+  })),
+])
 const labels: Record<string, string> = { 'accounts.read': '查看账号', 'accounts.status.write': '启停账号', 'accounts.quota.read': '查询额度', 'accounts.quota.reset': '消耗重置次数', 'accounts.import': '导入账号凭据', 'groups.read': '查看分组', 'users.read': '查看用户', 'usage.read': '查看用量', 'audit.read': '查看审计' }
 const split = (value: string) => [...new Set(value.split(/[\s,，;；]+/).map(x => x.trim()).filter(Boolean))]
 async function run(action: () => Promise<void>) { busy.value = true; error.value = ''; notice.value = ''; try { await action() } catch (e) { error.value = errMsg(e) } finally { busy.value = false } }
@@ -53,7 +67,15 @@ onMounted(() => { void run(load) })
       <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th class="py-2">名称</th><th>前缀</th><th>有效期</th><th>操作</th></tr></thead><tbody><tr v-for="key in keys" :key="key.id" class="border-t border-gray-200 dark:border-gray-700"><td class="py-3">{{ key.name }}<span v-if="key.revoked_at" class="ml-2 text-gray-500">已撤销</span></td><td>{{ key.prefix }}…</td><td>{{ key.expires_at ? new Date(Number(key.expires_at)).toLocaleDateString() : '永久' }}</td><td><button v-if="!key.revoked_at" class="mr-3 text-primary-600" :disabled="busy" @click="rotate(key.id)">轮换</button><button v-if="!key.revoked_at" class="text-red-600" :disabled="busy" @click="revoke(key.id)">撤销</button></td></tr></tbody></table></div>
     </section>
     <section class="card space-y-4 p-5"><h2 class="text-lg font-semibold">生图账号尺寸</h2><p class="text-sm text-gray-500">为选中的 OpenAI 账号设置可承接的尺寸档位。新账号默认不限。</p><div class="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2"><label v-for="account in accounts" :key="account.id" class="flex items-center gap-2 text-sm"><input v-model="accountIds" type="checkbox" :value="account.id" />{{ account.name }} <span class="text-xs text-gray-500">{{ account.imageSizeTiers?.join('/') || '不限' }}</span></label></div><div class="flex flex-wrap gap-4"><label v-for="tier in ['1K','2K','4K']" :key="tier" class="flex gap-2"><input v-model="tiers" type="checkbox" :value="tier" />{{ tier }}</label></div><button class="btn-primary" :disabled="busy || !accountIds.length || !tiers.length" @click="run(async () => { await api.post('/admin/accounts/bulk-update', { ids: accountIds, patch: { imageSizeTiers: tiers } }); await load(); notice = '尺寸档位已更新。' })">应用到选中账号</button></section>
-    <section class="card space-y-4 p-5"><h2 class="text-lg font-semibold">分组图片计费</h2><div class="grid gap-3 sm:grid-cols-2"><select v-model="groupId" class="input" aria-label="计费分组"><option value="">选择分组</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }} · {{ group.imageBillingMode || 'both' }}</option></select><select v-model="billingMode" class="input" aria-label="图片计费方式"><option value="both">Token 加已配置的每张费用</option><option value="tokens">仅 Token</option><option value="per_image">按实际张数（需每张单价）</option></select></div><p class="text-sm text-gray-500">仅作用于专用 OpenAI 图片端点。按张模式未配置模型每张单价时，使用 Token 计费。</p><button class="btn-primary" :disabled="busy || !groupId" @click="run(async () => { await api.patch(`/admin/account-groups/${groupId}`, { imageBillingMode: billingMode }); await load(); notice = '分组计费方式已保存。' })">保存计费方式</button></section>
+    <section class="card space-y-4 p-5">
+      <h2 class="text-lg font-semibold">分组图片计费</h2>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <UiSelect v-model:value="groupId" :options="groupOptions" filterable aria-label="计费分组" />
+        <UiSelect v-model:value="billingMode" :options="billingModeOptions" aria-label="图片计费方式" />
+      </div>
+      <p class="text-sm text-gray-500">仅作用于专用 OpenAI 图片端点。按张模式未配置模型每张单价时，使用 Token 计费。</p>
+      <button class="btn-primary" :disabled="busy || !groupId" @click="run(async () => { await api.patch(`/admin/account-groups/${groupId}`, { imageBillingMode: billingMode }); await load(); notice = '分组计费方式已保存。' })">保存计费方式</button>
+    </section>
     <section class="card space-y-4 p-5"><h2 class="text-lg font-semibold">注册邮箱黑名单</h2><p class="text-sm text-gray-500">每行一个邮箱。Gmail 的点号、加号及 googlemail 别名按同一收件箱匹配。保存名单后，可预览并单独确认停用历史用户。</p><textarea v-model="emails" rows="7" maxlength="6000000" class="input w-full" aria-label="邮箱黑名单" /><div class="flex flex-wrap gap-3"><button class="btn-primary" :disabled="busy" @click="saveBlacklist">保存名单</button><button class="btn-secondary" :disabled="busy" @click="checkMatches">检查已注册用户</button></div><div v-if="matches.length" class="space-y-3"><ul class="max-h-48 overflow-y-auto text-sm"><li v-for="user in matches" :key="user.id" class="py-1">{{ user.email }} · {{ user.name }} · {{ user.id }}</li></ul><button class="btn-secondary text-red-700" :disabled="busy" @click="disableMatches">确认停用以上用户</button></div></section>
     <section class="card space-y-4 p-5"><h2 class="text-lg font-semibold">管理 MCP</h2><p class="text-sm text-gray-500">支持浏览器 OAuth 授权和只读查询，可随时撤销授权应用。</p><a class="text-primary-600" href="/mcp/authorize">打开 MCP 接入与授权管理 →</a></section>
     <section class="card space-y-4 p-5"><h2 class="text-lg font-semibold">管理操作审计</h2><div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead><tr><th>时间</th><th>身份</th><th>操作</th><th>状态</th></tr></thead><tbody><tr v-for="entry in audit" :key="entry.id" class="border-t border-gray-200 dark:border-gray-700"><td class="py-2">{{ new Date(Number(entry.created_at)).toLocaleString() }}</td><td class="max-w-40 truncate">{{ entry.actor }}</td><td>{{ entry.operation }}</td><td>{{ entry.status }}</td></tr></tbody></table></div><div class="flex items-center gap-3"><button :disabled="auditPage === 1 || busy" @click="auditPage--; run(loadAudit)">上一页</button><span>{{ auditPage }}</span><button :disabled="audit.length < 25 || busy" @click="auditPage++; run(loadAudit)">下一页</button></div></section>

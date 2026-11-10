@@ -38,8 +38,6 @@ export const router = createRouter({
       children: [
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
-        { path: 'model-catalog', name: 'model-catalog', component: () => import('../views/ModelCatalogView.vue') },
-        { path: 'channel-health', name: 'channel-health', component: () => import('../views/ChannelHealthView.vue') },
         { path: 'logs', name: 'logs', component: () => import('../views/RequestLogsView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'account-groups', name: 'account-groups', component: () => import('../views/AccountGroupsView.vue') },

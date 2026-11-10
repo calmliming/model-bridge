@@ -28,6 +28,12 @@ const codes = ref<RedeemCode[]>([])
 const page = ref(1), total = ref(0), pageSize = 20
 const summary = ref({ value: 0, used: 0 })
 const statusFilter = ref(''), batchFilter = ref(''), validityFilter = ref('')
+const validityOptions = [
+  { label: '全部有效期', value: '' },
+  { label: '未过期', value: 'valid' },
+  { label: '已过期', value: 'expired' },
+  { label: '永久有效', value: 'permanent' },
+]
 const appliedFilters = ref<Record<string, string | undefined>>({})
 let loadVersion = 0
 const revealedBatch = ref<{ id: string; codes: string[] } | null>(null)
@@ -57,6 +63,7 @@ const statusLabel: Record<RedeemCode['status'], string> = {
   used: '已使用',
   disabled: '已禁用',
 }
+const statusOptions = [{ label: '全部状态', value: '' }, ...Object.entries(statusLabel).map(([value, label]) => ({ label, value }))]
 
 async function load() {
   const version = ++loadVersion
@@ -199,8 +206,14 @@ onMounted(load)
   <div>
     <form class="redeem-filters" @submit.prevent="applyFilters">
       <label><span class="field-label">批次</span><UiInput v-model:value="batchFilter" placeholder="输入完整批次 ID" /></label>
-      <label><span class="field-label">状态</span><select v-model="statusFilter" class="input" aria-label="兑换码状态"><option value="">全部状态</option><option v-for="(label, value) in statusLabel" :key="value" :value="value">{{ label }}</option></select></label>
-      <label><span class="field-label">有效期</span><select v-model="validityFilter" class="input" aria-label="兑换码有效期"><option value="">全部有效期</option><option value="valid">未过期</option><option value="expired">已过期</option><option value="permanent">永久有效</option></select></label>
+      <div class="min-w-0">
+        <span class="field-label">状态</span>
+        <UiSelect v-model:value="statusFilter" :options="statusOptions" aria-label="兑换码状态" />
+      </div>
+      <div class="min-w-0">
+        <span class="field-label">有效期</span>
+        <UiSelect v-model:value="validityFilter" :options="validityOptions" aria-label="兑换码有效期" />
+      </div>
       <div class="flex flex-wrap gap-2"><UiButton native-type="submit" type="primary">查询</UiButton><UiButton @click="resetFilters">重置</UiButton></div>
     </form>
     <div class="toolbar">
