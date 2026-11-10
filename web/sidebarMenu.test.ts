@@ -302,10 +302,10 @@ describe('sidebar menu grouping', () => {
 
   it('keeps every item in exactly one group with its own route and icon', () => {
     const routes = readRoutes()
-    const expectedTotals: Record<string, number> = { '管理端': 14, '用户端': 6 }
+    const expectedTotals: Record<string, number> = { '管理端': 15, '用户端': 7 }
     const expectedKeys: Record<string, string> = {
-      '管理端': 'overview,models,accounts,account-groups,keys,users,payments,redeem-codes,subscription-plans,logs,stats,docs,api-docs,settings',
-      '用户端': 'user-overview,user-models,user-keys,user-usage,user-logs,api-docs',
+      '管理端': 'overview,models,admin-studio,accounts,account-groups,keys,users,payments,redeem-codes,subscription-plans,logs,stats,docs,api-docs,settings',
+      '用户端': 'user-overview,user-models,user-studio,user-keys,user-usage,user-logs,api-docs',
     }
 
     for (const layout of LAYOUTS) {

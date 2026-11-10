@@ -75,6 +75,10 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => activeRole.value === 'admin' && !!token.value)
   const isUser = computed(() => activeRole.value === 'user' && !!token.value)
   const role = computed(() => activeRole.value)
+  const userId = computed(() => {
+    const subject = isUser.value && token.value ? decodeJwtPayload(token.value)?.sub : null
+    return typeof subject === 'string' ? subject : null
+  })
 
   function activateRole(newRole: SessionRole): void {
     activeRole.value = newRole
@@ -125,6 +129,7 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     username,
     role,
+    userId,
     isAuthenticated,
     isAdmin,
     isUser,

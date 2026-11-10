@@ -38,6 +38,7 @@ export const router = createRouter({
       children: [
         { path: 'overview', name: 'overview', component: () => import('../views/OverviewView.vue') },
         { path: 'models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
+        { path: 'studio', name: 'admin-studio', component: () => import('../views/CreationStudioView.vue') },
         { path: 'logs', name: 'logs', component: () => import('../views/RequestLogsView.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/AccountsView.vue') },
         { path: 'account-groups', name: 'account-groups', component: () => import('../views/AccountGroupsView.vue') },
@@ -59,6 +60,7 @@ export const router = createRouter({
       children: [
         { path: '', name: 'user-overview', component: () => import('../views/UserOverviewView.vue') },
         { path: 'models', name: 'user-models', component: () => import('../views/ModelPlazaView.vue') },
+        { path: 'studio', name: 'user-studio', component: () => import('../views/CreationStudioView.vue') },
         { path: 'keys', name: 'user-keys', component: () => import('../views/UserKeysView.vue') },
         { path: 'mcp', name: 'user-mcp', component: () => import('../views/McpView.vue') },
         { path: 'usage', name: 'user-usage', component: () => import('../views/UserUsageView.vue') },

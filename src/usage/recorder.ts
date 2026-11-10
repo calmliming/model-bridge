@@ -183,7 +183,7 @@ async function persistUsage(record: UsageRecord, snapshot?: Settlement): Promise
         recordedAt,
       ]
     )
-    if (record.apiKeyId && cost > 0) {
+    if (record.apiKeyId && !record.apiKeyId.startsWith('studio:') && cost > 0) {
       await client.query('UPDATE api_keys SET quota_used = quota_used + $1, last_used_at = $2 WHERE id = $3', [
         cost,
         Date.now(),

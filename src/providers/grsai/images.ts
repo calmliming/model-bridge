@@ -1,4 +1,5 @@
 import { fetchPublicMedia } from '../../http/upstream'
+import { UnsafeUpstreamUrlError } from '../../http/urlGuard'
 import { redactUpstreamError } from '../../http/upstreamDiagnostics'
 import { emptyUsage, type UsageData } from '../types'
 import type { OpenAIImagesRequestBody, NamedSseEvent } from '../openai/images'
@@ -47,8 +48,11 @@ export async function relayGrsaiImages(token: string, body: OpenAIImagesRequestB
       created_at: Math.floor(Date.now() / 1000), ...(image_index === data.length - 1 ? { usage } : {}) }))
     return new Response(events.map(event => `event: ${type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } })
   } catch (error) {
+    const message = error instanceof GrsaiUpstreamError ? error.message
+      : error instanceof UnsafeUpstreamUrlError ? '生成服务地址无法通过网络安全校验，请检查上游地址和 DNS 解析。'
+      : 'Image generation is temporarily unavailable'
     return Response.json({ error: { type: 'upstream_error', code: 'image_generation_failed',
-      message: publicMediaError(error instanceof GrsaiUpstreamError ? error.message : 'Image generation is temporarily unavailable') } },
+      message: publicMediaError(message) } },
       { status: error instanceof GrsaiUpstreamError ? error.statusCode : 502 })
   }
 }

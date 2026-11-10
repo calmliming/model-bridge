@@ -89,10 +89,6 @@ async function authenticateApiKey(request: FastifyRequest, reply: FastifyReply, 
     reply.code(429).send({ error: 'API key quota exceeded' })
     return
   }
-  let billTo: 'subscription' | 'balance' = 'balance'
-  let subscriptionId: string | null = null
-  let subscriptionQuotaMode: SubscriptionQuotaMode = 'spend'
-
   if (!record.userId || !record.userStatus) {
     reply.code(401).send({ error: 'API key owner is unavailable' })
     return
@@ -101,46 +97,9 @@ async function authenticateApiKey(request: FastifyRequest, reply: FastifyReply, 
     reply.code(401).send({ error: 'API key owner is disabled' })
     return
   }
-  // Billing decision: prefer an active subscription for the key's group when
-  // it still has window headroom; otherwise fall through to wallet balance.
-  // Existing wallet debt blocks admission; otherwise block (402) only when
-  // neither budget can cover further usage.
   const balanceMicros = record.userBalanceMicros ?? 0
-  // A request may settle above the balance or fall back from a subscription
-  // whose remaining window cannot cover its final cost. Do not let another
-  // subscription admission repeatedly incur wallet debt in that situation.
-  if (!resultOnly && balanceMicros < 0) {
-    reply.code(402).send({ error: 'insufficient balance' })
-    return
-  }
-  let subscriptionUsable = false
-  if (!resultOnly && record.accountGroupId) {
-    const sub = await resolveActiveSubscription(record.userId, record.accountGroupId)
-    if (sub) {
-      subscriptionId = sub.subscriptionId
-      subscriptionQuotaMode = sub.quotaMode ?? 'spend'
-      if (subscriptionQuotaMode === 'usage') {
-        const exhausted = sub.usageWindows.filter(window => window.remaining != null && window.remaining <= 0)
-        if (exhausted.length) {
-          const resetsAt = Math.max(...exhausted.map(window => window.resetsAt ?? Date.now()))
-          reply.header('Retry-After', String(Math.max(1, Math.ceil((resetsAt - Date.now()) / 1000))))
-          reply.code(429).send({ error: '订阅用量已达到上限，请等待额度重置', code: 'subscription_usage_exhausted', resetsAt, usageWindows: sub.usageWindows })
-          return
-        }
-        subscriptionUsable = true
-      } else {
-        subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
-      }
-    }
-  }
-  if (subscriptionUsable) {
-    billTo = 'subscription'
-  } else if (balanceMicros > 0) {
-    billTo = 'balance'
-  } else if (!resultOnly) {
-    reply.code(402).send({ error: 'insufficient balance' })
-    return
-  }
+  const billing = await resolveRelayBilling(reply, record.userId, record.accountGroupId, balanceMicros, resultOnly)
+  if (!billing) return
   await db.update(apiKeys).set({ lastUsedAt: Date.now() }).where(eq(apiKeys.id, record.id))
   request.apiKey = {
     id: record.id,
@@ -158,12 +117,53 @@ async function authenticateApiKey(request: FastifyRequest, reply: FastifyReply, 
     quotaLimit: record.quotaLimit ?? null,
     quotaUsed: record.quotaUsed,
     userId: record.userId,
-    userBalanceMicros: record.userBalanceMicros ?? 0,
-    userBalance: microsToUsd(record.userBalanceMicros ?? 0),
-    billTo,
-    subscriptionId,
-    subscriptionQuotaMode,
+    userBalanceMicros: balanceMicros,
+    userBalance: microsToUsd(balanceMicros),
+    ...billing,
   }
+}
+
+export async function resolveRelayBilling(
+  reply: FastifyReply, userId: string, groupId: string | null, balanceMicros: number, resultOnly = false,
+): Promise<Pick<AuthedApiKey, 'billTo' | 'subscriptionId' | 'subscriptionQuotaMode'> | undefined> {
+  let subscriptionId: string | null = null
+  let subscriptionQuotaMode: SubscriptionQuotaMode = 'spend'
+  // Billing decision: prefer an active subscription for the key's group when
+  // it still has window headroom; otherwise fall through to wallet balance.
+  // Existing wallet debt blocks admission; otherwise block (402) only when
+  // neither budget can cover further usage.
+  // A request may settle above the balance or fall back from a subscription
+  // whose remaining window cannot cover its final cost. Do not let another
+  // subscription admission repeatedly incur wallet debt in that situation.
+  if (!resultOnly && balanceMicros < 0) {
+    reply.code(402).send({ error: 'insufficient balance' })
+    return
+  }
+  let subscriptionUsable = false
+  if (!resultOnly && groupId) {
+    const sub = await resolveActiveSubscription(userId, groupId)
+    if (sub) {
+      subscriptionId = sub.subscriptionId
+      subscriptionQuotaMode = sub.quotaMode ?? 'spend'
+      if (subscriptionQuotaMode === 'usage') {
+        const exhausted = sub.usageWindows.filter(window => window.remaining != null && window.remaining <= 0)
+        if (exhausted.length) {
+          const resetsAt = Math.max(...exhausted.map(window => window.resetsAt ?? Date.now()))
+          reply.header('Retry-After', String(Math.max(1, Math.ceil((resetsAt - Date.now()) / 1000))))
+          reply.code(429).send({ error: '订阅用量已达到上限，请等待额度重置', code: 'subscription_usage_exhausted', resetsAt, usageWindows: sub.usageWindows })
+          return
+        }
+        subscriptionUsable = true
+      } else {
+        subscriptionUsable = await hasWindowHeadroom(sub.subscriptionId, sub.planLimits)
+      }
+    }
+  }
+  if (!subscriptionUsable && balanceMicros <= 0 && !resultOnly) {
+    reply.code(402).send({ error: 'insufficient balance' })
+    return
+  }
+  return { billTo: subscriptionUsable ? 'subscription' : 'balance', subscriptionId, subscriptionQuotaMode }
 }
 
 declare module 'fastify' {

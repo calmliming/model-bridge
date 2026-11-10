@@ -5,6 +5,7 @@ import { grsaiBaseUrl, parseGrsaiGenerateRequest, generateGrsai, queryGrsaiResul
 import { buildGrsaiImageRequest, createGrsaiImageStream, grsaiImageUsage, relayGrsaiImages } from './images'
 import { parseOpenAIImagesRequest } from '../openai/images'
 import { estimateCost } from '../../usage/pricing'
+import { UnsafeUpstreamUrlError } from '../../http/urlGuard'
 import { emptyUsage } from '../types'
 import { inferProviderForModel, listModelIdsForKey, listOpenAIStyleModels } from '../modelDiscovery'
 
@@ -89,6 +90,14 @@ describe('GrsAI transport', () => {
       await expect(generateGrsai('secret', parseGrsaiGenerateRequest(video))).rejects.toMatchObject({ statusCode: status })
     }
     expect(mocks.fetch).toHaveBeenCalledTimes(3)
+  })
+  it('reports a blocked image endpoint as a DNS or address issue without exposing the endpoint', async () => {
+    mocks.fetch.mockRejectedValueOnce(new UnsafeUpstreamUrlError('upstream URL resolves to a non-public address: 198.18.4.160'))
+    const response = await relayGrsaiImages('supplier-secret', image())
+    expect(response.status).toBe(502)
+    const body = await response.text()
+    expect(body).toContain('请检查上游地址和 DNS 解析')
+    expect(body).not.toContain('198.18.4.160')
   })
   it('returns compatible URL responses and completion SSE, without downloading media', async () => {
     mocks.fetch.mockImplementation(async () => Response.json(completed))

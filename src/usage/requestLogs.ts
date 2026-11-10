@@ -76,7 +76,8 @@ export async function listRequestLogs(page = 1, pageSize = 20, filters: RequestL
   ), classified AS (
     SELECT requests.*, ${modelManufacturerSql('manufacturer_model', 'provider')} AS manufacturer FROM requests
   ), named AS (
-    SELECT c.*, k.name AS key_name, k.key_prefix, a.name AS account_name, usr.name AS user_name, usr.email AS user_email
+    SELECT c.*, CASE WHEN c.api_key_id LIKE 'studio:%' THEN '创作工作台' ELSE k.name END AS key_name,
+      k.key_prefix, a.name AS account_name, usr.name AS user_name, usr.email AS user_email
     FROM classified c LEFT JOIN api_keys k ON k.id = c.api_key_id
     LEFT JOIN accounts a ON a.id = c.account_id LEFT JOIN users usr ON usr.id = c.user_id
   )`

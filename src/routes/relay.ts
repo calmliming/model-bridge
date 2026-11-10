@@ -1,4 +1,6 @@
 import { normalizeTerraRequest } from '../providers/openai/models'
+import { withStudioFiles } from '../media/studioFiles'
+import { requireStudioSession, studioScopes } from '../middleware/studioAuth'
 import { accountUpstreamMemory, UpstreamMemoryError, withUpstreamMemory } from '../http/upstreamMemory'
 import { releaseIngressMemory, retainIngressUntilSettled } from '../http/ingressMemory'
 import { requestedImageTier } from '../providers/openai/imageSizeTiers'
@@ -1757,8 +1759,14 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   app.post('/api/grsai/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'grsai'))
   app.post('/api/grsai/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'grsai'))
   app.get('/api/grsai/v1/models', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, 'grsai'))
-  app.post('/api/media/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'grsai'))
-  app.post('/api/media/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'grsai'))
+  const studioImageOptions = { preHandler: requireApiKey, bodyLimit: imageBodyLimit, onSend: withStudioFiles('image') }
+  app.post('/api/media/v1/images/generations', studioImageOptions, openaiImagesHandler('generations', 'grsai'))
+  app.post('/api/media/v1/images/edits', studioImageOptions, openaiImagesHandler('edits', 'grsai'))
+  for (const { prefix, admin } of studioScopes) {
+    const options = { ...studioImageOptions, preHandler: requireStudioSession(admin) }
+    app.post(`${prefix}/images/generations`, options, openaiImagesHandler('generations', 'grsai'))
+    app.post(`${prefix}/images/edits`, options, openaiImagesHandler('edits', 'grsai'))
+  }
   app.get('/api/media/v1/models', { preHandler: requireApiKey }, (request, reply) => sendOpenAIStyleModelList(request, reply, 'grsai'))
   // Gemini API surface: /v1beta/models/{model}:{action}. The wildcard
   // captures `{model}:{action}` in a single segment.

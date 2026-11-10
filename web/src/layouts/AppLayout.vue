@@ -22,6 +22,7 @@ const menuIconPaths = {
   models: [
     'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
   ],
+  studio: ['m16.86 4.49 2.65 2.65M4 20l4.35-.87L20 7.48a1.88 1.88 0 0 0-2.65-2.65L5.7 16.48 4 20Z'],
   'account-groups': [
     'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z',
   ],
@@ -82,6 +83,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { to: '/overview', key: 'overview', label: '仪表盘', icon: 'overview' },
       { to: '/models', key: 'models', label: '模型广场', icon: 'models' },
+      { to: '/studio', key: 'admin-studio', label: '创作工作台', icon: 'studio' },
     ],
   },
   {
@@ -137,6 +139,7 @@ const menuGroups: MenuGroup[] = [
 const titleMap: Record<string, string> = {
   overview: '仪表盘',
   models: '模型广场',
+  'admin-studio': '创作工作台',
   logs: '调用日志',
   accounts: '上游账户',
   'account-groups': '分组管理',
@@ -154,6 +157,7 @@ const titleMap: Record<string, string> = {
 const subtitleMap: Record<string, string> = {
   overview: '欢迎回来！这里是系统运行概览。',
   models: '浏览各服务商可用模型、能力分类与计费价格。',
+  'admin-studio': '生成图片和视频，预览并下载创作结果。',
   logs: '查看调用日志、图片视频生成进度和模型厂家。',
   accounts: '管理上游服务账号、可用状态和调度能力。',
   'account-groups': '维护账号分组、计费倍率和组内成员权重。',

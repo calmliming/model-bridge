@@ -99,8 +99,9 @@ export function fetchWithConnectTimeout(
 }
 
 /** Public-only downloads carry no supplier credentials and reject redirects. */
-export function fetchPublicMedia(input: string | URL, signal?: AbortSignal): Promise<Response> {
-  return fetchGuarded(input, { signal }, 10_000, undefined, true)
+export function fetchPublicMedia(input: string | URL, signal?: AbortSignal, range?: string): Promise<Response> {
+  const headers = range ? { 'accept-encoding': 'identity', range } : undefined
+  return fetchGuarded(input, { signal, ...(headers ? { headers } : {}) }, 10_000, undefined, true)
 }
 
 export async function closeUpstreamDispatcher(): Promise<void> {

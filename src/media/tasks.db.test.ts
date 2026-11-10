@@ -26,6 +26,8 @@ import { initDb } from '../db/init'
 import { initPricing, reloadPricing } from '../usage/pricing'
 import { recordUsage } from '../usage/recorder'
 import { createAccount } from '../accounts/manager'
+import { createGroup } from '../accounts/groups'
+import { setSetting } from '../db/settings'
 import { createApiKey } from '../keys/manager'
 import { pickAccount } from '../accounts/scheduler'
 import { parseGrsaiGenerateRequest } from '../providers/grsai/client'
@@ -194,6 +196,82 @@ describe.runIf(database)('GrsAI persistent media tasks', () => {
     expect(denied.statusCode).toBe(403)
     expect(mocks.fetch).not.toHaveBeenCalled()
     await app.close()
+  })
+  it('returns upstream image progress and only releases the final file after settlement', async () => {
+    const { key } = await fixture()
+    const app = Fastify()
+    await app.register(fastifyJwt, { secret: 'test-studio-progress-secret' })
+    registerMediaRoutes(app)
+    const headers = { authorization: `Bearer ${app.jwt.sign({ sub: key.userId, role: 'user' })}`, 'x-model-bridge-studio': '1' }
+    const path = '/api/users/studio/image-tasks'
+    try {
+      const image = 'data:image/png;base64,YQ=='
+      const submitted = await app.inject({ method: 'POST', url: path, headers,
+        payload: { model: 'gpt-image-2.6', prompt: 'A cat', images: [image], aspectRatio: '1024x1024', quality: 'auto' } })
+      expect(submitted.statusCode).toBe(202)
+      const task = submitted.json()
+      expect(task).toMatchObject({ object: 'image', status: 'running', results: [] })
+      expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body)).toMatchObject({ replyType: 'async', images: [image] })
+
+      const url = `${path}/${task.id}`
+      const source = 'https://files.example.com/image.png'
+      await due(task.id)
+      mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'supplier-task-1', status: 'running', progress: 37, results: [{ url: source }] }))
+      expect((await app.inject({ url, headers })).json()).toMatchObject({ status: 'running', progress: 37, results: [] })
+      expect((await pool.query('SELECT balance_micros FROM users WHERE id = $1', [key.userId])).rows[0].balance_micros).toBe(1_000_000)
+
+      await due(task.id)
+      mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'supplier-task-1', status: 'succeeded', progress: 100, results: [{ url: source }] }))
+      const completed = (await app.inject({ url, headers })).json()
+      expect(completed).toMatchObject({ status: 'succeeded', progress: 100, results: [{ url: source }] })
+      expect(completed.results[0].studio_url).toMatch(/^\/api\/media\/v1\/studio-file\?ticket=/)
+      expect((await pool.query('SELECT balance_micros FROM users WHERE id = $1', [key.userId])).rows[0].balance_micros).toBe(995_800)
+    } finally {
+      await app.close()
+    }
+  })
+  it('creates and bills studio work with sessions alone and only returns the owner’s tasks', async () => {
+    const { key, account } = await fixture()
+    const userId = randomUUID()
+    await pool.query("INSERT INTO users (id,name,email,balance_micros) VALUES ($1,'Studio QA',$2,1000000)", [userId, `${userId}@example.test`])
+    await setSetting('admin.user_id', userId)
+    const restricted = await createGroup({ name: 'Studio restriction', allowedModels: ['gpt-image-2'] })
+    const app = Fastify()
+    await app.register(fastifyJwt, { secret: 'test-studio-media-secret' })
+    registerRelayRoutes(app)
+    registerMediaRoutes(app)
+    const headers = (sub: string, role = 'user') => ({ authorization: `Bearer ${app.jwt.sign({ sub, role })}`, 'x-model-bridge-studio': '1' })
+    try {
+      const image = { model: 'gpt-image-2.6', prompt: 'A cat', response_format: 'url' }
+      const imagePath = '/api/users/studio/images/generations'
+      expect((await app.inject({ method: 'POST', url: imagePath, payload: image })).statusCode).toBe(401)
+      const denied = await app.inject({ method: 'POST', url: `${imagePath}?groupId=${restricted.id}`, headers: headers(userId), payload: image })
+      expect(denied.statusCode).toBe(404)
+      expect(mocks.fetch).not.toHaveBeenCalled()
+
+      mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'studio-image', status: 'succeeded', results: [{ url: 'https://files.example.com/image.png' }] }))
+      const generated = await app.inject({ method: 'POST', url: imagePath, headers: headers(userId), payload: image })
+      expect(generated.statusCode).toBe(200)
+      expect(generated.json().data[0].studio_url).toMatch(/^\/api\/media\/v1\/studio-file\?ticket=/)
+
+      const videoPath = '/api/admin/studio/videos'
+      expect((await app.inject({ method: 'POST', url: videoPath, headers: headers(userId), payload: video })).statusCode).toBe(403)
+      mocks.fetch.mockResolvedValueOnce(Response.json({ id: 'studio-video', status: 'succeeded', results: [{ url: 'https://files.example.com/video.mp4' }] }))
+      const submitted = await app.inject({ method: 'POST', url: videoPath, headers: headers('admin', 'admin'), payload: video })
+      expect(submitted.statusCode).toBe(202)
+      const resultPath = `/api/users/studio/videos/${submitted.json().id}`
+      expect((await app.inject({ url: resultPath, headers: headers(key.userId!) })).statusCode).toBe(404)
+      expect((await app.inject({ url: resultPath, headers: headers(userId) })).json().status).toBe('succeeded')
+      expect((await pool.query('SELECT id FROM api_keys WHERE user_id = $1', [userId])).rows).toEqual([])
+      const { rows } = await pool.query('SELECT balance_micros FROM users WHERE id = $1', [userId])
+      expect(rows[0].balance_micros).toBe(897_800)
+
+      const olderTask = await createMediaTask(key, account, video, 'minimax-h3')
+      const resumed = await app.inject({ url: `/api/users/studio/videos/${olderTask.id}`, headers: headers(key.userId!) })
+      expect(resumed.json()).toMatchObject({ id: olderTask.id, status: 'running' })
+    } finally {
+      await app.close()
+    }
   })
   it('keeps public catalog, key scopes, task results and usage under our identity', async () => {
     const { key, secret, account } = await fixture()

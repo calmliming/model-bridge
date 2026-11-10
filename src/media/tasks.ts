@@ -35,12 +35,14 @@ export function mediaTaskUsage(task: MediaTask): UsageData {
 }
 
 /** Do not expose upstream account IDs, credentials, billing or another owner's task. */
-export function publicMediaTask(task: MediaTask) {
+export function publicMediaTask(task: MediaTask, studio = false) {
   const ready = task.settled || task.status === 'running' || task.status === 'submitting'
+  const status = ready && task.status !== 'submitting' ? task.status : 'running'
   return { id: task.id, object: task.kind, model: task.requested_model,
-    status: ready && task.status !== 'submitting' ? task.status : 'running',
-    progress: ready ? task.progress : Math.min(99, task.progress),
-    results: ready ? task.results : [], ...(ready && task.error ? { error: publicMediaError(task.error) } : {}),
+    status,
+    progress: ready || studio ? task.progress : Math.min(99, task.progress),
+    results: (studio ? status === 'succeeded' : ready) ? task.results : [],
+    ...(ready && task.error ? { error: publicMediaError(task.error) } : {}),
     ...task.request_params, created_at: Math.floor(task.created_at / 1000) }
 }
 
@@ -139,6 +141,11 @@ export async function createMediaTask(key: AuthedApiKey, account: SelectedAccoun
 
 export async function getMediaTask(id: string, apiKeyId?: string): Promise<MediaTask | null> {
   const { rows } = await pool.query<MediaTask>('SELECT * FROM media_tasks WHERE id = $1 AND ($2::text IS NULL OR api_key_id = $2)', [id, apiKeyId ?? null])
+  return rows[0] ?? null
+}
+
+export async function getMediaTaskForUser(id: string, userId: string): Promise<MediaTask | null> {
+  const { rows } = await pool.query<MediaTask>('SELECT * FROM media_tasks WHERE id = $1 AND user_id = $2', [id, userId])
   return rows[0] ?? null
 }
 

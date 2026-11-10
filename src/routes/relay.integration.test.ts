@@ -222,8 +222,9 @@ describe('GrsAI image relay', () => {
     await withRelay(async request => {
       const edits = url.endsWith('/edits')
       const images = ['https://example.com/input.png']
+      const studio = url === '/api/media/v1/images/generations' && !stream
       const response = await request({ model: alias ? 'picture' : 'gpt-image-2.6', prompt: 'cat', size: '1024x1024', quality: 'auto',
-        response_format: 'url', stream, ...(edits ? { images } : {}) }, url)
+        response_format: 'url', stream, ...(edits ? { images } : {}) }, url, studio ? { 'x-model-bridge-studio': '1' } : {})
       expect(response.status).toBe(200)
       expect(mocks.pickAccount.mock.calls[0]![0]).toBe('grsai')
       expect(mocks.pickAccount.mock.calls[0]![3]).toBe('image-group')
@@ -233,6 +234,7 @@ describe('GrsAI image relay', () => {
       expect(mocks.logs[0]![4]).toBe('grsai')
       expect(mocks.logs[0]![16]).toBe(1)
       expect(response.body).toContain('https://files.example.com/cat.gif')
+      if (studio) expect(JSON.parse(response.body).data[0].studio_url).toMatch(/^\/api\/media\/v1\/studio-file\?ticket=/)
       if (stream) expect(response.body).toContain(`event: ${edits ? 'image_edit' : 'image_generation'}.completed`)
     })
   })

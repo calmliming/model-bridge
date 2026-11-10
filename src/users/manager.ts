@@ -452,7 +452,7 @@ export async function listUserUsage(
               l.cache_read_tokens, l.image_input_tokens, l.image_output_tokens,
               l.image_cache_read_tokens,
               l.image_count, l.image_size, l.image_model, l.video_seconds, l.video_resolution, l.cost, l.request_input, l.subscription_points,
-              k.name AS api_key_name
+              CASE WHEN l.api_key_id LIKE 'studio:%' THEN '创作工作台' ELSE k.name END AS api_key_name
        FROM usage_logs l
        LEFT JOIN api_keys k ON k.id = l.api_key_id
        WHERE l.user_id = $1 ${dateClause}
