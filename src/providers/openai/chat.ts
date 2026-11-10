@@ -6,6 +6,7 @@ import { createFunctionCallTracker } from './toolCalls'
 import { acceptsOpenAISamplingParams } from './models'
 import type { PeekVerdict } from '../streamPeek'
 import { upgradeLegacyFunctionCalling } from '../legacyFunctions'
+import { applyCacheWriteDetails, reportedCacheWrites, type CacheWriteDetails, type CacheWriteUsage } from './usage'
 
 interface ChatMessage {
   role?: string
@@ -32,17 +33,14 @@ interface ChatToolCall {
   }
 }
 
-interface ResponsesUsage {
+interface ResponsesUsage extends CacheWriteUsage {
   prompt_cache_hit_tokens?: number
   input_tokens?: number
   output_tokens?: number
-  input_tokens_details?: {
+  input_tokens_details?: CacheWriteDetails & {
     cached_tokens?: number
-    cache_write_tokens?: number
-    cache_creation_tokens?: number
   }
   cached_tokens?: number
-  cache_creation_tokens?: number
 }
 
 interface ResponsesStreamEvent {
@@ -100,16 +98,14 @@ interface ResponsesOutputItem {
   arguments?: string
 }
 
-interface ChatUsage {
+interface ChatUsage extends CacheWriteUsage {
   cached_tokens?: number
   prompt_cache_hit_tokens?: number
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
-  prompt_tokens_details?: {
-    cached_tokens: number
-    cache_write_tokens?: number
-    cache_creation_tokens?: number
+  prompt_tokens_details?: CacheWriteDetails & {
+    cached_tokens?: number
   }
   completion_tokens_details?: { reasoning_tokens?: number }
 }
@@ -321,13 +317,15 @@ export function chatCompletionsToResponses(request: Record<string, unknown>): Re
 
 function usageDataFromResponses(usage: ResponsesUsage | undefined): UsageData {
   const d = usage?.input_tokens_details
-  return usageWithCachedInput(
+  const cacheWrites = reportedCacheWrites(usage, d)
+  const parsed = usageWithCachedInput(
     usage?.input_tokens,
     usage?.output_tokens,
     d?.cached_tokens ?? usage?.cached_tokens ?? usage?.prompt_cache_hit_tokens,
     undefined,
-    d?.cache_write_tokens ?? d?.cache_creation_tokens ?? usage?.cache_creation_tokens,
+    cacheWrites,
   )
+  return applyCacheWriteDetails(parsed, cacheWrites, d)
 }
 
 function chatUsageFromResponses(usage: ResponsesUsage | undefined): ChatUsage | undefined {
@@ -347,16 +345,17 @@ export function parseChatCompletionUsage(body: unknown): UsageData {
   const usage = (body as { usage?: ChatUsage } | null)?.usage
   if (!usage) return emptyUsage()
   const d = usage.prompt_tokens_details
+  const cacheWrites = reportedCacheWrites(usage, d)
   const parsed = usageWithCachedInput(
     usage.prompt_tokens,
     usage.completion_tokens,
     d?.cached_tokens ?? usage.cached_tokens ?? usage.prompt_cache_hit_tokens,
     usage.completion_tokens_details?.reasoning_tokens,
-    d?.cache_write_tokens ?? d?.cache_creation_tokens,
+    cacheWrites,
   )
   const tier = (body as { service_tier?: unknown })?.service_tier
   if (typeof tier === 'string') parsed.serviceTier = tier
-  return parsed
+  return applyCacheWriteDetails(parsed, cacheWrites, d)
 }
 
 export function createChatCompletionStreamParser() {
@@ -367,6 +366,7 @@ export function createChatCompletionStreamParser() {
       if (typeof tier === 'string') usage.serviceTier = tier
       const parsed = parseChatCompletionUsage(event)
       if (event && typeof event === 'object' && hasReportedUsage((event as { usage?: unknown }).usage)) {
+        delete usage.cacheCreate12hTokens
         Object.assign(usage, parsed)
       }
     },

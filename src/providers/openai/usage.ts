@@ -1,19 +1,50 @@
 import { hasReportedUsage } from '../usageSource'
 import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 
-interface OpenAIUsage {
+export interface CacheWriteUsage {
+  cache_write_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_write_input_tokens?: number
+  cache_creation_tokens?: number
+}
+
+export interface CacheWriteDetails {
+  cache_write_tokens?: number
+  cache_creation_tokens?: number
+  cache_write_tokens_details?: {
+    ttl_30m_tokens?: number
+    ttl_12h_tokens?: number
+  } | null
+}
+
+interface OpenAIUsage extends CacheWriteUsage {
   prompt_cache_hit_tokens?: number
   input_tokens?: number
   output_tokens?: number
-  input_tokens_details?: {
+  input_tokens_details?: CacheWriteDetails & {
     cached_tokens?: number
-    cache_write_tokens?: number
-    cache_creation_tokens?: number
     image_tokens?: number
   }
   output_tokens_details?: { reasoning_tokens?: number; image_tokens?: number }
   cached_tokens?: number
-  cache_creation_tokens?: number
+}
+
+export function reportedCacheWrites(usage: CacheWriteUsage | undefined, details: CacheWriteDetails | undefined): number | undefined {
+  return details?.cache_write_tokens ?? details?.cache_creation_tokens ?? usage?.cache_write_tokens ??
+    usage?.cache_creation_input_tokens ?? usage?.cache_write_input_tokens ?? usage?.cache_creation_tokens
+}
+
+export function applyCacheWriteDetails(usage: UsageData, reported: number | undefined, details: CacheWriteDetails | undefined): UsageData {
+  const split = details?.cache_write_tokens_details
+  const short = split?.ttl_30m_tokens
+  const long = split?.ttl_12h_tokens
+  // If input normalization capped the aggregate, the split is no longer usable.
+  if (usage.cacheCreateTokens > 0 && usage.cacheCreateTokens === reported && typeof short === 'number' && typeof long === 'number' &&
+      Number.isSafeInteger(short) && Number.isSafeInteger(long) && short >= 0 && long >= 0 &&
+      short === usage.cacheCreateTokens - long) {
+    usage.cacheCreate12hTokens = long
+  }
+  return usage
 }
 
 interface OpenAIResponsePayload {
@@ -23,22 +54,14 @@ interface OpenAIResponsePayload {
   output?: unknown[]
 }
 
-/**
- * Cache-write (cache-creation) tokens from a Responses usage payload. gpt-5.6
- * reports these under input_tokens_details; older models omit them (→ 0).
- */
-function cacheWriteOf(u: OpenAIUsage | undefined): number | undefined {
-  const d = u?.input_tokens_details
-  return d?.cache_write_tokens ?? d?.cache_creation_tokens ?? u?.cache_creation_tokens
-}
-
 export function parseOpenAIUsagePayload(u: OpenAIUsage | undefined): UsageData {
+  const cacheWrites = reportedCacheWrites(u, u?.input_tokens_details)
   const usage = usageWithCachedInput(
     u?.input_tokens,
     u?.output_tokens,
     u?.input_tokens_details?.cached_tokens ?? u?.cached_tokens ?? u?.prompt_cache_hit_tokens,
     u?.output_tokens_details?.reasoning_tokens,
-    cacheWriteOf(u),
+    cacheWrites,
   )
   const imageInput = Math.min(Math.max(0, u?.input_tokens_details?.image_tokens ?? 0), usage.inputTokens)
   const imageOutput = Math.min(Math.max(0, u?.output_tokens_details?.image_tokens ?? 0), usage.outputTokens)
@@ -50,7 +73,7 @@ export function parseOpenAIUsagePayload(u: OpenAIUsage | undefined): UsageData {
     usage.outputTokens -= imageOutput
     usage.imageOutputTokens = imageOutput
   }
-  return usage
+  return applyCacheWriteDetails(usage, cacheWrites, u?.input_tokens_details)
 }
 
 function recordOf(value: unknown): Record<string, unknown> | null {
@@ -108,6 +131,7 @@ export function createStreamParser() {
         reported = { ...reported, ...e.response.usage,
           input_tokens_details: { ...reported.input_tokens_details, ...e.response.usage.input_tokens_details },
           output_tokens_details: { ...reported.output_tokens_details, ...e.response.usage.output_tokens_details } }
+        delete usage.cacheCreate12hTokens
         Object.assign(usage, applyImageMetadata(parseOpenAIUsagePayload(reported), e.response))
       }
     },

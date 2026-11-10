@@ -69,6 +69,7 @@ interface DashboardRecentLog {
   outputTokens: number
   reasoningTokens: number
   cacheCreateTokens: number
+  cacheCreate12hTokens?: number
   cacheReadTokens: number
   cost: number
   baseCost: number
@@ -91,6 +92,7 @@ interface DashboardRecentLog {
   inputPrice: number | null
   outputPrice: number | null
   cacheCreatePrice: number | null
+  cacheCreate12hPrice?: number
   cacheReadPrice: number | null
   apiKeyName: string | null
   accountName: string | null
@@ -603,10 +605,15 @@ function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number
   if (row.imageInputTokens > 0) rows.push({ label: '图片输入', value: row.imageInputTokens })
   if (row.imageOutputTokens > 0) rows.push({ label: '图片输出', value: row.imageOutputTokens })
   if (row.imageCacheReadTokens > 0) rows.push({ label: '图片缓存', value: row.imageCacheReadTokens })
-  rows.push(
-    { label: '缓存创建', value: row.cacheCreateTokens },
-    { label: '缓存读取', value: row.cacheReadTokens },
-  )
+  if (row.cacheCreate12hTokens === undefined) {
+    rows.push({ label: '缓存创建', value: row.cacheCreateTokens })
+  } else {
+    rows.push(
+      { label: '30 分钟缓存写入', value: row.cacheCreateTokens - row.cacheCreate12hTokens },
+      { label: '12 小时缓存写入', value: row.cacheCreate12hTokens },
+    )
+  }
+  rows.push({ label: '缓存读取', value: row.cacheReadTokens })
   return rows
 }
 
@@ -850,9 +857,13 @@ function openRequestInput(row: DashboardRecentLog) {
                     <span>输出单价</span>
                     <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.outputPrice) }}</strong>
                   </div>
-                  <div v-if="row.cacheCreatePrice && row.cacheCreatePrice > 0" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
-                    <span>缓存写入单价</span>
+                  <div v-if="row.cacheCreate12hTokens !== undefined || (row.cacheCreatePrice && row.cacheCreatePrice > 0)" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
+                    <span>{{ row.cacheCreate12hTokens === undefined ? '缓存写入单价' : '30 分钟缓存写入单价' }}</span>
                     <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreatePrice) }}</strong>
+                  </div>
+                  <div v-if="row.cacheCreate12hPrice !== undefined" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
+                    <span>12 小时缓存写入单价</span>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreate12hPrice) }}</strong>
                   </div>
                   <div v-if="row.cacheReadPrice && row.cacheReadPrice > 0" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>缓存读取单价</span>

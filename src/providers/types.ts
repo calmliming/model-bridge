@@ -45,6 +45,8 @@ export interface UsageData {
    */
   reasoningTokens: number
   cacheCreateTokens: number
+  /** OpenAI 12h subset of a verified 30m/12h split. The remainder is 30m. */
+  cacheCreate12hTokens?: number
   cacheReadTokens: number
   /** Image input tokens billed by a GPT Image tool/model, when reported. */
   imageInputTokens?: number

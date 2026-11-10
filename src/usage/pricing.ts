@@ -11,6 +11,8 @@ export interface TierPrice {
   input: number
   output: number
   cacheWrite: number
+  /** OpenAI 12h writes. An absent rate uses the regular cache-write price. */
+  cacheWrite12h?: number
   cacheRead: number
   /** USD per 1M image-input tokens, for GPT Image edits/variations. */
   imageInput?: number
@@ -197,25 +199,28 @@ const OPENAI_GPT56_SOL: TierPrice = {
   input: 5,
   output: 30,
   cacheWrite: 6.25,
+  cacheWrite12h: 12.5,
   cacheRead: 0.5
 }
 const OPENAI_GPT56_TERRA: TierPrice = {
   input: 2.5,
   output: 15,
   cacheWrite: 3.125,
+  cacheWrite12h: 6.25,
   cacheRead: 0.25
 }
 const OPENAI_GPT56_LUNA: TierPrice = {
   input: 1,
   output: 6,
   cacheWrite: 1.25,
+  cacheWrite12h: 2.5,
   cacheRead: 0.1
 }
 // gpt-6 Sol/Luna (public 2026-09-16). These are the gpt-5.6 Sol/Luna tiers at
 // roughly half the price — and in Luna's case a tenth — rather than a new
 // capability tier: Artificial Analysis measured Intelligence/Coding scores
 // level with gpt-5.6 while cost per task fell ~50% (Sol) and ~60% (Luna).
-// Official model pages: cached input is 10% of input, cache writes 1.25×.
+// Cached input is 10% of input. Cache writes are 1.25× (30m) or 2.5× (12h).
 // Deliberately its own constant so a later gpt-5.6 price change cannot
 // silently move gpt-6 billing.
 // https://developers.openai.com/api/docs/models/gpt-6-sol
@@ -224,23 +229,26 @@ const OPENAI_GPT6_SOL: TierPrice = {
   input: 2,
   output: 10,
   cacheWrite: 2.5,
+  cacheWrite12h: 5,
   cacheRead: 0.2
 }
 const OPENAI_GPT6_LUNA: TierPrice = {
   input: 0.1,
   output: 0.5,
   cacheWrite: 0.125,
+  cacheWrite12h: 0.25,
   cacheRead: 0.01
 }
 // GPT-6.1 Sol (public 2026-09-29). Same input/output as gpt-6 Sol, but cached
-// input halves to $0.10. Cache writes stay at 1.25× input.
+// input halves to $0.10. The 30m and 12h write multipliers stay the same.
 // https://developers.openai.com/api/docs/models/gpt-6.1-sol
 // https://developers.openai.com/api/docs/models/gpt-6.1-terra
-const OPENAI_GPT61_TERRA: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.05 }
+const OPENAI_GPT61_TERRA: TierPrice = { input: 1, output: 5, cacheWrite: 1.25, cacheWrite12h: 2.5, cacheRead: 0.05 }
 const OPENAI_GPT61_SOL: TierPrice = {
   input: 2,
   output: 10,
   cacheWrite: 2.5,
+  cacheWrite12h: 5,
   cacheRead: 0.1
 }
 // https://developers.openai.com/api/docs/models/gpt-6-astra (2026-09-07).
@@ -248,6 +256,7 @@ const OPENAI_ASTRA: TierPrice = {
   input: 10,
   output: 50,
   cacheWrite: 12.5,
+  cacheWrite12h: 25,
   cacheRead: 1
 }
 // Official Image 2.5/2.6 model cards, checked 2026-11-05. Independent of Image 2.
@@ -1111,7 +1120,7 @@ export async function loadPricing(): Promise<void> {
   )
   priceCache.clear()
   for (const row of res.rows) {
-    priceCache.set(cacheKey(row.provider, row.model), {
+    const price: TierPrice = {
       input: Number(row.input_price),
       output: Number(row.output_price),
       cacheWrite: Number(row.cache_write_price),
@@ -1128,7 +1137,16 @@ export async function loadPricing(): Promise<void> {
             ? OPENAI_IMAGE_25.imageCacheRead
             : undefined
           : Number(row.image_cache_read_price)
-    })
+    }
+    // Existing catalog rows store the flat rate. Only rows matching the
+    // built-in card inherit its 12h rate. Custom cards retain their flat rate.
+    if (row.provider === 'openai' || row.provider === 'sub2api') {
+      const catalog = openaiPrice(row.model)
+      if (catalog.cacheWrite12h !== undefined && sameTokenPrice(price, catalog)) {
+        price.cacheWrite12h = catalog.cacheWrite12h
+      }
+    }
+    priceCache.set(cacheKey(row.provider, row.model), price)
   }
   loaded = true
 }
@@ -1282,11 +1300,10 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const effortPrices = override?.effortPrices as Record<string, TierPrice> | undefined
   const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
   if (!base) return null
-  // Native OpenAI accounts use subscription OAuth: GPT-6.1 Sol no longer has
-  // the model's API long-context surcharge there. Aggregator/API-key routes
-  // keep it, and an explicit operator longContext rule still takes priority.
+  // Native OpenAI accounts use subscription OAuth. The default Sol and Terra
+  // long-context step applies only on the aggregator/API-key route.
   const gpt6 = (provider === 'openai' || provider === 'sub2api') && /^gpt-6(?:$|[.-])/i.test(model)
-  const subscriptionLongContextExempt = provider === 'openai' && isGpt61SolModel(model)
+  const subscriptionLongContextExempt = provider === 'openai' && (isGpt61SolModel(model) || isGpt61TerraModel(model))
   const haiku55 = ['claude', 'antigravity', 'sub2api'].includes(provider) && HAIKU_55_MODEL.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
   const grok47Fast = (provider === 'grok' || provider === 'sub2api') && GROK_47_FAST_MODEL.test(model)
@@ -1324,11 +1341,21 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
     input: base.input * inputMultiplier,
     output: base.output * outputMultiplier,
     cacheWrite: base.cacheWrite * inputMultiplier,
+    ...(base.cacheWrite12h !== undefined ? { cacheWrite12h: base.cacheWrite12h * inputMultiplier } : {}),
     cacheRead: base.cacheRead * inputMultiplier,
     ...(base.imageInput !== undefined ? { imageInput: base.imageInput * inputMultiplier } : {}),
     ...(base.imageCacheRead !== undefined ? { imageCacheRead: base.imageCacheRead * inputMultiplier } : {}),
     ...(base.imageOutput !== undefined ? { imageOutput: base.imageOutput * outputMultiplier } : {})
   }
+}
+
+/** Cache-write component in micro-USD, before rounding or group markup. */
+export function cacheWriteCostMicros(total: number, tokens12h: number | undefined, price: TierPrice): number {
+  if (price.cacheWrite12h === undefined || tokens12h === undefined ||
+      !Number.isSafeInteger(tokens12h) || tokens12h < 0 || tokens12h > total) {
+    return total * price.cacheWrite
+  }
+  return (total - tokens12h) * price.cacheWrite + tokens12h * price.cacheWrite12h
 }
 
 /** Unrounded reference cost, retaining small cache/token weights for subscription metering. */
@@ -1341,7 +1368,7 @@ export function calculateUsageCost(provider: string, model: string, usage: Usage
   const cost = tokenFactor *
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +
-      usage.cacheCreateTokens * p.cacheWrite +
+      cacheWriteCostMicros(usage.cacheCreateTokens, usage.cacheCreate12hTokens, p) +
       usage.cacheReadTokens * p.cacheRead +
       (usage.imageInputTokens ?? 0) * (imagePrice?.imageInput ?? 0) +
       (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +

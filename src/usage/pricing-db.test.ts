@@ -142,6 +142,7 @@ describe('scheduled database price overrides', () => {
     mocks.query.mockResolvedValue({ rows: [priceRow('gpt-6.1-sol', 3, 12, 0.3, 'openai')] })
     await loadPricing()
     expect(resolvePrice('openai', 'gpt-6.1-sol')).toMatchObject({ input: 3, output: 12, cacheRead: 0.3 })
+    expect(resolvePrice('openai', 'gpt-6.1-sol')).not.toHaveProperty('cacheWrite12h')
   })
   const peakTime = Date.parse('2026-08-24T01:00:00Z')
 

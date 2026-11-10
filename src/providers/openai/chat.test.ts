@@ -2,12 +2,34 @@ import { describe, expect, it } from 'vitest'
 import {
   buildResponsesErrorEvents,
   chatCompletionsToResponses,
+  createChatCompletionStreamParser,
   createOpenaiChatCompletionsStreamTransform,
   inspectResponsesSseTerminalFailure,
+  parseChatCompletionUsage,
   responsesSseEmptyCompletionReason,
   responsesSseToChatCompletion,
   responsesStreamStartVerdict,
 } from './chat'
+
+describe('cache-write TTL in Chat billing', () => {
+  const details = { cache_write_tokens: 25, cache_write_tokens_details: { ttl_30m_tokens: 5, ttl_12h_tokens: 20 } }
+
+  it('preserves the split when buffering Responses as Chat Completions', () => {
+    const event = { type: 'response.completed', response: {
+      usage: { input_tokens: 30, output_tokens: 2, input_tokens_details: details },
+    } }
+    const { usage } = responsesSseToChatCompletion(`data: ${JSON.stringify(event)}\n\n`, 'gpt-6.1-terra')
+    expect(usage).toMatchObject({ inputTokens: 5, outputTokens: 2, cacheCreateTokens: 25, cacheCreate12hTokens: 20 })
+  })
+
+  it('preserves the split for direct Chat JSON and SSE usage', () => {
+    const chunk = { usage: { prompt_tokens: 30, completion_tokens: 2, prompt_tokens_details: details } }
+    expect(parseChatCompletionUsage(chunk)).toMatchObject({ inputTokens: 5, cacheCreate12hTokens: 20 })
+    const parser = createChatCompletionStreamParser()
+    parser.feed(chunk)
+    expect(parser.result()).toMatchObject({ cacheCreateTokens: 25, cacheCreate12hTokens: 20 })
+  })
+})
 
 describe('chatCompletionsToResponses', () => {
   it('converts system and user messages into a Responses request', () => {

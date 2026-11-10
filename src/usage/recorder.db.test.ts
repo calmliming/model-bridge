@@ -42,6 +42,9 @@ import { initDb } from '../db/init'
 import { createApiKey } from '../keys/manager'
 import { recordStreamUsage, replayPendingUsage } from './recorder'
 import { DurableQueue, usageOutboxNamespace } from './durableQueue'
+import { initPricing } from './pricing'
+import { dashboardRecentLogs } from './stats'
+import { parseJsonUsage } from '../providers/openai/usage'
 
 describe.runIf(database)('durable usage settlement in PostgreSQL', () => {
   const queue = new DurableQueue<any>(join(config.USAGE_OUTBOX_DIR, usageOutboxNamespace(config.DATABASE_URL)))
@@ -106,5 +109,18 @@ describe.runIf(database)('durable usage settlement in PostgreSQL', () => {
     expect(await Promise.all([recordStreamUsage(record), recordStreamUsage(record)])).toEqual([true, true])
     expect(await state()).toMatchObject({ balance_micros: 3_500_000, quota_used: 1.5, logs: 1, debits: 1 })
     expect(await queue.pending()).toEqual([])
+  })
+
+  it('settles mixed cache lifetimes on the Terra subscription route and keeps the historical breakdown', async () => {
+    await initPricing()
+    const { record, state } = await fixture()
+    const usage = parseJsonUsage({ usage: { input_tokens: 300_000, output_tokens: 1_000,
+      input_tokens_details: { cache_write_tokens: 200_000,
+        cache_write_tokens_details: { ttl_30m_tokens: 50_000, ttl_12h_tokens: 150_000 } } } })
+    expect(await recordStreamUsage({ ...record, model: 'gpt-6.1-terra', priceSnapshot: undefined, usage })).toBe(true)
+    expect(await state()).toMatchObject({ balance_micros: 4_186_250, quota_used: 0.81375, logs: 1, debits: 1 })
+    const { logs } = await dashboardRecentLogs(1, 10, { model: 'gpt-6.1-terra' })
+    expect(logs[0]).toMatchObject({ cacheCreateTokens: 200_000, cacheCreate12hTokens: 150_000,
+      cacheCreatePrice: 1.25, cacheCreate12hPrice: 2.5, cacheCreateCost: 0.4375, baseCost: 0.5425, cost: 0.81375 })
   })
 })

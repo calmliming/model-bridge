@@ -23,7 +23,9 @@ import { fetchCodexManifest } from './providers/openai/codexCatalog'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 describe('follow-up billing and compatibility regressions', () => {
   it.each(['gpt-6.1-terra', 'gpt-6-1-terra', 'gpt-6.1-terra-high'])('uses dedicated Terra rates for %s', model => {
-    expect(resolvePrice('openai', model)).toEqual({ input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 })
+    const price = { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25, cacheWrite12h: 2.5 }
+    expect(resolvePrice('openai', model)).toEqual(price)
+    expect(resolveUsagePrice('openai', model, { ...emptyUsage(), inputTokens: 300000 })).toEqual(price)
     expect(resolveUsagePrice('sub2api', model, { ...emptyUsage(), inputTokens: 300000, serviceTier: 'priority' })).toMatchObject({ input: 4, output: 15, cacheRead: 0.2 })
   })
   it('preserves explicit zero cache counts and splits compatible Responses cache hits once', () => {

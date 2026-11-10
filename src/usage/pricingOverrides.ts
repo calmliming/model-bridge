@@ -4,6 +4,7 @@ import { z } from 'zod'
 const amount = z.number().finite().nonnegative()
 const priceSchema = z.object({
   input: amount, output: amount, cacheWrite: amount, cacheRead: amount,
+  cacheWrite12h: amount.optional(),
   imageInput: amount.optional(), imageOutput: amount.optional(),
   imageCacheRead: amount.optional(),
   imageRequest: amount.optional(), videoSecond480: amount.optional(),

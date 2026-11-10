@@ -99,6 +99,16 @@ describe('DeepSeek V4.1 Flash pricing', () => {
 // dedicated gpt-6 branch — without it they fall through to the generic gpt-5
 // tier (input 1.25) and under-bill every request.
 describe('openai gpt-6 pricing', () => {
+  it('charges each reported cache-write lifetime once and uses the flat rate without details', () => {
+    const usage = { ...emptyUsage(), cacheCreateTokens: 100_000 }
+    const cost = (tokens12h?: number) => estimateCost('openai', 'gpt-6.1-terra', { ...usage, cacheCreate12hTokens: tokens12h })
+    expect(cost(0)).toBe(0.125)
+    expect(cost(20_000)).toBe(0.15)
+    expect(cost(100_000)).toBe(0.25)
+    expect(cost()).toBe(0.125)
+    expect(cost(100_001)).toBe(0.125)
+  })
+
   it('prices the Sol flagship at 2 / 10, half of gpt-5.6 Sol', () => {
     expect(resolvePrice('openai', 'gpt-6-sol')).toMatchObject({
       input: 2,
@@ -119,7 +129,7 @@ describe('openai gpt-6 pricing', () => {
 
   it('applies the official long-context step and tier factors to Sol and Luna', () => {
     const long = { ...emptyUsage(), inputTokens: 272_001, outputTokens: 10 }
-    expect(resolveUsagePrice('openai', 'gpt-6-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheRead: 0.4 })
+    expect(resolveUsagePrice('openai', 'gpt-6-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheWrite12h: 10, cacheRead: 0.4 })
     expect(resolveUsagePrice('sub2api', 'gpt-6-luna', long)).toMatchObject({ input: 0.2, output: 0.75 })
     const short = { ...emptyUsage(), inputTokens: 272_000 }
     expect(resolveUsagePrice('openai', 'gpt-6-sol', short)).toMatchObject({ input: 2, output: 10 })
@@ -162,7 +172,7 @@ describe('openai gpt-6 pricing', () => {
 // halved to 0.10. "gpt-6.1-sol" has a "." after the 6, so it misses the gpt-6
 // branch and previously fell to the generic gpt-5 tier (1.25 / 10, no cache write).
 describe('openai gpt-6.1 sol pricing', () => {
-  const sol61 = { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.1 }
+  const sol61 = { input: 2, output: 10, cacheWrite: 2.5, cacheWrite12h: 5, cacheRead: 0.1 }
 
   it('prices both spellings and suffixed variants on the official card', () => {
     for (const provider of ['openai', 'sub2api']) {
@@ -181,7 +191,7 @@ describe('openai gpt-6.1 sol pricing', () => {
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', short)).toEqual(sol61)
     const long = { ...short, cacheReadTokens: 72_001 }
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', long)).toEqual(sol61)
-    expect(resolveUsagePrice('sub2api', 'gpt-6.1-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheRead: 0.2 })
+    expect(resolveUsagePrice('sub2api', 'gpt-6.1-sol', long)).toEqual({ input: 4, output: 15, cacheWrite: 5, cacheWrite12h: 10, cacheRead: 0.2 })
   })
 
   it('applies the official Fast and Flex factors', () => {

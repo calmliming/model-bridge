@@ -30,12 +30,26 @@ afterEach(async () => {
 describe('pricing override file', () => {
   it('retains explicit long-context rules for native GPT-6.1 and Haiku 5.5', async () => {
     await writeRules([
-      { provider: 'openai', model: 'gpt-6.1-sol', longContext: { threshold: 10, inputMultiplier: 3, outputMultiplier: 4 } },
+      { provider: 'openai', model: 'gpt-6.1-*', longContext: { threshold: 10, inputMultiplier: 3, outputMultiplier: 4 } },
       { provider: 'claude', model: 'claude-haiku-5-5', longContext: null },
     ])
     await reloadPricingOverrides(file)
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', { ...emptyUsage(), inputTokens: 400_000 })).toMatchObject({ input: 6, output: 40 })
+    expect(resolveUsagePrice('openai', 'gpt-6.1-terra', { ...emptyUsage(), inputTokens: 400_000 })).toMatchObject({ input: 3, output: 20 })
     expect(resolveUsagePrice('claude', 'claude-haiku-5-5', { ...emptyUsage(), inputTokens: 400_000 })).toMatchObject({ input: 0.1, output: 0.5 })
+  })
+  it('applies service tier and context factors to an explicit 12h rate with free 30m writes', async () => {
+    const rule = { provider: 'sub2api', model: 'gpt-6.1-terra' }
+    const usage = { ...emptyUsage(), cacheCreateTokens: 1_000_000, cacheCreate12hTokens: 250_000, serviceTier: 'fast' }
+    await writeRules([{ ...rule, price: { ...base, input: 0, cacheWrite: 0, cacheWrite12h: 3 } }])
+    await reloadPricingOverrides(file)
+    expect(estimateCost(rule.provider, rule.model, usage)).toBe(3)
+    await writeRules([{ ...rule, price: { ...base, cacheWrite12h: 0 } }])
+    await reloadPricingOverrides(file)
+    expect(estimateCost(rule.provider, rule.model, usage)).toBe(7.5)
+    await writeRules([{ ...rule, price: base }])
+    await reloadPricingOverrides(file)
+    expect(estimateCost(rule.provider, rule.model, usage)).toBe(10)
   })
   it('supports supplier image-request and resolution-specific video prices', async () => {
     await writeRules([

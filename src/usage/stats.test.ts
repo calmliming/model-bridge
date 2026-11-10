@@ -9,7 +9,8 @@ vi.mock('../db/index', () => ({
   pool: { query: mocks.query },
 }))
 
-vi.mock('./pricing', () => ({
+vi.mock('./pricing', async original => ({
+  ...await original<typeof import('./pricing')>(),
   resolvePrice: mocks.resolvePrice,
 }))
 
