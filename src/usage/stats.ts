@@ -88,6 +88,7 @@ export interface DashboardRecentLog {
   outputTokens: number
   reasoningTokens: number
   cacheCreateTokens: number
+  cacheCreate1hTokens?: number
   cacheCreate12hTokens?: number
   cacheReadTokens: number
   imageInputTokens: number
@@ -113,6 +114,7 @@ export interface DashboardRecentLog {
   inputPrice: number | null
   outputPrice: number | null
   cacheCreatePrice: number | null
+  cacheCreate1hPrice?: number
   cacheCreate12hPrice?: number
   cacheReadPrice: number | null
   imageInputPrice: number | null
@@ -268,6 +270,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const snapshot = row.billingprice as {
     price?: TierPrice | null
     imagePrice?: TierPrice | null
+    cacheCreate1hTokens?: number
     cacheCreate12hTokens?: number
   } | null
   const price = snapshot?.price ?? resolvePrice(provider, model ?? '', ts)
@@ -275,6 +278,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
   const outputTokens = toNum(row.outputtokens)
   const reasoningTokens = toNum(row.reasoningtokens)
   const cacheCreateTokens = toNum(row.cachecreatetokens)
+  const cacheCreate1hTokens = snapshot?.cacheCreate1hTokens
   const cacheCreate12hTokens = snapshot?.cacheCreate12hTokens
   const cacheReadTokens = toNum(row.cachereadtokens)
   const imageInputTokens = toNum(row.imageinputtokens)
@@ -308,6 +312,8 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     outputTokens,
     reasoningTokens,
     cacheCreateTokens,
+    ...(cacheCreate1hTokens !== undefined && price?.cacheWrite1h !== undefined
+      ? { cacheCreate1hTokens, cacheCreate1hPrice: price.cacheWrite1h } : {}),
     ...(cacheCreate12hTokens !== undefined ? { cacheCreate12hTokens } : {}),
     cacheReadTokens,
     imageInputTokens,
@@ -326,7 +332,7 @@ function asDashboardRecentLog(row: Record<string, unknown>): DashboardRecentLog 
     billTo: (row.billto as string | null) ?? 'balance',
     inputCost: price ? roundUsd((inputTokens * price.input) / 1_000_000) : 0,
     outputCost: price ? roundUsd((outputTokens * price.output) / 1_000_000) : 0,
-    cacheCreateCost: price ? roundUsd(cacheWriteCostMicros(cacheCreateTokens, cacheCreate12hTokens, price) / 1_000_000) : 0,
+    cacheCreateCost: price ? roundUsd(cacheWriteCostMicros({ cacheCreateTokens, cacheCreate12hTokens, cacheCreate1hTokens }, price) / 1_000_000) : 0,
     cacheReadCost: price ? roundUsd((cacheReadTokens * price.cacheRead) / 1_000_000) : 0,
     imageInputCost: imagePrice ? roundUsd((imageInputTokens * (imagePrice.imageInput ?? 0)) / 1_000_000) : 0,
     imageCacheReadCost: imagePrice ? roundUsd((imageCacheReadTokens * (imagePrice.imageCacheRead ?? imagePrice.cacheRead)) / 1_000_000) : 0,

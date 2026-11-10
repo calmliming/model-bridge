@@ -45,6 +45,8 @@ export interface UsageData {
    */
   reasoningTokens: number
   cacheCreateTokens: number
+  /** Anthropic 1h subset of a verified 5m/1h split. */
+  cacheCreate1hTokens?: number
   /** OpenAI 12h subset of a verified 30m/12h split. The remainder is 30m. */
   cacheCreate12hTokens?: number
   cacheReadTokens: number

@@ -3,6 +3,7 @@ import { fetchWithConnectTimeout } from '../../http/upstream'
 import { config } from '../../config'
 import type { IncomingHttpHeaders } from 'node:http'
 import { claudeProtocolHeaders } from './headers'
+import { CLAUDE_FABLE_MYTHOS_52 } from './models'
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages'
 
@@ -140,6 +141,7 @@ interface ClaudeCompatRule {
   /** thinking.type=enabled with a manual budget returns 400; omit it (adaptive). */
   dropEnabledThinking: boolean
   allowForcedTools?: boolean
+  preserveHistory?: boolean
 }
 
 // Documented migration rules for models that reject legacy request settings.
@@ -147,6 +149,7 @@ interface ClaudeCompatRule {
 // https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
 const SONNET_55_PATTERN = /^claude-sonnet-5[-.]5(?:$|-)/i
 const CLAUDE_COMPAT_RULES: Array<[RegExp, ClaudeCompatRule]> = [
+  [CLAUDE_FABLE_MYTHOS_52, { stripSampling: true, dropEnabledThinking: true, preserveHistory: true }],
   [/^claude-(?:fable|mythos)-5-1(?:$|-)/i, { stripSampling: true, dropEnabledThinking: false }],
   [SONNET_55_PATTERN, { stripSampling: true, disabledThinking: 'between_tools', dropEnabledThinking: true }],
   [/^claude-opus-5[-.]5(?:$|-)/i, { stripSampling: false, dropEnabledThinking: true }],
@@ -212,9 +215,8 @@ function withStrictClientTools(tools: unknown, forcedName?: string): unknown {
   })
 }
 
-/** Applies documented Fable 5.1 / Claude 5.5 migration rules that avoid 400s. */
-function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Record<string, unknown> {
-  const rule = claudeCompatRule(body.model)
+/** Adapts legacy settings to the selected model's supported controls. */
+function normalizeClaudeModelCompatibility(body: Record<string, unknown>, rule: ClaudeCompatRule | undefined): Record<string, unknown> {
   if (!rule) return body
   const out: Record<string, unknown> = { ...body }
 
@@ -227,7 +229,7 @@ function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Recor
     if (rule.disabledThinking && allowsBetweenTools(body)) out.thinking = { type: rule.disabledThinking }
     else delete out.thinking
   } else if ((thinkingType === 'enabled' && rule.dropEnabledThinking)
-    || (thinkingType === 'between_tools' && rule.disabledThinking === 'disabled')) {
+    || (thinkingType === 'between_tools' && (rule.preserveHistory || rule.disabledThinking === 'disabled'))) {
     delete out.thinking
   }
   if (rule.stripSampling) {
@@ -242,16 +244,19 @@ function normalizeClaudeModelCompatibility(body: Record<string, unknown>): Recor
   const row = choice as Record<string, unknown>
   if (row.type !== 'any' && row.type !== 'tool') return out
 
-  const forcedName = row.type === 'tool' && typeof row.name === 'string' ? row.name : undefined
-  const instruction = forcedName
-    ? `You must call the "${forcedName}" tool before responding.`
-    : 'You must call at least one available tool before responding.'
   out.tool_choice = {
     type: 'auto',
     ...(typeof row.disable_parallel_tool_use === 'boolean'
       ? { disable_parallel_tool_use: row.disable_parallel_tool_use }
       : {}),
   }
+  // On 5.2, a per-turn tool choice must not rewrite the signed history or
+  // change tool schemas, which can invalidate preserved thinking blocks.
+  if (rule.preserveHistory) return out
+  const forcedName = row.type === 'tool' && typeof row.name === 'string' ? row.name : undefined
+  const instruction = forcedName
+    ? `You must call the "${forcedName}" tool before responding.`
+    : 'You must call at least one available tool before responding.'
   out.tools = withStrictClientTools(body.tools, forcedName)
   out.messages = appendForcedToolInstruction(body.messages, instruction)
   return out
@@ -370,7 +375,8 @@ function clientCacheBreakpoints(body: Record<string, unknown>): { count: number;
  * now in the beta set the field is accepted upstream.)
  */
 export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Record<string, unknown> {
-  const compatibleBody = normalizeClaudeModelCompatibility(body)
+  const rule = claudeCompatRule(body.model)
+  const compatibleBody = normalizeClaudeModelCompatibility(body, rule)
   const out: Record<string, unknown> = { ...compatibleBody }
   const system = normalizeSystem(compatibleBody.system)
   // Cache the stable tools+system prefix so it can be READ across requests.
@@ -378,7 +384,7 @@ export function normalizeClaudeMessagesBody(body: Record<string, unknown>): Reco
   // breakpoints, to avoid competing markers / exceeding the 4-breakpoint cap.
   out.system =
     compatibleBody.cache_control || systemHasCacheControl(system) ? system : withSystemCacheBreakpoint(system, compatibleBody)
-  const messages = normalizeMessages(compatibleBody.messages)
+  const messages = rule?.preserveHistory ? compatibleBody.messages : normalizeMessages(compatibleBody.messages)
   if (messages !== compatibleBody.messages) out.messages = messages
   return out
 }

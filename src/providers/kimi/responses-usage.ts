@@ -10,7 +10,7 @@ import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
 interface ResponsesUsage {
   input_tokens?: number
   output_tokens?: number
-  input_tokens_details?: { cached_tokens?: number }
+  input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }
   output_tokens_details?: { reasoning_tokens?: number }
 }
 
@@ -20,6 +20,7 @@ function mapUsage(u: ResponsesUsage | undefined): UsageData {
     u?.output_tokens,
     u?.input_tokens_details?.cached_tokens,
     u?.output_tokens_details?.reasoning_tokens,
+    u?.input_tokens_details?.cache_write_tokens,
   )
 }
 
@@ -43,11 +44,7 @@ export function createStreamParser() {
   }
 }
 
-/**
- * Non-stream path is not exercised in practice — the relay handler is
- * `forceStream: true` so /api/kimi/v1/responses always streams. Kept
- * for interface symmetry with other providers.
- */
+/** Parses a non-streaming native Responses body. */
 export function parseJsonUsage(body: unknown): UsageData {
   const root = body as { response?: { usage?: ResponsesUsage }; usage?: ResponsesUsage } | null
   return mapUsage(root?.response?.usage ?? root?.usage)

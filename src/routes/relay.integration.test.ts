@@ -1500,14 +1500,15 @@ describe('upstream compatibility regressions', () => {
     expect(mocks.logs[0]?.[26]).toBe(3)
   }))
 
-  it('routes K3 to native Responses and preserves the caller response format', () => withRelay(async (request) => {
-    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ object: 'response', model: 'kimi-k3', status: 'completed',
-      output: [], usage: { input_tokens: 10, output_tokens: 5 } }), { headers: { 'content-type': 'application/json' } }))
-    const response = await request({ model: 'k3', stream: false, input: 'Hi', tools: [{ type: 'web_search' }] }, '/api/kimi/v1/responses')
+  it.each([['k3', 'kimi-k3'], ['kimi-k3.1-pro', 'kimi-k3.1-pro']])('routes %s to native Responses and records usage', (model, upstreamModel) => withRelay(async (request) => {
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ object: 'response', model: upstreamModel, status: 'completed',
+      output: [], usage: { input_tokens: 10, output_tokens: 5, input_tokens_details: { cache_write_tokens: 3 } } }),
+    { headers: { 'content-type': 'application/json' } }))
+    const response = await request({ model, stream: false, input: 'Hi', tools: [{ type: 'web_search' }] }, '/api/kimi/v1/responses')
     expect(response.contentType).toContain('application/json')
     expect(mocks.fetch.mock.calls[0]?.[0]).toBe('https://api.moonshot.cn/v1/responses')
-    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model: 'kimi-k3', tools: [{ type: 'web_search' }] })
-    expect(mocks.logs[0]?.slice(9, 11)).toEqual([10, 5])
+    expect(JSON.parse(mocks.fetch.mock.calls[0]?.[1].body)).toMatchObject({ model: upstreamModel, tools: [{ type: 'web_search' }] })
+    expect(mocks.logs[0]?.slice(9, 14)).toEqual([7, 5, 0, 3, 0])
   }))
 })
 

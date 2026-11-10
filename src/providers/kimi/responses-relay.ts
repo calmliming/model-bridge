@@ -2,13 +2,15 @@ import { normalizeKimiChatCompletionsBody } from './chat-relay'
 import { mapModel, responsesToChatCompletions } from './converter'
 import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { fetchWithConnectTimeout } from '../../http/upstream'
+import { isKimiK31Model } from './models'
 
 const KIMI_CHAT_COMPLETIONS_URL = 'https://api.moonshot.cn/v1/chat/completions'
 const KIMI_RESPONSES_URL = 'https://api.moonshot.cn/v1/responses'
 
-/** The native endpoint currently supports K3; K2 retains the chat adapter. */
+/** The native endpoint supports the K3 family; K2 retains the chat adapter. */
 export function supportsNativeKimiResponses(model: string): boolean {
-  return mapModel(model).toLowerCase() === 'kimi-k3'
+  const id = mapModel(model).toLowerCase()
+  return id === 'kimi-k3' || isKimiK31Model(id)
 }
 
 export function relayNativeKimiResponses(apiKey: string, body: Record<string, unknown>): Promise<Response> {

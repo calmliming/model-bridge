@@ -23,6 +23,7 @@ describe('one-time seed corrections', () => {
     expect(calls.some(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === 'gpt-6.1-sol' && values?.[6] === 0.1)).toBe(true)
     // New discoverable models get exact rows at their own list price.
     const seeded = (model: string) => calls.find(([sql, values]) => sql.includes('INSERT INTO model_pricing') && values?.[2] === model)?.[1]
+    expect(seeded('claude-fable-5-2')?.slice(3, 7)).toEqual([8, 40, 10, 0.2])
     expect(seeded('mimo-v2.5')).toBeUndefined()
     expect(seeded('mimo-v2.5-pro')).toBeUndefined()
     expect(seeded('mimo-v2.6-pro-ultraspeed')?.slice(3, 7)).toEqual([4.35, 8.7, 0, 0.036])
@@ -46,6 +47,14 @@ function priceRow(model: string, input: number, output: number, cacheRead: numbe
 }
 
 describe('scheduled database price overrides', () => {
+  it('retains Fable and Mythos history when the 5.2 seed is loaded', async () => {
+    mocks.query.mockResolvedValue({ rows: [{ ...priceRow('claude-fable-5-2', 8, 40, 0.2, 'claude'), cache_write_price: 10 }] })
+    await loadPricing()
+    expect(resolvePrice('claude', 'claude-fable-5-2')).toMatchObject({ input: 8, output: 40, cacheWrite1h: 16 })
+    expect(resolvePrice('claude', 'claude-fable-5')).toMatchObject({ input: 10, cacheRead: 1 })
+    expect(resolvePrice('claude', 'claude-fable-5-1')).toMatchObject({ input: 10, cacheRead: 0.25 })
+    expect(resolvePrice('sub2api', 'claude-mythos-5-2')).toMatchObject({ input: 8, output: 40, cacheWrite1h: 16 })
+  })
   it('seeds Haiku 5.5 without repricing older Haiku versions through substring matches', async () => {
     mocks.query.mockResolvedValue({ rows: [{ ...priceRow('haiku', 1, 5, 0.1, 'claude'), cache_write_price: 1.25 }] })
     await loadPricing()
@@ -215,6 +224,17 @@ describe('scheduled database price overrides', () => {
     expect(resolvePrice('kimi', 'kimi-k2.7-code-highspeed')).toMatchObject({ input: 1.82, output: 7.56, cacheRead: 0.364 })
     // The sibling rows themselves still apply.
     expect(resolvePrice('xiaomi', 'mimo-v2.6-pro')).toMatchObject({ input: 0.435 })
+  })
+
+  it('prices K3.1 independently of K3 and reads cache-write rates for existing default K3 rows', async () => {
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('kimi-k3', 2.8, 14, 0.28, 'kimi'),
+      { ...priceRow('kimi-k3.1-pro', 1.82, 9.52, 0.182, 'kimi'), cache_write_price: 1.82 },
+    ] })
+    await loadPricing()
+    expect(resolvePrice('kimi', 'kimi-k3')).toMatchObject({ cacheWrite: 2.8, cacheWrite1h: 5.6 })
+    expect(resolvePrice('kimi', 'kimi-k3.1-pro')).toMatchObject({ input: 1.82, output: 9.52, cacheWrite1h: 3.64 })
+    expect(resolvePrice('kimi', 'kimi-k3.1-pro-highspeed')).toMatchObject({ input: 3.64, output: 19.04 })
   })
 
   it('keeps an administrator-edited faster-lane row', async () => {

@@ -51,9 +51,12 @@ export async function listGroups() {
       rateMultiplier: accountGroups.rateMultiplier,
       createdAt: accountGroups.createdAt,
       accountCount: count(accountGroupMembers.accountId),
+      providers: sql<string[]>`coalesce(array_agg(distinct ${accounts.provider} order by ${accounts.provider})
+        filter (where ${accounts.status} <> 'disabled'), array[]::text[])`,
     })
     .from(accountGroups)
     .leftJoin(accountGroupMembers, eq(accountGroupMembers.groupId, accountGroups.id))
+    .leftJoin(accounts, eq(accountGroupMembers.accountId, accounts.id))
     .groupBy(accountGroups.id)
     .orderBy(desc(accountGroups.createdAt))
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { createStreamParser } from './usage'
+import { createStreamParser, parseJsonUsage } from './usage'
+import { claudeSseToChatCompletion } from './chat'
+import { estimateCost } from '../../usage/pricing'
 
 function parse(events: unknown[]) {
   const parser = createStreamParser()
@@ -8,6 +10,23 @@ function parse(events: unknown[]) {
 }
 
 describe('Claude stream usage parser', () => {
+  it('bills reported Fable 5.2 cache TTL and speed consistently for JSON, SSE and buffered Chat', () => {
+    const usage = { input_tokens: 10_000, output_tokens: 1_000, cache_read_input_tokens: 10_000,
+      cache_creation_input_tokens: 20_000, cache_creation: { ephemeral_5m_input_tokens: 5_000, ephemeral_1h_input_tokens: 15_000 },
+      speed: 'fast' }
+    const events = [
+      { type: 'message_start', message: { usage: { ...usage, output_tokens: 1 } } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1_000 } },
+    ]
+    const sse = events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('')
+    for (const result of [parseJsonUsage({ usage }), parse(events), claudeSseToChatCompletion(sse, 'claude-fable-5-2').usage]) {
+      expect(result).toMatchObject({ cacheCreateTokens: 20_000, cacheCreate1hTokens: 15_000, serviceTier: 'fast' })
+      expect(estimateCost('claude', 'claude-fable-5-2', result)).toBe(0.824)
+    }
+    expect(estimateCost('claude', 'claude-fable-5-2', parseJsonUsage({ usage: { ...usage, speed: 'standard' } }))).toBe(0.412)
+    expect(estimateCost('claude', 'claude-fable-5-2', parseJsonUsage({ usage: { ...usage, speed: 'standard', cache_creation: null } }))).toBe(0.322)
+  })
+
   it('keeps official stream counts from message_start and the final output', () => {
     expect(parse([
       { type: 'message_start', message: { usage: { input_tokens: 120, cache_read_input_tokens: 900, cache_creation_input_tokens: 40, output_tokens: 1 } } },

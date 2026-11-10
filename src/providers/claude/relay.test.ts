@@ -245,6 +245,23 @@ describe('normalizeClaudeMessagesBody', () => {
     expect(body.tool_choice).toEqual({ type: 'any' })
   })
 
+  it.each(['claude-fable-5-2', 'claude-mythos-5-2'])('adapts %s controls without changing the signed prefix', model => {
+    const messages = [
+      { role: 'user', content: "<system-reminder>Today’s date is 2026/11/10.</system-reminder>" },
+      { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature: 'example' }] },
+      { role: 'user', content: 'Continue.' },
+    ]
+    const tools = [{ name: 'lookup', input_schema: { type: 'object' } }]
+    const body = normalizeClaudeMessagesBody({ model, messages, tools, temperature: 0.2, top_p: 0.8, top_k: 5,
+      thinking: { type: 'enabled', budget_tokens: 1024 }, tool_choice: { type: 'tool', name: 'lookup', disable_parallel_tool_use: true },
+      output_config: { effort: 'xhigh' }, speed: 'fast' })
+    expect(body).toMatchObject({ model, output_config: { effort: 'xhigh' }, speed: 'fast',
+      tool_choice: { type: 'auto', disable_parallel_tool_use: true } })
+    expect(body.messages).toBe(messages)
+    expect(body.tools).toBe(tools)
+    for (const field of ['thinking', 'temperature', 'top_p', 'top_k']) expect(body).not.toHaveProperty(field)
+  })
+
   it.each(['claude-sonnet-5-5', 'claude-sonnet-5.5'])('adapts legacy controls for %s', model => {
     const body = normalizeClaudeMessagesBody({
       model,

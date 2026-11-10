@@ -7,7 +7,8 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime, formatUsd } from '../utils'
-import { buildCcSwitchUrl, ccSwitchProviderName, launchCcSwitch, targetsForProviders, type CcSwitchTarget } from '../ccswitch'
+import { KIMI_CC_SWITCH_MODEL } from '../ccswitch'
+import { useCcSwitchImport } from '../composables/useCcSwitchImport'
 
 interface ApiKey {
   id: string
@@ -46,6 +47,7 @@ interface AccountGroup {
   description: string | null
   rateMultiplier: number
   accountCount: number
+  providers: string[]
   createdAt: number
 }
 
@@ -112,6 +114,7 @@ const form = ref({
 
 /** Plaintext secret of a freshly created key — shown exactly once. */
 const newKey = ref<string | null>(null)
+const newKeyScope = ref<Pick<ApiKey, 'allowedProviders' | 'accountGroupId'>>({ allowedProviders: null, accountGroupId: null })
 const showUse = ref(false)
 const useKeyName = ref('')
 const useKeySecret = ref('')
@@ -200,6 +203,7 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
 
 const commonModelOptions = [
   'claude-*',
+  'claude-fable-5-2',
   'claude-fable-5-1',
   'gpt-*',
   'gemini-*',
@@ -231,6 +235,7 @@ const commonModelOptions = [
   'kimi-*',
   'kimi-k3',
   'kimi-k2.7-code',
+  KIMI_CC_SWITCH_MODEL,
   'kimi-k2.7-code-highspeed',
   'sub2api-*'
 ].map((value) => ({ label: value, value }))
@@ -321,6 +326,10 @@ async function create() {
     })
     showCreate.value = false
     newKey.value = data.key
+    newKeyScope.value = {
+      allowedProviders: form.value.allowedProviders.length ? [...form.value.allowedProviders] : null,
+      accountGroupId: form.value.accountGroupId,
+    }
     form.value = {
       userId: defaultUserId(),
       name: '',
@@ -750,13 +759,16 @@ POST ${baseOrigin.value}/api/qwen/v1/chat/completions
 GET ${baseOrigin.value}/api/qwen/v1/models`,
     kimi: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/kimi
 export ANTHROPIC_AUTH_TOKEN=${key}
-export ANTHROPIC_MODEL=kimi-k3
+export ANTHROPIC_MODEL=${KIMI_CC_SWITCH_MODEL}
 export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.6
+export ANTHROPIC_DEFAULT_OPUS_MODEL=${KIMI_CC_SWITCH_MODEL}
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=kimi-k2.7-code
 claude`,
     codexKimi: `[profiles.model-bridge-kimi]
 model_provider = "model-bridge-kimi"
-model = "kimi-k2.7-code"
+model = "${KIMI_CC_SWITCH_MODEL}"
+model_context_window = 1048576
+model_reasoning_effort = "high"
 
 [model_providers.model-bridge-kimi]
 name = "model-bridge-kimi"
@@ -779,30 +791,18 @@ GET ${baseOrigin.value}/api/kimi/v1/models`
 })
 
 // CC Switch one-click import picker state (opened from the table row).
-const showCcSwitch = ref(false)
-const ccSwitchSecret = ref('')
-const ccSwitchTargets = ref<CcSwitchTarget[]>([])
+const { showCcSwitch, ccSwitchTargets, beginCcSwitchImport, triggerCcSwitch } = useCcSwitchImport()
 
-/** Opens the CC Switch import picker for a key, fetching its plaintext first. */
 async function openCcSwitch(row: ApiKey) {
   const secret = await fetchFullKey(row)
   if (!secret) return
-  ccSwitchSecret.value = secret
-  ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
-  showCcSwitch.value = true
+  beginCcSwitchImport(secret, row.allowedProviders, groups.value.find(g => g.id === row.accountGroupId)?.providers)
 }
 
-/** Builds the deep link for the chosen target and hands off to CC Switch. */
-async function triggerCcSwitch(target: CcSwitchTarget) {
-  if (!ccSwitchSecret.value) return
-  const url = buildCcSwitchUrl(target, {
-    origin: baseOrigin.value,
-    apiKey: ccSwitchSecret.value,
-    name: ccSwitchProviderName(target)
-  })
-  const launched = await launchCcSwitch(url)
-  if (launched) message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
-  else message.warning('未能唤起 CC Switch，请确认已安装（https://ccswitch.io）')
+function openCcSwitchForNew() {
+  if (!newKey.value) return
+  const { allowedProviders, accountGroupId } = newKeyScope.value
+  beginCcSwitchImport(newKey.value, allowedProviders, groups.value.find(g => g.id === accountGroupId)?.providers)
 }
 
 function quotaPercent(row: ApiKey): number {
@@ -1032,9 +1032,12 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   {
     title: '操作',
     key: 'actions',
-    width: 96,
+    width: 190,
     fixed: 'right',
-    render: (row) => h(UiButton, { size: 'small', secondary: true, onClick: () => { actionKey.value = row } }, { default: () => '管理' })
+    render: (row) => h(UiSpace, { size: 'small', wrap: false }, { default: () => [
+      h(UiButton, { size: 'small', secondary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) }, { default: () => '导入 CC Switch' }),
+      h(UiButton, { size: 'small', secondary: true, onClick: () => { actionKey.value = row } }, { default: () => '管理' }),
+    ] })
   }
 ])
 
@@ -1111,7 +1114,10 @@ onMounted(() => {
         </div>
         <div class="my-4 flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 dark:bg-dark-900"><code class="min-w-0 truncate text-sm">{{ row.keyPrefix }}…</code><UiButton size="small" secondary :disabled="!row.canReveal" @click="copyApiKey(row)">复制</UiButton></div>
         <dl class="grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-gray-500">已用 / 上限</dt><dd class="mt-1 break-words">{{ formatUsd(row.quotaUsed) }} / {{ row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) }}</dd></div><div><dt class="text-xs text-gray-500">分组</dt><dd class="mt-1 break-words">{{ groupName(row.accountGroupId) }}</dd></div></dl>
-        <div class="mt-4 flex justify-end"><UiButton secondary size="small" @click="actionKey = row">管理</UiButton></div>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <UiButton secondary size="small" :disabled="!row.canReveal" @click="openCcSwitch(row)">导入 CC Switch</UiButton>
+          <UiButton secondary size="small" @click="actionKey = row">管理</UiButton>
+        </div>
       </article>
     </div>
 
@@ -1166,6 +1172,7 @@ onMounted(() => {
       <UiInput :value="newKey ?? ''" readonly />
       <template #footer>
         <UiSpace justify="end">
+          <UiButton secondary @click="openCcSwitchForNew">导入 CC Switch</UiButton>
           <UiButton secondary @click="openUseNewKey">查看接入方式</UiButton>
           <UiButton type="primary" @click="copyAndClose">复制并关闭</UiButton>
         </UiSpace>

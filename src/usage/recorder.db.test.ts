@@ -45,6 +45,7 @@ import { DurableQueue, usageOutboxNamespace } from './durableQueue'
 import { initPricing } from './pricing'
 import { dashboardRecentLogs } from './stats'
 import { parseJsonUsage } from '../providers/openai/usage'
+import { parseJsonUsage as parseClaudeJsonUsage } from '../providers/claude/usage'
 
 describe.runIf(database)('durable usage settlement in PostgreSQL', () => {
   const queue = new DurableQueue<any>(join(config.USAGE_OUTBOX_DIR, usageOutboxNamespace(config.DATABASE_URL)))
@@ -122,5 +123,18 @@ describe.runIf(database)('durable usage settlement in PostgreSQL', () => {
     const { logs } = await dashboardRecentLogs(1, 10, { model: 'gpt-6.1-terra' })
     expect(logs[0]).toMatchObject({ cacheCreateTokens: 200_000, cacheCreate12hTokens: 150_000,
       cacheCreatePrice: 1.25, cacheCreate12hPrice: 2.5, cacheCreateCost: 0.4375, baseCost: 0.5425, cost: 0.81375 })
+  })
+
+  it('settles and displays the Fable 5.2 fast rate and both cache write prices', async () => {
+    await initPricing()
+    const { record, state } = await fixture()
+    const usage = parseClaudeJsonUsage({ usage: { input_tokens: 10_000, output_tokens: 1_000, speed: 'fast',
+      cache_read_input_tokens: 10_000, cache_creation_input_tokens: 20_000,
+      cache_creation: { ephemeral_5m_input_tokens: 5_000, ephemeral_1h_input_tokens: 15_000 } } })
+    expect(await recordStreamUsage({ ...record, provider: 'claude', model: 'claude-fable-5-2', priceSnapshot: undefined, usage })).toBe(true)
+    expect(await state()).toMatchObject({ balance_micros: 3_764_000, quota_used: 1.236, logs: 1, debits: 1 })
+    const { logs } = await dashboardRecentLogs(1, 10, { model: 'claude-fable-5-2' })
+    expect(logs[0]).toMatchObject({ serviceTier: 'fast', cacheCreateTokens: 20_000, cacheCreate1hTokens: 15_000,
+      cacheCreatePrice: 20, cacheCreate1hPrice: 32, cacheCreateCost: 0.58, baseCost: 0.824, cost: 1.236 })
   })
 })

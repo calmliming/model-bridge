@@ -69,6 +69,7 @@ interface DashboardRecentLog {
   outputTokens: number
   reasoningTokens: number
   cacheCreateTokens: number
+  cacheCreate1hTokens?: number
   cacheCreate12hTokens?: number
   cacheReadTokens: number
   cost: number
@@ -92,6 +93,7 @@ interface DashboardRecentLog {
   inputPrice: number | null
   outputPrice: number | null
   cacheCreatePrice: number | null
+  cacheCreate1hPrice?: number
   cacheCreate12hPrice?: number
   cacheReadPrice: number | null
   apiKeyName: string | null
@@ -595,6 +597,11 @@ function costBreakdown(row: DashboardRecentLog): { label: string; value: string;
   return rows
 }
 
+function cacheWriteLabels(row: DashboardRecentLog) {
+  if (row.cacheCreate12hTokens !== undefined) return { short: '30 分钟', long: '12 小时', tokens: row.cacheCreate12hTokens }
+  if (row.cacheCreate1hTokens !== undefined) return { short: '5 分钟', long: '1 小时', tokens: row.cacheCreate1hTokens }
+}
+
 function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number }[] {
   const rows = [
     { label: '输入', value: row.inputTokens },
@@ -605,12 +612,13 @@ function tokenBreakdown(row: DashboardRecentLog): { label: string; value: number
   if (row.imageInputTokens > 0) rows.push({ label: '图片输入', value: row.imageInputTokens })
   if (row.imageOutputTokens > 0) rows.push({ label: '图片输出', value: row.imageOutputTokens })
   if (row.imageCacheReadTokens > 0) rows.push({ label: '图片缓存', value: row.imageCacheReadTokens })
-  if (row.cacheCreate12hTokens === undefined) {
+  const cacheWrite = cacheWriteLabels(row)
+  if (!cacheWrite) {
     rows.push({ label: '缓存创建', value: row.cacheCreateTokens })
   } else {
     rows.push(
-      { label: '30 分钟缓存写入', value: row.cacheCreateTokens - row.cacheCreate12hTokens },
-      { label: '12 小时缓存写入', value: row.cacheCreate12hTokens },
+      { label: `${cacheWrite.short}缓存写入`, value: row.cacheCreateTokens - cacheWrite.tokens },
+      { label: `${cacheWrite.long}缓存写入`, value: cacheWrite.tokens },
     )
   }
   rows.push({ label: '缓存读取', value: row.cacheReadTokens })
@@ -857,13 +865,13 @@ function openRequestInput(row: DashboardRecentLog) {
                     <span>输出单价</span>
                     <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.outputPrice) }}</strong>
                   </div>
-                  <div v-if="row.cacheCreate12hTokens !== undefined || (row.cacheCreatePrice && row.cacheCreatePrice > 0)" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
-                    <span>{{ row.cacheCreate12hTokens === undefined ? '缓存写入单价' : '30 分钟缓存写入单价' }}</span>
+                  <div v-if="cacheWriteLabels(row) || (row.cacheCreatePrice && row.cacheCreatePrice > 0)" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
+                    <span>{{ cacheWriteLabels(row)?.short }}缓存写入单价</span>
                     <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreatePrice) }}</strong>
                   </div>
-                  <div v-if="row.cacheCreate12hPrice !== undefined" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
-                    <span>12 小时缓存写入单价</span>
-                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreate12hPrice) }}</strong>
+                  <div v-if="row.cacheCreate12hPrice !== undefined || row.cacheCreate1hPrice !== undefined" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
+                    <span>{{ cacheWriteLabels(row)?.long }}缓存写入单价</span>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ formatTokenPrice(row.cacheCreate12hPrice ?? row.cacheCreate1hPrice ?? null) }}</strong>
                   </div>
                   <div v-if="row.cacheReadPrice && row.cacheReadPrice > 0" class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>缓存读取单价</span>
@@ -872,7 +880,7 @@ function openRequestInput(row: DashboardRecentLog) {
                   <div class="h-px my-[3px] bg-slate-400/30" />
                   <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>服务档位</span>
-                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">Standard</strong>
+                    <strong class="text-cyan-300 font-extrabold whitespace-nowrap">{{ row.serviceTier === 'fast' ? 'Fast' : 'Standard' }}</strong>
                   </div>
                   <div class="flex items-center justify-between gap-[18px] text-xs leading-[1.15] text-slate-400">
                     <span>倍率</span>

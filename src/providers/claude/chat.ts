@@ -14,7 +14,8 @@ import { anthropicContent } from '../toolMedia'
 import { randomUUID } from 'node:crypto'
 import { anthropicToolSchema } from '../toolSchema'
 import { upgradeLegacyFunctionCalling } from '../legacyFunctions'
-import { emptyUsage, type UsageData } from '../types'
+import type { UsageData } from '../types'
+import { createStreamParser, parseClaudeUsage, parseJsonUsage, type ClaudeUsage } from './usage'
 
 /** Anthropic requires max_tokens; use this when the client omits it. */
 const DEFAULT_MAX_TOKENS = 4096
@@ -209,29 +210,9 @@ interface OpenAIToolCall {
   function: { name: string; arguments: string }
 }
 
-interface AnthropicUsage {
-  input_tokens?: number
-  output_tokens?: number
-  cache_creation_input_tokens?: number
-  cache_read_input_tokens?: number
-}
-
-function usageFromAnthropic(u: AnthropicUsage | undefined): UsageData {
-  return {
-    inputTokens: u?.input_tokens ?? 0,
-    outputTokens: u?.output_tokens ?? 0,
-    reasoningTokens: 0,
-    cacheCreateTokens: u?.cache_creation_input_tokens ?? 0,
-    cacheReadTokens: u?.cache_read_input_tokens ?? 0,
-  }
-}
-
-function chatUsageFromAnthropic(u: AnthropicUsage | undefined):
-  | { prompt_tokens: number; completion_tokens: number; total_tokens: number }
-  | undefined {
-  if (!u) return undefined
-  const prompt = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
-  const completion = u.output_tokens ?? 0
+function chatUsageFromCounts(u: UsageData): { prompt_tokens: number; completion_tokens: number; total_tokens: number } {
+  const prompt = u.inputTokens + u.cacheReadTokens + u.cacheCreateTokens
+  const completion = u.outputTokens
   return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion }
 }
 
@@ -245,7 +226,7 @@ export function claudeMessageToChatCompletion(
     model?: string
     content?: AnthropicContentBlock[]
     stop_reason?: unknown
-    usage?: AnthropicUsage
+    usage?: ClaudeUsage
   } | null
   let text = ''
   const toolCalls: OpenAIToolCall[] = []
@@ -260,7 +241,8 @@ export function claudeMessageToChatCompletion(
     }
   }
   const hasToolCalls = toolCalls.length > 0
-  const chatUsage = chatUsageFromAnthropic(msg?.usage)
+  const usage = parseClaudeUsage(msg?.usage)
+  const chatUsage = msg?.usage ? chatUsageFromCounts(usage) : undefined
   return {
     body: {
       id: msg?.id ?? `chatcmpl-${randomUUID()}`,
@@ -280,7 +262,7 @@ export function claudeMessageToChatCompletion(
       ],
       ...(chatUsage ? { usage: chatUsage } : {}),
     },
-    usage: usageFromAnthropic(msg?.usage),
+    usage,
   }
 }
 
@@ -487,19 +469,15 @@ export function claudeSseToChatCompletion(
   let stopReason: unknown = null
   let failure: { code: string; message: string } | undefined
   const toolByBlock = new Map<number, { id: string; name: string; args: string }>()
-  const usage: AnthropicUsage = {}
+  const usageParser = createStreamParser()
 
   for (const event of parseAnthropicSseEvents(text)) {
-    const e = event as AnthropicStreamEvent & {
-      message?: { id?: string; model?: string; usage?: AnthropicUsage }
-      content_block?: AnthropicContentBlock
-      usage?: AnthropicUsage
-    }
+    usageParser.feed(event)
+    const e = event as AnthropicStreamEvent
     switch (e.type) {
       case 'message_start':
         if (e.message?.id) id = e.message.id
         if (e.message?.model) model = e.message.model
-        if (e.message?.usage) Object.assign(usage, e.message.usage)
         break
       case 'content_block_start':
         if (e.content_block?.type === 'tool_use' && typeof e.index === 'number') {
@@ -524,7 +502,6 @@ export function claudeSseToChatCompletion(
         break
       case 'message_delta':
         if (e.delta?.stop_reason != null) stopReason = e.delta.stop_reason
-        if (e.usage) Object.assign(usage, e.usage)
         break
       case 'error': {
         const message = typeof e.error?.message === 'string' && e.error.message ? e.error.message : 'Upstream error.'
@@ -537,10 +514,11 @@ export function claudeSseToChatCompletion(
     }
   }
 
+  const usage = usageParser.result()
   if (failure) {
     return {
       body: { error: { message: failure.message, type: failure.code, code: failure.code } },
-      usage: usageFromAnthropic(usage),
+      usage,
       status: 'error',
       httpStatus: failure.code === 'overloaded_error' || failure.code === 'rate_limit_error' ? 429 : 502,
     }
@@ -552,7 +530,7 @@ export function claudeSseToChatCompletion(
     function: { name: t.name, arguments: t.args || '{}' },
   }))
   const hasToolCalls = toolCalls.length > 0
-  const chatUsage = chatUsageFromAnthropic(usage)
+  const chatUsage = chatUsageFromCounts(usage)
   return {
     body: {
       id,
@@ -570,15 +548,11 @@ export function claudeSseToChatCompletion(
           finish_reason: hasToolCalls ? 'tool_calls' : mapStopReason(stopReason),
         },
       ],
-      ...(chatUsage ? { usage: chatUsage } : {}),
+      usage: chatUsage,
     },
-    usage: usageFromAnthropic(usage),
+    usage,
   }
 }
 
 /** Non-stream usage parser for the buffered JSON path (Anthropic Messages body). */
-export function parseClaudeChatJsonUsage(body: unknown): UsageData {
-  const usage = (body as { usage?: AnthropicUsage } | null | undefined)?.usage
-  if (!usage) return emptyUsage()
-  return usageFromAnthropic(usage)
-}
+export { parseJsonUsage as parseClaudeChatJsonUsage }

@@ -2,20 +2,37 @@
  * Helpers for building CC Switch (https://ccswitch.io) deep links.
  *
  * CC Switch exposes a `ccswitch://v1/import` deep link that one-click imports a
- * provider into Claude Code / Codex / Gemini CLI. We turn a model-bridge API Key
+ * provider into Claude Code / Codex / Gemini CLI / Grok Build. We turn a model-bridge API Key
  * into such a link so users can hand it to CC Switch without editing config files.
  *
- * Format (provider import, aligned with sub2api's implementation):
- *   ccswitch://v1/import?resource=provider&app=<app>&name=<name>&homepage=<origin>&endpoint=<url>&apiKey=<key>&configFormat=json[&model=...&sonnetModel=...&haikuModel=...&opusModel=...]
- *
- * `app` accepts claude / codex / gemini (CC Switch also supports opencode / openclaw).
+ * https://github.com/farion1231/cc-switch/blob/main/docs/guides/deeplink-site-integration-guide-en.md
  */
 
-export type CcSwitchApp = 'claude' | 'codex' | 'gemini'
+export type CcSwitchApp = 'claude' | 'codex' | 'gemini' | 'grokbuild'
+
+const API_FORMAT: Record<CcSwitchApp, string> = {
+  claude: 'anthropic',
+  codex: 'openai_responses',
+  gemini: 'gemini_native',
+  grokbuild: 'openai_responses',
+}
+
+export interface CcSwitchRuntimeConfig {
+  ccSwitchApiBaseUrl?: string | null
+  openaiImageGenerationEnabled?: boolean
+}
 
 // Pinned Codex default from the repository model catalog, shared by native
 // OpenAI and Sub2API imports.
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
+export const KIMI_CC_SWITCH_MODEL = 'kimi-k3.1-pro'
+const GEMINI_CC_SWITCH_MODEL = 'gemini-3.8-flash'
+const CLAUDE_FABLE_MODEL = 'claude-fable-5-2'
+const CLAUDE_MODEL_SLOTS = {
+  opusModel: 'claude-opus-5-5',
+  sonnetModel: 'claude-sonnet-5-5',
+  haikuModel: 'claude-haiku-5-5',
+}
 
 export interface CcSwitchTarget {
   /** Stable id, also matches the snippet tab names in the views. */
@@ -26,17 +43,16 @@ export interface CcSwitchTarget {
   label: string
   /** Upstream model vendor (模型厂家), used to build the CC Switch provider name. */
   vendor: string
-  /** Builds the provider endpoint from the deployment origin (e.g. https://bridge.example.com). */
-  endpoint: (origin: string) => string
   /** Optional model overrides (DeepSeek presets map onto Claude/Codex model slots). */
   models?: {
     model?: string
     sonnetModel?: string
     haikuModel?: string
     opusModel?: string
+    fableModel?: string
   }
   /** Which key provider this target maps to, for filtering by a key's allowedProviders. */
-  provider: 'claude' | 'openai' | 'gemini' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'sub2api'
+  provider: 'claude' | 'openai' | 'gemini' | 'antigravity' | 'deepseek' | 'xiaomi' | 'zhipu' | 'qwen' | 'kimi' | 'grok' | 'sub2api'
 }
 
 /** All supported import targets, in display order. */
@@ -46,26 +62,19 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code',
     vendor: 'Claude',
-    endpoint: (origin) => origin,
     provider: 'claude',
-    // Latest catalog versions for the Opus, Sonnet and Haiku model slots.
-    models: {
-      opusModel: 'claude-opus-5-5',
-      sonnetModel: 'claude-sonnet-5-5',
-      haikuModel: 'claude-haiku-4-5',
-    },
+    models: { ...CLAUDE_MODEL_SLOTS, model: CLAUDE_MODEL_SLOTS.opusModel, fableModel: CLAUDE_FABLE_MODEL },
   },
   {
     id: 'claude-deepseek',
     app: 'claude',
     label: 'Claude Code · DeepSeek',
     vendor: 'DeepSeek',
-    endpoint: (origin) => origin,
     models: {
       model: 'deepseek-flash',
       sonnetModel: 'deepseek-flash',
       haikuModel: 'deepseek-flash',
-      opusModel: 'deepseek-flash',
+      opusModel: 'deepseek-v4-pro',
     },
     provider: 'deepseek',
   },
@@ -74,7 +83,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI',
     vendor: 'OpenAI',
-    endpoint: (origin) => origin,
     models: { model: OPENAI_CC_SWITCH_CODEX_MODEL },
     provider: 'openai',
   },
@@ -83,7 +91,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · DeepSeek',
     vendor: 'DeepSeek',
-    endpoint: (origin) => origin,
     models: { model: 'deepseek-flash' },
     provider: 'deepseek',
   },
@@ -92,7 +99,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code · MiMo',
     vendor: 'Xiaomi',
-    endpoint: (origin) => origin,
     models: {
       model: 'mimo-v2.6-pro',
       sonnetModel: 'mimo-v2.6-pro',
@@ -106,7 +112,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · MiMo',
     vendor: 'Xiaomi',
-    endpoint: (origin) => origin,
     models: { model: 'mimo-v2.6-pro' },
     provider: 'xiaomi',
   },
@@ -115,7 +120,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code · GLM',
     vendor: 'Zhipu',
-    endpoint: (origin) => origin,
     models: {
       model: 'glm-5.3',
       sonnetModel: 'glm-5.3',
@@ -129,7 +133,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · GLM',
     vendor: 'Zhipu',
-    endpoint: (origin) => origin,
     models: { model: 'glm-5.3' },
     provider: 'zhipu',
   },
@@ -138,7 +141,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code · Qwen',
     vendor: 'Qwen',
-    endpoint: (origin) => origin,
     models: {
       model: 'qwen3.8-max',
       sonnetModel: 'qwen3.7-plus',
@@ -152,7 +154,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · Qwen',
     vendor: 'Qwen',
-    endpoint: (origin) => origin,
     models: { model: 'qwen3.8-max' },
     provider: 'qwen',
   },
@@ -161,12 +162,11 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'claude',
     label: 'Claude Code · Kimi',
     vendor: 'Kimi',
-    endpoint: (origin) => origin,
     models: {
-      model: 'kimi-k3',
+      model: KIMI_CC_SWITCH_MODEL,
       sonnetModel: 'kimi-k3',
-      haikuModel: 'kimi-k2.6',
-      opusModel: 'kimi-k3',
+      haikuModel: 'kimi-k2.7-code',
+      opusModel: KIMI_CC_SWITCH_MODEL,
     },
     provider: 'kimi',
   },
@@ -175,8 +175,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · Kimi',
     vendor: 'Kimi',
-    endpoint: (origin) => origin,
-    models: { model: 'kimi-k3' },
+    models: { model: KIMI_CC_SWITCH_MODEL },
     provider: 'kimi',
   },
   {
@@ -184,18 +183,39 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'gemini',
     label: 'Gemini CLI',
     vendor: 'Gemini',
-    endpoint: (origin) => origin,
+    models: { model: GEMINI_CC_SWITCH_MODEL },
     provider: 'gemini',
   },
-  // Sub2API aggregates multiple model families behind one bare-domain endpoint,
-  // routed by model name. A sub2api-only key hitting the origin therefore works
-  // for Claude Code / Codex / Gemini alike, so expose one target per client.
+  {
+    id: 'claude-antigravity',
+    app: 'claude',
+    label: 'Claude Code · Antigravity',
+    vendor: 'Antigravity',
+    provider: 'antigravity',
+  },
+  {
+    id: 'gemini-antigravity',
+    app: 'gemini',
+    label: 'Gemini CLI · Antigravity',
+    vendor: 'Antigravity',
+    provider: 'antigravity',
+  },
+  {
+    id: 'grokbuild',
+    app: 'grokbuild',
+    label: 'Grok Build',
+    vendor: 'Grok',
+    provider: 'grok',
+    models: { model: 'grok-4.5' },
+  },
+  // Sub2API has distinct protocol routes. Its default Claude model is kept on
+  // the family supported by the current Sub2API release.
   {
     id: 'claude-sub2api',
     app: 'claude',
     label: 'Claude Code · Sub2API',
     vendor: 'Sub2API',
-    endpoint: (origin) => origin,
+    models: { ...CLAUDE_MODEL_SLOTS, model: CLAUDE_MODEL_SLOTS.opusModel },
     provider: 'sub2api',
   },
   {
@@ -203,7 +223,6 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · Sub2API',
     vendor: 'Sub2API',
-    endpoint: (origin) => origin,
     models: { model: OPENAI_CC_SWITCH_CODEX_MODEL },
     provider: 'sub2api',
   },
@@ -212,7 +231,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'gemini',
     label: 'Gemini CLI · Sub2API',
     vendor: 'Sub2API',
-    endpoint: (origin) => origin,
+    models: { model: GEMINI_CC_SWITCH_MODEL },
     provider: 'sub2api',
   },
 ]
@@ -235,17 +254,38 @@ export function ccSwitchTarget(id: string): CcSwitchTarget | undefined {
 }
 
 /**
- * Returns the import targets relevant to a key, honoring its allowedProviders.
- * A null/empty list means "all providers", so every target applies.
+ * A bound group can contain several providers. Intersect its available
+ * providers with the key's permissions before deciding whether to open a picker.
  */
-export function targetsForProviders(allowed: string[] | null | undefined): CcSwitchTarget[] {
-  if (!allowed || allowed.length === 0) return CC_SWITCH_TARGETS
-  const set = new Set(allowed)
-  const matched = CC_SWITCH_TARGETS.filter((t) => set.has(t.provider))
-  // Safety net: a key restricted to a provider with no dedicated target (e.g. a
-  // future upstream not yet mapped here) would otherwise yield an empty picker.
-  // Fall back to all targets so the modal is never blank.
-  return matched.length > 0 ? matched : CC_SWITCH_TARGETS
+export function targetsForProviders(
+  allowed?: readonly string[] | null,
+  groupProviders?: readonly string[] | null,
+): CcSwitchTarget[] {
+  return CC_SWITCH_TARGETS.filter(({ provider }) =>
+    (!allowed || allowed.includes(provider)) && (!groupProviders || groupProviders.includes(provider)),
+  )
+}
+
+function buildCodexImportConfig(target: CcSwitchTarget, endpoint: string, openaiImageGenerationEnabled: boolean): string {
+  const model = target.models?.model
+  const lines = [
+    'model_provider = "modelbridge"',
+    ...(model ? [`model = ${JSON.stringify(model)}`] : []),
+    ...(model === KIMI_CC_SWITCH_MODEL ? ['model_context_window = 1048576', 'model_reasoning_effort = "high"'] : []),
+    ...(target.provider === 'openai' || target.provider === 'sub2api' ? ['web_search = "live"'] : []),
+    '',
+    '[model_providers.modelbridge]',
+    `name = ${JSON.stringify(ccSwitchProviderName(target))}`,
+    `base_url = ${JSON.stringify(endpoint)}`,
+    'wire_api = "responses"',
+    'requires_openai_auth = false',
+    'supports_websockets = false',
+    // Codex uses this marker to register its local image extension. Model
+    // Bridge still checks the API key and image policy on the server.
+    ...(target.provider === 'openai' && openaiImageGenerationEnabled
+      ? ['http_headers = { "x-openai-actor-authorization" = "local-image-extension" }'] : []),
+  ]
+  return JSON.stringify({ config: lines.join('\n') })
 }
 
 /**
@@ -255,7 +295,9 @@ export function targetsForProviders(allowed: string[] | null | undefined): CcSwi
  */
 const CC_SWITCH_USAGE_SCRIPT =
   '({request:{url:"{{baseUrl}}/api/usage",method:"GET",headers:{"Authorization":"Bearer {{apiKey}}","User-Agent":"cc-switch/1.0"}},' +
-  'extractor:function(r){return{isValid:r.balance!=null,remaining:r.balance,used:r.used,total:r.limit,unit:r.currency||"USD"};}})'
+  'extractor:function(r){var result={isValid:r.is_active===true,unit:r.currency||"USD"};' +
+  'if(typeof r.balance==="number")result.remaining=r.balance;' +
+  'if(typeof r.limit==="number"){result.used=r.used;result.total=r.limit;}return result;}})'
 
 /** Auto-refresh interval (minutes) for the balance query. */
 const CC_SWITCH_USAGE_INTERVAL = 30
@@ -280,23 +322,39 @@ function toBase64(input: string): string {
  */
 export function buildCcSwitchUrl(
   target: CcSwitchTarget,
-  opts: { origin: string; apiKey: string; name: string },
+  opts: CcSwitchRuntimeConfig & { origin: string; apiKey: string; name: string },
 ): string {
+  const origin = opts.origin.replace(/\/+$/, '')
+  const baseUrl = opts.ccSwitchApiBaseUrl?.replace(/\/+$/, '') || origin
+  const endpoint = `${baseUrl}/api/${target.provider}${API_FORMAT[target.app] === 'openai_responses' ? '/v1' : ''}`
+  const claudeDefaults = target.app === 'claude' && (target.provider === 'claude' || target.provider === 'sub2api')
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', target.app],
+    ['apiFormat', API_FORMAT[target.app]],
     ['name', opts.name],
-    ['homepage', opts.origin],
-    ['endpoint', target.endpoint(opts.origin)],
+    ['homepage', origin],
+    ['endpoint', endpoint],
     ['apiKey', opts.apiKey],
     ['configFormat', 'json'],
   ]
   const models = target.models
   if (models) {
-    if (models.model) entries.push(['model', models.model])
+    if (models.model && !claudeDefaults) entries.push(['model', models.model])
     if (models.sonnetModel) entries.push(['sonnetModel', models.sonnetModel])
     if (models.haikuModel) entries.push(['haikuModel', models.haikuModel])
     if (models.opusModel) entries.push(['opusModel', models.opusModel])
+  }
+  if (claudeDefaults) {
+    // Set the default for new sessions without overriding a model the user
+    // explicitly selects in Claude Code.
+    const env = {
+      ...(models?.model ? { ANTHROPIC_DEFAULT_MODEL: models.model } : {}),
+      ...(models?.fableModel ? { ANTHROPIC_DEFAULT_FABLE_MODEL: models.fableModel } : {}),
+    }
+    entries.push(['config', toBase64(JSON.stringify({ env }))])
+  } else if (target.app === 'codex') {
+    entries.push(['config', toBase64(buildCodexImportConfig(target, endpoint, opts.openaiImageGenerationEnabled === true))])
   }
   // Balance display: enable CC Switch's usage query against /api/usage. Pass the
   // key explicitly as usageApiKey so {{apiKey}} resolves even on CC Switch builds
@@ -304,6 +362,7 @@ export function buildCcSwitchUrl(
   entries.push(['usageEnabled', 'true'])
   entries.push(['usageAutoInterval', String(CC_SWITCH_USAGE_INTERVAL)])
   entries.push(['usageApiKey', opts.apiKey])
+  entries.push(['usageBaseUrl', baseUrl])
   entries.push(['usageScript', toBase64(CC_SWITCH_USAGE_SCRIPT)])
   return `ccswitch://v1/import?${new URLSearchParams(entries).toString()}`
 }

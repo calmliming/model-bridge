@@ -27,7 +27,7 @@ import { db, pool } from '../db/index'
 import { initDb } from '../db/init'
 import { accounts } from '../db/schema'
 import { accountAvailability, clearExpiredAccountCooldowns, disableAccount, markAccountUsed, penalizeAccount, penalizeAccountModel, pickAccount } from './scheduler'
-import { createGroup, listGroups, updateGroup } from './groups'
+import { createGroup, deleteGroup, listGroups, updateGroup } from './groups'
 import { accountHealth } from './health'
 import { createApiKey, findApiKeyBySecret } from '../keys/manager'
 import { cachedAntigravityModels } from './antigravityModels'
@@ -134,6 +134,27 @@ describe.runIf(database)('upstream update database regressions', () => {
     await pool.query('ALTER TABLE account_groups DROP COLUMN allowed_models')
     await initDb()
     expect((await listGroups()).find(x => x.id === id)?.allowedModels).toBeNull()
+  })
+
+  it('lists each eligible provider once and excludes disabled accounts from import selection', async () => {
+    const group = await createGroup({ name: 'CC Switch' })
+    const fixtures = [
+      { id: randomUUID(), name: 'Claude one', provider: 'claude' },
+      { id: randomUUID(), name: 'Claude two', provider: 'claude' },
+      { id: randomUUID(), name: 'OpenAI cooling', provider: 'openai', status: 'rate_limited' },
+      { id: randomUUID(), name: 'Gemini disabled', provider: 'gemini', status: 'disabled' },
+    ]
+    try {
+      expect((await listGroups()).find(g => g.id === group.id)?.providers).toEqual([])
+      await db.insert(accounts).values(fixtures)
+      for (const account of fixtures) await setAccountGroups(account.id, [group.id])
+      expect((await listGroups()).find(g => g.id === group.id)).toMatchObject({
+        accountCount: 4, providers: ['claude', 'openai'],
+      })
+    } finally {
+      await deleteGroup(group.id)
+      await pool.query('DELETE FROM accounts WHERE id = ANY($1::text[])', [fixtures.map(a => a.id)])
+    }
   })
 
   it('keeps a concurrent cooldown, never shortens it, and never revives a disabled account', async () => {

@@ -6,13 +6,7 @@ import { useMessage } from '../composables/useMessage'
 import type { TableColumn } from '../components/ui/types'
 import { api, errMsg } from '../api/client'
 import { formatTime, formatUsd } from '../utils'
-import {
-  buildCcSwitchUrl,
-  ccSwitchProviderName,
-  launchCcSwitch,
-  targetsForProviders,
-  type CcSwitchTarget,
-} from '../ccswitch'
+import { useCcSwitchImport } from '../composables/useCcSwitchImport'
 
 interface ApiKey {
   id: string
@@ -37,6 +31,7 @@ interface AccountGroup {
   id: string
   name: string
   rateMultiplier: number
+  providers: string[] | null
 }
 
 const message = useMessage()
@@ -63,16 +58,10 @@ function groupName(id: string | null): string {
 const showCreate = ref(false)
 const creating = ref(false)
 const newKey = ref<string | null>(null)
-const newKeyProviders = ref<string[] | null>(null)
-
-const baseOrigin = computed(() =>
-  typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
-)
+const newKeyScope = ref<Pick<ApiKey, 'allowedProviders' | 'accountGroupId'>>({ allowedProviders: null, accountGroupId: null })
 
 // CC Switch one-click import modal state.
-const showCcSwitch = ref(false)
-const ccSwitchSecret = ref('')
-const ccSwitchTargets = ref<CcSwitchTarget[]>([])
+const { showCcSwitch, ccSwitchTargets, beginCcSwitchImport, triggerCcSwitch } = useCcSwitchImport()
 
 const showEdit = ref(false)
 const editingId = ref<string | null>(null)
@@ -184,7 +173,10 @@ async function create() {
       accountGroupId: form.value.accountGroupId ?? undefined,
     })
     newKey.value = data.key
-    newKeyProviders.value = form.value.allowedProviders.length ? [...form.value.allowedProviders] : null
+    newKeyScope.value = {
+      allowedProviders: form.value.allowedProviders.length ? [...form.value.allowedProviders] : null,
+      accountGroupId: form.value.accountGroupId,
+    }
     showCreate.value = false
     form.value = { name: '', allowedProviders: [], allowedModels: [], modelMappings: [], accountGroupId: null }
     await load()
@@ -278,7 +270,6 @@ async function copyKey(row: ApiKey) {
   }
 }
 
-/** Opens the CC Switch import picker for an existing key, fetching its plaintext. */
 async function openCcSwitch(row: ApiKey) {
   if (!row.canReveal) {
     message.warning('这个 Key 无法再次显示完整值，无法一键导入。请重新创建一个 Key。')
@@ -290,33 +281,16 @@ async function openCcSwitch(row: ApiKey) {
       message.warning('无法获取完整 Key')
       return
     }
-    ccSwitchSecret.value = secret
-    ccSwitchTargets.value = targetsForProviders(row.allowedProviders)
-    showCcSwitch.value = true
+    beginCcSwitchImport(secret, row.allowedProviders, groups.value.find(g => g.id === row.accountGroupId)?.providers)
   } catch (e) {
     message.error(errMsg(e, '获取完整 Key 失败'))
   }
 }
 
-/** Opens the CC Switch import picker for a freshly created key (plaintext in hand). */
 function openCcSwitchForNew() {
   if (!newKey.value) return
-  ccSwitchSecret.value = newKey.value
-  ccSwitchTargets.value = targetsForProviders(newKeyProviders.value)
-  showCcSwitch.value = true
-}
-
-/** Builds the deep link for the chosen target and hands off to CC Switch. */
-async function triggerCcSwitch(target: CcSwitchTarget) {
-  if (!ccSwitchSecret.value) return
-  const url = buildCcSwitchUrl(target, {
-    origin: baseOrigin.value,
-    apiKey: ccSwitchSecret.value,
-    name: ccSwitchProviderName(target),
-  })
-  const launched = await launchCcSwitch(url)
-  if (launched) message.success('已唤起 CC Switch，请在弹出的应用中确认导入')
-  else message.warning('未能唤起 CC Switch，请确认已安装（https://ccswitch.io）')
+  const { allowedProviders, accountGroupId } = newKeyScope.value
+  beginCcSwitchImport(newKey.value, allowedProviders, groups.value.find(g => g.id === accountGroupId)?.providers)
 }
 
 const columns = computed<TableColumn<ApiKey>[]>(() => [
@@ -337,7 +311,10 @@ const columns = computed<TableColumn<ApiKey>[]>(() => [
   { title: '过期', key: 'expiresAt', minWidth: 140, render: (row) => formatTime(row.expiresAt) },
   { title: '最后使用', key: 'lastUsedAt', minWidth: 140, render: (row) => formatTime(row.lastUsedAt) },
   { title: '状态', key: 'enabled', width: 76, render: (row) => h(UiSwitch, { value: row.enabled, size: 'small', onUpdateValue: () => toggle(row) }) },
-  { title: '操作', key: 'actions', width: 96, fixed: 'right', render: (row) => h(UiButton, { size: 'small', secondary: true, onClick: () => { managedKey.value = row } }, { default: () => '管理' }) },
+  { title: '操作', key: 'actions', width: 190, fixed: 'right', render: (row) => h(UiSpace, { size: 'small', wrap: false }, { default: () => [
+    h(UiButton, { size: 'small', secondary: true, disabled: !row.canReveal, onClick: () => openCcSwitch(row) }, { default: () => '导入 CC Switch' }),
+    h(UiButton, { size: 'small', secondary: true, onClick: () => { managedKey.value = row } }, { default: () => '管理' }),
+  ] }) },
 ])
 const visibleColumns = computed(() => showAllColumns.value ? columns.value : columns.value.filter(column => ['name', 'prefix', 'quotaUsed', 'quotaLimit', 'enabled', 'actions'].includes(column.key)))
 function manage(action: 'edit' | 'import' | 'delete') {
@@ -374,7 +351,10 @@ onMounted(() => {
         <div class="my-4 flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 dark:bg-dark-900"><code class="min-w-0 truncate text-sm">{{ row.keyPrefix }}…</code><UiButton size="small" secondary :disabled="!row.canReveal" @click="copyKey(row)">复制</UiButton></div>
         <dl class="grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-gray-500">已用 / 上限</dt><dd class="mt-1 break-words">{{ formatUsd(row.quotaUsed) }} / {{ row.quotaLimit == null ? '不限' : formatUsd(row.quotaLimit) }}</dd></div><div><dt class="text-xs text-gray-500">分组</dt><dd class="mt-1 break-words">{{ groupName(row.accountGroupId) }}</dd></div></dl>
         <details class="mt-4 border-t border-gray-100 pt-3 text-xs dark:border-dark-700"><summary class="cursor-pointer text-primary-700 dark:text-primary-300">查看权限与限制</summary><p class="mt-2 break-words">服务商：{{ row.allowedProviders?.map(value => providerLabel[value] || value).join('、') || '全部' }}</p><p class="mt-2 break-all">模型：{{ row.allowedModels?.join('、') || '不限' }}</p><p class="mt-2">限速：{{ row.rateLimit ?? '不限' }} · 并发：{{ row.concurrencyLimit ?? '不限' }}</p><p class="mt-2">过期：{{ formatTime(row.expiresAt) }}</p></details>
-        <div class="mt-4 flex justify-end"><UiButton secondary size="small" @click="managedKey = row">管理</UiButton></div>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <UiButton secondary size="small" :disabled="!row.canReveal" @click="openCcSwitch(row)">导入 CC Switch</UiButton>
+          <UiButton secondary size="small" @click="managedKey = row">管理</UiButton>
+        </div>
       </article>
     </div>
     <UiModal :show="!!managedKey" :title="`管理 Key：${managedKey?.name ?? ''}`" :width="440" @update:show="(shown: boolean) => { if (!shown) managedKey = null }">

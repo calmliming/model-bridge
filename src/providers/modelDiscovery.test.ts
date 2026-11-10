@@ -10,6 +10,15 @@ const nativeImageModels = [
 ]
 
 describe('model discovery', () => {
+  it('advertises Fable 5.2 and leaves Mythos 5.2 to account catalogs', () => {
+    const key = { allowedProviders: ['claude'], allowedModels: null }
+    expect(listModelIdsForKey(key, 'claude')).toContain('claude-fable-5-2')
+    expect(listModelIdsForKey(key, 'claude')).not.toContain('claude-mythos-5-2')
+    expect(listModelIdsForKey({ ...key, providerModels: { claude: ['claude-mythos-5-2'] } }, 'claude'))
+      .toEqual(['claude-mythos-5-2'])
+    expect(listModelIdsForKey({ ...key, allowedProviders: ['antigravity'] })).not.toContain('claude-fable-5-2')
+  })
+
   it('filters GPT-5.5 from static, stale, custom and mapped native subscription catalogs', () => {
     const retired = ['gpt-5.5', 'GPT-5-5', 'gpt-5.5-2026-04-23']
     for (const requested of [undefined, 'openai'] as const) {
@@ -287,9 +296,12 @@ describe('model discovery', () => {
     ])
   })
 
-  it('discovers Kimi Code K3 aliases for Kimi-scoped keys', () => {
+  it('discovers K3.1 Pro and keeps K3 aliases for Kimi-scoped keys', () => {
     const key = { allowedProviders: ['kimi'] as const, allowedModels: null }
-    expect(listModelIdsForKey(key)).toEqual(['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'])
+    expect(listModelIdsForKey(key)).toEqual([
+      'kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'kimi-k3', 'kimi-k2.7-code',
+      'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3',
+    ])
   })
 
   it('returns Gemini API model objects', () => {

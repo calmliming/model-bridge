@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { KIMI_CC_SWITCH_MODEL } from './src/ccswitch'
 
 // Execute the actual snippet computation so the tests cover the emitted config,
 // including TOML section placement, without mounting the dashboard or calling APIs.
@@ -7,14 +8,14 @@ const source = readFileSync(new URL('./src/views/ApiKeysView.vue', import.meta.u
 const start = source.indexOf('const snippets = computed(')
 const end = source.indexOf('// CC Switch one-click import picker state', start)
 if (start < 0 || end < 0) throw new Error('API key snippet computation not found')
-const generate = new Function('computed', 'useKeySecret', 'codexRemoteCatalog', 'baseOrigin',
+const generate = new Function('computed', 'useKeySecret', 'codexRemoteCatalog', 'baseOrigin', 'KIMI_CC_SWITCH_MODEL',
   `${source.slice(start, end)}\nreturn snippets.codex`) as (
     computed: (fn: () => unknown) => unknown,
-    key: { value: string }, remote: { value: boolean }, origin: { value: string },
+    key: { value: string }, remote: { value: boolean }, origin: { value: string }, kimiModel: string,
   ) => string
 
 function config(remote: boolean): string {
-  return generate(fn => fn(), { value: 'mb-test' }, { value: remote }, { value: 'https://bridge.example.com' })
+  return generate(fn => fn(), { value: 'mb-test' }, { value: remote }, { value: 'https://bridge.example.com' }, KIMI_CC_SWITCH_MODEL)
 }
 
 function sectionLines(snippet: string, name: string): string[] {

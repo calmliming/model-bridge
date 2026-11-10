@@ -171,6 +171,7 @@ async function persistUsage(record: UsageRecord, snapshot?: Settlement): Promise
         usage.serviceTier?.slice(0, 100) || null,
         usage.reasoningEffort?.slice(0, 100) || null,
         JSON.stringify({ price, imagePrice, ...(usage.svgUsage ? { svg: { ...usage.svgUsage, price: svgPrice } } : {}),
+          cacheCreate1hTokens: usage.cacheCreate1hTokens,
           cacheCreate12hTokens: usage.cacheCreate12hTokens,
           ...(subscriptionPointMultiplier != null ? { subscriptionPointMultiplier } : {}) }),
         record.usage.imageCacheReadTokens ?? 0,

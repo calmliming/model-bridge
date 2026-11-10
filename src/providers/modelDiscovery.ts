@@ -8,6 +8,8 @@ import { isForwardableDeepseekModel } from './deepseek/converter'
 import { isRetiredXiaomiModel } from './xiaomi/converter'
 import { GRSAI_MODELS } from './grsai/models'
 import { publicModelProvider } from './publicIdentity'
+import { CLAUDE_FABLE_52 } from './claude/models'
+import { KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED } from './kimi/models'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -43,7 +45,7 @@ const CREATED_AT = 1_704_067_200
 // each tier here; pricing.ts resolves any other version via substring tiers.
 // Native upstreams each surface their own tier flagships.
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grsai'>, string[]> = {
-  claude: ['claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'claude-fable-5'],
+  claude: [CLAUDE_FABLE_52, 'claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
     'gpt-6.1-terra',
     'gpt-6.1-sol',
@@ -83,7 +85,7 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
   // Kimi Code exposes the K3 model under short aliases as well as the
   // provider-qualified name. Keep them discoverable so a Composite-style key
   // can route the same identifiers that Sub2API v0.1.183 accepts.
-  kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
+  kimi: [KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED, 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
   minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
   grok: ['grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
 }
@@ -91,7 +93,8 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
 const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   ...NATIVE_MODELS,
   grsai: GRSAI_MODELS,
-  antigravity: [...NATIVE_MODELS.gemini, ...NATIVE_MODELS.claude],
+  // Claude API availability does not imply availability in Antigravity.
+  antigravity: [...NATIVE_MODELS.gemini, ...NATIVE_MODELS.claude.filter(model => model !== CLAUDE_FABLE_52)],
   // Sub2API is an aggregator upstream that forwards model names verbatim and
   // has access to every model, so its discovery list is the union of all
   // native providers' lists — no separate list to keep in sync.

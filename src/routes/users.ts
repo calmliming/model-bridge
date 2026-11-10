@@ -328,7 +328,10 @@ export function registerUserRoutes(app: FastifyInstance): void {
   app.get('/api/users/account-groups', { preHandler: requireUser }, async () => {
     const groups = await listGroups()
     return {
-      groups: groups.map((g) => ({ id: g.id, name: publicGroupName(g.name), rateMultiplier: g.rateMultiplier })),
+      groups: groups.map((g) => ({
+        id: g.id, name: publicGroupName(g.name), rateMultiplier: g.rateMultiplier,
+        providers: publicKeyProviders(g.providers),
+      })),
     }
   })
 

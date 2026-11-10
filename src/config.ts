@@ -140,6 +140,11 @@ const schema = z.object({
       return major! > 2 || (major === 2 && (minor! > 1 || (minor === 1 && patch! >= 251)))
     }, 'must be 2.1.251 or newer for Fable 5.1 compatibility').default('2.1.263')),
   PRICING_OVERRIDE_FILE: z.preprocess(blankToUndefined, z.string().optional()),
+  CC_SWITCH_API_BASE_URL: z.preprocess(blankToUndefined, z.string().trim().refine(value => {
+    if (!URL.canParse(value)) return false
+    const url = new URL(value)
+    return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
+  }, 'must be an HTTP(S) API base URL without credentials, query, or fragment').optional()),
   UPDATER_URL: z.preprocess(blankToUndefined, z.string().url().optional()),
   UPDATE_TOKEN: z.preprocess(blankToUndefined, z.string().min(16).optional()),
   TURNSTILE_SITE_KEY: z.preprocess(blankToUndefined, z.string().optional()),

@@ -112,7 +112,11 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   // client-side timestamp rendering so a log row's date always matches the
   // STATS_TIMEZONE day bucket / "today" card it was counted into.
   app.get('/api/auth/display-config', async () => {
-    return { statsTimezone: config.STATS_TIMEZONE }
+    return {
+      statsTimezone: config.STATS_TIMEZONE,
+      ccSwitchApiBaseUrl: config.CC_SWITCH_API_BASE_URL ?? null,
+      openaiImageGenerationEnabled: config.OPENAI_IMAGE_GENERATION_ENABLED,
+    }
   })
 
   // Public: system summary for the landing page.

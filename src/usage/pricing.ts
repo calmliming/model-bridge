@@ -3,6 +3,8 @@ import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
 import { NATIVE_IMAGE_MODELS, isNativeImageModel } from '../providers/openai/imageModels'
 import { isGpt61SolModel, isGpt61TerraModel } from '../providers/openai/models'
+import { CLAUDE_FABLE_52, CLAUDE_FABLE_MYTHOS_52 } from '../providers/claude/models'
+import { isKimiK31Model, KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED } from '../providers/kimi/models'
 import { roundUsd } from '../wallet/money'
 import { GRSAI_IMAGE_PRICES, GRSAI_VIDEO_PRICES, GRSAI_MODELS } from '../providers/grsai/models'
 
@@ -11,6 +13,8 @@ export interface TierPrice {
   input: number
   output: number
   cacheWrite: number
+  /** Anthropic 1h writes. An absent rate uses the regular cache-write price. */
+  cacheWrite1h?: number
   /** OpenAI 12h writes. An absent rate uses the regular cache-write price. */
   cacheWrite12h?: number
   cacheRead: number
@@ -108,6 +112,11 @@ const CLAUDE_FABLE_51: TierPrice = {
   cacheWrite: 12.5,
   cacheRead: 0.25
 }
+// https://platform.claude.com/docs/en/models/fable-5-2/overview
+const CLAUDE_FABLE_52_PRICE: TierPrice = {
+  input: 8, output: 40, cacheWrite: 10, cacheWrite1h: 16, cacheRead: 0.2,
+}
+const CLAUDE_PRICE_PROVIDERS = new Set(['claude', 'sub2api', 'antigravity'])
 
 /** True for Opus versions that still bill at the legacy 15/75 rate (4.1 and earlier). */
 function isLegacyOpus(model: string): boolean {
@@ -125,6 +134,7 @@ function isLegacyOpus(model: string): boolean {
 
 function claudePrice(model: string): TierPrice {
   const m = model.toLowerCase()
+  if (CLAUDE_FABLE_MYTHOS_52.test(m)) return CLAUDE_FABLE_52_PRICE
   if (m.includes('fable') || m.includes('mythos')) {
     return /(?:fable|mythos)-5(?:-1|\.1)(?:$|-)/.test(m) ? CLAUDE_FABLE_51 : CLAUDE_FABLE
   }
@@ -627,14 +637,13 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
 }
 
 // Kimi (月之暗面 / Moonshot) list prices (per 1M tokens), quoted in CNY on the
-// platform.kimi.com pricing pages and converted to USD. No separate cache-write
-// fee — cacheWrite is 0; cacheRead is the cache-hit input price. kimi-k3 is the
-// 1M-context flagship (¥20 / ¥100, cache-hit ¥2); the k2 family (k2.7-code /
-// k2.6 / k2.5, and the retiring moonshot-v1-*) is the cheaper tier
-// (¥6.5 / ¥27, cache-hit ~¥1.3). kimi-k2.7-code-highspeed serves K2.7 Code
-// faster at twice that (¥13 / ¥54, cache-hit ¥2.6).
-const KIMI_TIERS: Record<'k3' | 'k2' | 'k2Highspeed', TierPrice> = {
-  k3: { input: cny(20), output: cny(100), cacheWrite: 0, cacheRead: cny(2) },
+// platform.kimi.com prices converted to USD. The K3 family separates billed
+// cache writes from uncached input. 5m writes cost the input rate, 1h writes
+// cost twice that, and K2 does not report billable cache writes.
+const KIMI_TIERS: Record<'k31' | 'k31Highspeed' | 'k3' | 'k2' | 'k2Highspeed', TierPrice> = {
+  k31: { input: cny(13), output: cny(68), cacheWrite: cny(13), cacheWrite1h: cny(26), cacheRead: cny(1.3) },
+  k31Highspeed: { input: cny(26), output: cny(136), cacheWrite: cny(26), cacheWrite1h: cny(52), cacheRead: cny(1.3) },
+  k3: { input: cny(20), output: cny(100), cacheWrite: cny(20), cacheWrite1h: cny(40), cacheRead: cny(2) },
   k2: { input: cny(6.5), output: cny(27), cacheWrite: 0, cacheRead: cny(1.3) },
   k2Highspeed: { input: cny(13), output: cny(54), cacheWrite: 0, cacheRead: cny(2.6) }
 }
@@ -644,6 +653,8 @@ function kimiTier(model: string): keyof typeof KIMI_TIERS {
   // highspeed lane → its own tier; everything else (kimi-k2.x, moonshot-v1-*)
   // → the cheaper k2 tier.
   const m = model.toLowerCase()
+  if (m === KIMI_K31_PRO) return 'k31'
+  if (m === KIMI_K31_PRO_HIGHSPEED) return 'k31Highspeed'
   if (m.includes('k3')) return 'k3'
   return m.includes('highspeed') ? 'k2Highspeed' : 'k2'
 }
@@ -716,6 +727,7 @@ function sub2apiPrice(model: string, atMs: number): TierPrice {
   // Sub2API v0.1.182 accepts Kimi Code's bare Composite aliases. They are
   // still K3-tier requests and must not fall through to the Claude default
   // price when the relay preserves the original model name for auditing.
+  if (isKimiK31Model(m)) return KIMI_TIERS[kimiTier(m)]
   if (m.startsWith('kimi') || m.startsWith('moonshot') || m === 'k3' || m === 'k3-256k' || m === 'kimi-code/k3') return KIMI_TIERS.k3
   if (m.startsWith('minimax-')) return minimaxPrice(model)
   if (m.startsWith('grok') || m.startsWith('xai/grok')) return grokPrice(model)
@@ -780,6 +792,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-haiku-5-5', price: CLAUDE_HAIKU_55 },
   { provider: 'claude', model: 'fable', price: CLAUDE_FABLE },
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
+  { provider: 'claude', model: CLAUDE_FABLE_52, price: CLAUDE_FABLE_52_PRICE },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
   { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
   { provider: 'openai', model: 'gpt-6.1-terra', price: OPENAI_GPT61_TERRA },
@@ -910,6 +923,8 @@ const SEED_ROWS: SeedRow[] = [
     model,
     price: minimaxPrice(model)
   })),
+  { provider: 'kimi', model: KIMI_K31_PRO, price: KIMI_TIERS.k31 },
+  { provider: 'kimi', model: KIMI_K31_PRO_HIGHSPEED, price: KIMI_TIERS.k31Highspeed },
   { provider: 'kimi', model: 'kimi-k3', price: KIMI_TIERS.k3 },
   { provider: 'kimi', model: 'kimi-k2.7-code', price: KIMI_TIERS.k2 },
   // Exact row: the DB substring pass would otherwise bill it as kimi-k2.7-code.
@@ -1139,11 +1154,24 @@ export async function loadPricing(): Promise<void> {
           : Number(row.image_cache_read_price)
     }
     // Existing catalog rows store the flat rate. Only rows matching the
-    // built-in card inherit its 12h rate. Custom cards retain their flat rate.
+    // built-in card inherit its extended rate. Custom cards retain their flat rate.
+    if (CLAUDE_PRICE_PROVIDERS.has(row.provider) && CLAUDE_FABLE_MYTHOS_52.test(row.model)
+        && sameTokenPrice(price, CLAUDE_FABLE_52_PRICE)) {
+      price.cacheWrite1h = CLAUDE_FABLE_52_PRICE.cacheWrite1h
+    }
     if (row.provider === 'openai' || row.provider === 'sub2api') {
       const catalog = openaiPrice(row.model)
       if (catalog.cacheWrite12h !== undefined && sameTokenPrice(price, catalog)) {
         price.cacheWrite12h = catalog.cacheWrite12h
+      }
+    }
+    if (row.provider === 'kimi' || row.provider === 'sub2api') {
+      const catalog = KIMI_TIERS[kimiTier(row.model)]
+      if (row.model === 'kimi-k3' && sameTokenPrice(price, { ...catalog, cacheWrite: 0 })) {
+        price.cacheWrite = catalog.cacheWrite
+      }
+      if (catalog.cacheWrite1h !== undefined && sameTokenPrice(price, catalog)) {
+        price.cacheWrite1h = catalog.cacheWrite1h
       }
     }
     priceCache.set(cacheKey(row.provider, row.model), price)
@@ -1247,6 +1275,13 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   // above remains an administrator override; only the fallback lookup is
   // short-circuited here.
   const normalizedModel = model.toLowerCase()
+  if ((provider === 'kimi' || provider === 'sub2api') && isKimiK31Model(normalizedModel)) {
+    return priceCache.get(cacheKey(provider, normalizedModel)) ?? KIMI_TIERS[kimiTier(normalizedModel)]
+  }
+  if (CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(normalizedModel)) {
+    const canonical = normalizedModel.replace(/^(claude-(?:fable|mythos)-5)[.-]2(?:$|-.*)/, '$1-2')
+    return priceCache.get(cacheKey(provider, canonical)) ?? CLAUDE_FABLE_52_PRICE
+  }
   const canonicalModel = normalizedModel.replace(/^claude-haiku-5\.5(?=$|-)/, 'claude-haiku-5-5')
     .replace(/-(?:low|medium|high|tiered)$/, '')
   if (HAIKU_55_MODEL.test(model) || ARGON_MODEL.test(model)) {
@@ -1281,6 +1316,8 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   for (const [key, price] of priceCache) {
     const [p, dbModel] = key.split(':', 2)
     if (p !== provider) continue
+    if ((provider === 'kimi' || provider === 'sub2api') && isKimiK31Model(dbModel)) continue
+    if (CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(dbModel)) continue
     if (isManagedScheduledDefault(provider, dbModel, price)) continue
     const dm = dbModel.toLowerCase()
     if ((m.includes(dm) || dm.includes(m)) && dm.length > bestLen) {
@@ -1304,7 +1341,8 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   // long-context step applies only on the aggregator/API-key route.
   const gpt6 = (provider === 'openai' || provider === 'sub2api') && /^gpt-6(?:$|[.-])/i.test(model)
   const subscriptionLongContextExempt = provider === 'openai' && (isGpt61SolModel(model) || isGpt61TerraModel(model))
-  const haiku55 = ['claude', 'antigravity', 'sub2api'].includes(provider) && HAIKU_55_MODEL.test(model)
+  const haiku55 = CLAUDE_PRICE_PROVIDERS.has(provider) && HAIKU_55_MODEL.test(model)
+  const claude52 = CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
   const grok47Fast = (provider === 'grok' || provider === 'sub2api') && GROK_47_FAST_MODEL.test(model)
   const grok47 = (provider === 'grok' || provider === 'sub2api') && !grok47Fast && GROK_47_MODEL.test(model)
@@ -1328,12 +1366,12 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
   const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
-  // The GPT-6 family and MiniMax M3 have verified default factors. Other
-  // models retain the gateway's base-price policy unless the operator supplies
-  // a tier rule.
+  const doublePrice = (gpt6 && (tier === 'fast' || tier === 'priority')) || (claude52 && tier === 'fast')
+  // Keep standard rates unless the reported tier has a known multiplier or
+  // an explicit operator rule.
   const tierMultiplier =
     configuredMultiplier ??
-    (minimaxM3 && tier === 'priority' ? 1.5 : gpt6 && (tier === 'fast' || tier === 'priority') ? 2 : gpt6 && tier === 'flex' ? 0.5 : 1)
+    (minimaxM3 && tier === 'priority' ? 1.5 : doublePrice ? 2 : gpt6 && tier === 'flex' ? 0.5 : 1)
   const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
   const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
   return {
@@ -1341,6 +1379,7 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
     input: base.input * inputMultiplier,
     output: base.output * outputMultiplier,
     cacheWrite: base.cacheWrite * inputMultiplier,
+    ...(base.cacheWrite1h !== undefined ? { cacheWrite1h: base.cacheWrite1h * inputMultiplier } : {}),
     ...(base.cacheWrite12h !== undefined ? { cacheWrite12h: base.cacheWrite12h * inputMultiplier } : {}),
     cacheRead: base.cacheRead * inputMultiplier,
     ...(base.imageInput !== undefined ? { imageInput: base.imageInput * inputMultiplier } : {}),
@@ -1350,12 +1389,17 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
 }
 
 /** Cache-write component in micro-USD, before rounding or group markup. */
-export function cacheWriteCostMicros(total: number, tokens12h: number | undefined, price: TierPrice): number {
-  if (price.cacheWrite12h === undefined || tokens12h === undefined ||
-      !Number.isSafeInteger(tokens12h) || tokens12h < 0 || tokens12h > total) {
+export function cacheWriteCostMicros(
+  { cacheCreateTokens: total, cacheCreate12hTokens, cacheCreate1hTokens }: Pick<UsageData, 'cacheCreateTokens' | 'cacheCreate12hTokens' | 'cacheCreate1hTokens'>,
+  price: TierPrice,
+): number {
+  const extendedTokens = cacheCreate12hTokens ?? cacheCreate1hTokens
+  const extendedPrice = cacheCreate12hTokens !== undefined ? price.cacheWrite12h : price.cacheWrite1h
+  if (extendedPrice === undefined || extendedTokens === undefined ||
+      !Number.isSafeInteger(extendedTokens) || extendedTokens < 0 || extendedTokens > total) {
     return total * price.cacheWrite
   }
-  return (total - tokens12h) * price.cacheWrite + tokens12h * price.cacheWrite12h
+  return (total - extendedTokens) * price.cacheWrite + extendedTokens * extendedPrice
 }
 
 /** Unrounded reference cost, retaining small cache/token weights for subscription metering. */
@@ -1368,7 +1412,7 @@ export function calculateUsageCost(provider: string, model: string, usage: Usage
   const cost = tokenFactor *
     (usage.inputTokens * p.input +
       usage.outputTokens * p.output +
-      cacheWriteCostMicros(usage.cacheCreateTokens, usage.cacheCreate12hTokens, p) +
+      cacheWriteCostMicros(usage, p) +
       usage.cacheReadTokens * p.cacheRead +
       (usage.imageInputTokens ?? 0) * (imagePrice?.imageInput ?? 0) +
       (usage.imageCacheReadTokens ?? 0) * (imagePrice?.imageCacheRead ?? imagePrice?.cacheRead ?? 0) +
