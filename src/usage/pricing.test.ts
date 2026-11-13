@@ -14,15 +14,29 @@ describe('Sub2API v0.2.16 model pricing', () => {
     }
     expect(resolvePrice(provider, 'claude-haiku-4-5')).toMatchObject({ input: 1, output: 5 })
   })
-  it.each(['gemini', 'sub2api', 'antigravity'])('prices Argon variants across the promo boundary on %s', provider => {
+  it.each(['gemini', 'sub2api', 'antigravity'])('prices Argon and Carbon variants across the promo boundary on %s', provider => {
     const boundary = Date.parse('2026-12-01T00:00:00Z')
-    for (const suffix of ['', '-high', '-low', '-medium', '-tiered']) {
-      expect(resolvePrice(provider, `gemini-4-argon${suffix}`, boundary - 1)).toMatchObject({ input: 2, output: 10, cacheRead: 0.1 })
-      expect(resolvePrice(provider, `gemini-4-argon${suffix}`, boundary)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
+    for (const base of ['gemini-4-argon', 'gemini-4-carbon']) {
+      for (const suffix of ['', '-high', '-low', '-medium', '-tiered']) {
+        expect(resolvePrice(provider, `${base}${suffix}`, boundary - 1)).toMatchObject({ input: 2, output: 10, cacheRead: 0.1 })
+        expect(resolvePrice(provider, `${base}${suffix}`, boundary)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
+      }
+      expect(resolvePrice(provider, `${base}-cyber-permissive`, boundary - 1)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
+      expect(resolveUsagePrice(provider, base, { ...emptyUsage(), inputTokens: 900_000 }, boundary - 1))
+        .toMatchObject({ input: 2, output: 10 })
     }
-    expect(resolvePrice(provider, 'gemini-4-argon-cyber-permissive', boundary - 1)).toMatchObject({ input: 4, output: 20, cacheRead: 0.2 })
-    expect(resolveUsagePrice(provider, 'gemini-4-argon', { ...emptyUsage(), inputTokens: 900_000 }, boundary - 1))
-      .toMatchObject({ input: 2, output: 10 })
+  })
+  it.each(['gemini', 'sub2api', 'antigravity'])('prices Hydrogen variants on %s', provider => {
+    const dec = Date.parse('2026-12-01T00:00:00Z')
+    const jan = Date.parse('2027-01-01T00:00:00Z')
+    for (const suffix of ['', '-low', '-medium', '-high', '-xhigh', '-tiered']) {
+      for (const atMs of [dec - 1, dec, jan]) {
+        expect(resolvePrice(provider, `gemini-4-hydrogen${suffix}`, atMs))
+          .toMatchObject({ input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.075 })
+      }
+    }
+    expect(resolveUsagePrice(provider, 'gemini-4-hydrogen', { ...emptyUsage(), inputTokens: 900_000 }, jan))
+      .toMatchObject({ input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.075 })
   })
 })
 

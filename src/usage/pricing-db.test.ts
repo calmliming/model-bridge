@@ -63,17 +63,45 @@ describe('scheduled database price overrides', () => {
     await loadPricing()
     expect(resolvePrice('claude', 'claude-haiku-4-5')).toMatchObject({ input: 1, output: 5 })
   })
-  it('lets Argon seed rows follow the schedule while retaining custom base and variant prices', async () => {
+  it('lets Argon and Carbon seed rows follow the schedule while retaining custom base and variant prices', async () => {
     const boundary = Date.parse('2026-12-01T00:00:00Z')
-    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-4-argon', 2, 10, 0.1, 'gemini'), priceRow('gemini-4-argon-cyber-permissive', 4, 20, 0.2, 'gemini')] })
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('gemini-4-argon', 2, 10, 0.1, 'gemini'),
+      priceRow('gemini-4-argon-cyber-permissive', 4, 20, 0.2, 'gemini'),
+      priceRow('gemini-4-carbon', 2, 10, 0.1, 'gemini'),
+      priceRow('gemini-4-carbon-cyber-permissive', 4, 20, 0.2, 'gemini'),
+    ] })
     await loadPricing()
     expect(resolvePrice('gemini', 'gemini-4-argon', boundary)).toMatchObject({ input: 4, output: 20 })
     expect(resolvePrice('gemini', 'gemini-4-argon-high', boundary)).toMatchObject({ input: 4, output: 20 })
-    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-4-argon', 9, 19, 0.9, 'gemini'), priceRow('gemini-4-argon-high', 10, 20, 1, 'gemini')] })
+    expect(resolvePrice('gemini', 'gemini-4-carbon', boundary)).toMatchObject({ input: 4, output: 20 })
+    expect(resolvePrice('gemini', 'gemini-4-carbon-high', boundary)).toMatchObject({ input: 4, output: 20 })
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('gemini-4-argon', 9, 19, 0.9, 'gemini'),
+      priceRow('gemini-4-argon-high', 10, 20, 1, 'gemini'),
+      priceRow('gemini-4-carbon', 9, 19, 0.9, 'gemini'),
+      priceRow('gemini-4-carbon-high', 10, 20, 1, 'gemini'),
+    ] })
     await loadPricing()
     expect(resolvePrice('gemini', 'gemini-4-argon-medium', boundary)).toMatchObject({ input: 9, output: 19 })
     expect(resolvePrice('gemini', 'gemini-4-argon-high', boundary)).toMatchObject({ input: 10, output: 20 })
     expect(resolvePrice('gemini', 'gemini-4-argon-cyber-permissive', boundary - 1)).toMatchObject({ input: 4, output: 20 })
+    expect(resolvePrice('gemini', 'gemini-4-carbon-medium', boundary)).toMatchObject({ input: 9, output: 19 })
+    expect(resolvePrice('gemini', 'gemini-4-carbon-high', boundary)).toMatchObject({ input: 10, output: 20 })
+    expect(resolvePrice('gemini', 'gemini-4-carbon-cyber-permissive', boundary - 1)).toMatchObject({ input: 4, output: 20 })
+  })
+  it('keeps Hydrogen pricing independent from broad flash rows and honors custom base and xhigh overrides', async () => {
+    mocks.query.mockResolvedValue({ rows: [priceRow('gemini-flash', 0.1, 0.2, 0.01, 'gemini')] })
+    await loadPricing()
+    expect(resolvePrice('gemini', 'gemini-4-hydrogen')).toMatchObject({ input: 1.5, output: 7.5, cacheRead: 0.075 })
+    expect(resolvePrice('gemini', 'gemini-4-hydrogen-xhigh')).toMatchObject({ input: 1.5, output: 7.5, cacheRead: 0.075 })
+    mocks.query.mockResolvedValue({ rows: [
+      priceRow('gemini-4-hydrogen', 2.2, 11, 0.11, 'gemini'),
+      priceRow('gemini-4-hydrogen-xhigh', 3.3, 15, 0.15, 'gemini'),
+    ] })
+    await loadPricing()
+    expect(resolvePrice('gemini', 'gemini-4-hydrogen-high')).toMatchObject({ input: 2.2, output: 11, cacheRead: 0.11 })
+    expect(resolvePrice('gemini', 'gemini-4-hydrogen-xhigh')).toMatchObject({ input: 3.3, output: 15, cacheRead: 0.15 })
   })
   it('keeps Image 2.5 pricing independent from old broad image rows', async () => {
     mocks.query.mockResolvedValue({ rows: [{ ...priceRow('gpt-image-2', 1, 2, 0.1, 'openai'), image_input_price: 1, image_output_price: 2 }] })

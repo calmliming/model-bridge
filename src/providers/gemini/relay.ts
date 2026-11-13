@@ -156,7 +156,7 @@ function sanitizeSchema(value: unknown): unknown {
 /**
  * Cleans tool/function-declaration JSON schemas in a Gemini request body so
  * fields the Code Assist backend rejects (e.g. `$schema`, `additionalProperties`)
- * don't 400 the request. Gemini 3.7/3.8/4 Argon generation settings are also
+ * don't 400 the request. Gemini 3.7/3.8/4 generation settings are also
  * normalized when a model is supplied. The original body is not mutated.
  */
 export function sanitizeGeminiBody(
@@ -197,11 +197,16 @@ export function sanitizeGeminiBody(
   // thinking enabled 400s — that path synthesizes a numeric thinkingBudget
   // (antigravity/converter.ts) that only this strip removes.
   const normalizedModel = model.toLowerCase().replace(/^models\//, '')
-  const argon = /^gemini-4-argon(?:$|-)/.test(normalizedModel)
-  if (argon && (body.cachedContent != null || body.cached_content != null)) {
-    throw new ProviderRequestError('unsupported_explicit_cache', 'Gemini 4 Argon supports implicit caching only; remove cachedContent and supply the original content.')
+  const gemini4 = /^gemini-4-(?:argon|carbon|hydrogen)(?:$|-)/.test(normalizedModel)
+  if (gemini4 && (body.cachedContent != null || body.cached_content != null)) {
+    const label = normalizedModel.startsWith('gemini-4-carbon')
+      ? 'Gemini 4 Carbon'
+      : normalizedModel.startsWith('gemini-4-hydrogen')
+        ? 'Gemini 4 Hydrogen'
+        : 'Gemini 4 Argon'
+    throw new ProviderRequestError('unsupported_explicit_cache', `${label} supports implicit caching only; remove cachedContent and supply the original content.`)
   }
-  if (!argon && !/^gemini-3\.[78]-flash/.test(normalizedModel)) return cleaned
+  if (!gemini4 && !/^gemini-3\.[78]-flash/.test(normalizedModel)) return cleaned
   const configKey = cleaned.generationConfig ? 'generationConfig' : 'generation_config'
   const generationConfig = cleaned[configKey]
   if (!generationConfig || typeof generationConfig !== 'object' || Array.isArray(generationConfig)) {
@@ -221,7 +226,7 @@ export function sanitizeGeminiBody(
   if (thinkingConfig && typeof thinkingConfig === 'object' && !Array.isArray(thinkingConfig)) {
     const nextThinking = { ...(thinkingConfig as Record<string, unknown>) }
     const budget = nextThinking.thinkingBudget ?? nextThinking.thinking_budget
-    if (argon && nextThinking.thinkingLevel == null && nextThinking.thinking_level == null
+    if (gemini4 && nextThinking.thinkingLevel == null && nextThinking.thinking_level == null
       && typeof budget === 'number' && Number.isFinite(budget) && budget >= 0) {
       nextThinking[thinkingKey === 'thinking_config' ? 'thinking_level' : 'thinkingLevel'] = budget <= 1024 ? 'low' : budget <= 8192 ? 'medium' : 'high'
       changed = true

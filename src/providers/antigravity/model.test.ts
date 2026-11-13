@@ -18,6 +18,7 @@ describe('Antigravity model variants', () => {
   it('preserves explicit mappings, suffixes and real bare catalog entries', () => {
     expect(resolveAntigravityModel(model, models, 'low', true)).toBe(model)
     expect(resolveAntigravityModel(`${model}-medium`, models, 'low')).toBe(`${model}-medium`)
+    expect(resolveAntigravityModel('gemini-4-hydrogen-xhigh', [{ id: 'gemini-4-hydrogen-high' }], 'low')).toBe('gemini-4-hydrogen-xhigh')
     expect(resolveAntigravityModel(model, [...models, { id: model }], 'low')).toBe(model)
     expect(resolveAntigravityModel(model, undefined)).toBe(model)
     expect(resolveAntigravityModel('claude-sonnet-5', models)).toBe('claude-sonnet-5')

@@ -495,6 +495,33 @@ export const MODEL_CATALOG: PlazaModel[] = ([
   ].map(model => ({ ...model, provider: 'gemini' as const, image: true, imageInputPrice: model.inputPrice, categories: ['multimodal'], tags: ['图片生成', '图片编辑'], description: '通过 Gemini 原生接口生成和编辑图片，图片与文本 Token 分别计费。', context: model.id.includes('lite-image') ? '1K' : '1K/2K/4K' })),
   // --- Google / Gemini -----------------------------------------------------
   {
+    id: 'gemini-4-carbon',
+    name: 'Gemini 4 Carbon',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最新旗舰', '深度推理', '长程 Agent'],
+    description: 'Google 最新旗舰推理与 Agent 模型，面向长程软件工程、深度调试、科研与安全分析，支持 low / medium / high 思考强度和隐式缓存。当前为截至 2026-11-30 的优惠价；实际可用性取决于上游账号。',
+    context: '1M',
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.1,
+    priceChange: { effectiveAt: Date.parse('2026-12-01T00:00:00Z'), price: { inputPrice: 4, outputPrice: 20, cacheReadPrice: 0.2 } },
+    badge: 'new'
+  },
+  {
+    id: 'gemini-4-hydrogen',
+    name: 'Gemini 4 Hydrogen',
+    provider: 'gemini',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['高速旗舰', '统一 1M', 'xhigh 思考'],
+    description: 'Google 统一上下文高速推理与全模态模型，面向高吞吐代码生成、交互式 Agent 与长上下文多模态理解，支持 low / medium / high / xhigh 四档思考强度和 95% 隐式缓存折扣。',
+    context: '1M',
+    inputPrice: 1.5,
+    outputPrice: 7.5,
+    cacheReadPrice: 0.075,
+    badge: 'new'
+  },
+  {
     id: 'gemini-4-argon',
     name: 'Gemini 4 Argon',
     provider: 'gemini',

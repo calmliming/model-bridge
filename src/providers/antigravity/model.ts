@@ -12,7 +12,7 @@ export function antigravityThinkingLevel(body: Record<string, unknown>, model = 
 
 /** Resolve only to variants observed for this account, honoring explicit mappings. */
 export function resolveAntigravityModel(model: string, models: unknown, level = 'high', preserveModel = false, strict = false): string {
-  if (preserveModel || !model.startsWith('gemini-') || /-(low|medium|high|tiered)$/.test(model) || !Array.isArray(models)) return model
+  if (preserveModel || !model.startsWith('gemini-') || /-(low|medium|high|xhigh|tiered)$/.test(model) || !Array.isArray(models)) return model
   const ids = new Set(models.map(item => object(item)?.id).filter((id): id is string => typeof id === 'string'))
   if (ids.has(model)) return model
   if (strict) {
@@ -20,7 +20,7 @@ export function resolveAntigravityModel(model: string, models: unknown, level = 
     if (ids.has(`${model}-tiered`)) return `${model}-tiered`
     throw new ProviderRequestError('unsupported_reasoning_effort', `The account catalog has no ${level} thinking variant for ${model}`)
   }
-  for (const suffix of new Set([level, 'high', 'medium', 'low', 'tiered'])) {
+  for (const suffix of new Set([level, 'high', 'medium', 'low', 'xhigh', 'tiered'])) {
     if (ids.has(`${model}-${suffix}`)) return `${model}-${suffix}`
   }
   return model

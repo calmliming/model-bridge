@@ -46,47 +46,55 @@ describe('Sub2API v0.2.16 model compatibility', () => {
     expect(init.headers['anthropic-beta']).toContain('future-feature')
   })
   it('lists both new models through native and aggregator model discovery', () => {
-    for (const [provider, model] of [['claude', 'claude-haiku-5-5'], ['gemini', 'gemini-4-argon']] as const) {
+    for (const [provider, model] of [['claude', 'claude-haiku-5-5'], ['gemini', 'gemini-4-argon'], ['gemini', 'gemini-4-carbon'], ['gemini', 'gemini-4-hydrogen']] as const) {
       expect(listModelIdsForKey({ allowedProviders: [provider], allowedModels: null })).toContain(model)
       expect(listModelIdsForKey({ allowedProviders: ['sub2api'], allowedModels: null })).toContain(model)
     }
   })
 })
 
-describe('Gemini 4 Argon and Antigravity', () => {
+describe('Gemini 4 Argon/Carbon/Hydrogen and Antigravity', () => {
   it.each([0, 4096, 20000])('maps numeric budget %s to a supported level', budget => {
     const body = { generationConfig: { temperature: 0.1, topP: 0.5, maxOutputTokens: 16000,
       thinkingConfig: { thinkingBudget: budget, includeThoughts: true } } }
-    const result = sanitizeGeminiBody(body, 'gemini-4-argon-high')
-    expect(result).toEqual({ generationConfig: { maxOutputTokens: 16000,
-      thinkingConfig: { thinkingLevel: budget === 0 ? 'low' : budget === 4096 ? 'medium' : 'high', includeThoughts: true } } })
+    for (const model of ['gemini-4-argon-high', 'gemini-4-carbon-high', 'gemini-4-hydrogen-high']) {
+      const result = sanitizeGeminiBody(body, model)
+      expect(result).toEqual({ generationConfig: { maxOutputTokens: 16000,
+        thinkingConfig: { thinkingLevel: budget === 0 ? 'low' : budget === 4096 ? 'medium' : 'high', includeThoughts: true } } })
+    }
     expect(body.generationConfig.thinkingConfig.thinkingBudget).toBe(budget)
   })
-  it('accepts snake-case config and keeps an explicit thinking level', () => {
-    expect(sanitizeGeminiBody({ generation_config: { top_k: 2, thinking_config: { thinking_budget: 4096, thinking_level: 'high' } } }, 'models/gemini-4-argon'))
+  it.each(['models/gemini-4-argon', 'models/gemini-4-carbon', 'models/gemini-4-hydrogen'])('accepts snake-case config and keeps an explicit thinking level for %s', model => {
+    expect(sanitizeGeminiBody({ generation_config: { top_k: 2, thinking_config: { thinking_budget: 4096, thinking_level: 'high' } } }, model))
       .toEqual({ generation_config: { thinking_config: { thinking_level: 'high' } } })
   })
-  it('rejects explicit cache references before making an upstream request', () => {
+  it('keeps explicit xhigh thinking level on gemini-4-hydrogen', () => {
+    expect(sanitizeGeminiBody({ generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: 32768, thinkingLevel: 'xhigh' } } }, 'gemini-4-hydrogen'))
+      .toEqual({ generationConfig: { thinkingConfig: { thinkingLevel: 'xhigh' } } })
+  })
+  it.each(['gemini-4-argon', 'gemini-4-carbon', 'gemini-4-hydrogen'])('rejects explicit cache references for %s before making an upstream request', model => {
     for (const key of ['cachedContent', 'cached_content']) {
-      expect(() => sanitizeGeminiBody({ [key]: 'cachedContents/123' }, 'gemini-4-argon'))
+      expect(() => sanitizeGeminiBody({ [key]: 'cachedContents/123' }, model))
         .toThrowError(expect.objectContaining({ code: 'unsupported_explicit_cache', statusCode: 400 }))
     }
     expect(mocks.fetch).not.toHaveBeenCalled()
   })
   it('discovers models on the configured generation endpoint', async () => {
-    mocks.fetch.mockResolvedValueOnce(Response.json({ models: { 'gemini-4-argon-high': {} } }))
+    mocks.fetch.mockResolvedValueOnce(Response.json({ models: { 'gemini-4-argon-high': {}, 'gemini-4-carbon-high': {}, 'gemini-4-hydrogen-xhigh': {} } }))
     const result = await fetchAntigravityModels('test', 'project')
     expect(mocks.fetch.mock.calls[0]![0]).toBe('https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels')
     expect(resolveAntigravityModel('gemini-4-argon', result.models, 'high')).toBe('gemini-4-argon-high')
+    expect(resolveAntigravityModel('gemini-4-carbon', result.models, 'high')).toBe('gemini-4-carbon-high')
+    expect(resolveAntigravityModel('gemini-4-hydrogen', result.models, 'xhigh')).toBe('gemini-4-hydrogen-xhigh')
   })
   it('keeps tool-result images and native function-call signatures intact', () => {
     const source = { type: 'base64', media_type: 'image/png', data: 'AA==' }
     const converted = messagesToGemini({ messages: [
       { role: 'assistant', content: [{ type: 'tool_use', id: 'call', name: 'screen', input: {}, signature: 'sig' }] },
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call', content: [{ type: 'image', source }] }] },
-    ] }, 'gemini-4-argon')
+    ] }, 'gemini-4-carbon')
     expect(JSON.stringify(converted)).toContain('"inlineData":{"mimeType":"image/png","data":"AA=="}')
     const native = { contents: [{ role: 'model', parts: [{ functionCall: { id: 'call', name: 'screen', args: {} }, thoughtSignature: 'sig' }] }] }
-    expect(prepareAntigravityGemini(native, 'gemini-4-argon').contents).toEqual(native.contents)
+    expect(prepareAntigravityGemini(native, 'gemini-4-carbon').contents).toEqual(native.contents)
   })
 })

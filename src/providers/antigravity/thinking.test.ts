@@ -57,9 +57,27 @@ describe('consistent Gemini thinking interpretation', () => {
   it('rejects unsupported effort and invalid Messages budgets locally', () => {
     expect(() => prepareAntigravityGemini({ generationConfig: { thinkingConfig: { thinkingLevel: 'typo' } } }, model))
       .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
+    expect(() => prepareAntigravityGemini({ generationConfig: { thinkingConfig: { thinkingLevel: 'xhigh' } } }, model))
+      .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
     expect(() => messagesToGemini({ messages: [], output_config: { effort: 'typo' } }, model))
       .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
     expect(() => messagesToGemini({ messages: [], thinking: { type: 'enabled', budget_tokens: -1 } }, model))
       .toThrow(expect.objectContaining({ code: 'invalid_thinking_budget', statusCode: 400 }))
+  })
+
+  it('supports xhigh thinking level and variants exclusively on gemini-4-hydrogen', () => {
+    const hydrogen = 'gemini-4-hydrogen'
+    const hydrogenCatalog = ['low', 'medium', 'high', 'xhigh'].map(level => ({ id: `${hydrogen}-${level}` }))
+    expect(antigravityThinking({ generationConfig: { thinkingConfig: { thinkingLevel: 'xhigh', includeThoughts: true } } }, hydrogen))
+      .toEqual({ level: 'xhigh', explicit: true, config: { includeThoughts: true, thinkingLevel: 'xhigh' } })
+    expect(antigravityThinking({ output_config: { effort: 'xhigh' } }, hydrogen).level).toBe('xhigh')
+    expect(antigravityThinking({ output_config: { effort: 'xhigh' } }, model).level).toBe('high')
+    expect(antigravityThinking({}, `${hydrogen}-xhigh`).level).toBe('xhigh')
+    expect(messagesToGemini({ messages: [], thinking: { type: 'adaptive' }, output_config: { effort: 'xhigh' } }, hydrogen).generationConfig)
+      .toMatchObject({ thinkingConfig: { thinkingLevel: 'xhigh', includeThoughts: true } })
+    expect(resolveAntigravityModel(hydrogen, hydrogenCatalog, 'xhigh')).toBe(`${hydrogen}-xhigh`)
+    expect(resolveAntigravityModel(hydrogen, [{ id: `${hydrogen}-high` }], 'xhigh')).toBe(`${hydrogen}-high`)
+    expect(() => resolveAntigravityModel(hydrogen, [{ id: `${hydrogen}-high` }], 'xhigh', false, true))
+      .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
   })
 })

@@ -64,6 +64,8 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
     ...NATIVE_IMAGE_MODELS
   ],
   gemini: [
+    'gemini-4-carbon',
+    'gemini-4-hydrogen',
     'gemini-4-argon',
     'gemini-3.8-flash',
     'gemini-3.7-flash',

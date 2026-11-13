@@ -4,8 +4,8 @@ function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
-export type ThinkingLevel = 'low' | 'medium' | 'high'
-const budgets: Record<ThinkingLevel, number> = { low: 1024, medium: 8192, high: 16384 }
+export type ThinkingLevel = 'low' | 'medium' | 'high' | 'xhigh'
+const budgets: Record<ThinkingLevel, number> = { low: 1024, medium: 8192, high: 16384, xhigh: 32768 }
 
 /** One interpretation feeds variant selection, the forwarded config and usage diagnostics. */
 export function antigravityThinking(body: Record<string, unknown>, model = '') {
@@ -13,27 +13,31 @@ export function antigravityThinking(body: Record<string, unknown>, model = '') {
   const native = object(generation?.thinkingConfig) ?? object(generation?.thinking_config)
   const thinking = object(body.thinking)
   const effort = object(body.output_config)?.effort ?? body.reasoning_effort ?? object(body.reasoning)?.effort
+  const supportsXhigh = /^(?:models\/)?gemini-4-hydrogen(?:$|-)/i.test(model)
+  const allowedLevels: ThinkingLevel[] = supportsXhigh ? ['low', 'medium', 'high', 'xhigh'] : ['low', 'medium', 'high']
+  const levelHint = supportsXhigh ? 'low, medium, high or xhigh' : 'low, medium or high'
   const nativeLevel = native?.thinkingLevel ?? native?.thinking_level
   if (nativeLevel !== undefined && (typeof nativeLevel !== 'string'
-    || !['low', 'medium', 'high'].includes(nativeLevel.toLowerCase().trim()))) {
-    throw new ProviderRequestError('unsupported_reasoning_effort', 'Use low, medium or high Gemini thinking level')
+    || !allowedLevels.includes(nativeLevel.toLowerCase().trim() as ThinkingLevel))) {
+    throw new ProviderRequestError('unsupported_reasoning_effort', `Use ${levelHint} Gemini thinking level`)
   }
-  const suffix = /-(low|medium|high)$/i.exec(model)?.[1]?.toLowerCase() as ThinkingLevel | undefined
+  const suffix = (supportsXhigh ? /-(low|medium|high|xhigh)$/i : /-(low|medium|high)$/i).exec(model)?.[1]?.toLowerCase() as ThinkingLevel | undefined
   const budget = native ? native.thinkingBudget ?? native.thinking_budget : thinking?.budget_tokens
   if (!native && budget !== undefined && (typeof budget !== 'number' || !Number.isFinite(budget) || budget < 0)) {
     throw new ProviderRequestError('invalid_thinking_budget', 'Thinking budget must be a finite non-negative number')
   }
   let level: ThinkingLevel = 'high'
   if (suffix) level = suffix
-  else if (typeof nativeLevel === 'string' && ['low', 'medium', 'high'].includes(nativeLevel.toLowerCase().trim())) {
+  else if (typeof nativeLevel === 'string' && allowedLevels.includes(nativeLevel.toLowerCase().trim() as ThinkingLevel)) {
     level = nativeLevel.toLowerCase().trim() as ThinkingLevel
   } else if (thinking?.type === 'disabled') level = 'low'
   else if (effort !== undefined) {
     const normalized = typeof effort === 'string' ? effort.toLowerCase().trim() : ''
     if (['none', 'minimal', 'low'].includes(normalized)) level = 'low'
     else if (normalized === 'medium') level = 'medium'
-    else if (['high', 'xhigh', 'max', 'ultra'].includes(normalized)) level = 'high'
-    else throw new ProviderRequestError('unsupported_reasoning_effort', 'Use low, medium or high Gemini reasoning effort')
+    else if (normalized === 'high') level = 'high'
+    else if (['xhigh', 'max', 'ultra'].includes(normalized)) level = supportsXhigh ? 'xhigh' : 'high'
+    else throw new ProviderRequestError('unsupported_reasoning_effort', `Use ${levelHint} Gemini reasoning effort`)
   } else if (typeof budget === 'number' && Number.isFinite(budget) && budget >= 0) {
     level = budget <= 1024 ? 'low' : budget <= 8192 ? 'medium' : 'high'
   } else if (thinking && !model.startsWith('gemini-') && ['enabled', 'adaptive'].includes(String(thinking.type))) level = 'medium'

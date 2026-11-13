@@ -311,6 +311,18 @@ describe('model discovery', () => {
     }
     expect(listGeminiModels(key)).toEqual([
       {
+        name: 'models/gemini-4-carbon',
+        version: '001',
+        displayName: 'Gemini 4 Carbon',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+      },
+      {
+        name: 'models/gemini-4-hydrogen',
+        version: '001',
+        displayName: 'Gemini 4 Hydrogen',
+        supportedGenerationMethods: ['generateContent', 'streamGenerateContent']
+      },
+      {
         name: 'models/gemini-4-argon',
         version: '001',
         displayName: 'Gemini 4 Argon',

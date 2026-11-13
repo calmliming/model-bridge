@@ -375,11 +375,14 @@ const GEMINI_FRONTIER_FLASH_STANDARD: TierPrice = {
   cacheRead: 0.15
 }
 const GEMINI_FRONTIER_FLASH_STANDARD_AT = Date.parse('2027-01-01T00:00:00Z')
-// Argon Cyber has no introductory discount. Thinking variants share the base rate.
+// Argon and Carbon Cyber have no introductory discount. Thinking variants share the base rate.
 const GEMINI_ARGON_PROMO: TierPrice = { input: 2, output: 10, cacheWrite: 0, cacheRead: 0.1 }
 const GEMINI_ARGON_STANDARD: TierPrice = { input: 4, output: 20, cacheWrite: 0, cacheRead: 0.2 }
 const GEMINI_ARGON_STANDARD_AT = Date.parse('2026-12-01T00:00:00Z')
-const ARGON_MODEL = /^gemini-4-argon(?:$|-)/i
+const GEMINI_4_MODEL = /^gemini-4-(?:argon|carbon)(?:$|-)/i
+const GEMINI_4_CYBER_MODEL = /^gemini-4-(?:argon|carbon)-cyber-permissive(?:$|-)/i
+const GEMINI_HYDROGEN: TierPrice = { input: 1.5, output: 7.5, cacheWrite: 0, cacheRead: 0.075 }
+const HYDROGEN_MODEL = /^gemini-4-hydrogen(?:$|-)/i
 const GEMINI_35_FLASH: TierPrice = {
   input: 1.5,
   output: 9,
@@ -428,8 +431,9 @@ function geminiImagePrice(model: string): TierPrice {
 function geminiPrice(model: string, atMs: number): TierPrice {
   if (isGeminiImageModel(model)) return geminiImagePrice(model)
   const m = model.toLowerCase()
-  if (ARGON_MODEL.test(m)) {
-    return m.startsWith('gemini-4-argon-cyber-permissive') || atMs >= GEMINI_ARGON_STANDARD_AT
+  if (HYDROGEN_MODEL.test(m)) return GEMINI_HYDROGEN
+  if (GEMINI_4_MODEL.test(m)) {
+    return GEMINI_4_CYBER_MODEL.test(m) || atMs >= GEMINI_ARGON_STANDARD_AT
       ? GEMINI_ARGON_STANDARD : GEMINI_ARGON_PROMO
   }
   if (/^gemini-3-flash(?:$|-)/.test(m)) return GEMINI_3_FLASH
@@ -825,6 +829,9 @@ const SEED_ROWS: SeedRow[] = [
   // Gemini — exact rows for the discoverable models + generic fallbacks.
   { provider: 'gemini', model: 'gemini-3-flash', price: GEMINI_3_FLASH },
   { provider: 'gemini', model: 'gemini-3.1-pro-preview-customtools', price: GEMINI_31_PRO },
+  { provider: 'gemini', model: 'gemini-4-carbon', price: GEMINI_ARGON_PROMO },
+  { provider: 'gemini', model: 'gemini-4-carbon-cyber-permissive', price: GEMINI_ARGON_STANDARD },
+  { provider: 'gemini', model: 'gemini-4-hydrogen', price: GEMINI_HYDROGEN },
   { provider: 'gemini', model: 'gemini-4-argon', price: GEMINI_ARGON_PROMO },
   { provider: 'gemini', model: 'gemini-4-argon-cyber-permissive', price: GEMINI_ARGON_STANDARD },
   {
@@ -1098,7 +1105,7 @@ function isManagedScheduledDefault(provider: string, model: string, price: TierP
 
   if (provider === 'gemini') {
     const m = model.toLowerCase()
-    if (ARGON_MODEL.test(m) && !m.startsWith('gemini-4-argon-cyber-permissive')) {
+    if (GEMINI_4_MODEL.test(m) && !GEMINI_4_CYBER_MODEL.test(m)) {
       return sameTokenPrice(price, GEMINI_ARGON_PROMO) || sameTokenPrice(price, GEMINI_ARGON_STANDARD)
     }
     const isManagedFlash = m === 'flash' || /gemini-3\.(?:6|7|8)-flash/.test(m)
@@ -1283,8 +1290,8 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
     return priceCache.get(cacheKey(provider, canonical)) ?? CLAUDE_FABLE_52_PRICE
   }
   const canonicalModel = normalizedModel.replace(/^claude-haiku-5\.5(?=$|-)/, 'claude-haiku-5-5')
-    .replace(/-(?:low|medium|high|tiered)$/, '')
-  if (HAIKU_55_MODEL.test(model) || ARGON_MODEL.test(model)) {
+    .replace(/-(?:low|medium|high|xhigh|tiered)$/, '')
+  if (HAIKU_55_MODEL.test(model) || GEMINI_4_MODEL.test(model) || HYDROGEN_MODEL.test(model)) {
     const canonicalPrice = priceCache.get(cacheKey(provider, canonicalModel))
     if (canonicalPrice && !isManagedScheduledDefault(provider, canonicalModel, canonicalPrice)) return canonicalPrice
   }
@@ -1292,7 +1299,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   if (HAIKU_55_MODEL.test(model)
     && ['claude', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
   if (isGeminiImageModel(model) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
-  if (ARGON_MODEL.test(model) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
+  if ((GEMINI_4_MODEL.test(model) || HYDROGEN_MODEL.test(model)) && ['gemini', 'antigravity', 'sub2api'].includes(provider)) return builtinPrice(provider, model, atMs)
   if (
     (normalizedModel.includes('codex-spark') || /^gpt-6-astra(?:$|-)/i.test(normalizedModel) ||
       isGpt61SolModel(normalizedModel) || isGpt61TerraModel(normalizedModel) || isNativeImageModel(normalizedModel)) &&

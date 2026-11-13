@@ -76,11 +76,14 @@ describe('DeepSeek catalog pricing schedule', () => {
 })
 
 describe('current provider model catalog', () => {
-  it('shows Haiku 5.5 and scheduled Argon pricing consistently with the backend', () => {
+  it('shows Haiku 5.5, Hydrogen, and scheduled Argon/Carbon pricing consistently with the backend', () => {
     expect(model('claude-haiku-5-5')).toMatchObject({ context: '1M', inputPrice: 0.1, outputPrice: 0.5, cacheReadPrice: 0.01 })
+    expect(model('gemini-4-hydrogen')).toMatchObject({ context: '1M', inputPrice: 1.5, outputPrice: 7.5, cacheReadPrice: 0.075 })
     const cutoff = Date.parse('2026-12-01T00:00:00Z')
-    expect(resolveModelPrice(model('gemini-4-argon'), cutoff - 1)).toMatchObject({ inputPrice: 2, outputPrice: 10, cacheReadPrice: 0.1 })
-    expect(resolveModelPrice(model('gemini-4-argon'), cutoff)).toMatchObject({ inputPrice: 4, outputPrice: 20, cacheReadPrice: 0.2 })
+    for (const id of ['gemini-4-argon', 'gemini-4-carbon']) {
+      expect(resolveModelPrice(model(id), cutoff - 1)).toMatchObject({ inputPrice: 2, outputPrice: 10, cacheReadPrice: 0.1 })
+      expect(resolveModelPrice(model(id), cutoff)).toMatchObject({ inputPrice: 4, outputPrice: 20, cacheReadPrice: 0.2 })
+    }
   })
   it('lists media models once by manufacturer while keeping the public supply channel', () => {
     const media = MODEL_CATALOG.filter(model => model.channel === 'modelbridge')
@@ -90,7 +93,7 @@ describe('current provider model catalog', () => {
     expect(model('minimax-h3').provider).toBe('minimax')
     expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(17)
     expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(5)
-    expect(MODEL_CATALOG).toHaveLength(68)
+    expect(MODEL_CATALOG).toHaveLength(73)
     const nativeImages = MODEL_CATALOG.filter(model => model.image && model.provider === 'openai' && !model.channel)
     expect(nativeImages.map(model => model.id)).toEqual(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])
     expect(nativeImages.every(model => model.imageRequestPrice == null && model.imageOutputPrice === 30 && model.imageCacheReadPrice === 2)).toBe(true)
@@ -136,13 +139,19 @@ describe('current provider model catalog', () => {
     expect(model('qwen3.7-flash')).toMatchObject({ context: '1M' })
   })
 
-  it('shows Claude Fable 5.1 with its reduced cache-read price', () => {
+  it('shows Claude Fable 5.2 and 5.1 with their reduced cache-read prices', () => {
+    expect(model('claude-fable-5-2')).toMatchObject({
+      context: '1M',
+      inputPrice: 8,
+      outputPrice: 40,
+      cacheReadPrice: 0.2,
+      badge: 'new'
+    })
     expect(model('claude-fable-5-1')).toMatchObject({
       context: '1M',
       inputPrice: 10,
       outputPrice: 50,
-      cacheReadPrice: 0.25,
-      badge: 'new'
+      cacheReadPrice: 0.25
     })
     expect(model('claude-sonnet-5')).toMatchObject({
       inputPrice: 2,
