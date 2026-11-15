@@ -7,6 +7,7 @@ import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
 import { isGpt61SolModel } from './models'
 import { ProviderRequestError } from '../requestError'
 import { fetchWithConnectTimeout } from '../../http/upstream'
+import { normalizeCodexPageContext } from './pageContext'
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses'
 
@@ -140,7 +141,7 @@ export function normalizeOpenaiResponsesBody(
   body: Record<string, unknown>,
   options: { allowImageGeneration?: boolean } = {},
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...sanitizeToolSchemas(body) }
+  const out: Record<string, unknown> = { ...sanitizeToolSchemas(normalizeCodexPageContext(body)) }
   for (const field of FORBIDDEN_FIELDS) delete out[field]
   normalizeResponseTools(out)
   normalizeResponseInputItemIds(out)

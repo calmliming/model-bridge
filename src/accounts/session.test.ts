@@ -41,6 +41,34 @@ describe('sticky bindings', () => {
 })
 
 describe('computeSessionKey', () => {
+  it.each(['input', 'messages'])('ignores later system reminders in %s while keeping the leading prefix', async field => {
+    const prefix = [{ role: 'system', content: 'System' }, { role: 'developer', content: 'Repo rules' }]
+    const first = { role: 'user', content: 'Fix the bug' }
+    const body = { model: 'gpt-6.1-sol', instructions: 'Top-level rules', tools: [{ type: 'function', name: 'shell' }], [field]: [...prefix, first] }
+    const key = computeSessionKey('openai', 'stable-tools', {}, body)!
+    await bindStickyAccount(key, 'original-account')
+    for (const tail of [
+      [{ role: 'assistant', content: 'Working' }, { role: 'developer', content: 'New reminder' }],
+      [{ type: 'function_call', call_id: 'call-1', name: 'shell', arguments: '{}' },
+        { type: 'function_call_output', call_id: 'call-1', output: 'Done' }, { role: 'system', content: 'Continue' }],
+    ]) {
+      const next = computeSessionKey('openai', 'stable-tools', {}, { ...body, [field]: [...prefix, first, ...tail] })!
+      expect(next).toBe(key)
+      expect(await getStickyAccountId(next)).toBe('original-account')
+    }
+    expect(computeSessionKey('openai', 'stable-tools', {}, { ...body, [field]: [{ role: 'system', content: 'Different' }, first] })).not.toBe(key)
+    expect(computeSessionKey('openai', 'stable-tools', {}, { ...body, instructions: 'Different' })).not.toBe(key)
+    expect(computeSessionKey('openai', 'stable-tools', {}, { ...body, [field]: [...prefix, { ...first, content: 'Another task' }] })).not.toBe(key)
+  })
+
+  it.each([{ type: 'function_call_output', call_id: 'call-1', output: 'Done' }, { type: 'reasoning', summary: [] }])(
+    'closes the Responses instruction prefix at a tool/history item: %j', history => {
+      const input = [history, { role: 'user', content: 'Task' }]
+      expect(computeSessionKey('openai', 'k1', {}, { input }))
+        .toBe(computeSessionKey('openai', 'k1', {}, { input: [history, { role: 'developer', content: 'Reminder' }, input[1]] }))
+    },
+  )
+
   it('prefers an explicit session header', () => {
     const key = computeSessionKey('claude', 'k1', { 'x-session-id': 'conv-42' }, {})
     expect(key).toBe('claude:k1:h:conv-42')

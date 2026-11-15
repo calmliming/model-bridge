@@ -238,7 +238,7 @@ function withoutBillingBlocks(system: unknown): unknown {
   })
 }
 
-/** Extracts the system / instruction prompt across Anthropic, OpenAI and Gemini shapes. */
+/** Hash only leading instructions; reminders appended during a tool loop aren't session identity. */
 function extractSystemText(body: Record<string, unknown>): string {
   const parts = [
     textFromContent(withoutBillingBlocks(body.system)), // Anthropic messages
@@ -253,7 +253,7 @@ function extractSystemText(body: Record<string, unknown>): string {
       const role = (message as { role?: unknown })?.role
       if (role === 'system' || role === 'developer') {
         parts.push(textFromContent((message as { content?: unknown })?.content))
-      }
+      } else break
     }
   }
 
@@ -263,7 +263,7 @@ function extractSystemText(body: Record<string, unknown>): string {
       const role = (item as { role?: unknown })?.role
       if (role === 'system' || role === 'developer') {
         parts.push(textFromContent((item as { content?: unknown })?.content ?? item))
-      }
+      } else break
     }
   }
 

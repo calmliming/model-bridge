@@ -16,6 +16,30 @@ const usage = { promptTokenCount: 100, cachedContentTokenCount: 30, candidatesTo
 const sse = (items: unknown[]) => items.map(response => `data: ${JSON.stringify({ response })}\n\n`).join('')
 
 describe('Antigravity Messages conversion', () => {
+  it.each([0, 1])('keeps parallel tool results together when tool %i returns media', mediaIndex => {
+    const sources = [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'BB==' } },
+    ]
+    const calls = [0, 1, 2].map(i => ({ type: 'tool_use', id: `call-${i}`, name: `tool_${i}`, input: { i }, signature: `sig-${i}` }))
+    const input = { messages: [
+      { role: 'assistant', content: calls },
+      { role: 'user', content: calls.map((call, i) => ({ type: 'tool_result', tool_use_id: call.id,
+        is_error: i === 2, content: [{ type: 'text', text: `result-${i}` }, ...(i === mediaIndex ? sources : [])] })) },
+      { role: 'user', content: 'Continue' },
+    ] }
+    const original = structuredClone(input)
+    const result = messagesToGemini(input, scope.model) as { contents: Array<{ parts: unknown[] }> }
+    expect(result.contents[1]!.parts).toEqual([
+      ...calls.map((call, i) => ({ functionResponse: { id: call.id, name: call.name, response: {
+        [i === 2 ? 'error' : 'result']: `result-${i}${i === mediaIndex ? '\n[media attached]\n[media attached]' : ''}`,
+      } } })),
+      ...sources.map(item => ({ inlineData: { mimeType: item.source.media_type, data: item.source.data } })),
+    ])
+    expect(result.contents[2]!.parts).toEqual([{ text: 'Continue' }])
+    expect(input).toEqual(original)
+  })
+
   it('keeps tool names, arguments, signed thinking and image input across turns', () => {
     const input = { model: scope.model, stream: true, max_tokens: 1000, system: 'System', messages: [
       { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }] },

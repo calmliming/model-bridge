@@ -7,6 +7,7 @@ const failure = { type: 'response.failed', response: { error: { code: 'server_is
   message: 'Our servers are currently overloaded. Please try again later.', headers: { 'retry-after-ms': '7000' } } } }
 
 const emptyEvents = [
+  ...['codex.rate_limits', 'codex.response.metadata', 'keepalive'].map(type => ({ type })),
   ...['output_text', 'reasoning_summary_text', 'reasoning_text', 'function_call_arguments', 'custom_tool_call_input', 'refusal']
     .map(kind => ({ type: `response.${kind}.delta`, delta: '' })),
   ...['output_text', 'reasoning_summary_text', 'reasoning_text'].map(kind => ({ type: `response.${kind}.done`, text: '' })),

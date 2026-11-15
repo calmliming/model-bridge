@@ -479,6 +479,9 @@ const RESPONSES_PREAMBLE_EVENTS = new Set([
   'response.in_progress',
   'response.queued',
   'response.metadata',
+  'codex.rate_limits',
+  'codex.response.metadata',
+  'keepalive',
 ])
 
 function responseRecord(raw: unknown): Record<string, unknown> | null {

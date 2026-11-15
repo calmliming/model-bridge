@@ -1,4 +1,6 @@
 import { normalizeTerraRequest } from '../providers/openai/models'
+import { normalizeCodexPageContext } from '../providers/openai/pageContext'
+import { registerResponsesUtf8Validation } from '../http/utf8'
 import { withStudioFiles } from '../media/studioFiles'
 import { requireStudioSession, studioScopes } from '../middleware/studioAuth'
 import { accountUpstreamMemory, UpstreamMemoryError, withUpstreamMemory } from '../http/upstreamMemory'
@@ -765,6 +767,7 @@ const PROVIDERS: Record<string, ProviderHandler> = {
     callUpstream: (token, body, ctx) => relaySub2ApiResponses(token, ctx.account.proxyUrl, body),
     createStreamParser: openaiUsage.createStreamParser,
     parseJsonUsage: openaiUsage.parseJsonUsage,
+    streamStartVerdict: responsesStreamStartVerdict,
   },
 }
 
@@ -1603,6 +1606,7 @@ function isOpenaiModelScopedLimit(provider: string, response: Response, text = '
 
 /** Registers the provider relay endpoints. */
 export function registerRelayRoutes(app: FastifyInstance): void {
+  registerResponsesUtf8Validation(app)
   const imageBodyLimit = 128 * 1024 * 1024
   // DeepSeek vision accepts up to 48 MiB JSON requests (base64 images included).
   // Keep headroom for JSON encoding while leaving the global limit unchanged.
@@ -2151,8 +2155,9 @@ async function executeRelay(
   bodyOverride?: Record<string, unknown>,
 ): Promise<void> {
   const apiKey = request.apiKey!
-  const body = bodyOverride ?? (request.body ?? {}) as Record<string, unknown>
-  const route = provider.parseRoute(request, body)
+  const originalBody = bodyOverride ?? (request.body ?? {}) as Record<string, unknown>
+  const route = provider.parseRoute(request, originalBody)
+  const body = route.action === 'responses' ? normalizeCodexPageContext(originalBody) : originalBody
   if (!enforceGroupModel(route.model, request, reply)) return
   const mappedModel = mapRequestedModel(route.model, apiKey.modelMappings)
   // normalizeModel can reject a model outright (a provider whitelist, an

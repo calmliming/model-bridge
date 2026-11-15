@@ -16,7 +16,8 @@ const row = (value: unknown): Row | null => value && typeof value === 'object' &
 const RELAY_REASONING_PREFIX = 'mb1:'
 
 /**
- * Drops reasoning items stamped by this relay. Native Responses upstreams
+ * Drops reasoning items stamped by this relay or wrapped by CC Switch.
+ * Native Responses upstreams
  * cannot decrypt the marker and reject the request (OpenAI answers
  * invalid_encrypted_content), e.g. when a Codex session switches from Qwen to GPT.
  */
@@ -25,7 +26,8 @@ export function withoutRelayReasoningItems(input: unknown): unknown {
   const kept = input.filter(item => {
     const entry = row(item)
     return !(entry?.type === 'reasoning' && typeof entry.encrypted_content === 'string' &&
-      entry.encrypted_content.startsWith(RELAY_REASONING_PREFIX))
+      (entry.encrypted_content.startsWith(RELAY_REASONING_PREFIX) ||
+        entry.encrypted_content.trimStart().startsWith('ccswitch-openai-reasoning-v1:')))
   })
   return kept.length === input.length ? input : kept
 }

@@ -35,6 +35,7 @@ export function messagesToGemini(body: Record<string, unknown>, model: string): 
     const message = object(raw)
     if (!message || !['user', 'assistant'].includes(String(message.role))) throw new AntigravityRequestError('Messages roles must be user or assistant')
     const parts: Record<string, unknown>[] = []
+    const toolMedia: Record<string, unknown>[] = []
     for (const block of blocks(message.content)) {
       switch (block.type) {
         case 'text':
@@ -74,13 +75,16 @@ export function messagesToGemini(body: Record<string, unknown>, model: string): 
           }
           const response = block.is_error === true ? { error: content } : { result: content }
           parts.push({ functionResponse: { id, name, response } })
-          parts.push(...attachments)
+          toolMedia.push(...attachments)
           break
         }
         default:
           throw new AntigravityRequestError(`Unsupported Messages block type: ${String(block.type).slice(0, 60)}`)
       }
     }
+    // Antigravity requires parallel function responses to stay contiguous.
+    // Tool attachments belong to this message, after all of its tool results.
+    parts.push(...toolMedia)
     if (parts.length) contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts })
   }
   const result: Record<string, unknown> = { contents }

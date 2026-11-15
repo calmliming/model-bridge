@@ -1969,6 +1969,34 @@ describe('native Antigravity relay', () => {
     expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('antigravity')
   }))
 
+  it.each([false, true])('forwards parallel tool images after all Antigravity function responses (stream=%s)', stream => withRelay(async request => {
+    mocks.key.allowedProviders = ['antigravity']
+    mocks.accounts[0]!.metadata = { project: 'project' }
+    mocks.fetch.mockImplementationOnce(async (_url, options) => {
+      const forwarded = JSON.parse(options.body)
+      expect(forwarded.request.contents[1].parts).toEqual([
+        { functionResponse: { id: 'view-1', name: 'view_image', response: { result: '[media attached]' } } },
+        { functionResponse: { id: 'exec-1', name: 'exec_command', response: { result: 'Tests passed' } } },
+        { inlineData: { mimeType: 'image/png', data: 'AA==' } },
+      ])
+      return nativeResponse()
+    })
+    const response = await request({ model: 'claude-sonnet-5', stream, messages: [
+      { role: 'assistant', content: [
+        { type: 'tool_use', id: 'view-1', name: 'view_image', input: { path: 'result.png' } },
+        { type: 'tool_use', id: 'exec-1', name: 'exec_command', input: { command: 'npm test' } },
+      ] },
+      { role: 'user', content: [
+        { type: 'tool_result', tool_use_id: 'view-1', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } }] },
+        { type: 'tool_result', tool_use_id: 'exec-1', content: 'Tests passed' },
+      ] },
+    ] }, '/v1/messages')
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Native answer')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.logs).toHaveLength(1)
+  }))
+
   it.each(['/api/antigravity/v1beta/models/gemini-3.8-flash:generateContent', '/v1beta/models/gemini-3.8-flash:generateContent'])('unwraps native Gemini JSON at %s', url => withRelay(async request => {
     mocks.key.allowedProviders = ['antigravity']
     mocks.accounts[0]!.metadata = { project: 'project' }
@@ -2119,6 +2147,87 @@ describe('Responses overload and edge-block recovery', () => {
     await openaiResponse().text(), { headers: { 'content-type': 'text/event-stream' } })
 
   it.each([
+    { url: '/v1/responses', stream: true },
+    { url: '/v1/chat/completions', stream: true },
+    { url: '/v1/chat/completions', stream: false },
+    { url: '/api/sub2api/v1/responses', stream: true },
+  ])('retries overload after Codex metadata without leaking the abandoned attempt: %j', ({ url, stream }) => withRelay(async request => {
+    if (url.includes('sub2api')) mocks.accounts[0]!.proxyUrl = 'https://relay.example'
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'codex.rate_limits', marker: 'discarded-attempt' },
+      { type: 'codex.response.metadata', marker: 'discarded-attempt' },
+      { type: 'keepalive' }, failure(overload),
+    ])).mockImplementationOnce(answered)
+    const response = await request({ ...prompt, stream }, url)
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('Paid answer')
+    expect(response.body).not.toContain('discarded-attempt')
+    expect(response.body).not.toContain('server_is_overloaded')
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[26]).toBe(2)
+    expect(mocks.quota).toBe(mocks.cost)
+  }))
+
+  it('keeps successful metadata but never retries an error after actual output', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'codex.response.metadata', marker: 'kept-attempt' },
+      { type: 'response.output_text.delta', delta: 'Partial answer' }, failure(overload),
+    ]))
+    const response = await request(prompt)
+    expect(response.body).toContain('kept-attempt')
+    expect(response.body).toContain('Partial answer')
+    expect(response.body).toContain('server_is_overloaded')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+    expect(mocks.logs).toHaveLength(1)
+  }))
+
+  it.each([undefined, null, [], ['sealed-args']])('preserves namespaced sealed calls through the native Responses stream: %j', encrypted => withRelay(async request => {
+    const item = { type: 'function_call', id: 'fc_1', call_id: 'call-1', namespace: 'functions', name: 'shell', arguments: '',
+      ...(encrypted === undefined ? {} : { encrypted_function_args: encrypted }) }
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'response.output_item.added', output_index: 0, item },
+      { type: 'response.function_call_arguments.delta', output_index: 0, item_id: 'fc_1', delta: '{"command":"pwd"}' },
+      { type: 'response.completed', response: { id: 'resp-1', output: [], usage: { input_tokens: 5, output_tokens: 3 } } },
+    ]))
+    const response = await request(prompt)
+    const added = response.body.split('\n').filter(line => line.startsWith('data: {'))
+      .map(line => JSON.parse(line.slice(6))).find(event => event.type === 'response.output_item.added')
+    expect(added.item).toEqual(item)
+    expect(response.body).toContain('response.function_call_arguments.delta')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+  }))
+
+  it('forwards injected page context as user content before contacting Codex', () => withRelay(async request => {
+    const output = '{"page_id":null,"document_view":null}'
+    const response = await request({ ...prompt, input: [
+      { type: 'function_call_output', namespace: 'agent', name: 'codex_apps_open_page', output },
+      { role: 'user', content: 'Hello' },
+    ] })
+    expect(response.status).toBe(200)
+    expect(JSON.parse(mocks.fetch.mock.calls[0]![1].body).input[0]).toEqual({ type: 'message', role: 'user',
+      content: [{ type: 'input_text', text: `<external_codex_apps_open_page>\n${output}\n</external_codex_apps_open_page>` }] })
+  }))
+
+  it.each([undefined, false, true])('rejects malformed UTF-8 locally before scheduling (stream=%s)', async stream => {
+    const app = Fastify()
+    registerRelayRoutes(app)
+    try {
+      for (const invalid of [[0xff], [0xc3, 0x28], [0xed, 0xa0, 0x80], [0xe4, 0xb8]]) {
+        const payload = Buffer.concat([Buffer.from('{"model":"gpt-5.4","input":"'), Buffer.from(invalid),
+          Buffer.from(`"${stream === undefined ? '' : `,"stream":${stream}`}}`)])
+        const response = await app.inject({ method: 'POST', url: '/v1/responses',
+          headers: { authorization: 'Bearer mb-test', 'content-type': 'application/json' }, payload })
+        expect(response.statusCode).toBe(400)
+        expect(response.body).toContain('invalid_request_error')
+      }
+      expect(mocks.pickAccount).not.toHaveBeenCalled()
+      expect(mocks.fetch).not.toHaveBeenCalled()
+      expect(mocks.logs).toHaveLength(0)
+    } finally { await app.close() }
+  })
+
+  it.each([
     { url: '/v1/responses', stream: true, hint: 'http' },
     { url: '/v1/chat/completions', stream: true, hint: 'body' },
     { url: '/v1/chat/completions', stream: false, hint: 'http' },
@@ -2177,6 +2286,7 @@ describe('Responses overload and edge-block recovery', () => {
   it.each([true, false])('rotates an exhausted account after empty frames (stream=%s)', stream => withRelay(async request => {
     mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null })
     mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'codex.rate_limits', marker: 'exhausted-account' },
       { type: 'response.content_part.added', part: { type: 'output_text', text: '' } },
       failure({ code: 'usage_limit_reached', message: 'usage limit reached', resets_in_seconds: 3600 }),
     ])).mockImplementationOnce(answered)
@@ -2188,7 +2298,7 @@ describe('Responses overload and edge-block recovery', () => {
   }))
 
   it.each(['cyber_policy', 'invalid_request_error'])('preserves a hard %s decision without retrying', code => withRelay(async request => {
-    mocks.fetch.mockResolvedValueOnce(sse([failure({ code, message: 'request blocked' })]))
+    mocks.fetch.mockResolvedValueOnce(sse([{ type: 'codex.response.metadata' }, failure({ code, message: 'request blocked' })]))
     const response = await request(prompt)
     expect(response.body).toContain(code)
     expect(mocks.fetch).toHaveBeenCalledOnce()

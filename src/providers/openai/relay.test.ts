@@ -17,6 +17,15 @@ describe('codexBetaHeader', () => {
 })
 
 describe('normalizeOpenaiResponsesBody', () => {
+  it.each(['ccswitch-openai-reasoning-v1:eyJ0ZXh0IjoieCJ9', '  ccswitch-openai-reasoning-v1:bad-payload  '])(
+    'does not forward a foreign CC Switch reasoning envelope as native ciphertext', encrypted_content => {
+      const native = { type: 'reasoning', encrypted_content: 'gAAAA-native', summary: [] }
+      const call = { type: 'function_call', name: 'shell', call_id: 'call-1', arguments: '{}' }
+      const output = { type: 'function_call_output', call_id: 'call-1', output: 'Done' }
+      expect(normalizeOpenaiResponsesBody({ input: [{ type: 'reasoning', encrypted_content }, native, call, output] }).input)
+        .toEqual([native, call, output])
+    },
+  )
   it('drops relay-stamped reasoning that OpenAI cannot decrypt, keeping its own', () => {
     const own = { type: 'reasoning', id: 'rs_own', summary: [], encrypted_content: 'gAAAA-openai' }
     const user = { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] }
