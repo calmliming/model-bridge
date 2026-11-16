@@ -73,11 +73,11 @@ codex --profile model-bridge`)
             </div>
             <div>
               <strong class="block text-sm text-gray-900 dark:text-white">模型限制</strong>
-              <p class="doc-p">留空表示允许全部模型；支持精确模型名和 <code class="code-inline">*</code> 通配符。</p>
+              <p class="doc-p">通过 API 设置的模型限制支持精确模型名和 <code class="code-inline">*</code> 通配符。</p>
             </div>
             <div>
               <strong class="block text-sm text-gray-900 dark:text-white">模型映射</strong>
-              <p class="doc-p">按 <code class="code-inline">客户端模型=上游模型</code> 配置；留空表示不改写模型名。</p>
+              <p class="doc-p">通过 API 设置的模型映射会将请求中的客户端模型名改写为对应的上游模型名。</p>
             </div>
             <div>
               <strong class="block text-sm text-gray-900 dark:text-white">账号分组</strong>

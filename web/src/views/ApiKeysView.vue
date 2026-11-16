@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
+import KeyAdvancedSettings from '../components/KeyAdvancedSettings.vue'
+import KeyProviderPicker from '../components/KeyProviderPicker.vue'
 import { UiButton, UiSpace, UiSwitch, UiTag, UiTooltip } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useBulkSelection, summarizeBatch, type BatchOutcome } from '../composables/useBulkSelection'
@@ -112,8 +114,6 @@ const form = ref({
   name: '',
   ownerLabel: '',
   allowedProviders: [] as string[],
-  allowedModels: [] as string[],
-  modelMappings: [] as string[],
   accountGroupId: null as string | null
 })
 
@@ -136,8 +136,6 @@ const editForm = ref<{
   ownerLabel: string
   enabled: boolean
   allowedProviders: string[]
-  allowedModels: string[]
-  modelMappings: string[]
   accountGroupId: string | null
   rateLimit: number | null
   concurrencyLimit: number | null
@@ -149,8 +147,6 @@ const editForm = ref<{
   ownerLabel: '',
   enabled: true,
   allowedProviders: [],
-  allowedModels: [],
-  modelMappings: [],
   accountGroupId: null,
   rateLimit: null,
   concurrencyLimit: null,
@@ -206,75 +202,6 @@ const providerTagType: Record<string, 'info' | 'success' | 'warning' | 'default'
   sub2api: 'success'
 }
 
-const commonModelOptions = [
-  'claude-*',
-  'claude-fable-5-2',
-  'claude-fable-5-1',
-  'gpt-*',
-  'gemini-*',
-  'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-3.6-flash',
-  'gemini-3.1-pro-preview',
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'deepseek-*',
-  'deepseek-flash',
-  'deepseek-v4-pro',
-  'mimo-*',
-  'mimo-v2.6-pro',
-  'mimo-v2.6-flash',
-  'mimo-v2.6-pro-ultraspeed',
-  'glm-*',
-  'glm-5.3',
-  'glm-5.3-flash',
-  'glm-5.3-flashx',
-  'glm-5.2',
-  'qwen*',
-  'qwen3.8-max',
-  'qwen3.8-flash',
-  'qwen3.7-plus',
-  'qwen3.7-flash',
-  'minimax-*',
-  'MiniMax-M3',
-  'kimi-*',
-  'kimi-k3',
-  'kimi-k2.7-code',
-  KIMI_CC_SWITCH_MODEL,
-  'kimi-k2.7-code-highspeed',
-  'sub2api-*'
-].map((value) => ({ label: value, value }))
-
-const commonMappingOptions = [
-  'gpt-public=gpt-6.1-sol',
-  'gpt-fast=gpt-6-luna',
-  'deepseek-pro=deepseek-v4-pro',
-  'deepseek-fast=deepseek-flash',
-  'glm-pro=glm-5.3',
-  'glm-fast=glm-5.3-flash',
-  'qwen-pro=qwen3.8-max',
-  'qwen-fast=qwen3.7-flash',
-  'kimi-pro=kimi-k3'
-].map((value) => ({ label: value, value }))
-
-function parseMappingEntries(entries: string[]): Record<string, string> | null {
-  const out: Record<string, string> = {}
-  for (const entry of entries) {
-    const index = entry.indexOf('=')
-    if (index <= 0) continue
-    const from = entry.slice(0, index).trim()
-    const to = entry.slice(index + 1).trim()
-    if (from && to) out[from] = to
-  }
-  return Object.keys(out).length ? out : null
-}
-
-function mappingEntriesFromObject(value: Record<string, string> | null): string[] {
-  return Object.entries(value ?? {})
-    .filter(([from, to]) => from.trim() && to.trim())
-    .map(([from, to]) => `${from}=${to}`)
-}
-
 async function load() {
   loading.value = true
   try {
@@ -319,14 +246,11 @@ async function create() {
   }
   creating.value = true
   try {
-    const modelMappings = parseMappingEntries(form.value.modelMappings)
     const { data } = await api.post('/admin/keys', {
       userId: form.value.userId,
       name: form.value.name.trim(),
       ownerLabel: form.value.ownerLabel.trim() || undefined,
       allowedProviders: form.value.allowedProviders.length ? form.value.allowedProviders : undefined,
-      allowedModels: form.value.allowedModels.length ? form.value.allowedModels : undefined,
-      modelMappings: modelMappings ?? undefined,
       accountGroupId: form.value.accountGroupId ?? undefined
     })
     showCreate.value = false
@@ -340,8 +264,6 @@ async function create() {
       name: '',
       ownerLabel: '',
       allowedProviders: [],
-      allowedModels: [],
-      modelMappings: [],
       accountGroupId: null
     }
     await load()
@@ -369,8 +291,6 @@ function openEdit(row: ApiKey) {
     ownerLabel: row.ownerLabel ?? '',
     enabled: row.enabled,
     allowedProviders: row.allowedProviders ?? [],
-    allowedModels: row.allowedModels ?? [],
-    modelMappings: mappingEntriesFromObject(row.modelMappings),
     accountGroupId: row.accountGroupId,
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
@@ -392,15 +312,12 @@ async function saveEdit() {
   }
   editing.value = true
   try {
-    const modelMappings = parseMappingEntries(editForm.value.modelMappings)
     await api.patch(`/admin/keys/${editId.value}`, {
       userId: editForm.value.userId,
       name: editForm.value.name.trim(),
       ownerLabel: editForm.value.ownerLabel.trim() || null,
       enabled: editForm.value.enabled,
       allowedProviders: editForm.value.allowedProviders.length ? editForm.value.allowedProviders : null,
-      allowedModels: editForm.value.allowedModels.length ? editForm.value.allowedModels : null,
-      modelMappings,
       accountGroupId: editForm.value.accountGroupId,
       rateLimit: editForm.value.rateLimit,
       concurrencyLimit: editForm.value.concurrencyLimit,
@@ -1150,15 +1067,7 @@ onMounted(() => {
         <UiFormItem label="显示名称（可选）">
           <UiInput v-model:value="form.ownerLabel" placeholder="默认使用归属用户名称" />
         </UiFormItem>
-        <UiFormItem label="允许的服务商（留空 = 不限）">
-          <UiSelect v-model:value="form.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </UiFormItem>
-        <UiFormItem label="允许的模型（留空 = 不限）">
-          <UiSelect v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
-        </UiFormItem>
-        <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-6.1-sol" />
-        </UiFormItem>
+        <KeyProviderPicker v-model:value="form.allowedProviders" :options="providerOptions" />
         <UiFormItem label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="form.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />
         </UiFormItem>
@@ -1301,39 +1210,27 @@ onMounted(() => {
         <UiFormItem label="归属用户">
           <UiSelect v-model:value="editForm.userId" filterable :options="userSelectOptions" placeholder="选择扣费用户" />
         </UiFormItem>
-        <UiFormItem label="名称">
-          <UiInput v-model:value="editForm.name" />
-        </UiFormItem>
-        <UiFormItem label="显示名称（可选）">
-          <UiInput v-model:value="editForm.ownerLabel" placeholder="默认使用归属用户名称" />
-        </UiFormItem>
-        <UiFormItem label="允许的服务商（留空 = 不限）">
-          <UiSelect v-model:value="editForm.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </UiFormItem>
-        <UiFormItem label="允许的模型（留空 = 不限）">
-          <UiSelect v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*、claude-sonnet-*" />
-        </UiFormItem>
-        <UiFormItem label="模型映射（客户端=上游，留空 = 不映射）">
-          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="例如：gpt-public=gpt-6.1-sol" />
-        </UiFormItem>
+        <div class="grid gap-3 min-[480px]:grid-cols-2">
+          <UiFormItem label="名称" class="!mb-0 min-w-0">
+            <UiInput v-model:value="editForm.name" />
+          </UiFormItem>
+          <UiFormItem label="显示名称（可选）" class="min-w-0">
+            <UiInput v-model:value="editForm.ownerLabel" placeholder="默认使用归属用户名称" />
+          </UiFormItem>
+        </div>
+        <KeyProviderPicker v-model:value="editForm.allowedProviders" :options="providerOptions" />
         <UiFormItem label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="editForm.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池（仅调度未分组账号）" />
         </UiFormItem>
-        <UiFormItem label="成本上限（USD，留空 = 不限）">
-          <UiInputNumber v-model:value="editForm.quotaLimit" :min="0" :step="1" placeholder="例如：10" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="速率上限（次/分钟，留空 = 不限）">
-          <UiInputNumber v-model:value="editForm.rateLimit" :min="1" :step="10" placeholder="例如：60" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="并发上限（同时进行的请求数，留空 = 不限）">
-          <UiInputNumber v-model:value="editForm.concurrencyLimit" :min="1" :step="1" placeholder="例如：5" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="过期时间（留空 = 永久）">
-          <UiDatePicker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="启用">
+        <UiFormItem label="启用" class="flex items-center justify-between gap-3 [&>.field-label]:mb-0">
           <UiSwitch v-model:value="editForm.enabled" />
         </UiFormItem>
+        <KeyAdvancedSettings
+          v-model:quota-limit="editForm.quotaLimit"
+          v-model:rate-limit="editForm.rateLimit"
+          v-model:concurrency-limit="editForm.concurrencyLimit"
+          v-model:expires-at="editForm.expiresAt"
+        />
       </UiForm>
       <template #footer>
         <UiSpace justify="end">

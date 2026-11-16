@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
+import KeyAdvancedSettings from '../components/KeyAdvancedSettings.vue'
+import KeyProviderPicker from '../components/KeyProviderPicker.vue'
 import { UiButton, UiSpace, UiSwitch, UiTag } from '../components/ui'
 import { useDialog } from '../composables/useDialog'
 import { useMessage } from '../composables/useMessage'
@@ -16,7 +18,6 @@ interface ApiKey {
   enabled: boolean
   allowedProviders: string[] | null
   allowedModels: string[] | null
-  modelMappings: Record<string, string> | null
   accountGroupId: string | null
   rateLimit: number | null
   concurrencyLimit: number | null
@@ -69,8 +70,6 @@ const editForm = ref({
   name: '',
   enabled: true,
   allowedProviders: [] as string[],
-  allowedModels: [] as string[],
-  modelMappings: [] as string[],
   accountGroupId: null as string | null,
   rateLimit: null as number | null,
   concurrencyLimit: null as number | null,
@@ -81,8 +80,6 @@ const editForm = ref({
 const form = ref({
   name: '',
   allowedProviders: [] as string[],
-  allowedModels: [] as string[],
-  modelMappings: [] as string[],
   accountGroupId: null as string | null,
 })
 
@@ -118,25 +115,6 @@ const providerLabel: Record<string, string> = {
   sub2api: 'Sub2API',
 }
 
-const commonModelOptions = ['claude-*', 'gpt-*', 'gemini-*', 'deepseek-*', 'mimo-*', 'glm-*', 'qwen*', 'kimi-*', 'gpt-image-*', 'minimax-h3', 'sub2api-*'].map((value) => ({ label: value, value }))
-const commonMappingOptions = ['gpt-public=gpt-6.1-sol', 'deepseek-pro=deepseek-v4-pro', 'mimo-pro=mimo-v2.6-pro', 'glm-pro=glm-5.3', 'qwen-pro=qwen3.8-max', 'kimi-pro=kimi-k3'].map((value) => ({ label: value, value }))
-
-function parseMappingEntries(entries: string[]): Record<string, string> | null {
-  const out: Record<string, string> = {}
-  for (const entry of entries) {
-    const index = entry.indexOf('=')
-    if (index <= 0) continue
-    const from = entry.slice(0, index).trim()
-    const to = entry.slice(index + 1).trim()
-    if (from && to) out[from] = to
-  }
-  return Object.keys(out).length ? out : null
-}
-
-function mappingEntriesFromObject(value: Record<string, string> | null): string[] {
-  return Object.entries(value ?? {}).map(([from, to]) => `${from}=${to}`)
-}
-
 async function load() {
   loading.value = true
   try {
@@ -168,8 +146,6 @@ async function create() {
     const { data } = await api.post('/users/keys', {
       name: form.value.name.trim(),
       allowedProviders: form.value.allowedProviders.length ? form.value.allowedProviders : undefined,
-      allowedModels: form.value.allowedModels.length ? form.value.allowedModels : undefined,
-      modelMappings: parseMappingEntries(form.value.modelMappings) ?? undefined,
       accountGroupId: form.value.accountGroupId ?? undefined,
     })
     newKey.value = data.key
@@ -178,7 +154,7 @@ async function create() {
       accountGroupId: form.value.accountGroupId,
     }
     showCreate.value = false
-    form.value = { name: '', allowedProviders: [], allowedModels: [], modelMappings: [], accountGroupId: null }
+    form.value = { name: '', allowedProviders: [], accountGroupId: null }
     await load()
   } catch (e) {
     message.error(errMsg(e, '创建失败'))
@@ -193,8 +169,6 @@ function openEdit(row: ApiKey) {
     name: row.name,
     enabled: row.enabled,
     allowedProviders: row.allowedProviders ?? [],
-    allowedModels: row.allowedModels ?? [],
-    modelMappings: mappingEntriesFromObject(row.modelMappings),
     accountGroupId: row.accountGroupId,
     rateLimit: row.rateLimit,
     concurrencyLimit: row.concurrencyLimit,
@@ -210,8 +184,6 @@ async function saveEdit() {
     name: editForm.value.name.trim(),
     enabled: editForm.value.enabled,
     allowedProviders: editForm.value.allowedProviders.length ? editForm.value.allowedProviders : null,
-    allowedModels: editForm.value.allowedModels.length ? editForm.value.allowedModels : null,
-    modelMappings: parseMappingEntries(editForm.value.modelMappings),
     accountGroupId: editForm.value.accountGroupId,
     rateLimit: editForm.value.rateLimit,
     concurrencyLimit: editForm.value.concurrencyLimit,
@@ -366,15 +338,7 @@ onMounted(() => {
         <UiFormItem label="名称">
           <UiInput v-model:value="form.name" placeholder="例如：工作站" />
         </UiFormItem>
-        <UiFormItem label="允许的服务商（留空 = 不限）">
-          <UiSelect v-model:value="form.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </UiFormItem>
-        <UiFormItem label="允许的模型（留空 = 不限）">
-          <UiSelect v-model:value="form.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="例如：gpt-*" />
-        </UiFormItem>
-        <UiFormItem label="模型映射">
-          <UiSelect v-model:value="form.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
-        </UiFormItem>
+        <KeyProviderPicker v-model:value="form.allowedProviders" :options="providerOptions" />
         <UiFormItem v-if="groups.length" label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="form.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池" />
         </UiFormItem>
@@ -426,33 +390,19 @@ onMounted(() => {
         <UiFormItem label="名称">
           <UiInput v-model:value="editForm.name" />
         </UiFormItem>
-        <UiFormItem label="允许的服务商">
-          <UiSelect v-model:value="editForm.allowedProviders" multiple :options="providerOptions" placeholder="不限" />
-        </UiFormItem>
-        <UiFormItem label="允许的模型">
-          <UiSelect v-model:value="editForm.allowedModels" multiple filterable tag :options="commonModelOptions" placeholder="不限" />
-        </UiFormItem>
-        <UiFormItem label="模型映射">
-          <UiSelect v-model:value="editForm.modelMappings" multiple filterable tag :options="commonMappingOptions" placeholder="客户端=上游" />
-        </UiFormItem>
+        <KeyProviderPicker v-model:value="editForm.allowedProviders" :options="providerOptions" />
         <UiFormItem v-if="groups.length" label="账号分组（留空 = 默认池）">
           <UiSelect v-model:value="editForm.accountGroupId" clearable :options="groupSelectOptions" placeholder="默认池" />
         </UiFormItem>
-        <UiFormItem label="成本上限（USD）">
-          <UiInputNumber v-model:value="editForm.quotaLimit" :min="0" :step="1" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="速率上限（次/分钟）">
-          <UiInputNumber v-model:value="editForm.rateLimit" :min="1" :step="10" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="并发上限">
-          <UiInputNumber v-model:value="editForm.concurrencyLimit" :min="1" :step="1" style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="过期时间">
-          <UiDatePicker v-model:value="editForm.expiresAt" type="datetime" clearable style="width: 100%" />
-        </UiFormItem>
-        <UiFormItem label="启用">
+        <UiFormItem label="启用" class="flex items-center justify-between gap-3 [&>.field-label]:mb-0">
           <UiSwitch v-model:value="editForm.enabled" />
         </UiFormItem>
+        <KeyAdvancedSettings
+          v-model:quota-limit="editForm.quotaLimit"
+          v-model:rate-limit="editForm.rateLimit"
+          v-model:concurrency-limit="editForm.concurrencyLimit"
+          v-model:expires-at="editForm.expiresAt"
+        />
       </UiForm>
       <template #footer>
         <UiSpace justify="end">
