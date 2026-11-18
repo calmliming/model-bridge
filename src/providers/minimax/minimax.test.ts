@@ -102,3 +102,277 @@ describe('MiniMax quota and usage', () => {
     expect(parser.result()).toEqual(parseJsonUsage(response))
   })
 })
+
+import { parseOpenAIImagesRequest, type OpenAIImagesEndpoint } from '../openai/images'
+import {
+  buildMiniMaxImageRequest,
+  canonicalMiniMaxImageModel,
+  createMiniMaxImagesStreamParser,
+  hasMiniMaxImageBillableWork,
+  isMiniMaxImageModel,
+  parseMiniMaxImageUsage,
+  relayMiniMaxImages,
+} from './images'
+import { mapMiniMaxModel as mapModel } from './relay'
+
+function parseMiniMaxReq(body: unknown, endpoint: OpenAIImagesEndpoint = 'generations') {
+  return parseOpenAIImagesRequest(body, 'application/json', endpoint, {
+    defaultModel: 'MiniMax-H3-Image',
+    deferModelValidation: true,
+  })
+}
+
+describe('MiniMax H3-Image', () => {
+  it('recognizes, preserves, and canonicalizes H3-Image model names', () => {
+    expect(isMiniMaxImageModel('MiniMax-H3-Image')).toBe(true)
+    expect(isMiniMaxImageModel('minimax-h3-image-highspeed')).toBe(true)
+    expect(isMiniMaxImageModel('MiniMax-M2.7')).toBe(false)
+    expect(canonicalMiniMaxImageModel('minimax-h3-image')).toBe('MiniMax-H3-Image')
+    expect(canonicalMiniMaxImageModel('minimax-h3-image-highspeed')).toBe('MiniMax-H3-Image-Highspeed')
+    expect(mapModel('minimax-h3-image')).toBe('MiniMax-H3-Image')
+    expect(mapModel('minimax-h3-image-highspeed')).toBe('MiniMax-H3-Image-Highspeed')
+  })
+
+  it('builds valid generation and edit payloads and validates MiniMax constraints', () => {
+    const gen = parseMiniMaxReq({
+      model: 'minimax-h3-image',
+      prompt: 'a neon skyline at dusk',
+      size: '1920x1080',
+      n: 2,
+      output_format: 'webp',
+      disable_prompt_enhanced: true,
+    })
+    expect(buildMiniMaxImageRequest(gen)).toEqual({
+      model: 'MiniMax-H3-Image',
+      prompt: 'a neon skyline at dusk',
+      n: 2,
+      response_format: 'b64_json',
+      size: '1920x1080',
+      output_format: 'webp',
+      disable_prompt_enhanced: true,
+    })
+
+    const streamed = parseMiniMaxReq({
+      model: 'minimax-h3-image-highspeed',
+      prompt: 'studio portrait',
+      aspect_ratio: '3:4',
+      area: '4K',
+      stream: true,
+    })
+    expect(buildMiniMaxImageRequest(streamed)).toEqual({
+      model: 'MiniMax-H3-Image-Highspeed',
+      prompt: 'studio portrait',
+      n: 1,
+      response_format: 'url',
+      aspect_ratio: '3:4',
+      area: '4K',
+      stream: true,
+    })
+
+    const edit = parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'replace background with snow',
+      image: ['https://example.com/ref.png'],
+    }, 'edits')
+    expect(buildMiniMaxImageRequest(edit)).toMatchObject({
+      model: 'MiniMax-H3-Image',
+      prompt: 'replace background with snow',
+      images: [{ image_url: 'https://example.com/ref.png' }],
+    })
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      stream: true,
+      response_format: 'b64_json',
+    }))).toThrow('response_format=url')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      size: '1024x1024',
+      aspect_ratio: '1:1',
+    }))).toThrow('cannot combine explicit WIDTHxHEIGHT')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      size: 'auto',
+      disable_prompt_enhanced: true,
+    }))).toThrow('disable_prompt_enhanced')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      size: '5000x5000',
+    }))).toThrow('20 megapixels')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      size: '4000x1000',
+    }))).toThrow('1:3 and 3:1')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'cat',
+      quality: 'high',
+    }))).toThrow('does not support quality')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'edit',
+    }, 'edits'))).toThrow('image input is required')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'edit',
+      image: Array.from({ length: 17 }, (_, i) => `https://example.com/${i}.png`),
+    }, 'edits'))).toThrow('at most 16 images')
+
+    expect(() => buildMiniMaxImageRequest(parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'edit',
+      images: [{ file_id: 'file_123' }],
+    }, 'edits'))).toThrow('instead of file_id')
+  })
+
+  it('relays image requests and turns network or URL failures into HTTP responses instead of throwing', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ created: 1, data: [{ url: 'https://cdn.example/out.png' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const genReq = parseMiniMaxReq({
+      model: 'MiniMax-H3-Image',
+      prompt: 'sunset',
+      stream: true,
+    })
+    await relayMiniMaxImages('mm-secret', genReq)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.minimaxi.com/v1/images/generations',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer mm-secret',
+          accept: 'text/event-stream',
+        }),
+      }),
+    )
+
+    const editReq = parseMiniMaxReq({
+      model: 'MiniMax-H3-Image-Highspeed',
+      prompt: 'add hat',
+      images: [{ image_url: 'https://example.com/a.png' }],
+    }, 'edits')
+    await relayMiniMaxImages('mm-secret', editReq, 'https://api.minimax.io/v1')
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.minimax.io/v1/images/edits',
+      expect.any(Object),
+    )
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connect ETIMEDOUT https://api.minimaxi.com') }))
+    const timeoutRes = await relayMiniMaxImages('mm-secret', genReq)
+    expect(timeoutRes.status).toBe(502)
+    await expect(timeoutRes.json()).resolves.toMatchObject({
+      error: { type: 'upstream_error', code: 'image_generation_failed' },
+    })
+
+    const unsafeRes = await relayMiniMaxImages('mm-secret', genReq, 'http://127.0.0.1:8080')
+    expect(unsafeRes.status).toBe(400)
+  })
+
+  it('parses MiniMax image token usage, detects billable work, and tracks SSE/JSON streams', () => {
+    const parsed = parseMiniMaxImageUsage({
+      data: [{ url: 'https://cdn.example/1.png', size: '2048x2048' }, { url: 'https://cdn.example/2.png' }],
+      usage: {
+        input_tokens: 1850,
+        input_tokens_details: { text_tokens: 50, image_tokens: 1800 },
+        output_tokens: 4096,
+        output_tokens_details: { image_tokens: 4096 },
+        generated_images: 2,
+      },
+    }, 'minimax-h3-image-highspeed')
+    expect(parsed).toMatchObject({
+      inputTokens: 50,
+      outputTokens: 0,
+      imageInputTokens: 1800,
+      imageOutputTokens: 4096,
+      imageCount: 2,
+      imageModel: 'MiniMax-H3-Image-Highspeed',
+      imageSize: '2048x2048',
+      usageSource: 'upstream',
+    })
+
+    const derived = parseMiniMaxImageUsage({
+      data: [{ b64_json: 'Zm9v' }],
+      usage: { prompt_tokens: 600, input_tokens_details: { image_tokens: 512 }, completion_tokens: 2048 },
+    })
+    expect(derived).toMatchObject({
+      inputTokens: 88,
+      imageInputTokens: 512,
+      imageOutputTokens: 2048,
+      imageCount: 1,
+      usageSource: 'upstream',
+    })
+    expect(parseMiniMaxImageUsage({ data: [{ url: 'https://cdn.example/only.png' }] })).toMatchObject({
+      imageCount: 1,
+      usageSource: 'partial',
+    })
+
+    expect(hasMiniMaxImageBillableWork({ data: [{ url: 'https://cdn.example/1.png' }] })).toBe(true)
+    expect(hasMiniMaxImageBillableWork({ usage: { input_tokens: 100, output_tokens: 1024 } })).toBe(true)
+    expect(hasMiniMaxImageBillableWork({ error: { code: 'bad_request' } })).toBe(false)
+
+    const genReq = parseMiniMaxReq({ model: 'MiniMax-H3-Image', prompt: 'draw', stream: true })
+    const sseGen = createMiniMaxImagesStreamParser(genReq)
+    sseGen.feed({ type: 'image_generation.partial_succeeded', image_index: 0, url: 'https://cdn.example/0.png', size: '1024x1024' })
+    sseGen.feed({
+      type: 'image_generation.completed',
+      usage: { input_tokens: 40, output_tokens: 2048, output_tokens_details: { image_tokens: 2048 } },
+    })
+    expect(sseGen.failure()).toBeNull()
+    expect(sseGen.result()).toMatchObject({
+      inputTokens: 40,
+      imageOutputTokens: 2048,
+      imageCount: 1,
+      imageModel: 'MiniMax-H3-Image',
+      imageSize: '1024x1024',
+    })
+
+    const editReq = parseMiniMaxReq({
+      model: 'MiniMax-H3-Image-Highspeed',
+      prompt: 'edit',
+      images: [{ image_url: 'https://example.com/a.png' }],
+      stream: true,
+    }, 'edits')
+    const sseEdit = createMiniMaxImagesStreamParser(editReq)
+    sseEdit.feed({ type: 'image_edit.partial_succeeded', image_index: 0, url: 'https://cdn.example/edit.png', size: '1536x1024' })
+    sseEdit.feed({
+      type: 'image_edit.completed',
+      usage: { input_tokens: 1000, input_tokens_details: { text_tokens: 100, image_tokens: 900 }, output_tokens: 2048 },
+    })
+    expect(sseEdit.failure()).toBeNull()
+    expect(sseEdit.result()).toMatchObject({
+      inputTokens: 100,
+      imageInputTokens: 900,
+      imageOutputTokens: 2048,
+      imageCount: 1,
+      imageModel: 'MiniMax-H3-Image-Highspeed',
+      imageSize: '1536x1024',
+    })
+
+    const failedSse = createMiniMaxImagesStreamParser(genReq)
+    failedSse.feed({ type: 'error', code: 'content_filter', message: 'blocked' })
+    expect(failedSse.failure()).toEqual({ code: 'content_filter', message: 'blocked' })
+
+    const emptySse = createMiniMaxImagesStreamParser(genReq)
+    expect(emptySse.failure()).toMatchObject({ code: 'image_generation_no_output' })
+
+    const partialJson = createMiniMaxImagesStreamParser(genReq)
+    partialJson.feed({
+      data: [{ url: 'https://cdn.example/ok.png' }, { error: { code: 'moderation_blocked', message: 'unsafe' } }],
+      usage: { input_tokens: 20, output_tokens: 1024 },
+    })
+    expect(partialJson.failure()).toBeNull()
+    expect(partialJson.result()).toMatchObject({ imageCount: 1, imageOutputTokens: 1024 })
+  })
+})

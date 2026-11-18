@@ -45,7 +45,7 @@ export interface UsageData {
    */
   reasoningTokens: number
   cacheCreateTokens: number
-  /** Anthropic 1h subset of a verified 5m/1h split. */
+  /** 1h subset of a verified 5m/1h cache write split. */
   cacheCreate1hTokens?: number
   /** OpenAI 12h subset of a verified 30m/12h split. The remainder is 30m. */
   cacheCreate12hTokens?: number
@@ -71,6 +71,19 @@ export interface UsageData {
 
 export function emptyUsage(): UsageData {
   return { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0 }
+}
+
+export interface EphemeralCacheCreation {
+  ephemeral_5m_input_tokens?: number
+  ephemeral_1h_input_tokens?: number
+}
+
+export function parseCacheWrite1hTokens(total: number, split?: EphemeralCacheCreation | null): number | undefined {
+  const short = split?.ephemeral_5m_input_tokens
+  const long = split?.ephemeral_1h_input_tokens
+  if (total > 0 && typeof short === 'number' && typeof long === 'number' &&
+      Number.isSafeInteger(short) && Number.isSafeInteger(long) &&
+      short >= 0 && long >= 0 && short === total - long) return long
 }
 
 /**

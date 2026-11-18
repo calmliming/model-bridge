@@ -15,6 +15,7 @@ type DocSection =
   | 'image-gpt-image-2' | 'image-gpt-image-25' | 'image-gpt-image-vip'
   | 'image-gpt-image-flare' | 'image-gpt-image-sunburst'
   | 'image-gpt-image-26' | 'image-gpt-image-26-media'
+  | 'image-minimax-h3-image'
   | 'video-generation' | 'video-result' | 'video-async' | 'video-minimax-h3'
   | 'streaming' | 'models' | 'errors' | 'integration'
 
@@ -148,6 +149,7 @@ const navigationGroups: NavigationGroup[] = [
     items: [
       { id: 'image-generation', label: '图片接口通用说明', icon: 'image-generation', description: '/images/generations', method: 'POST' },
       { id: 'image-gpt-image-26', label: 'GPT Image 2.6 Flare / Sunburst', icon: 'image-generation', description: 'OpenAI · SVG / GIF', method: 'POST' },
+      { id: 'image-minimax-h3-image', label: 'MiniMax H3-Image', icon: 'image-generation', description: 'MiniMax · 1K–4K · 16 图编辑', method: 'POST' },
       { id: 'image-gpt-image-2', label: 'gpt-image-2', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
       { id: 'image-gpt-image-25', label: 'gpt-image-2.5', icon: 'image-generation', description: '1K · 基础款', method: 'POST' },
       { id: 'image-gpt-image-26-media', label: 'gpt-image-2.6', icon: 'image-generation', description: '1K · GIF · 按次计费', method: 'POST' },
@@ -309,7 +311,7 @@ const chatCurl = computed(() => `curl ${apiBaseUrl.value}/chat/completions \\
   -H "Authorization: Bearer mb-xxxxxxxx" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gpt-6.1-sol",
+    "model": "gpt-6.2-sol",
     "messages": [{"role": "user", "content": "用三句话介绍 Model Bridge"}],
     "stream": false
   }'`)
@@ -318,7 +320,7 @@ const chatResponse = `{
   "id": "chatcmpl-9f2c1a",
   "object": "chat.completion",
   "created": 1791003279,
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "choices": [{
     "index": 0,
     "message": { "role": "assistant", "content": "Model Bridge 是一个统一入口…" },
@@ -419,8 +421,9 @@ const modelsResponse = `{
   "object": "list",
   "data": [
     { "id": "claude-sonnet-5", "object": "model", "owned_by": "claude", "type": "model", "display_name": "Claude Sonnet 5" },
-    { "id": "gpt-6.1-sol", "object": "model", "owned_by": "openai", "type": "model", "display_name": "GPT-6.1 Sol" },
+    { "id": "gpt-6.2-sol", "object": "model", "owned_by": "openai", "type": "model", "display_name": "GPT-6.2 Sol" },
     { "id": "gpt-image-2.5", "object": "model", "owned_by": "modelbridge", "type": "model", "display_name": "GPT Image 2.5" },
+    { "id": "MiniMax-H3-Image", "object": "model", "owned_by": "minimax", "type": "model", "display_name": "MiniMax H3 Image" },
     { "id": "minimax-h3", "object": "model", "owned_by": "modelbridge", "type": "model", "display_name": "MiniMax H3" }
   ]
 }`
@@ -433,11 +436,12 @@ interface IntegrationRow {
 }
 
 const integrationRows: IntegrationRow[] = [
-  { tool: 'OpenAI 兼容客户端（ChatGPT 类、Cherry Studio、Open WebUI、Dify 等）', baseUrl: 'https://your-host/v1', model: 'gpt-6.1-sol、claude-sonnet-5 等', note: '填 OpenAI 协议即可，平台按模型自动路由到对应上游。' },
+  { tool: 'OpenAI 兼容客户端（ChatGPT 类、Cherry Studio、Open WebUI、Dify 等）', baseUrl: 'https://your-host/v1', model: 'gpt-6.2-sol、claude-sonnet-5 等', note: '填 OpenAI 协议即可，平台按模型自动路由到对应上游。' },
   { tool: 'Claude Code / Anthropic SDK', baseUrl: 'https://your-host', model: 'claude-sonnet-5、claude-opus-5', note: 'ANTHROPIC_BASE_URL 指向本平台，Key 用 ANTHROPIC_AUTH_TOKEN 传入。' },
-  { tool: 'Codex CLI / OpenAI Responses 客户端', baseUrl: 'https://your-host/v1', model: 'gpt-6.1-sol、gpt-6-astra', note: '使用 /v1/responses，兼容 Codex 的模型清单请求。' },
+  { tool: 'Codex CLI / OpenAI Responses 客户端', baseUrl: 'https://your-host/v1', model: 'gpt-6.2-sol、gpt-6.2-astra', note: '使用 /v1/responses，兼容 Codex 的模型清单请求。' },
   { tool: 'Gemini SDK / google-genai', baseUrl: 'https://your-host', model: 'gemini-3.8-flash、gemini-3.1-pro-preview', note: '走 /v1beta/models/{model}:generateContent，用 x-goog-api-key 鉴权。' },
-  { tool: '图片客户端（Python OpenAI SDK、绘图前端、ComfyUI 图像节点）', baseUrl: 'https://your-host/api/media/v1 或 https://your-host/v1', model: 'gpt-image-2.5、gpt-image-2-vip 等', note: '图片必须走 images 接口；模型权限需包含图片 / 视频。' },
+  { tool: '图片客户端（Python OpenAI SDK、绘图前端、ComfyUI 图像节点）', baseUrl: 'https://your-host/api/media/v1', model: 'gpt-image-2.5 等', note: '需开通图片 / 视频权限，也可使用标准 /v1。' },
+  { tool: '图片客户端（MiniMax）', baseUrl: 'https://your-host/api/minimax/v1', model: 'MiniMax-H3-Image、MiniMax-H3-Image-Highspeed', note: '需开通 MiniMax 权限，也可使用标准 /v1。' },
   { tool: '视频脚本 / 后端任务队列', baseUrl: 'https://your-host/api/media/v1', model: 'minimax-h3', note: '视频是异步任务：先 POST /videos，再轮询 /videos/{id}。' },
 ]
 
@@ -445,11 +449,12 @@ const integrationRows: IntegrationRow[] = [
 const textModelRows = [
   { model: 'claude-sonnet-5', vendor: 'Anthropic', context: '1M', tools: '支持', reasoning: '思考预算', vision: '支持', price: '$2 / $10' },
   { model: 'claude-opus-5', vendor: 'Anthropic', context: '1M', tools: '支持', reasoning: '思考预算', vision: '支持', price: '$5 / $25' },
-  { model: 'gpt-6.1-sol', vendor: 'OpenAI', context: '1.05M', tools: '支持', reasoning: 'reasoning_effort', vision: '支持', price: '$2 / $10' },
+  { model: 'gpt-6.2-sol', vendor: 'OpenAI', context: '1.05M', tools: '支持', reasoning: 'reasoning_effort', vision: '支持', price: '$2 / $10' },
+  { model: 'gpt-6.2-astra', vendor: 'OpenAI', context: '1.05M', tools: '支持', reasoning: 'reasoning_effort', vision: '支持', price: '$8 / $40' },
   { model: 'gemini-3.8-flash', vendor: 'Google', context: '1M', tools: '支持', reasoning: '思考预算', vision: '支持', price: '$0.75 / $3.75' },
   { model: 'deepseek-v4-pro', vendor: 'DeepSeek', context: '1M', tools: '支持', reasoning: '深度推理档', vision: '不支持', price: '$0.435 / $0.87' },
   { model: 'glm-5.3', vendor: 'Zhipu', context: '1M', tools: '支持', reasoning: '思考模式', vision: '不支持', price: '$1.12 / $3.92' },
-  { model: 'qwen3.8-max', vendor: 'Alibaba', context: '1M', tools: '支持', reasoning: '思考模式', vision: '原生视觉', price: '$1.68 / $5.04' },
+  { model: 'qwen4-max', vendor: 'Alibaba', context: '1M', tools: '支持', reasoning: '思考模式', vision: '原生视觉', price: '$1.4 / $4.2' },
   { model: 'kimi-k3', vendor: 'Moonshot', context: '1M', tools: '支持', reasoning: '默认开启', vision: '不支持', price: '$2.8 / $14' },
   { model: 'MiniMax-M3', vendor: 'MiniMax', context: '1M', tools: '支持', reasoning: '可选思考', vision: '支持', price: '$0.3 / $1.2' },
   { model: 'grok-4.7', vendor: 'xAI', context: '500K', tools: '支持', reasoning: '思考档位', vision: '图像输入', price: '$2 / $6' },
@@ -874,7 +879,7 @@ onBeforeUnmount(() => {
             <h2>快速开始</h2>
             <ol class="start-list">
               <li><span>01</span><div><strong>创建平台 API Key</strong><p>在控制台创建 <code>mb-</code> 开头的密钥，按需勾选服务商范围（文本模型、图片 / 视频）与模型白名单。</p></div></li>
-              <li><span>02</span><div><strong>设置 Base URL 与鉴权</strong><p>文本与图片填 <code>{{ apiBaseUrl }}</code>，图片 / 视频也可填 <code>{{ baseOrigin }}/api/media/v1</code>；鉴权用 <code>Authorization: Bearer</code>（Gemini 可用 <code>x-goog-api-key</code>）。</p></div></li>
+              <li><span>02</span><div><strong>设置 Base URL 与鉴权</strong><p>文本与图片可使用 <code>{{ apiBaseUrl }}</code>。MiniMax 图片可直连 <code>{{ baseOrigin }}/api/minimax/v1</code>，图片 / 视频渠道使用 <code>{{ baseOrigin }}/api/media/v1</code>。鉴权用 <code>Authorization: Bearer</code>（Gemini 可用 <code>x-goog-api-key</code>）。</p></div></li>
               <li><span>03</span><div><strong>按能力发第一条请求</strong><p>文本 <code>POST /v1/chat/completions</code>；图片 <code>POST /v1/images/generations</code>；视频 <code>POST /api/media/v1/videos</code> 后轮询结果。</p></div></li>
             </ol>
           </section>
@@ -910,13 +915,13 @@ onBeforeUnmount(() => {
             <h2>计费口径</h2>
             <div class="table-wrap"><table class="doc-table"><thead><tr><th>能力</th><th>计费方式</th><th>说明</th></tr></thead><tbody>
               <tr><td>文本</td><td>按输入 / 输出 Token</td><td>价格随模型档位与缓存读写区分，用量来自上游返回。</td></tr>
-              <tr><td>图片</td><td>按成功生成的次数</td><td>一次请求一张图；失败或违规不计费。</td></tr>
+              <tr><td>图片</td><td>按成功次数或 Token</td><td>计费方式取决于模型，MiniMax H3-Image 按上游返回的 Token 计费。</td></tr>
               <tr><td>视频</td><td>按分辨率 × 生成秒数</td><td>受理时冻结价格，成功后才结算；重复查询不重复计费。</td></tr>
             </tbody></table></div>
           </section>
 
-          <UiAlert type="info" title="两种图片地址都可用">
-            <code>{{ baseOrigin }}/api/media/v1/images/...</code> 与标准 <code>{{ apiBaseUrl }}/images/...</code> 等价；前者始终选择图片 / 视频渠道，后者按 Key 权限与模型自动选路，推荐在同时开通了文本与图片权限时使用前者。
+          <UiAlert type="info" title="图片接口按模型选路">
+            标准 <code>{{ apiBaseUrl }}/images/...</code> 按 Key 权限和模型选路。MiniMax 图片的专用路径是 <code>{{ baseOrigin }}/api/minimax/v1/images/...</code>，图片 / 视频渠道的专用路径是 <code>{{ baseOrigin }}/api/media/v1/images/...</code>。
           </UiAlert>
         </section>
 
@@ -958,7 +963,7 @@ onBeforeUnmount(() => {
           <section class="article-section">
             <h2>常用参数</h2>
             <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>
-              <tr><td><code>model</code></td><td>string</td><td><span class="required">是</span></td><td>平台模型 id，可用 <code>GET /v1/models</code> 获取，例如 <code>gpt-6.1-sol</code>、<code>claude-sonnet-5</code>、<code>gemini-3.8-flash</code>、<code>deepseek-v4-pro</code>。</td></tr>
+              <tr><td><code>model</code></td><td>string</td><td><span class="required">是</span></td><td>平台模型 id，可用 <code>GET /v1/models</code> 获取，例如 <code>gpt-6.2-sol</code>、<code>claude-sonnet-5</code>、<code>gemini-3.8-flash</code>、<code>deepseek-v4-pro</code>。</td></tr>
               <tr><td><code>messages</code></td><td>array</td><td><span class="required">是</span></td><td>标准 <code>{role, content}</code> 数组，支持 <code>system</code> / <code>user</code> / <code>assistant</code> / <code>tool</code>。</td></tr>
               <tr><td><code>stream</code></td><td>boolean</td><td><span class="optional">否</span></td><td>开启后返回 SSE 增量，见「流式响应」。</td></tr>
               <tr><td><code>max_tokens</code>、<code>temperature</code>、<code>top_p</code>、<code>stop</code></td><td>—</td><td><span class="optional">否</span></td><td>透传给上游模型，超出模型支持范围时由上游返回错误。</td></tr>
@@ -1079,10 +1084,10 @@ anthropic-version: 2023-06-01</code></pre>
           <section class="article-section">
             <h2>选用建议</h2>
             <div class="security-list">
-              <div><strong>日常对话与代码</strong><p><code>claude-sonnet-5</code>、<code>gpt-6.1-sol</code>、<code>gemini-3.8-flash</code>：1M 上下文、价格适中，适合绝大多数请求。</p></div>
-              <div><strong>复杂推理与 Agent</strong><p><code>claude-opus-5</code>、<code>glm-5.3</code>、<code>grok-4.7</code>：多步工具调用和长链路任务更稳。</p></div>
+              <div><strong>日常对话与代码</strong><p><code>claude-sonnet-5</code>、<code>gpt-6.2-sol</code>、<code>gemini-3.8-flash</code>：1M 上下文、价格适中，适合绝大多数请求。</p></div>
+              <div><strong>复杂推理与 Agent</strong><p><code>claude-opus-5</code>、<code>gpt-6.2-astra</code>、<code>glm-5.3</code>、<code>grok-4.7</code>：多步工具调用和长链路任务更稳。</p></div>
               <div><strong>成本敏感</strong><p><code>MiniMax-M3</code>、<code>deepseek-v4-pro</code>：单价最低，适合批量处理与内部任务。</p></div>
-              <div><strong>长文档与视觉</strong><p><code>qwen3.8-max</code>、<code>gemini-3.8-flash</code>：原生视觉输入，适合图表、截图、PDF 转写类任务。</p></div>
+              <div><strong>长文档与视觉</strong><p><code>qwen4-max</code>、<code>gemini-3.8-flash</code>：原生视觉输入，适合图表、截图、PDF 转写类任务。</p></div>
             </div>
           </section>
         </section>
@@ -1104,6 +1109,24 @@ anthropic-version: 2023-06-01</code></pre>
           </section>
           <section class="article-section"><h2>生成与格式调试</h2><ImageApiExplorer :api-key="testerApiKey" mode="generation" :base-url="`${baseOrigin}/api/openai/v1`" @request-authorization="openAuthorization" /></section>
           <section class="article-section"><h2>编辑与标注调试</h2><p class="doc-copy">编辑接口为 <code>/api/openai/v1/images/edits</code>，支持 JSON 或 multipart 上传。</p><ImageApiExplorer :api-key="testerApiKey" mode="edit" :base-url="`${baseOrigin}/api/openai/v1`" @request-authorization="openAuthorization" /></section>
+        </section>
+
+        <section v-else-if="activeSection === 'image-minimax-h3-image'" class="article-body">
+          <div class="endpoint-bar"><span class="method-post">POST</span><code>{{ baseOrigin }}/api/minimax/v1/images/generations</code><UiButton size="tiny" secondary @click="copy(`${baseOrigin}/api/minimax/v1/images/generations`)">复制地址</UiButton></div>
+          <p class="doc-copy"><code>MiniMax-H3-Image</code> 与高速版 <code>MiniMax-H3-Image-Highspeed</code> 走平台 MiniMax 渠道（标准 <code>/v1/images/*</code> 按模型自动分流，也可显式使用 <code>/api/minimax/v1/images/*</code>）。支持最高 4K（20MP）输出与最多 16 张参考图编辑。</p>
+          <section class="article-section">
+            <h2>参数与计费</h2>
+            <div class="table-wrap"><table class="doc-table"><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody>
+              <tr><td><code>model</code></td><td><code>MiniMax-H3-Image</code> 或 <code>MiniMax-H3-Image-Highspeed</code>。</td></tr>
+              <tr><td><code>size / aspect_ratio / area</code></td><td><code>size</code> 支持 <code>auto</code> 或 <code>WIDTHxHEIGHT</code>（不超过 20MP）；或传 <code>aspect_ratio</code>（<code>1:3</code>–<code>3:1</code>）搭配 <code>area</code>（<code>1K</code> / <code>2K</code> / <code>4K</code>）。显式像素尺寸不可与 <code>aspect_ratio</code> / <code>area</code> 混用。</td></tr>
+              <tr><td><code>output_format</code></td><td>支持 <code>jpeg</code>（默认）、<code>jpg</code>、<code>png</code>、<code>webp</code>。</td></tr>
+              <tr><td><code>stream</code></td><td>开启流式进度时仅支持 <code>response_format=url</code>，返回 <code>partial_succeeded</code> 与 <code>completed</code> 事件。</td></tr>
+              <tr><td><code>images</code></td><td>仅用于 <code>/images/edits</code>，支持 1–16 张参考图（URL、data URL 或 multipart 文件）。</td></tr>
+            </tbody></table></div>
+            <p class="doc-copy">按实际返回 Token 结算（USD / 百万 Token）：标准版文本输入 $2.30、图片输入 $1.50、图片输出 $3.80；高速版文本输入 $2.30、图片输入 $3.00、图片输出 $7.60。</p>
+          </section>
+          <section class="article-section"><h2>文生图调试</h2><ImageApiExplorer :api-key="testerApiKey" mode="generation" provider="minimax" :base-url="`${baseOrigin}/api/minimax/v1`" @request-authorization="openAuthorization" /></section>
+          <section class="article-section"><h2>参考图编辑调试</h2><p class="doc-copy">编辑接口为 <code>/api/minimax/v1/images/edits</code>，支持 JSON 或 multipart 上传。</p><ImageApiExplorer :api-key="testerApiKey" mode="edit" provider="minimax" :base-url="`${baseOrigin}/api/minimax/v1`" @request-authorization="openAuthorization" /></section>
         </section>
 
         <section v-else-if="activeSection === 'image-generation'" class="article-body">

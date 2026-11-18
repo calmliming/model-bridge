@@ -2,9 +2,15 @@ import type { UsageData } from '../providers/types'
 import { pool } from '../db/index'
 import { resolvePricingOverride } from './pricingOverrides'
 import { NATIVE_IMAGE_MODELS, isNativeImageModel } from '../providers/openai/imageModels'
-import { isGpt61SolModel, isGpt61TerraModel } from '../providers/openai/models'
+import { isGpt61SolModel, isGpt61TerraModel, isGpt62AstraModel, isGpt62SolModel } from '../providers/openai/models'
 import { CLAUDE_FABLE_52, CLAUDE_FABLE_MYTHOS_52 } from '../providers/claude/models'
 import { isKimiK31Model, KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED } from '../providers/kimi/models'
+import {
+  canonicalMiniMaxImageModel,
+  isMiniMaxImageModel,
+  MINIMAX_IMAGE_HIGHSPEED_MODEL,
+  MINIMAX_IMAGE_MODEL,
+} from '../providers/minimax/images'
 import { roundUsd } from '../wallet/money'
 import { GRSAI_IMAGE_PRICES, GRSAI_VIDEO_PRICES, GRSAI_MODELS } from '../providers/grsai/models'
 
@@ -269,6 +275,31 @@ const OPENAI_ASTRA: TierPrice = {
   cacheWrite12h: 25,
   cacheRead: 1
 }
+// GPT-6.2 Astra & Sol (released 2026-11-17). Astra cuts input/output 20% to
+// 8 / 40 with 0.40 cache read; Sol keeps 2 / 10 / 0.10. Ultrafast is 3x
+// through 2027-02-28 and 6x from 2027-03-01 (Pacific time).
+const OPENAI_GPT62_ASTRA: TierPrice = {
+  input: 8,
+  output: 40,
+  cacheWrite: 10,
+  cacheWrite12h: 20,
+  cacheRead: 0.4
+}
+const OPENAI_GPT62_ASTRA_FLEX: TierPrice = {
+  input: 5,
+  output: 25,
+  cacheWrite: 6.25,
+  cacheWrite12h: 12.5,
+  cacheRead: 0.5
+}
+const OPENAI_GPT62_SOL: TierPrice = {
+  input: 2,
+  output: 10,
+  cacheWrite: 2.5,
+  cacheWrite12h: 5,
+  cacheRead: 0.1
+}
+const OPENAI_ULTRAFAST_STANDARD_AT = Date.parse('2027-03-01T00:00:00-08:00')
 // Official Image 2.5/2.6 model cards, checked 2026-11-05. Independent of Image 2.
 const OPENAI_IMAGE_25: TierPrice = {
   input: 5,
@@ -313,6 +344,8 @@ const OPENAI_IMAGE_MINI: TierPrice = {
 }
 
 function openaiPrice(model: string): TierPrice {
+  if (isGpt62AstraModel(model)) return OPENAI_GPT62_ASTRA
+  if (isGpt62SolModel(model) || /^gpt-6[.-]2(?:$|-)/i.test(model.trim())) return OPENAI_GPT62_SOL
   if (/^gpt-6-astra(?:$|-)/i.test(model)) return OPENAI_ASTRA
   // "gpt-6.1-sol" misses the gpt-6 branch below ("." after the 6), and the
   // dashed "gpt-6-1-sol" would hit it and bill the older cache-read rate.
@@ -588,13 +621,17 @@ function zhipuTier(model: string): keyof typeof ZHIPU_TIERS {
 }
 
 // Qwen (通义千问 / 阿里百炼) list prices (per 1M tokens), quoted in CNY on the
-// Bailian pricing page and converted to USD. No separate cache-write fee —
-// cacheWrite 0; cacheRead is the published cache-hit input rate. Qwen 3.8 Max
-// is the current flagship, Qwen 3.7 Plus the balanced Agent tier, Qwen 3.8
-// Flash the new multimodal Flash (¥0.8 / ¥2.7 since 2026-08-27, cache-hit
-// ¥0.1) and Qwen 3.7 Flash the cheapest tier. Legacy rows stay available for
-// explicit old IDs.
-const QWEN_TIERS: Record<'max38' | 'plus37' | 'flash38' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus', TierPrice> = {
+// Bailian pricing page and converted to USD. Qwen4-Max (2026-11) is ¥10 / ¥30
+// with explicit/implicit cache read ¥0.5 and 5m/1h explicit cache writes at
+// ¥12.5 / ¥20. Qwen 3.8 Max stays on ¥12 / ¥36 (¥1.5 cache-hit).
+const QWEN_TIERS: Record<'max4' | 'max38' | 'plus37' | 'flash38' | 'flash37' | 'legacyCoder' | 'legacyMax' | 'legacyPlus', TierPrice> = {
+  max4: {
+    input: cny(10),
+    output: cny(30),
+    cacheWrite: cny(12.5),
+    cacheWrite1h: cny(20),
+    cacheRead: cny(0.5)
+  },
   max38: {
     input: cny(12),
     output: cny(36),
@@ -634,6 +671,7 @@ function qwenTier(model: string): keyof typeof QWEN_TIERS {
   if (m.includes('coder')) return 'legacyCoder'
   if (m === 'qwen-max' || m.startsWith('qwen-max-')) return 'legacyMax'
   if (m === 'qwen-plus' || m.startsWith('qwen-plus-')) return 'legacyPlus'
+  if (/qwen4[.-]max/.test(m)) return 'max4'
   if (/qwen3[.-]8-flash/.test(m)) return 'flash38'
   if (m.includes('flash')) return 'flash37'
   if (m.includes('plus')) return 'plus37'
@@ -706,9 +744,30 @@ function grokPrice(model: string): TierPrice {
   return GROK_45
 }
 
-// MiniMax public USD prices, verified 2026-09-09 against its official paygo table.
+// MiniMax public USD prices, verified against official paygo tables.
+// H3-Image (2026-11) bills text input, image input and image output tokens.
+const MINIMAX_H3_IMAGE: TierPrice = {
+  input: 2.3,
+  output: 0,
+  cacheWrite: 0,
+  cacheRead: 0,
+  imageInput: 1.5,
+  imageOutput: 3.8,
+}
+const MINIMAX_H3_IMAGE_HIGHSPEED: TierPrice = {
+  input: 2.3,
+  output: 0,
+  cacheWrite: 0,
+  cacheRead: 0,
+  imageInput: 3,
+  imageOutput: 7.6,
+}
+
 function minimaxPrice(model: string): TierPrice {
   const m = model.toLowerCase()
+  if (isMiniMaxImageModel(m)) {
+    return m.includes('highspeed') ? MINIMAX_H3_IMAGE_HIGHSPEED : MINIMAX_H3_IMAGE
+  }
   const highspeed = m.endsWith('-highspeed')
   return {
     input: highspeed ? 0.6 : 0.3,
@@ -798,6 +857,8 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'claude', model: 'claude-fable-5-1', price: CLAUDE_FABLE_51 },
   { provider: 'claude', model: CLAUDE_FABLE_52, price: CLAUDE_FABLE_52_PRICE },
   // OpenAI — exact rows for the discoverable models + generic fallbacks.
+  { provider: 'openai', model: 'gpt-6.2-astra', price: OPENAI_GPT62_ASTRA },
+  { provider: 'openai', model: 'gpt-6.2-sol', price: OPENAI_GPT62_SOL },
   { provider: 'openai', model: 'gpt-6-astra', price: OPENAI_ASTRA },
   { provider: 'openai', model: 'gpt-6.1-terra', price: OPENAI_GPT61_TERRA },
   { provider: 'openai', model: 'gpt-6.1-sol', price: OPENAI_GPT61_SOL },
@@ -912,6 +973,7 @@ const SEED_ROWS: SeedRow[] = [
   // Exact rows only — no generic 'qwen' row, because the granular qwenTier()
   // builtin fallback prices other qwen-* variants (turbo/flash/long/3-max) more
   // accurately than a broad substring row would.
+  { provider: 'qwen', model: 'qwen4-max', price: QWEN_TIERS.max4 },
   { provider: 'qwen', model: 'qwen3.8-max', price: QWEN_TIERS.max38 },
   { provider: 'qwen', model: 'qwen3.8-flash', price: QWEN_TIERS.flash38 },
   { provider: 'qwen', model: 'qwen3.7-plus', price: QWEN_TIERS.plus37 },
@@ -925,7 +987,7 @@ const SEED_ROWS: SeedRow[] = [
   { provider: 'qwen', model: 'qwen-plus', price: QWEN_TIERS.legacyPlus },
   // Kimi — exact rows for the discoverable models; kimiTier() covers other
   // kimi-* / moonshot-* variants via substring tiers.
-  ...['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'].map((model) => ({
+  ...['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', MINIMAX_IMAGE_MODEL, MINIMAX_IMAGE_HIGHSPEED_MODEL].map((model) => ({
     provider: 'minimax',
     model,
     price: minimaxPrice(model)
@@ -1181,6 +1243,10 @@ export async function loadPricing(): Promise<void> {
         price.cacheWrite1h = catalog.cacheWrite1h
       }
     }
+    if ((row.provider === 'qwen' || row.provider === 'sub2api') && /^qwen4[.-]max/i.test(row.model)
+        && sameTokenPrice(price, QWEN_TIERS.max4)) {
+      price.cacheWrite1h = QWEN_TIERS.max4.cacheWrite1h
+    }
     priceCache.set(cacheKey(row.provider, row.model), price)
   }
   loaded = true
@@ -1285,6 +1351,16 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
   if ((provider === 'kimi' || provider === 'sub2api') && isKimiK31Model(normalizedModel)) {
     return priceCache.get(cacheKey(provider, normalizedModel)) ?? KIMI_TIERS[kimiTier(normalizedModel)]
   }
+  if ((provider === 'minimax' || provider === 'sub2api') && isMiniMaxImageModel(normalizedModel)) {
+    return priceCache.get(cacheKey(provider, canonicalMiniMaxImageModel(normalizedModel))) ?? builtinPrice(provider, model, atMs)
+  }
+  if ((provider === 'qwen' || provider === 'sub2api') && /^qwen4[.-]max(?:$|-)/i.test(normalizedModel)) {
+    return priceCache.get(cacheKey(provider, 'qwen4-max')) ?? QWEN_TIERS.max4
+  }
+  if ((provider === 'openai' || provider === 'sub2api') && (isGpt62AstraModel(normalizedModel) || isGpt62SolModel(normalizedModel))) {
+    const canonical = isGpt62AstraModel(normalizedModel) ? 'gpt-6.2-astra' : 'gpt-6.2-sol'
+    return priceCache.get(cacheKey(provider, canonical)) ?? builtinPrice(provider, model, atMs)
+  }
   if (CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(normalizedModel)) {
     const canonical = normalizedModel.replace(/^(claude-(?:fable|mythos)-5)[.-]2(?:$|-.*)/, '$1-2')
     return priceCache.get(cacheKey(provider, canonical)) ?? CLAUDE_FABLE_52_PRICE
@@ -1324,6 +1400,7 @@ export function resolvePrice(provider: string, model: string, atMs = Date.now())
     const [p, dbModel] = key.split(':', 2)
     if (p !== provider) continue
     if ((provider === 'kimi' || provider === 'sub2api') && isKimiK31Model(dbModel)) continue
+    if ((provider === 'minimax' || provider === 'sub2api') && isMiniMaxImageModel(dbModel)) continue
     if (CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(dbModel)) continue
     if (isManagedScheduledDefault(provider, dbModel, price)) continue
     const dm = dbModel.toLowerCase()
@@ -1344,10 +1421,13 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const effortPrices = override?.effortPrices as Record<string, TierPrice> | undefined
   const base = (usage.reasoningEffort && effortPrices?.[usage.reasoningEffort]) || resolvePrice(provider, model, atMs)
   if (!base) return null
-  // Native OpenAI accounts use subscription OAuth. The default Sol and Terra
-  // long-context step applies only on the aggregator/API-key route.
+  // Native OpenAI accounts use subscription OAuth. The default Sol, Terra and
+  // GPT-6.2 long-context steps apply only on the aggregator/API-key route.
   const gpt6 = (provider === 'openai' || provider === 'sub2api') && /^gpt-6(?:$|[.-])/i.test(model)
-  const subscriptionLongContextExempt = provider === 'openai' && (isGpt61SolModel(model) || isGpt61TerraModel(model))
+  const gpt62 = (provider === 'openai' || provider === 'sub2api') && (isGpt62AstraModel(model) || isGpt62SolModel(model) || /^gpt-6[.-]2(?:$|-)/i.test(model.trim()))
+  const subscriptionLongContextExempt = provider === 'openai' && (
+    isGpt61SolModel(model) || isGpt61TerraModel(model) || isGpt62SolModel(model) || isGpt62AstraModel(model)
+  )
   const haiku55 = CLAUDE_PRICE_PROVIDERS.has(provider) && HAIKU_55_MODEL.test(model)
   const claude52 = CLAUDE_PRICE_PROVIDERS.has(provider) && CLAUDE_FABLE_MYTHOS_52.test(model)
   const minimaxM3 = (provider === 'minimax' || provider === 'sub2api') && /^minimax-m3(?:$|-)/i.test(model)
@@ -1373,25 +1453,35 @@ export function resolveUsagePrice(provider: string, model: string, usage: UsageD
   const tierMultipliers = override?.serviceTierMultipliers as Record<string, number> | undefined
   const tier = usage.serviceTier
   const configuredMultiplier = tier ? tierMultipliers?.[tier] : undefined
+  const useGpt62AstraFlex =
+    configuredMultiplier === undefined &&
+    (provider === 'openai' || provider === 'sub2api') &&
+    isGpt62AstraModel(model) &&
+    tier === 'flex' &&
+    sameTokenPrice(base, OPENAI_GPT62_ASTRA)
+  const effectiveBase = useGpt62AstraFlex ? OPENAI_GPT62_ASTRA_FLEX : base
   const doublePrice = (gpt6 && (tier === 'fast' || tier === 'priority')) || (claude52 && tier === 'fast')
+  const ultrafastMultiplier = gpt62 && tier === 'ultrafast'
+    ? (atMs < OPENAI_ULTRAFAST_STANDARD_AT ? 3 : 6)
+    : null
   // Keep standard rates unless the reported tier has a known multiplier or
   // an explicit operator rule.
   const tierMultiplier =
     configuredMultiplier ??
-    (minimaxM3 && tier === 'priority' ? 1.5 : doublePrice ? 2 : gpt6 && tier === 'flex' ? 0.5 : 1)
+    (useGpt62AstraFlex ? 1 : ultrafastMultiplier ?? (minimaxM3 && tier === 'priority' ? 1.5 : doublePrice ? 2 : gpt6 && tier === 'flex' ? 0.5 : 1))
   const inputMultiplier = (long?.inputMultiplier ?? 1) * tierMultiplier
   const outputMultiplier = (long?.outputMultiplier ?? 1) * tierMultiplier
   return {
-    ...base,
-    input: base.input * inputMultiplier,
-    output: base.output * outputMultiplier,
-    cacheWrite: base.cacheWrite * inputMultiplier,
-    ...(base.cacheWrite1h !== undefined ? { cacheWrite1h: base.cacheWrite1h * inputMultiplier } : {}),
-    ...(base.cacheWrite12h !== undefined ? { cacheWrite12h: base.cacheWrite12h * inputMultiplier } : {}),
-    cacheRead: base.cacheRead * inputMultiplier,
-    ...(base.imageInput !== undefined ? { imageInput: base.imageInput * inputMultiplier } : {}),
-    ...(base.imageCacheRead !== undefined ? { imageCacheRead: base.imageCacheRead * inputMultiplier } : {}),
-    ...(base.imageOutput !== undefined ? { imageOutput: base.imageOutput * outputMultiplier } : {})
+    ...effectiveBase,
+    input: effectiveBase.input * inputMultiplier,
+    output: effectiveBase.output * outputMultiplier,
+    cacheWrite: effectiveBase.cacheWrite * inputMultiplier,
+    ...(effectiveBase.cacheWrite1h !== undefined ? { cacheWrite1h: effectiveBase.cacheWrite1h * inputMultiplier } : {}),
+    ...(effectiveBase.cacheWrite12h !== undefined ? { cacheWrite12h: effectiveBase.cacheWrite12h * inputMultiplier } : {}),
+    cacheRead: effectiveBase.cacheRead * inputMultiplier,
+    ...(effectiveBase.imageInput !== undefined ? { imageInput: effectiveBase.imageInput * inputMultiplier } : {}),
+    ...(effectiveBase.imageCacheRead !== undefined ? { imageCacheRead: effectiveBase.imageCacheRead * inputMultiplier } : {}),
+    ...(effectiveBase.imageOutput !== undefined ? { imageOutput: effectiveBase.imageOutput * outputMultiplier } : {})
   }
 }
 

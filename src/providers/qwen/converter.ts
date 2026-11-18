@@ -44,16 +44,18 @@ export interface ChatCompletionsRequest {
   response_format?: unknown
 }
 
+export const DEFAULT_QWEN_MODEL = 'qwen4-max'
+
 /**
  * Codex defaults to model names like `gpt-5.5` which Qwen does not recognise.
  * Rewrite anything that doesn't already look like a Qwen model to
- * `qwen3.8-max` (the current general/coding flagship). Anything starting with
+ * `qwen4-max` (the current general/coding flagship). Anything starting with
  * `qwen` is passed through, so users can set `model="qwen3.7-plus"` for the
  * balanced Agent tier or `model="qwen3.7-flash"` for the lower-cost tier.
  */
 export function mapModel(input: unknown): string {
-  if (typeof input !== 'string' || !input) return 'qwen3.8-max'
-  return input.startsWith('qwen') ? input : 'qwen3.8-max'
+  if (typeof input !== 'string' || !input) return DEFAULT_QWEN_MODEL
+  return input.startsWith('qwen') ? input : DEFAULT_QWEN_MODEL
 }
 
 /** Fields on the Responses request that have no equivalent on chat/completions. */

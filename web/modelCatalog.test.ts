@@ -91,12 +91,30 @@ describe('current provider model catalog', () => {
     expect(media.filter(model => model.image).every(model => model.provider === 'openai')).toBe(true)
     expect(model('gpt-image-2.6')).toMatchObject({ channel: 'modelbridge', context: '1K', imageRequestPrice: 0.0042, tags: expect.arrayContaining(['GIF']) })
     expect(model('minimax-h3').provider).toBe('minimax')
-    expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(17)
-    expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(5)
-    expect(MODEL_CATALOG).toHaveLength(73)
+    expect(MODEL_CATALOG.filter(model => model.provider === 'openai')).toHaveLength(19)
+    expect(MODEL_CATALOG.filter(model => model.provider === 'minimax')).toHaveLength(7)
+    expect(MODEL_CATALOG).toHaveLength(78)
     const nativeImages = MODEL_CATALOG.filter(model => model.image && model.provider === 'openai' && !model.channel)
     expect(nativeImages.map(model => model.id)).toEqual(['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'])
     expect(nativeImages.every(model => model.imageRequestPrice == null && model.imageOutputPrice === 30 && model.imageCacheReadPrice === 2)).toBe(true)
+    expect(model('MiniMax-H3-Image')).toMatchObject({
+      provider: 'minimax',
+      image: true,
+      context: '1K–4K',
+      inputPrice: 2.3,
+      imageInputPrice: 1.5,
+      imageOutputPrice: 3.8,
+      badge: 'new',
+    })
+    expect(model('MiniMax-H3-Image-Highspeed')).toMatchObject({
+      provider: 'minimax',
+      image: true,
+      context: '1K–4K',
+      inputPrice: 2.3,
+      imageInputPrice: 3,
+      imageOutputPrice: 7.6,
+      badge: 'new',
+    })
     expect(MODEL_CATALOG.filter(model => model.image && model.provider === 'gemini')).toHaveLength(3)
     // Price refreshes must not restore native snapshots or image aliases, but
     // discovering new text models should continue to work.
@@ -109,7 +127,23 @@ describe('current provider model catalog', () => {
     expect(JSON.stringify({ models: MODEL_CATALOG, providers: PROVIDERS })).not.toMatch(/grsai|第三方供应商/i)
     expect(new Set(MODEL_CATALOG.map(model => model.id)).size).toBe(MODEL_CATALOG.length)
   })
-  it('exposes Astra with verified base prices and image input capability', () => {
+  it('exposes Astra and GPT-6.2 with verified base prices and image input capability', () => {
+    expect(model('gpt-6.2-astra')).toMatchObject({
+      context: '1.05M',
+      inputPrice: 8,
+      outputPrice: 40,
+      cacheReadPrice: 0.4,
+      categories: expect.arrayContaining(['multimodal']),
+      badge: 'new',
+    })
+    expect(model('gpt-6.2-sol')).toMatchObject({
+      context: '1.05M',
+      inputPrice: 2,
+      outputPrice: 10,
+      cacheReadPrice: 0.1,
+      categories: expect.arrayContaining(['multimodal']),
+      badge: 'recommended',
+    })
     expect(model('gpt-6-astra')).toMatchObject({
       context: '1.05M',
       inputPrice: 10,
@@ -132,9 +166,18 @@ describe('current provider model catalog', () => {
     })
     expect(model('gemini-3.6-flash')).toMatchObject({ context: '1M' })
     expect(model('gemini-3.1-pro-preview')).toMatchObject({ context: '1M' })
+    expect(model('qwen4-max')).toMatchObject({
+      context: '1M',
+      inputPrice: 1.4,
+      outputPrice: 4.2,
+      cacheReadPrice: 0.07,
+      badge: 'recommended'
+    })
     expect(model('qwen3.8-max')).toMatchObject({
       context: '1M',
-      badge: 'recommended'
+      inputPrice: 1.68,
+      outputPrice: 5.04,
+      cacheReadPrice: 0.21
     })
     expect(model('qwen3.7-flash')).toMatchObject({ context: '1M' })
   })

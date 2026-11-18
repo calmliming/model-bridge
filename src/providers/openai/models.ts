@@ -3,6 +3,21 @@ export function isGpt61SolModel(model: unknown): boolean {
   return typeof model === 'string' && /^gpt-6[.-]1-sol(?:$|-)/i.test(model.trim())
 }
 
+/** GPT-6.2 Sol in either published (`gpt-6.2-sol`) or dashed spelling, with optional suffixes. */
+export function isGpt62SolModel(model: unknown): boolean {
+  return typeof model === 'string' && /^gpt-6[.-]2-sol(?:$|-)/i.test(model.trim())
+}
+
+/** GPT-6.2 Astra in either published (`gpt-6.2-astra`) or dashed spelling, with optional suffixes. */
+export function isGpt62AstraModel(model: unknown): boolean {
+  return typeof model === 'string' && /^gpt-6[.-]2-astra(?:$|-)/i.test(model.trim())
+}
+
+/** GPT-6.2 family (Astra / Sol / bare) in dotted or dashed spelling. */
+export function isGpt62Model(model: unknown): boolean {
+  return typeof model === 'string' && /^gpt-6[.-]2(?:-(?:astra|sol))?(?:$|-)/i.test(model.trim())
+}
+
 /**
  * GPT-5 and every later generation are reasoning-only, and the Responses API
  * rejects temperature/top_p for them. Keyed on the generation number so new

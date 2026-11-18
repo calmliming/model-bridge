@@ -1,28 +1,17 @@
-import { emptyUsage, type UsageData } from '../types'
+import { emptyUsage, parseCacheWrite1hTokens, type EphemeralCacheCreation, type UsageData } from '../types'
 
 export interface ClaudeUsage {
   input_tokens?: number
   output_tokens?: number
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
-  cache_creation?: {
-    ephemeral_5m_input_tokens?: number
-    ephemeral_1h_input_tokens?: number
-  } | null
+  cache_creation?: EphemeralCacheCreation | null
   speed?: 'fast' | 'standard'
-}
-
-function cacheWrite1h(total: number, split: ClaudeUsage['cache_creation']): number | undefined {
-  const short = split?.ephemeral_5m_input_tokens
-  const long = split?.ephemeral_1h_input_tokens
-  if (total > 0 && typeof short === 'number' && typeof long === 'number' &&
-      Number.isSafeInteger(short) && Number.isSafeInteger(long) &&
-      short >= 0 && long >= 0 && short === total - long) return long
 }
 
 export function parseClaudeUsage(u: ClaudeUsage | undefined): UsageData {
   const cacheCreateTokens = u?.cache_creation_input_tokens ?? 0
-  const cacheCreate1hTokens = cacheWrite1h(cacheCreateTokens, u?.cache_creation)
+  const cacheCreate1hTokens = parseCacheWrite1hTokens(cacheCreateTokens, u?.cache_creation)
   return {
     inputTokens: u?.input_tokens ?? 0,
     outputTokens: u?.output_tokens ?? 0,
@@ -81,7 +70,7 @@ export function createStreamParser() {
           usage[key] = value
         }
         if (e.usage.cache_creation !== undefined || usage.cacheCreateTokens !== previousCacheTotal) {
-          const tokens = cacheWrite1h(usage.cacheCreateTokens, e.usage.cache_creation)
+          const tokens = parseCacheWrite1hTokens(usage.cacheCreateTokens, e.usage.cache_creation)
           if (tokens === undefined) delete usage.cacheCreate1hTokens
           else usage.cacheCreate1hTokens = tokens
         }

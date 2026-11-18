@@ -48,18 +48,36 @@ describe('normalizeOpenaiResponsesBody', () => {
     expect(result).not.toHaveProperty('top_p')
     expect(body.reasoning.effort).toBe('none')
   })
-  it.each(['none', 'minimal'])('rejects GPT-6.1 Sol reasoning effort %s instead of raising it', effort => {
-    for (const model of ['gpt-6.1-sol', 'gpt-6-1-sol']) {
+  it.each(['none', 'minimal'])('rejects GPT-6.1 Sol and GPT-6.2 reasoning effort %s instead of raising it', effort => {
+    for (const model of ['gpt-6.1-sol', 'gpt-6-1-sol', 'gpt-6.2-sol', 'gpt-6-2-sol', 'gpt-6.2-astra', 'gpt-6-2-astra']) {
       expect(() => normalizeOpenaiResponsesBody({ model, input: 'hi', reasoning: { effort } }))
         .toThrow(expect.objectContaining({ code: 'unsupported_reasoning_effort', statusCode: 400 }))
     }
   })
-  it('passes GPT-6.1 Sol supported efforts through unchanged', () => {
-    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
-      expect(normalizeOpenaiResponsesBody({ model: 'gpt-6.1-sol', input: 'hi', reasoning: { effort } }))
-        .toMatchObject({ reasoning: { effort } })
+  it('passes GPT-6.1 Sol and GPT-6.2 supported efforts through and strips sampling/logprobs for GPT-6.2', () => {
+    for (const model of ['gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6.2-astra']) {
+      for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+        expect(normalizeOpenaiResponsesBody({ model, input: 'hi', reasoning: { effort } }))
+          .toMatchObject({ reasoning: { effort } })
+      }
+      expect(normalizeOpenaiResponsesBody({ model, input: 'hi' })).not.toHaveProperty('reasoning')
     }
-    expect(normalizeOpenaiResponsesBody({ model: 'gpt-6.1-sol', input: 'hi' })).not.toHaveProperty('reasoning')
+    for (const model of ['gpt-6.2-sol', 'gpt-6.2-astra']) {
+      const normalized = normalizeOpenaiResponsesBody({
+        model,
+        input: 'hi',
+        temperature: 0.4,
+        top_p: 0.8,
+        logprobs: true,
+        top_logprobs: 5,
+        include: ['message.output_text.logprobs', 'reasoning.encrypted_content'],
+      })
+      expect(normalized).not.toHaveProperty('temperature')
+      expect(normalized).not.toHaveProperty('top_p')
+      expect(normalized).not.toHaveProperty('logprobs')
+      expect(normalized).not.toHaveProperty('top_logprobs')
+      expect(normalized.include).toEqual(['reasoning.encrypted_content'])
+    }
     expect(normalizeOpenaiResponsesBody({ model: 'gpt-6-sol', input: 'hi', reasoning: { effort: 'none' } }))
       .toMatchObject({ reasoning: { effort: 'none' } })
   })

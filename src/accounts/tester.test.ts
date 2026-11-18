@@ -188,6 +188,7 @@ describe('testAccountConnectivity (OpenAI probe model)', () => {
         { slug: 'gpt-6-luna' },
         { slug: 'gpt-6-sol' },
         { slug: 'gpt-6.1-sol' },
+        { slug: 'gpt-6.2-sol' },
         { slug: 'gpt-5.4', visibility: 'hide' },
       ]))
       .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
@@ -198,11 +199,11 @@ describe('testAccountConnectivity (OpenAI probe model)', () => {
     expect(String(catalogUrl)).toContain('/backend-api/codex/models?client_version=')
     expect(new URL(String(catalogUrl)).searchParams.get('client_version')).toBe('0.146.0')
     expect(catalogInit.headers).toMatchObject({ 'ChatGPT-Account-ID': 'chatgpt-1' })
-    expect(probeModel()).toBe('gpt-6.1-sol')
-    expect(result.message).toContain('gpt-6.1-sol')
+    expect(probeModel()).toBe('gpt-6.2-sol')
+    expect(result.message).toContain('gpt-6.2-sol')
   })
 
-  it('steps down to the newest model a plan without gpt-6.1-sol carries', async () => {
+  it('steps down to the newest model a plan without gpt-6.2-sol carries', async () => {
     upstream.fetchWithConnectTimeout
       .mockResolvedValueOnce(manifest([{ slug: 'gpt-6-luna' }, { slug: 'gpt-6-sol' }]))
       .mockResolvedValueOnce(new Response('data: {}\n\n', { status: 200 }))
@@ -230,6 +231,6 @@ describe('testAccountConnectivity (OpenAI probe model)', () => {
     const result = await testAccountConnectivity('acct-oa')
 
     expect(result.success).toBe(true)
-    expect(probeModel()).toBe('gpt-6.1-sol')
+    expect(probeModel()).toBe('gpt-6.2-sol')
   })
 })

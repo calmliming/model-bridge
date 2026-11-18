@@ -103,4 +103,10 @@ describe('API docs structure', () => {
     expect(source).toContain('只支持 auto，传其它值返回 400')
     expect(source).toContain('不接受 16:9 这类比例')
   })
+
+  it('points MiniMax image clients to the MiniMax base URL in the integration table', () => {
+    const table = source.match(/const integrationRows: IntegrationRow\[\] = \[([\s\S]*?)\n\]/)?.[1] ?? ''
+    const miniMaxRow = table.split('\n').find(row => row.includes("model: 'MiniMax-H3-Image"))
+    expect(miniMaxRow).toContain("baseUrl: 'https://your-host/api/minimax/v1'")
+  })
 })

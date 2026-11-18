@@ -1,7 +1,7 @@
 import { hasReportedUsage } from '../usageSource'
 import { splitToolMedia } from '../toolMedia'
 import { randomUUID } from 'node:crypto'
-import { emptyUsage, usageWithCachedInput, type UsageData } from '../types'
+import { emptyUsage, parseCacheWrite1hTokens, usageWithCachedInput, type EphemeralCacheCreation, type UsageData } from '../types'
 import { createFunctionCallTracker } from './toolCalls'
 import { acceptsOpenAISamplingParams } from './models'
 import type { PeekVerdict } from '../streamPeek'
@@ -106,6 +106,7 @@ interface ChatUsage extends CacheWriteUsage {
   total_tokens: number
   prompt_tokens_details?: CacheWriteDetails & {
     cached_tokens?: number
+    cache_creation?: EphemeralCacheCreation | null
   }
   completion_tokens_details?: { reasoning_tokens?: number }
 }
@@ -355,6 +356,10 @@ export function parseChatCompletionUsage(body: unknown): UsageData {
   )
   const tier = (body as { service_tier?: unknown })?.service_tier
   if (typeof tier === 'string') parsed.serviceTier = tier
+  if (parsed.cacheCreateTokens === cacheWrites) {
+    const tokens = parseCacheWrite1hTokens(parsed.cacheCreateTokens, d?.cache_creation)
+    if (tokens !== undefined) parsed.cacheCreate1hTokens = tokens
+  }
   return applyCacheWriteDetails(parsed, cacheWrites, d)
 }
 
@@ -366,6 +371,7 @@ export function createChatCompletionStreamParser() {
       if (typeof tier === 'string') usage.serviceTier = tier
       const parsed = parseChatCompletionUsage(event)
       if (event && typeof event === 'object' && hasReportedUsage((event as { usage?: unknown }).usage)) {
+        delete usage.cacheCreate1hTokens
         delete usage.cacheCreate12hTokens
         Object.assign(usage, parsed)
       }

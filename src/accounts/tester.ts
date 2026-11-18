@@ -61,6 +61,8 @@ const KIMI_MESSAGES_URL = 'https://api.moonshot.cn/anthropic/v1/messages'
 // (gpt-6.1-sol is not on Free / Go plans); the head of the list is also the
 // fallback when the catalog cannot be read.
 const OPENAI_PROBE_MODELS = [
+  'gpt-6.2-sol',
+  'gpt-6.2-astra',
   'gpt-6.1-sol',
   'gpt-6.1-terra',
   'gpt-6-astra',
@@ -333,7 +335,7 @@ async function testQwen(apiKey: string): Promise<ProviderTestOutcome> {
       accept: 'application/json',
     },
     body: JSON.stringify({
-      model: 'qwen3.8-max',
+      model: 'qwen4-max',
       max_tokens: 1,
       messages: [{ role: 'user', content: 'hi' }],
     }),

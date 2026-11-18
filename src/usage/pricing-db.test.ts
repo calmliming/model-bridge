@@ -30,6 +30,11 @@ describe('one-time seed corrections', () => {
     expect(seeded('qwen3.8-flash')?.slice(3, 7)).toEqual([0.112, 0.378, 0, 0.014])
     expect(seeded('glm-5.3-flashx')?.slice(3, 7)).toEqual([0.28, 0.98, 0, 0.0798])
     expect(seeded('kimi-k2.7-code-highspeed')?.slice(3, 7)).toEqual([1.82, 7.56, 0, 0.364])
+    expect(seeded('gpt-6.2-astra')?.slice(3, 7)).toEqual([8, 40, 10, 0.4])
+    expect(seeded('gpt-6.2-sol')?.slice(3, 7)).toEqual([2, 10, 2.5, 0.1])
+    expect(seeded('qwen4-max')?.slice(3, 7)).toEqual([1.4, 4.2, 1.75, 0.07])
+    expect(seeded('MiniMax-H3-Image')?.slice(3, 7)).toEqual([2.3, 0, 0, 0])
+    expect(seeded('MiniMax-H3-Image-Highspeed')?.slice(3, 7)).toEqual([2.3, 0, 0, 0])
   })
 })
 
@@ -180,6 +185,45 @@ describe('scheduled database price overrides', () => {
     await loadPricing()
     expect(resolvePrice('openai', 'gpt-6.1-sol')).toMatchObject({ input: 3, output: 12, cacheRead: 0.3 })
     expect(resolvePrice('openai', 'gpt-6.1-sol')).not.toHaveProperty('cacheWrite12h')
+  })
+
+  it('keeps GPT-6.2, Qwen4-Max, and MiniMax H3-Image overrides isolated from sibling models', async () => {
+    mocks.query.mockResolvedValue({
+      rows: [
+        priceRow('gpt-6.2-sol', 2.5, 11, 0.25, 'openai'),
+        priceRow('qwen3.8-max', 0.5, 2, 0.05, 'qwen'),
+        priceRow('MiniMax-H3-Image', 4, 0, 0, 'minimax'),
+      ],
+    })
+    await loadPricing()
+
+    expect(resolvePrice('openai', 'gpt-6.2-sol')).toMatchObject({ input: 2.5, output: 11, cacheRead: 0.25 })
+    expect(resolvePrice('openai', 'gpt-6.2-astra')).toMatchObject({ input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10, cacheWrite12h: 20 })
+    expect(resolvePrice('openai', 'gpt-6.1-sol')).toMatchObject({ input: 2, output: 10, cacheRead: 0.1 })
+
+    expect(resolvePrice('qwen', 'qwen3.8-max')).toMatchObject({ input: 0.5, output: 2, cacheRead: 0.05 })
+    expect(resolvePrice('qwen', 'qwen4-max')).toMatchObject({
+      input: 1.4,
+      output: 4.2,
+      cacheRead: 0.07,
+      cacheWrite: 1.75,
+      cacheWrite1h: 2.8,
+    })
+
+    expect(resolvePrice('minimax', 'MiniMax-H3-Image')).toMatchObject({ input: 4, output: 0 })
+    expect(resolvePrice('minimax', 'MiniMax-H3-Image-Highspeed')).toMatchObject({
+      input: 2.3,
+      output: 0,
+      imageInput: 3,
+      imageOutput: 7.6,
+    })
+
+    mocks.query.mockResolvedValue({
+      rows: [priceRow('qwen4-max', 1.8, 5.4, 0.09, 'qwen')],
+    })
+    await loadPricing()
+    expect(resolvePrice('qwen', 'qwen4-max')).toMatchObject({ input: 1.8, output: 5.4, cacheRead: 0.09 })
+    expect(resolvePrice('qwen', 'qwen3.8-max')).toMatchObject({ input: 1.68, output: 5.04, cacheRead: 0.21 })
   })
   const peakTime = Date.parse('2026-08-24T01:00:00Z')
 

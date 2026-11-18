@@ -69,6 +69,7 @@ import {
   relayOpenaiImages,
   summarizeOpenAIImagesRequest,
   validateOpenAIImagesRequestModel,
+  type NamedSseEvent,
   type OpenAIImagesEndpoint,
   type OpenAIImagesRequestBody,
 } from '../providers/openai/images'
@@ -130,6 +131,14 @@ import {
 } from '../providers/antigravity/response'
 import { peekSseStart, sseDataEvents, type PeekVerdict } from '../providers/streamPeek'
 import { relayMiniMax, mapMiniMaxModel } from '../providers/minimax/relay'
+import {
+  buildMiniMaxImageRequest,
+  createMiniMaxImagesStreamParser,
+  hasMiniMaxImageBillableWork,
+  MINIMAX_IMAGE_MODEL,
+  parseMiniMaxImageUsage,
+  relayMiniMaxImages,
+} from '../providers/minimax/images'
 import * as minimaxUsage from '../providers/minimax/usage'
 import { cancelUpstreamResponse, upstreamSignal, withUpstreamSignal } from '../http/cancellation'
 import {
@@ -289,7 +298,11 @@ interface ProviderHandler {
    * byte reaches the client, so an empty HTTP-200 reply can still be retried.
    */
   streamStartVerdict?: (event: unknown) => PeekVerdict
-  createStreamParser(): { feed(event: unknown): void; result(): UsageData; failure?(): { code: string; message: string } | null }
+  createStreamParser(): {
+    feed(event: unknown): void
+    result(): UsageData
+    failure?(): { code: string; message: string; closingEvent?: NamedSseEvent } | null
+  }
   parseJsonUsage(body: unknown): UsageData
   /**
    * Stream transforms usually parse usage from their downstream event shape.
@@ -921,12 +934,16 @@ function isOpenaiQuotaExhaustedBody(text: string): boolean {
   return false
 }
 
+const bufferedTranscripts = new WeakMap<Response, Promise<string>>()
+
 async function readErrorTextForQuota(response: Response): Promise<string> {
   return [402, 403, 429].includes(response.status) ? readErrorText(response) : ''
 }
 
 async function readErrorText(response: Response): Promise<string> {
   try {
+    const buffered = bufferedTranscripts.get(response)
+    if (buffered) return (await buffered).slice(0, 4000)
     const reader = response.clone().body?.getReader()
     if (!reader) return ''
     let text = ''
@@ -1494,6 +1511,22 @@ export async function classifyOpenAIImageUpstreamFailure(
   return classifyUpstreamFailure('openai', response, model)
 }
 
+async function classifyMiniMaxImageUpstreamFailure(
+  response: Response,
+  model: string,
+): Promise<UpstreamFailure> {
+  if (!response.ok) {
+    const text = await bufferedUpstreamText(response)
+    try {
+      if (hasMiniMaxImageBillableWork(JSON.parse(text))) return { penalty: null, retryable: false }
+    } catch { /* Ordinary HTTP errors use the standard classifier below. */ }
+    if ([502, 503, 504].includes(response.status)) {
+      return { penalty: null, retryable: false }
+    }
+  }
+  return classifyUpstreamFailure('minimax', response, model)
+}
+
 /**
  * Classifies an image-generation failure carried by an HTTP-200 Responses SSE
  * body before the buffered Images response is committed to the client.
@@ -1548,12 +1581,10 @@ export async function classifyBufferedOpenAIImageFailure(
   return classifyUpstreamFailure('openai', new Response(serialized, { status }), model)
 }
 
-const bufferedTranscripts = new WeakMap<Response, Promise<string>>()
-
-function bufferedUpstreamText(upstream: Response, provider: ProviderHandler): Promise<string> {
+function bufferedUpstreamText(upstream: Response, provider?: ProviderHandler): Promise<string> {
   let pending = bufferedTranscripts.get(upstream)
   if (!pending) {
-    pending = (provider.bufferedResponsesProtocol || provider.responsesProtocol) && upstream.ok
+    pending = (provider?.bufferedResponsesProtocol || provider?.responsesProtocol) && upstream.ok
       ? readResponsesSse(upstream) : readBoundedText(upstream)
     bufferedTranscripts.set(upstream, pending)
   }
@@ -1622,12 +1653,17 @@ export function registerRelayRoutes(app: FastifyInstance): void {
     executeRelay(request, reply, PROVIDERS.openai!)
   const openaiChatHandler = (request: FastifyRequest, reply: FastifyReply) =>
     executeRelay(request, reply, PROVIDERS['openai-chat']!)
-  const openaiImagesHandler = (endpoint: OpenAIImagesEndpoint, explicitProvider?: 'openai' | 'grsai') =>
+  const openaiImagesHandler = (endpoint: OpenAIImagesEndpoint, explicitProvider?: 'openai' | 'grsai' | 'minimax') =>
     async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      // A supplier-only key uses its own image pool on the standard path.
+      // Retain the supplier fallback for keys with GrsAI and no OpenAI permission.
+      // A MiniMax model ID can still select MiniMax below.
       // Explicit provider paths always select that provider, even for shared IDs.
-      let imageProvider = explicitProvider ?? (request.apiKey!.allowedProviders?.includes('grsai')
-        && !request.apiKey!.allowedProviders.includes('openai') ? 'grsai' : 'openai')
+      const allowed = request.apiKey!.allowedProviders
+      let imageProvider: 'openai' | 'grsai' | 'minimax' = explicitProvider ?? (
+        allowed?.includes('grsai') && !allowed.includes('openai') ? 'grsai'
+          : allowed?.includes('minimax') && !allowed.includes('openai') ? 'minimax'
+            : 'openai'
+      )
       let body: OpenAIImagesRequestBody
       try {
         const contentType = Array.isArray(request.headers['content-type'])
@@ -1635,10 +1671,15 @@ export function registerRelayRoutes(app: FastifyInstance): void {
           : request.headers['content-type'] ?? ''
         body = parseOpenAIImagesRequest(request.body, contentType, endpoint, {
           deferModelValidation: true,
+          ...(imageProvider === 'minimax' ? { defaultModel: MINIMAX_IMAGE_MODEL } : {}),
         })
         const mapped = { ...body, model: mapRequestedModel(body.model, request.apiKey!.modelMappings) }
-        if (!explicitProvider && inferProviderForModel(mapped.model) === 'grsai') imageProvider = 'grsai'
+        if (!explicitProvider) {
+          const inferred = inferProviderForModel(mapped.model)
+          if (inferred === 'grsai' || inferred === 'minimax') imageProvider = inferred
+        }
         if (imageProvider === 'grsai') buildGrsaiImageRequest(mapped)
+        else if (imageProvider === 'minimax') buildMiniMaxImageRequest(mapped)
         else validateOpenAIImagesRequestModel(body, mapped.model)
       } catch (error) {
         await reply.code(400).send({
@@ -1676,6 +1717,22 @@ export function registerRelayRoutes(app: FastifyInstance): void {
               return { transform: raw => { stream.feed(raw); return stream.transform(raw) }, flush: stream.flush,
                 status: () => stream.result().imageCount ? 'success' : 'error' }
             },
+            summarizeRequestInput: summarizeOpenAIImagesRequest,
+          }, body)
+          return
+        }
+        if (imageProvider === 'minimax') {
+          await executeRelay(request, reply, {
+            id: 'minimax', forceStream: false,
+            parseRoute: () => ({ model: requestedModel, action: `images.${endpoint}` }),
+            callUpstream: (token, input, ctx) => relayMiniMaxImages(token, input as OpenAIImagesRequestBody, ctx.account.proxyUrl),
+            classifyUpstreamFailure: (response, model) => classifyMiniMaxImageUpstreamFailure(response, model),
+            createStreamParser: () => createMiniMaxImagesStreamParser(mappedRequest),
+            parseJsonUsage: payload => parseMiniMaxImageUsage(
+              payload,
+              mappedRequest.model,
+              typeof mappedRequest.size === 'string' && mappedRequest.size !== 'auto' ? mappedRequest.size : undefined,
+            ),
             summarizeRequestInput: summarizeOpenAIImagesRequest,
           }, body)
           return
@@ -1839,13 +1896,15 @@ export function registerRelayRoutes(app: FastifyInstance): void {
   // requests into chat/completions and translates the SSE stream back.
   // Codex: configure base_url=https://your-host/api/kimi
   app.post('/api/kimi/v1/responses', { preHandler: requireApiKey }, kimiResponsesHandler)
-  // MiniMax exposes all three native protocols; Responses supports JSON and SSE.
+  // MiniMax exposes all three native protocols plus H3-Image generation/editing.
   for (const [path, handler] of [
     ['messages', 'minimax'], ['chat/completions', 'minimax-chat'], ['responses', 'minimax-responses'],
   ] as const) {
     app.post(`/api/minimax/v1/${path}`, { preHandler: requireApiKey }, (request, reply) =>
       executeRelay(request, reply, PROVIDERS[handler]!))
   }
+  app.post('/api/minimax/v1/images/generations', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('generations', 'minimax'))
+  app.post('/api/minimax/v1/images/edits', { preHandler: requireApiKey, bodyLimit: imageBodyLimit }, openaiImagesHandler('edits', 'minimax'))
   app.get('/api/minimax/v1/models', { preHandler: requireApiKey }, (request, reply) =>
     sendOpenAIStyleModelList(request, reply, 'minimax'))
 
@@ -2892,7 +2951,8 @@ async function sendStreaming(
   if (provider.id === 'antigravity' && !upstream.ok) {
     return sendAntigravityUpstreamError(reply, upstream, meta, provider)
   }
-  if (provider.createStreamParser().failure && isNonStreamContentType(upstream.headers.get('content-type'))) {
+  if ((!upstream.ok && bufferedTranscripts.has(upstream)) ||
+      (provider.createStreamParser().failure && isNonStreamContentType(upstream.headers.get('content-type')))) {
     return sendBuffered(reply, upstream, meta, provider)
   }
   reply.hijack()
@@ -3211,6 +3271,11 @@ async function sendStreaming(
       if (!downstreamClosed && !await writeSseData(raw, event)) downstreamClosed = true
     }
   }
+  const parsedFailure = upstream.ok ? parser.failure?.() : null
+  const providerFailure = parsedFailure?.closingEvent && streamState.sawFailure ? null : parsedFailure
+  if (providerFailure?.closingEvent && !downstreamClosed) {
+    if (!await writeSseData(raw, providerFailure.closingEvent)) downstreamClosed = true
+  }
   if (!downstreamClosed && !raw.writableEnded) {
     try {
       raw.end()
@@ -3221,7 +3286,6 @@ async function sendStreaming(
   }
 
   const clientCanceled = (upstreamSignal()?.aborted || (raw.destroyed && !raw.writableEnded)) && !streamState.sawTerminal
-  const providerFailure = upstream.ok ? parser.failure?.() : null
   const streamStatus = streamReadFailed || clientCanceled
     ? 'error'
     : providerFailure ? 'error' : streamTransform?.status?.() ?? responsesStreamStatus(upstream.ok, responsesProtocol, streamState)

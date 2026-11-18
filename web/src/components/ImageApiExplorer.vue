@@ -12,21 +12,29 @@ const props = defineProps<{
   mode: 'generation' | 'edit'
   baseUrl: string
   apiKey: string
-  provider?: 'openai' | 'media'
+  provider?: 'openai' | 'media' | 'minimax'
 }>()
 
 const emit = defineEmits<{ (event: 'requestAuthorization'): void }>()
 const message = useMessage()
 
 const prompt = ref('')
-const model = ref(props.provider === 'media' ? 'gpt-image-2.5' : props.mode === 'edit' ? 'gpt-image-2.6-sunburst' : 'gpt-image-2.6-flare')
+const model = ref(
+  props.provider === 'media'
+    ? 'gpt-image-2.5'
+    : props.provider === 'minimax'
+      ? 'MiniMax-H3-Image'
+      : props.mode === 'edit' ? 'gpt-image-2.6-sunburst' : 'gpt-image-2.6-flare',
+)
 const quality = ref('auto')
 const background = ref('auto')
-const requestedOutputFormat = ref('png')
+const requestedOutputFormat = ref(props.provider === 'minimax' ? 'jpeg' : 'png')
 const complexity = ref('high')
 const frameCount = ref('9')
 const frameDuration = ref('200')
-const size = ref('1024x1024')
+const size = ref(props.provider === 'minimax' ? 'auto' : '1024x1024')
+const minimaxAspectRatio = ref('auto')
+const minimaxArea = ref('2K')
 const responseFormat = ref<'url' | 'b64_json'>('url')
 const imageFile = ref<File | null>(null)
 const markupFile = ref<File | null>(null)
@@ -40,14 +48,46 @@ let requestController: AbortController | null = null
 
 const isEdit = computed(() => props.mode === 'edit')
 const isMedia = computed(() => props.provider === 'media')
-const isImage26 = computed(() => !isMedia.value && /^gpt-image-2\.6-(flare|sunburst)$/.test(model.value))
-const supportsMarkup = computed(() => !isMedia.value && isEdit.value && /^gpt-image-2\.[56]-(flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.value))
-const outputFormatOptions = computed(() => ['png', 'webp', 'jpeg', ...(isImage26.value && !isEdit.value ? ['svg', 'gif'] : [])])
+const isMinimax = computed(() => props.provider === 'minimax')
+const isImage26 = computed(() => !isMedia.value && !isMinimax.value && /^gpt-image-2\.6-(flare|sunburst)$/.test(model.value))
+const supportsMarkup = computed(() => !isMedia.value && !isMinimax.value && isEdit.value && /^gpt-image-2\.[56]-(flare|sunburst)(?:-\d{4}-\d{2}-\d{2})?$/.test(model.value))
+const outputFormatOptions = computed(() => isMinimax.value
+  ? ['jpeg', 'png', 'webp']
+  : ['png', 'webp', 'jpeg', ...(isImage26.value && !isEdit.value ? ['svg', 'gif'] : [])])
 const nativeParameters = computed(() => ({
   output_format: requestedOutputFormat.value,
   ...(isImage26.value ? { complexity: complexity.value } : {}),
   ...(isImage26.value && requestedOutputFormat.value === 'gif' ? { frame_count: Number(frameCount.value), frame_duration_ms: Number(frameDuration.value) } : {}),
 }))
+const providerParameters = computed<Record<string, string | number>>(() => {
+  if (isMinimax.value) {
+    return {
+      ...(size.value === 'auto' ? { aspect_ratio: minimaxAspectRatio.value, area: minimaxArea.value } : {}),
+      output_format: requestedOutputFormat.value,
+    }
+  }
+  return {
+    quality: quality.value,
+    background: background.value,
+    ...(!isMedia.value ? nativeParameters.value : {}),
+  }
+})
+const sizeOptions = computed(() => isMinimax.value
+  ? [
+      { label: '自动 / 按比例与档位', value: 'auto' },
+      { label: '1024 × 1024 (1K)', value: '1024x1024' },
+      { label: '2048 × 2048 (2K)', value: '2048x2048' },
+      { label: '4096 × 4096 (4K)', value: '4096x4096' },
+    ]
+  : [
+      { label: '1024 × 1024', value: '1024x1024' },
+      { label: '1536 × 1024', value: '1536x1024' },
+      { label: '1024 × 1536', value: '1024x1536' },
+      { label: '自动', value: 'auto' },
+    ])
+const modelListOptions = computed(() => isMinimax.value
+  ? ['MiniMax-H3-Image', 'MiniMax-H3-Image-Highspeed']
+  : ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2'])
 watch([model, requestedOutputFormat], () => {
   if (!outputFormatOptions.value.includes(requestedOutputFormat.value)) requestedOutputFormat.value = 'png'
   if (!['png', 'webp'].includes(requestedOutputFormat.value) && background.value === 'transparent') background.value = 'auto'
@@ -114,9 +154,7 @@ const generatedCurl = computed(() => {
       `  -F "model=${model.value}" \\`,
       `  -F "prompt=${prompt.value || '把天空替换成极光'}" \\`,
       `  -F "size=${size.value}" \\`,
-      `  -F "quality=${quality.value}" \\`,
-      `  -F "background=${background.value}" \\`,
-      ...(!isMedia.value ? Object.entries(nativeParameters.value).map(([field, value]) => `  -F "${field}=${value}" \\`) : []),
+      ...Object.entries(providerParameters.value).map(([field, value]) => `  -F "${field}=${value}" \\`),
       `  -F "response_format=${responseFormat.value}" \\`,
       `  -F "image=@./${imageFile.value?.name || 'source.png'}"${supportsMarkup.value && markupFile.value ? ' \\' : ''}`,
       ...(supportsMarkup.value && markupFile.value ? [`  -F "markup=@./${markupFile.value.name};type=image/png"`] : []),
@@ -130,7 +168,7 @@ const generatedCurl = computed(() => {
       model: model.value,
       prompt: prompt.value || '一只坐在窗边的橘猫',
       size: size.value,
-      quality: quality.value, background: background.value, ...(!isMedia.value ? nativeParameters.value : {}),
+      ...providerParameters.value,
       response_format: responseFormat.value,
     }, null, 2)}'`,
   ].join('\n')
@@ -209,9 +247,7 @@ async function runTest(): Promise<void> {
       form.append('model', model.value)
       form.append('prompt', prompt.value.trim())
       form.append('size', size.value)
-      form.append('quality', quality.value)
-      form.append('background', background.value)
-      if (!isMedia.value) for (const [field, value] of Object.entries(nativeParameters.value)) form.append(field, String(value))
+      for (const [field, value] of Object.entries(providerParameters.value)) form.append(field, String(value))
       form.append('response_format', responseFormat.value)
       form.append('image', imageFile.value!)
       if (supportsMarkup.value && markupFile.value) form.append('markup', markupFile.value)
@@ -222,7 +258,7 @@ async function runTest(): Promise<void> {
         model: model.value,
         prompt: prompt.value.trim(),
         size: size.value,
-        quality: quality.value, background: background.value, ...(!isMedia.value ? nativeParameters.value : {}),
+        ...providerParameters.value,
         response_format: responseFormat.value,
       })
     }
@@ -372,26 +408,25 @@ onBeforeUnmount(() => {
         <div class="field-row">
           <label class="field-group">
             <span>模型</span>
-            <UiInput v-model:value="model" :list="!isMedia ? `image-models-${mode}` : undefined" :placeholder="isMedia ? 'gpt-image-2.5' : 'gpt-image-2.6-flare'" />
-            <datalist v-if="!isMedia" :id="`image-models-${mode}`"><option v-for="id in ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2']" :key="id" :value="id" /></datalist>
+            <UiInput v-model:value="model" :list="!isMedia ? `image-models-${provider || 'openai'}-${mode}` : undefined" :placeholder="isMedia ? 'gpt-image-2.5' : isMinimax ? 'MiniMax-H3-Image' : 'gpt-image-2.6-flare'" />
+            <datalist v-if="!isMedia" :id="`image-models-${provider || 'openai'}-${mode}`"><option v-for="id in modelListOptions" :key="id" :value="id" /></datalist>
           </label>
           <label class="field-group">
             <span>尺寸</span>
             <UiSelect
               v-model:value="size"
-              :options="[
-                { label: '1024 × 1024', value: '1024x1024' },
-                { label: '1536 × 1024', value: '1536x1024' },
-                { label: '1024 × 1536', value: '1024x1536' },
-                { label: '自动', value: 'auto' },
-              ]"
+              :options="sizeOptions"
             />
           </label>
         </div>
 
-        <div class="field-row">
+        <div v-if="!isMinimax" class="field-row">
           <label class="field-group"><span>品质</span><UiSelect v-model:value="quality" :options="qualityOptions" /></label>
           <label class="field-group"><span>背景</span><UiSelect v-model:value="background" :options="[{ label: '自动', value: 'auto' }, { label: '不透明', value: 'opaque' }, ...(!basicImageModel && (isMedia || ['png', 'webp'].includes(requestedOutputFormat)) ? [{ label: '透明（PNG/WebP）', value: 'transparent' }] : [])]" /></label>
+        </div>
+        <div v-if="isMinimax && size === 'auto'" class="field-row">
+          <label class="field-group"><span>宽高比</span><UiSelect v-model:value="minimaxAspectRatio" :options="[{ label: '自动', value: 'auto' }, { label: '1:1', value: '1:1' }, { label: '16:9', value: '16:9' }, { label: '9:16', value: '9:16' }, { label: '4:3', value: '4:3' }, { label: '3:4', value: '3:4' }, { label: '21:9', value: '21:9' }]" /></label>
+          <label class="field-group"><span>清晰度档位</span><UiSelect v-model:value="minimaxArea" :options="[{ label: '1K', value: '1K' }, { label: '2K', value: '2K' }, { label: '4K', value: '4K' }]" /></label>
         </div>
         <label v-if="!isMedia" class="field-group"><span>图片编码</span><UiSelect v-model:value="requestedOutputFormat" :options="outputFormatOptions.map(value => ({ label: value.toUpperCase(), value }))" /></label>
         <label v-if="isImage26" class="field-group"><span>构图复杂度</span><UiSelect v-model:value="complexity" :options="[{ label: '低', value: 'low' }, { label: '中', value: 'medium' }, { label: '高（默认）', value: 'high' }]" /></label>

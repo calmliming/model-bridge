@@ -61,6 +61,11 @@ function sse(events: unknown[]): Response {
   })
 }
 
+function events(body: string): Array<Record<string, any>> {
+  return body.split('\n').filter(line => line.startsWith('data: ') && line !== 'data: [DONE]')
+    .map(line => JSON.parse(line.slice(6)))
+}
+
 function openaiResponse(): Response {
   return sse([{ type: 'response.completed', response: {
     id: 'resp_test', object: 'response', model: 'gpt-5.4', status: 'completed',
@@ -273,6 +278,319 @@ describe('GrsAI image relay', () => {
       expect(mocks.fetch).toHaveBeenCalledTimes(1)
     })
   })
+})
+
+describe('MiniMax H3-Image relay', () => {
+  it('relays /api/minimax/v1/images/generations and records text + image token usage', () => withRelay(async request => {
+    mocks.balance = 10_000_000
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      created: 1700000000,
+      data: [{ url: 'https://cdn.example/minimax.png', size: '1024x1024' }],
+      usage: {
+        input_tokens: 45,
+        input_tokens_details: { text_tokens: 45 },
+        output_tokens: 2048,
+        output_tokens_details: { image_tokens: 2048 },
+        generated_images: 1,
+      },
+    }), { headers: { 'content-type': 'application/json' } }))
+
+    const response = await request(
+      { model: 'minimax-h3-image', prompt: 'a mountain lake', aspect_ratio: '1:1', area: '1K' },
+      '/api/minimax/v1/images/generations',
+    )
+    expect(response.status).toBe(200)
+    expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('minimax')
+    expect(mocks.pickAccount.mock.calls[0]?.[4]).toBe('minimax-h3-image')
+    const [upstreamUrl, init] = mocks.fetch.mock.calls[0]!
+    expect(upstreamUrl).toBe('https://api.minimaxi.com/v1/images/generations')
+    expect(JSON.parse(init.body)).toEqual({
+      model: 'MiniMax-H3-Image',
+      prompt: 'a mountain lake',
+      n: 1,
+      response_format: 'b64_json',
+      aspect_ratio: '1:1',
+      area: '1K',
+    })
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.slice(4, 6)).toEqual(['minimax', 'minimax-h3-image'])
+    expect(mocks.logs[0]?.[9]).toBe(45)
+    expect(mocks.logs[0]?.slice(14, 19)).toEqual([0, 2048, 1, '1024x1024', 'MiniMax-H3-Image'])
+  }))
+
+  it('supports JSON and multipart requests on /api/minimax/v1/images/edits', async () => {
+    mocks.balance = 10_000_000
+    mocks.fetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        created: 1,
+        data: [{ url: 'https://cdn.example/edit-json.png', size: '1536x1024' }],
+        usage: {
+          input_tokens: 1200,
+          input_tokens_details: { text_tokens: 100, image_tokens: 1100 },
+          output_tokens: 2048,
+          output_tokens_details: { image_tokens: 2048 },
+          generated_images: 1,
+        },
+      }), { headers: { 'content-type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        created: 2,
+        data: [{ url: 'https://cdn.example/edit-multipart.png', size: '1024x1024' }],
+        usage: {
+          input_tokens: 900,
+          input_tokens_details: { text_tokens: 50, image_tokens: 850 },
+          output_tokens: 1024,
+          generated_images: 1,
+        },
+      }), { headers: { 'content-type': 'application/json' } }))
+
+    await withRelay(async request => {
+      const jsonRes = await request({
+        model: 'minimax-h3-image-highspeed',
+        prompt: 'turn sky golden',
+        image: ['https://example.com/base.png'],
+      }, '/api/minimax/v1/images/edits')
+      expect(jsonRes.status).toBe(200)
+      const [url1, init1] = mocks.fetch.mock.calls[0]!
+      expect(url1).toBe('https://api.minimaxi.com/v1/images/edits')
+      expect(JSON.parse(init1.body)).toMatchObject({
+        model: 'MiniMax-H3-Image-Highspeed',
+        images: [{ image_url: 'https://example.com/base.png' }],
+      })
+      expect(mocks.logs[0]?.slice(14, 19)).toEqual([1100, 2048, 1, '1536x1024', 'MiniMax-H3-Image-Highspeed'])
+    })
+
+    const app = Fastify()
+    registerRelayRoutes(app)
+    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    try {
+      const form = new FormData()
+      form.append('model', 'MiniMax-H3-Image')
+      form.append('prompt', 'add snow')
+      form.append('image', new Blob([Buffer.from('fake-png-bytes')], { type: 'image/png' }), 'ref.png')
+      const res = await fetch(`${origin}/api/minimax/v1/images/edits`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer mb-test' },
+        body: form,
+        signal: AbortSignal.timeout(5_000),
+      })
+      await res.text()
+      await waitForPendingUsage()
+      expect(res.status).toBe(200)
+      const [url2, init2] = mocks.fetch.mock.calls[1]!
+      expect(url2).toBe('https://api.minimaxi.com/v1/images/edits')
+      expect(JSON.parse(init2.body)).toMatchObject({
+        model: 'MiniMax-H3-Image',
+        prompt: 'add snow',
+        images: [{ image_url: `data:image/png;base64,${Buffer.from('fake-png-bytes').toString('base64')}` }],
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('auto-dispatches MiniMax on /v1/images/generations and enforces key provider restrictions', () => withRelay(async request => {
+    mocks.balance = 10_000_000
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({
+      created: 1,
+      data: [{ url: 'https://cdn.example/out.png' }],
+      usage: { input_tokens: 30, output_tokens: 1024, generated_images: 1 },
+    }), { headers: { 'content-type': 'application/json' } }))
+
+    const byModel = await request({ model: 'MiniMax-H3-Image', prompt: 'forest' }, '/v1/images/generations')
+    expect(byModel.status).toBe(200)
+    expect(mocks.pickAccount.mock.calls[0]?.[0]).toBe('minimax')
+    expect(mocks.pickAccount.mock.calls[0]?.[4]).toBe('MiniMax-H3-Image')
+
+    mocks.key.allowedProviders = ['minimax']
+    const byKey = await request({ prompt: 'desert' }, '/v1/images/generations')
+    expect(byKey.status).toBe(200)
+    const lastBody = JSON.parse(mocks.fetch.mock.calls[1]![1].body)
+    expect(lastBody.model).toBe('MiniMax-H3-Image')
+
+    mocks.pickAccount.mockClear()
+    mocks.key.allowedProviders = ['openai']
+    const forbidden = await request({ model: 'MiniMax-H3-Image', prompt: 'cat' }, '/v1/images/generations')
+    expect(forbidden.status).toBe(403)
+    expect(mocks.pickAccount).not.toHaveBeenCalled()
+  }))
+
+  it('keeps GrsAI defaults and routes MiniMax aliases for a mixed key', () => withRelay(async request => {
+    mocks.balance = 10_000_000
+    mocks.key.allowedProviders = ['grsai', 'minimax']
+    mocks.key.modelMappings = { 'image-alias': 'MiniMax-H3-Image' }
+    mocks.fetch.mockImplementation(async (url: string) => url.includes('minimaxi.com')
+      ? Response.json({ data: [{ url: 'https://files.example.com/minimax.jpg' }] })
+      : Response.json({ id: 'supplier-image', status: 'succeeded', results: [{ url: 'https://files.example.com/supplier.png' }] }))
+
+    const path = '/v1/images/generations'
+    const body = { prompt: 'a cat', response_format: 'url' }
+    for (const payload of [body, { ...body, model: 'gpt-image-2' }]) {
+      const response = await request(payload, path)
+      expect(response.status).toBe(200)
+      expect(JSON.parse(response.body).data[0].url).toBe('https://files.example.com/supplier.png')
+    }
+    const miniMax = await request({ ...body, model: 'image-alias' }, path)
+    expect(miniMax.status).toBe(200)
+    expect(JSON.parse(miniMax.body).data[0].url).toBe('https://files.example.com/minimax.jpg')
+    expect(mocks.pickAccount.mock.calls.map(([provider]) => provider)).toEqual(['grsai', 'grsai', 'minimax'])
+  }))
+
+  it('streams MiniMax image SSE events and records completed usage', () => withRelay(async request => {
+    mocks.balance = 10_000_000
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'image_generation.partial_succeeded', image_index: 0, url: 'https://cdn.example/p0.png', size: '2048x2048' },
+      { type: 'image_generation.partial_failed', image_index: 1, code: '1027', message: 'Image did not pass review.' },
+      {
+        type: 'image_generation.completed',
+        usage: {
+          input_tokens: 60,
+          input_tokens_details: { text_tokens: 60 },
+          output_tokens: 4096,
+          output_tokens_details: { image_tokens: 4096 },
+          generated_images: 1,
+        },
+      },
+    ]))
+
+    const response = await request(
+      { model: 'MiniMax-H3-Image', prompt: 'cyberpunk alley', n: 2, stream: true },
+      '/api/minimax/v1/images/generations',
+    )
+    expect(response.status).toBe(200)
+    expect(response.contentType).toContain('text/event-stream')
+    expect(events(response.body).map(event => event.type)).toEqual([
+      'image_generation.partial_succeeded', 'image_generation.partial_failed', 'image_generation.completed',
+    ])
+    expect(mocks.logs).toHaveLength(1)
+    expect(mocks.logs[0]?.[9]).toBe(60)
+    expect(mocks.logs[0]?.slice(15, 19)).toEqual([4096, 1, '2048x2048', 'MiniMax-H3-Image'])
+    expect(mocks.logs[0]?.[22]).toBe('success')
+  }))
+
+  it('ends a truncated MiniMax image stream with an error and retains the delivered image count', () => withRelay(async request => {
+    mocks.fetch.mockResolvedValueOnce(sse([
+      { type: 'image_generation.partial_succeeded', image_index: 0, url: 'https://cdn.example/cat.jpg', size: '1024x1024' },
+    ]))
+    const response = await request(
+      { model: 'MiniMax-H3-Image', prompt: 'a cat', n: 2, stream: true },
+      '/api/minimax/v1/images/generations',
+    )
+    expect(response.status).toBe(200)
+    expect(response.body).toContain('event: error\n')
+    expect(events(response.body)).toEqual([
+      expect.objectContaining({ type: 'image_generation.partial_succeeded', image_index: 0 }),
+      expect.objectContaining({ type: 'error', error: expect.objectContaining({ code: 'upstream_stream_closed' }) }),
+    ])
+    expect(mocks.logs[0]?.slice(15, 19)).toEqual([0, 1, '1024x1024', 'MiniMax-H3-Image'])
+    expect(mocks.logs[0]?.slice(22, 24)).toEqual(['error', 'upstream_stream_closed'])
+    expect(mocks.logs[0]?.[36]).toBe('missing')
+    expect(mocks.fetch).toHaveBeenCalledOnce()
+  }))
+
+  it('passes through the upstream MiniMax error as the only terminal event', () => withRelay(async request => {
+    const failure = { type: 'error', error: { type: 'server_error', http_code: '500', message: 'Image generation failed.' },
+      usage: { input_tokens: 0, output_tokens: 0, generated_images: 0 } }
+    mocks.fetch.mockResolvedValueOnce(sse([failure]))
+    const response = await request({ model: 'MiniMax-H3-Image', prompt: 'a cat', stream: true }, '/api/minimax/v1/images/generations')
+    expect(events(response.body)).toEqual([failure])
+    expect(mocks.logs[0]?.slice(22, 24)).toEqual(['error', 'server_error'])
+  }))
+
+  it('rejects invalid MiniMax image params before pickAccount and avoids retrying timeouts or billable failures', async () => {
+    mocks.balance = 10_000_000
+    await withRelay(async request => {
+      const invalid = await request(
+        { model: 'MiniMax-H3-Image', prompt: 'cat', stream: true, response_format: 'b64_json' },
+        '/api/minimax/v1/images/generations',
+      )
+      expect(invalid.status).toBe(400)
+      expect(mocks.pickAccount).not.toHaveBeenCalled()
+      expect(mocks.fetch).not.toHaveBeenCalled()
+    })
+
+    mocks.fetch.mockRejectedValueOnce(new Error('ETIMEDOUT'))
+    await withRelay(async request => {
+      const timedOut = await request(
+        { model: 'MiniMax-H3-Image', prompt: 'cat' },
+        '/api/minimax/v1/images/generations',
+      )
+      expect(timedOut.status).toBe(502)
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    })
+
+    mocks.fetch.mockReset()
+    mocks.accounts.push({ id: 'account-2', concurrencyLimit: null, metadata: null })
+    mocks.fetch.mockResolvedValueOnce(new Response(Buffer.from(JSON.stringify({
+      error: { code: 'server_error', message: 'failed after partial work' },
+      usage: { input_tokens: 50, output_tokens: 1024, generated_images: 1 },
+    })), { status: 500 }))
+    await withRelay(async request => {
+      const billableFailure = await request(
+        { model: 'MiniMax-H3-Image', prompt: 'cat', stream: true },
+        '/api/minimax/v1/images/generations',
+      )
+      expect(billableFailure.status).toBe(500)
+      expect(mocks.fetch).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(billableFailure.body).usage).toMatchObject({ input_tokens: 50, output_tokens: 1024 })
+      expect(mocks.logs.at(-1)?.slice(15, 17)).toEqual([1024, 1])
+    })
+  })
+
+  it('applies the response buffer limit while classifying a MiniMax HTTP error', async () => {
+    const originalLimit = config.UPSTREAM_BUFFER_MAX_BYTES
+    config.UPSTREAM_BUFFER_MAX_BYTES = 1_024
+    try {
+      mocks.fetch.mockResolvedValueOnce(Response.json({ error: { message: 'details '.repeat(160) } }, { status: 429 }))
+      await withRelay(async request => {
+        const response = await request({ prompt: 'a cat' }, '/api/minimax/v1/images/generations')
+        expect(response.status).toBe(502)
+        expect(JSON.parse(response.body).code).toBe('response_too_large')
+        expect(mocks.fetch).toHaveBeenCalledOnce()
+      })
+    } finally {
+      config.UPSTREAM_BUFFER_MAX_BYTES = originalLimit
+    }
+  })
+
+  it('times out and cancels a stalled MiniMax HTTP error body', async () => {
+    const originalTimeout = config.UPSTREAM_IDLE_TIMEOUT_MS
+    config.UPSTREAM_IDLE_TIMEOUT_MS = 25
+    try {
+      const cancel = vi.fn()
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(Buffer.from('{')) },
+        cancel,
+      })
+      mocks.fetch.mockResolvedValueOnce(new Response(body, { status: 429, headers: { 'content-type': 'application/json' } }))
+      await withRelay(async request => {
+        const response = await request({ prompt: 'a cat', stream: true }, '/api/minimax/v1/images/generations')
+        expect(response.status).toBe(502)
+        expect(JSON.parse(response.body).code).toBe('upstream_idle_timeout')
+        expect(cancel).toHaveBeenCalledOnce()
+        expect(mocks.fetch).toHaveBeenCalledOnce()
+      })
+    } finally {
+      config.UPSTREAM_IDLE_TIMEOUT_MS = originalTimeout
+    }
+  })
+})
+
+describe('Qwen Chat cache usage', () => {
+  it.each([false, true])('records the reported 1h cache-write split (stream=%s)', stream => withRelay(async request => {
+    const usage = {
+      prompt_tokens: 4000, completion_tokens: 12,
+      prompt_tokens_details: {
+        cached_tokens: 200, cache_write_tokens: 3500, cache_creation_input_tokens: 3500,
+        cache_creation: { ephemeral_5m_input_tokens: 1000, ephemeral_1h_input_tokens: 2500 },
+      },
+    }
+    mocks.fetch.mockResolvedValueOnce(stream ? sse([{ usage }]) : Response.json({ usage }))
+    const response = await request({ model: 'qwen4-max', messages: [{ role: 'user', content: 'hi' }], stream,
+      prompt_cache_options: { mode: 'implicit', ttl: '1h' } }, '/api/qwen/v1/chat/completions')
+    expect(response.status).toBe(200)
+    expect(mocks.logs[0]?.slice(9, 14)).toEqual([300, 12, 0, 3500, 200])
+    expect(JSON.parse(String(mocks.logs[0]?.[34]))).toMatchObject({ cacheCreate1hTokens: 2500 })
+  }))
 })
 
 const prompt = { model: 'gpt-5.4', stream: true, input: 'Hi' }
@@ -817,11 +1135,6 @@ describe('GPT-5.5 subscription retirement', () => {
 })
 
 describe('Responses output field compatibility', () => {
-  function events(body: string): Array<Record<string, any>> {
-    return body.split('\n').filter(line => line.startsWith('data: ') && line !== 'data: [DONE]')
-      .map(line => JSON.parse(line.slice(6)))
-  }
-
   const routes = [
     ['/v1/responses', 'gpt-6.1-sol'], ['/api/grok/v1/responses', 'grok-4.7'],
     ['/api/sub2api/v1/responses', 'gpt-5.5'], ['/api/minimax/v1/responses', 'MiniMax-M3'],

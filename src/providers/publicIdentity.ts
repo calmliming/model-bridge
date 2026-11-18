@@ -28,6 +28,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   deepseek: 'DeepSeek',
   qwen: 'Qwen',
   kimi: 'Kimi',
+  minimax: 'MiniMax',
   zhipu: '智谱',
   xiaomi: '小米',
   grok: 'Grok',

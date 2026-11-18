@@ -9,9 +9,12 @@ export function minimaxBaseUrl(baseUrl?: string | null): string {
   return url.toString().replace(/\/+$/, '')
 }
 
+import { canonicalMiniMaxImageModel, isMiniMaxImageModel } from './images'
+
 export function mapMiniMaxModel(model: unknown): string {
   if (typeof model !== 'string' || !model.trim()) return 'MiniMax-M3'
   const value = model.trim()
+  if (isMiniMaxImageModel(value)) return canonicalMiniMaxImageModel(value)
   return /^minimax-/i.test(value) ? value.replace(/^minimax-m/i, 'MiniMax-M') : 'MiniMax-M3'
 }
 

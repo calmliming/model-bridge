@@ -23,6 +23,7 @@ export interface OpenAIImagesRequestBody extends Record<string, unknown> {
   mask?: OpenAIImageReference
   markup?: OpenAIImageReference
   __image_endpoint: OpenAIImagesEndpoint
+  __explicit_response_format?: boolean
 }
 
 export interface NamedSseEvent {
@@ -207,7 +208,7 @@ export function parseOpenAIImagesRequest(
   rawBody: unknown,
   contentType: string,
   endpoint: OpenAIImagesEndpoint,
-  options: { deferModelValidation?: boolean } = {},
+  options: { deferModelValidation?: boolean; defaultModel?: string } = {},
 ): OpenAIImagesRequestBody {
   const source = Buffer.isBuffer(rawBody)
     ? parseMultipartBody(rawBody, contentType)
@@ -216,14 +217,15 @@ export function parseOpenAIImagesRequest(
       : null
   if (!source) throw new Error('request body must be a JSON object or multipart form')
 
-  const model = stringField(source.model) || DEFAULT_IMAGE_MODEL
+  const model = stringField(source.model) || options.defaultModel || DEFAULT_IMAGE_MODEL
   const prompt = typeof source.prompt === 'string' ? source.prompt : ''
   if (!prompt.trim()) throw new Error('prompt is required')
   if (!options.deferModelValidation) validateOpenAIImageModel(model)
 
   const n = optionalInteger(source.n, 'n', 1, 10) ?? 1
   const stream = optionalBoolean(source.stream, 'stream') ?? false
-  const responseFormat = stringField(source.response_format).toLowerCase() || 'b64_json'
+  const explicitResponseFormat = stringField(source.response_format).toLowerCase()
+  const responseFormat = explicitResponseFormat || 'b64_json'
   if (!['b64_json', 'url'].includes(responseFormat)) {
     throw new Error('response_format must be b64_json or url')
   }
@@ -242,6 +244,7 @@ export function parseOpenAIImagesRequest(
     response_format: responseFormat,
     images,
     __image_endpoint: endpoint,
+    ...(explicitResponseFormat ? { __explicit_response_format: true } : {}),
   }
   const mask = imageReference(source.mask)
   if (source.mask != null && !mask) throw new Error('invalid mask reference')

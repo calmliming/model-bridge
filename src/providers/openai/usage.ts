@@ -11,6 +11,7 @@ export interface CacheWriteUsage {
 export interface CacheWriteDetails {
   cache_write_tokens?: number
   cache_creation_tokens?: number
+  cache_creation_input_tokens?: number
   cache_write_tokens_details?: {
     ttl_30m_tokens?: number
     ttl_12h_tokens?: number
@@ -30,7 +31,7 @@ interface OpenAIUsage extends CacheWriteUsage {
 }
 
 export function reportedCacheWrites(usage: CacheWriteUsage | undefined, details: CacheWriteDetails | undefined): number | undefined {
-  return details?.cache_write_tokens ?? details?.cache_creation_tokens ?? usage?.cache_write_tokens ??
+  return details?.cache_write_tokens ?? details?.cache_creation_tokens ?? details?.cache_creation_input_tokens ?? usage?.cache_write_tokens ??
     usage?.cache_creation_input_tokens ?? usage?.cache_write_input_tokens ?? usage?.cache_creation_tokens
 }
 

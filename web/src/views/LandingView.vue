@@ -101,7 +101,7 @@ const codeSnippets: Record<SnippetKey, string> = {
   -H "Authorization: Bearer $MB_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gpt-6.1-sol",
+    "model": "gpt-6.2-sol",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,
   python: `import openai

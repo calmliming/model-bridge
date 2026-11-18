@@ -583,7 +583,7 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-flash
 claude`,
     codex: `[profiles.model-bridge]
 model_provider = "model-bridge"
-model = "gpt-6.1-sol"
+model = "gpt-6.2-sol"
 
 [model_providers.model-bridge]
 name = "model-bridge"
@@ -654,13 +654,13 @@ POST ${baseOrigin.value}/api/zhipu/v1/chat/completions
 GET ${baseOrigin.value}/api/zhipu/v1/models`,
     qwen: `export ANTHROPIC_BASE_URL=${baseOrigin.value}/api/qwen
 export ANTHROPIC_AUTH_TOKEN=${key}
-export ANTHROPIC_MODEL=qwen3.8-max
+export ANTHROPIC_MODEL=qwen4-max
 export ANTHROPIC_DEFAULT_SONNET_MODEL=qwen3.7-plus
 export ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen3.7-flash
 claude`,
     codexQwen: `[profiles.model-bridge-qwen]
 model_provider = "model-bridge-qwen"
-model = "qwen3.8-max"
+model = "qwen4-max"
 
 [model_providers.model-bridge-qwen]
 name = "model-bridge-qwen"

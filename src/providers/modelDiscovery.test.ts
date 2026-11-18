@@ -185,8 +185,10 @@ describe('model discovery', () => {
     })
     expect(models).toEqual(
       expect.arrayContaining([
+        'gpt-6.2-astra',
+        'gpt-6.2-sol',
         'gpt-6.1-terra',
-      'gpt-6.1-sol',
+        'gpt-6.1-sol',
         'claude-fable-5-1',
         'claude-sonnet-5-5',
         'claude-sonnet-5',
@@ -198,9 +200,12 @@ describe('model discovery', () => {
         'mimo-v2.6-pro-ultraspeed',
         'glm-5.3',
         'glm-5.3-flashx',
+        'qwen4-max',
         'qwen3.8-max',
         'qwen3.8-flash',
         'kimi-k2.7-code-highspeed',
+        'MiniMax-H3-Image',
+        'MiniMax-H3-Image-Highspeed',
         'deepseek-v4-pro'
       ])
     )
@@ -226,6 +231,8 @@ describe('model discovery', () => {
     expect(isProviderAllowed('openai', key)).toBe(true)
     expect(isProviderAllowed('deepseek', key)).toBe(false)
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
       'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
@@ -245,6 +252,8 @@ describe('model discovery', () => {
       allowedModels: ['gpt-*', 'deepseek-v4-pro']
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
       'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
@@ -282,6 +291,8 @@ describe('model discovery', () => {
       modelMappings: { 'gpt-public': 'gpt-5.4' }
     }
     expect(listModelIdsForKey(key)).toEqual([
+      'gpt-6.2-astra',
+      'gpt-6.2-sol',
       'gpt-6.1-terra',
       'gpt-6.1-sol',
       'gpt-6-astra',
@@ -294,6 +305,32 @@ describe('model discovery', () => {
       ...nativeImageModels,
       'gpt-public'
     ])
+  })
+
+  it('discovers MiniMax H3-Image variants through the native MiniMax routes', () => {
+    const images = ['MiniMax-H3-Image', 'MiniMax-H3-Image-Highspeed']
+    expect(listModelIdsForKey({ allowedProviders: ['minimax'], allowedModels: null })).toEqual([
+      'MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5',
+      ...images,
+    ])
+    const sub2api = { allowedProviders: ['sub2api'], allowedModels: null }
+    expect(listModelIdsForKey(sub2api)).toContain('MiniMax-M3')
+    expect(listModelIdsForKey(sub2api).filter(model => images.includes(model))).toEqual([])
+
+    const mixed = { ...sub2api, allowedProviders: ['sub2api', 'minimax'] }
+    expect(listModelIdsForKey(mixed)).toEqual(expect.arrayContaining(images))
+    expect(listModelIdsForKey(mixed, 'sub2api').filter(model => images.includes(model))).toEqual([])
+  })
+
+  it('excludes MiniMax image IDs and aliases from a synced Sub2API catalog', () => {
+    const key = {
+      allowedProviders: ['sub2api'], allowedModels: null,
+      providerModels: { sub2api: ['MiniMax-M3', 'MiniMax-H3-Image'] },
+      catalogModels: { sub2api: { 'MiniMax-H3-Image-Highspeed': { id: 'MiniMax-H3-Image-Highspeed' } } },
+      modelMappings: { 'image-alias': 'MiniMax-H3-Image-Highspeed' },
+    }
+    expect(listModelIdsForKey(key)).toEqual(['MiniMax-M3'])
+    expect(listModelIdsForKey({ ...key, allowedProviders: ['sub2api', 'minimax'] }, 'sub2api')).toEqual(['MiniMax-M3'])
   })
 
   it('discovers K3.1 Pro and keeps K3 aliases for Kimi-scoped keys', () => {

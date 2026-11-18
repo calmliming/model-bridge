@@ -387,7 +387,33 @@ export const MODEL_CATALOG: PlazaModel[] = ([
 
   // --- OpenAI --------------------------------------------------------------
   {
-    id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', provider: 'openai', categories: ['chat', 'reasoning', 'multimodal'], tags: ['视觉', '工具调用', '1M 上下文'], description: '高效视觉推理与计算机操作模型。', context: '1.05M', inputPrice: 1, outputPrice: 5, cacheReadPrice: 0.05, badge: 'new',
+    id: 'gpt-6.2-astra',
+    name: 'GPT-6.2 Astra',
+    provider: 'openai',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['最新旗舰', '深度推理', 'Agent'],
+    description: 'OpenAI 最新旗舰推理模型，面向高难度工程、科研与多步 Agent 任务；输入输出较上一代 Astra 降价 20%，支持 Ultrafast 极速档。',
+    context: '1.05M',
+    inputPrice: 8,
+    outputPrice: 40,
+    cacheReadPrice: 0.4,
+    badge: 'new'
+  },
+  {
+    id: 'gpt-6.2-sol',
+    name: 'GPT-6.2 Sol',
+    provider: 'openai',
+    categories: ['chat', 'reasoning', 'code', 'multimodal'],
+    tags: ['主力旗舰', '高性价比', 'Agent'],
+    description: 'GPT-6.1 Sol 的新一代升级版，推理与编程效率进一步提升，维持 $2 / $10 与 $0.10 缓存读取定价；原生订阅账号免收 272K 长上下文附加费。',
+    context: '1.05M',
+    inputPrice: 2,
+    outputPrice: 10,
+    cacheReadPrice: 0.1,
+    badge: 'recommended'
+  },
+  {
+    id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra', provider: 'openai', categories: ['chat', 'reasoning', 'multimodal'], tags: ['视觉', '工具调用', '1M 上下文'], description: '高效视觉推理与计算机操作模型。', context: '1.05M', inputPrice: 1, outputPrice: 5, cacheReadPrice: 0.05,
   },
   {
     id: 'gpt-6.1-sol',
@@ -399,8 +425,7 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     context: '1.05M',
     inputPrice: 2,
     outputPrice: 10,
-    cacheReadPrice: 0.1,
-    badge: 'new'
+    cacheReadPrice: 0.1
   },
   {
     id: 'gpt-6-astra',
@@ -446,12 +471,11 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     name: 'GPT-5.6 Sol',
     provider: 'openai',
     categories: ['chat', 'reasoning', 'multimodal'],
-    tags: ['旗舰', '推理', 'Agent'],
-    description: 'GPT-5.6 家族旗舰，最强推理与 Agent 编码能力，定价对齐上一代 GPT-5.5。',
+    tags: ['推理', 'Agent'],
+    description: 'GPT-5.6 家族旗舰，定价对齐 GPT-5.5；新接入建议优先选用 GPT-6.2 Sol。',
     context: '256K',
     inputPrice: 5,
-    outputPrice: 30,
-    badge: 'recommended'
+    outputPrice: 30
   },
   {
     id: 'gpt-5.6-terra',
@@ -753,17 +777,29 @@ export const MODEL_CATALOG: PlazaModel[] = ([
 
   // --- 通义 Qwen -----------------------------------------------------------
   {
+    id: 'qwen4-max',
+    name: 'Qwen4 Max',
+    provider: 'qwen',
+    categories: ['chat', 'code', 'reasoning', 'multimodal'],
+    tags: ['最新旗舰', '1M 上下文', '深度思考'],
+    description: '通义千问新一代 Qwen4 旗舰模型，支持 1M 上下文、原生多模态与思考/非思考同价切换（¥10 / ¥30，缓存读取 ¥0.5）。',
+    context: '1M',
+    inputPrice: 1.4,
+    outputPrice: 4.2,
+    cacheReadPrice: 0.07,
+    badge: 'recommended'
+  },
+  {
     id: 'qwen3.8-max',
     name: 'Qwen3.8 Max',
     provider: 'qwen',
     categories: ['chat', 'code', 'reasoning', 'multimodal'],
-    tags: ['最新旗舰', '长程 Agent', '原生视觉'],
-    description: '通义千问当前最强旗舰，面向复杂推理、编程、专业任务与长程自主规划。',
+    tags: ['上一代旗舰', '长程 Agent', '原生视觉'],
+    description: '通义千问上一代旗舰，面向复杂推理、编程与长程自主规划。',
     context: '1M',
     inputPrice: 1.68,
     outputPrice: 5.04,
-    cacheReadPrice: 0.21,
-    badge: 'recommended'
+    cacheReadPrice: 0.21
   },
   {
     id: 'qwen3.8-flash',
@@ -803,6 +839,36 @@ export const MODEL_CATALOG: PlazaModel[] = ([
     cacheReadPrice: 0.0056
   },
 
+  {
+    id: 'MiniMax-H3-Image',
+    name: 'MiniMax H3 Image',
+    provider: 'minimax',
+    image: true,
+    categories: ['image', 'multimodal'],
+    tags: ['文生图 / 改图', '原生 4K', '最多 16 张参考图'],
+    description: 'MiniMax 新一代原生 4K 文生图与多图编辑模型，支持 1–16 张参考图和流式进度，按文本输入、图片输入与图片输出 Token 计费。',
+    context: '1K–4K',
+    inputPrice: 2.3,
+    outputPrice: 0,
+    imageInputPrice: 1.5,
+    imageOutputPrice: 3.8,
+    badge: 'new'
+  },
+  {
+    id: 'MiniMax-H3-Image-Highspeed',
+    name: 'MiniMax H3 Image Highspeed',
+    provider: 'minimax',
+    image: true,
+    categories: ['image', 'multimodal'],
+    tags: ['高速生图', '原生 4K', '最多 16 张参考图'],
+    description: 'MiniMax H3 Image 的高速推理版本，约 10 秒级生成 4K 图像；支持文生图与最多 16 张参考图编辑。',
+    context: '1K–4K',
+    inputPrice: 2.3,
+    outputPrice: 0,
+    imageInputPrice: 3,
+    imageOutputPrice: 7.6,
+    badge: 'new'
+  },
   {
     id: 'MiniMax-M3',
     name: 'MiniMax M3',

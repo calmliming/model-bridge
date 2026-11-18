@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parseChatCompletionUsage } from '../providers/openai/chat'
 import { emptyUsage } from '../providers/types'
 import { calculateUsageCost, estimateCost, resolvePrice, resolveUsagePrice } from './pricing'
 import { usagePoints } from '../subscriptions/usageWindows'
@@ -213,6 +214,109 @@ describe('openai gpt-6.1 sol pricing', () => {
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', { ...usage, serviceTier: 'priority' })).toMatchObject({ input: 4, output: 20 })
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', { ...usage, serviceTier: 'fast' })).toMatchObject({ input: 4, output: 20 })
     expect(resolveUsagePrice('openai', 'gpt-6.1-sol', { ...usage, serviceTier: 'flex' })).toMatchObject({ input: 1, output: 5 })
+  })
+})
+
+describe('gpt-6.2 pricing', () => {
+  it('prices gpt-6.2-astra and gpt-6.2-sol across dashed and suffixed spellings', () => {
+    for (const model of ['gpt-6.2-astra', 'gpt-6-2-astra', 'gpt-6.2-astra-codex']) {
+      expect(resolvePrice('openai', model)).toMatchObject({
+        input: 8,
+        output: 40,
+        cacheRead: 0.4,
+        cacheWrite: 10,
+        cacheWrite12h: 20,
+      })
+    }
+    for (const model of ['gpt-6.2-sol', 'gpt-6-2-sol', 'gpt-6.2-sol-2026-11-17']) {
+      expect(resolvePrice('openai', model)).toMatchObject({
+        input: 2,
+        output: 10,
+        cacheRead: 0.1,
+        cacheWrite: 2.5,
+        cacheWrite12h: 5,
+      })
+    }
+  })
+
+  it('exempts native openai subscriptions from >272K surcharge while charging sub2api 2x/1.5x', () => {
+    const atBoundary = { ...emptyUsage(), inputTokens: 272_000, outputTokens: 100 }
+    const overBoundary = { ...emptyUsage(), inputTokens: 272_001, outputTokens: 100 }
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', overBoundary)).toMatchObject({ input: 8, output: 40 })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-sol', overBoundary)).toMatchObject({ input: 2, output: 10 })
+
+    expect(resolveUsagePrice('sub2api', 'gpt-6.2-astra', atBoundary)).toMatchObject({ input: 8, output: 40 })
+    expect(resolveUsagePrice('sub2api', 'gpt-6.2-astra', overBoundary)).toMatchObject({
+      input: 16,
+      output: 60,
+      cacheRead: 0.8,
+      cacheWrite: 20,
+      cacheWrite12h: 40,
+    })
+    expect(resolveUsagePrice('sub2api', 'gpt-6.2-sol', overBoundary)).toMatchObject({
+      input: 4,
+      output: 15,
+      cacheRead: 0.2,
+      cacheWrite: 5,
+      cacheWrite12h: 10,
+    })
+  })
+
+  it('applies Fast, Flex, and date-switched Ultrafast rates for GPT-6.2', () => {
+    const usage = { ...emptyUsage(), inputTokens: 1000, outputTokens: 100 }
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', { ...usage, serviceTier: 'fast' })).toMatchObject({
+      input: 16,
+      output: 80,
+      cacheRead: 0.8,
+      cacheWrite: 20,
+      cacheWrite12h: 40,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', { ...usage, serviceTier: 'priority' })).toMatchObject({
+      input: 16,
+      output: 80,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', { ...usage, serviceTier: 'flex' })).toMatchObject({
+      input: 5,
+      output: 25,
+      cacheRead: 0.5,
+      cacheWrite: 6.25,
+      cacheWrite12h: 12.5,
+    })
+
+    expect(resolveUsagePrice('openai', 'gpt-6.2-sol', { ...usage, serviceTier: 'priority' })).toMatchObject({
+      input: 4,
+      output: 20,
+      cacheRead: 0.2,
+      cacheWrite: 5,
+      cacheWrite12h: 10,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-sol', { ...usage, serviceTier: 'flex' })).toMatchObject({
+      input: 1,
+      output: 5,
+      cacheRead: 0.05,
+      cacheWrite: 1.25,
+      cacheWrite12h: 2.5,
+    })
+
+    // Pacific midnight is 08:00 UTC on March 1.
+    const atCutoff = Date.parse('2027-03-01T08:00:00Z')
+    const beforeCutoff = atCutoff - 1
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', { ...usage, serviceTier: 'ultrafast' }, beforeCutoff)).toMatchObject({
+      input: 24,
+      output: 120,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-astra', { ...usage, serviceTier: 'ultrafast' }, atCutoff)).toMatchObject({
+      input: 48,
+      output: 240,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-sol', { ...usage, serviceTier: 'ultrafast' }, beforeCutoff)).toMatchObject({
+      input: 6,
+      output: 30,
+    })
+    expect(resolveUsagePrice('openai', 'gpt-6.2-sol', { ...usage, serviceTier: 'ultrafast' }, atCutoff)).toMatchObject({
+      input: 12,
+      output: 60,
+    })
   })
 })
 
@@ -567,6 +671,28 @@ describe('current Google, Xiaomi, GLM, and Qwen pricing', () => {
         cacheRead: 0.014
       })
     }
+    // Qwen4-Max (¥10 / ¥30, cache-hit ¥0.5, 5m write ¥12.5, 1h write ¥20).
+    for (const model of ['qwen4-max', 'qwen4-max-2026-11-15']) {
+      expect(resolvePrice('qwen', model)).toMatchObject({
+        input: 1.4,
+        output: 4.2,
+        cacheRead: 0.07,
+        cacheWrite: 1.75,
+        cacheWrite1h: 2.8,
+      })
+    }
+  })
+
+  it('charges the reported 5m and 1h write buckets at their respective Qwen4 rates', () => {
+    const usage = parseChatCompletionUsage({ usage: {
+      prompt_tokens: 1_000_000,
+      completion_tokens: 0,
+      prompt_tokens_details: {
+        cache_write_tokens: 1_000_000,
+        cache_creation: { ephemeral_5m_input_tokens: 500_000, ephemeral_1h_input_tokens: 500_000 },
+      },
+    } })
+    expect(calculateUsageCost('qwen', 'qwen4-max', usage)).toBeCloseTo(2.275, 8)
   })
 
   it('routes the same current models through Sub2API pricing', () => {
@@ -757,7 +883,36 @@ describe('MiniMax pricing', () => {
       })?.input
     ).toBe(0.3)
   })
+
+  it('prices MiniMax H3-Image and Highspeed from image token rates', () => {
+    expect(resolvePrice('minimax', 'MiniMax-H3-Image')).toMatchObject({
+      input: 2.3,
+      output: 0,
+      imageInput: 1.5,
+      imageOutput: 3.8,
+    })
+    expect(resolvePrice('minimax', 'minimax-h3-image-highspeed')).toMatchObject({
+      input: 2.3,
+      output: 0,
+      imageInput: 3,
+      imageOutput: 7.6,
+    })
+
+    const usage = {
+      ...emptyUsage(),
+      inputTokens: 100_000,
+      imageInputTokens: 200_000,
+      imageOutputTokens: 500_000,
+      imageCount: 1,
+    }
+    // Standard: 0.1 * $2.30 + 0.2 * $1.50 + 0.5 * $3.80 = 0.23 + 0.30 + 1.90 = $2.43
+    expect(calculateUsageCostForTest('minimax', 'MiniMax-H3-Image', usage)).toBeCloseTo(2.43, 8)
+    // Highspeed: 0.1 * $2.30 + 0.2 * $3.00 + 0.5 * $7.60 = 0.23 + 0.60 + 3.80 = $4.63
+    expect(calculateUsageCostForTest('minimax', 'MiniMax-H3-Image-Highspeed', usage)).toBeCloseTo(4.63, 8)
+  })
 })
+
+import { calculateUsageCost as calculateUsageCostForTest } from './pricing'
 
 
 describe('Grok 4.7 official rates', () => {

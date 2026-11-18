@@ -26,9 +26,9 @@ describe('CC Switch import links', () => {
     expect(params.get('resource')).toBe('provider')
     expect(params.get('app')).toBe('codex')
     expect(params.get('endpoint')).toBe(`${baseOpts.origin}/api/${target!.provider}/v1`)
-    expect(params.get('model')).toBe('gpt-6.1-sol')
+    expect(params.get('model')).toBe('gpt-6.2-sol')
     const { config } = JSON.parse(atob(params.get('config')!))
-    expect(config).toContain('model = "gpt-6.1-sol"')
+    expect(config).toContain('model = "gpt-6.2-sol"')
     expect(config).toContain(`base_url = "${params.get('endpoint')}"`)
     expect(config).toContain('wire_api = "responses"')
     expect(config).toContain('requires_openai_auth = false')
@@ -113,10 +113,10 @@ describe('CC Switch import links', () => {
     expect(ccSwitchTarget('claude-xiaomi')?.models).toMatchObject({ model: 'mimo-v2.6-pro', haikuModel: 'mimo-v2.6-flash' })
     expect(glm?.models).toMatchObject({ model: 'glm-5.3', haikuModel: 'glm-5.3-flash' })
     expect(qwen?.models).toEqual({
-      model: 'qwen3.8-max',
+      model: 'qwen4-max',
       sonnetModel: 'qwen3.7-plus',
       haikuModel: 'qwen3.8-flash',
-      opusModel: 'qwen3.8-max',
+      opusModel: 'qwen4-max',
     })
     expect(paramsFromCcSwitchUrl(buildCcSwitchUrl(qwen!, baseOpts)).get('haikuModel')).toBe('qwen3.8-flash')
     expect(ccSwitchTarget('claude-kimi')?.models).toMatchObject({ model: 'kimi-k3.1-pro', haikuModel: 'kimi-k2.7-code' })

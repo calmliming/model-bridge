@@ -29,6 +29,19 @@ describe('cache-write TTL in Chat billing', () => {
     parser.feed(chunk)
     expect(parser.result()).toMatchObject({ cacheCreateTokens: 25, cacheCreate12hTokens: 20 })
   })
+
+  it('clears a previous 1h split if a new usage snapshot cannot reconcile it', () => {
+    const parser = createChatCompletionStreamParser()
+    const promptDetails = {
+      cache_creation_input_tokens: 25,
+      cache_creation: { ephemeral_5m_input_tokens: 5, ephemeral_1h_input_tokens: 20 },
+    }
+    parser.feed({ usage: { prompt_tokens: 30, completion_tokens: 2, prompt_tokens_details: promptDetails } })
+    expect(parser.result()).toMatchObject({ cacheCreateTokens: 25, cacheCreate1hTokens: 20 })
+    parser.feed({ usage: { prompt_tokens: 23, completion_tokens: 2, prompt_tokens_details: promptDetails } })
+    expect(parser.result().cacheCreateTokens).toBe(23)
+    expect(parser.result().cacheCreate1hTokens).toBeUndefined()
+  })
 })
 
 describe('chatCompletionsToResponses', () => {
@@ -59,7 +72,7 @@ describe('chatCompletionsToResponses', () => {
 
   it('keeps sampling params only where the target model accepts them', () => {
     const base = { messages: [{ role: 'user', content: 'Hi' }], temperature: 0.3, top_p: 0.9 }
-    for (const model of ['gpt-5.4', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-7']) {
+    for (const model of ['gpt-5.4', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6-sol', 'gpt-7']) {
       const out = chatCompletionsToResponses({ ...base, model })
       expect(out).not.toHaveProperty('temperature')
       expect(out).not.toHaveProperty('top_p')
@@ -72,7 +85,9 @@ describe('chatCompletionsToResponses', () => {
       expect(chatCompletionsToResponses({ ...base, model, reasoning_effort: 'none' })).toMatchObject({ temperature: 0.3, top_p: 0.9 })
       expect(chatCompletionsToResponses({ ...base, model, reasoning_effort: 'low' })).not.toHaveProperty('temperature')
     }
-    expect(chatCompletionsToResponses({ ...base, model: 'gpt-6.1-sol', reasoning_effort: 'none' })).not.toHaveProperty('temperature')
+    for (const model of ['gpt-6.1-sol', 'gpt-6.2-sol', 'gpt-6.2-astra']) {
+      expect(chatCompletionsToResponses({ ...base, model, reasoning_effort: 'none' })).not.toHaveProperty('temperature')
+    }
   })
 
   it('converts assistant tool calls and tool results into Responses items', () => {

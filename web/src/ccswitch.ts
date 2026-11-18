@@ -24,7 +24,7 @@ export interface CcSwitchRuntimeConfig {
 
 // Pinned Codex default from the repository model catalog, shared by native
 // OpenAI and Sub2API imports.
-export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
+export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.2-sol'
 export const KIMI_CC_SWITCH_MODEL = 'kimi-k3.1-pro'
 const GEMINI_CC_SWITCH_MODEL = 'gemini-3.8-flash'
 const CLAUDE_FABLE_MODEL = 'claude-fable-5-2'
@@ -142,10 +142,10 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     label: 'Claude Code · Qwen',
     vendor: 'Qwen',
     models: {
-      model: 'qwen3.8-max',
+      model: 'qwen4-max',
       sonnetModel: 'qwen3.7-plus',
       haikuModel: 'qwen3.8-flash',
-      opusModel: 'qwen3.8-max',
+      opusModel: 'qwen4-max',
     },
     provider: 'qwen',
   },
@@ -154,7 +154,7 @@ export const CC_SWITCH_TARGETS: CcSwitchTarget[] = [
     app: 'codex',
     label: 'Codex CLI · Qwen',
     vendor: 'Qwen',
-    models: { model: 'qwen3.8-max' },
+    models: { model: 'qwen4-max' },
     provider: 'qwen',
   },
   {

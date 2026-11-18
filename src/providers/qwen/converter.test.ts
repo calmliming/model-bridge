@@ -3,15 +3,16 @@ import { mapModel, responsesToChatCompletions } from './converter'
 
 describe('qwen mapModel', () => {
   it('passes through qwen* model names', () => {
+    expect(mapModel('qwen4-max')).toBe('qwen4-max')
     expect(mapModel('qwen3.8-max')).toBe('qwen3.8-max')
     expect(mapModel('qwen3.7-plus')).toBe('qwen3.7-plus')
     expect(mapModel('qwen3.7-flash')).toBe('qwen3.7-flash')
   })
 
   it('rewrites unknown / Codex model names to the current flagship', () => {
-    expect(mapModel('gpt-5.5')).toBe('qwen3.8-max')
-    expect(mapModel('')).toBe('qwen3.8-max')
-    expect(mapModel(undefined)).toBe('qwen3.8-max')
+    expect(mapModel('gpt-5.5')).toBe('qwen4-max')
+    expect(mapModel('')).toBe('qwen4-max')
+    expect(mapModel(undefined)).toBe('qwen4-max')
   })
 })
 

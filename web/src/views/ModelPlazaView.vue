@@ -131,6 +131,7 @@ function callExample(model: PlazaModel): string {
     return `curl ${base}/api/media/v1/${path} \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(body, null, 2)}'${model.video ? '\n\n# 使用返回的 id 查询结果\ncurl ' + base + '/api/media/v1/videos/media_TASK_ID \\\n  -H "Authorization: Bearer mb-xxxxxxxx"' : ''}`
   }
   if (model.image && model.provider === 'gemini') return `curl ${base}/v1beta/models/${model.id}:generateContent -H "x-goog-api-key: mb-xxxxxxxx" -H "Content-Type: application/json" -d '${JSON.stringify({ contents: [{ role: 'user', parts: [{ text: '一只在窗边看雨的橘猫' }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }, null, 2)}'`
+  if (model.image && model.provider === 'minimax') return `curl ${base}/api/minimax/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ model: model.id, prompt: '一只在窗边看雨的橘猫', aspect_ratio: '16:9', area: '2K', response_format: 'url' }, null, 2)}'`
   if (model.image) return `curl ${base}/v1/images/generations \\\n  -H "Authorization: Bearer mb-xxxxxxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify({ model: model.id, prompt: '一只在窗边看雨的橘猫', quality: 'high', size: '1024x1024' }, null, 2)}'`
   if (model.provider === 'claude') {
     return [
@@ -432,9 +433,9 @@ function openDetail(model: PlazaModel) {
             <div class="text-[11px] text-gray-400 dark:text-dark-400">{{ selected.image ? '图片输出' : '输出价格' }} /1M</div>
             <div class="mt-1 text-sm font-bold text-gray-900 dark:text-white">{{ formatPrice(selected.image ? currentPrice(selected).imageOutputPrice ?? 30 : currentPrice(selected).outputPrice) }}</div>
           </div>
-          <template v-if="selected.image">
-            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片输入 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageInputPrice ?? 8) }}</div></div>
-            <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片缓存 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageCacheReadPrice ?? 2) }}</div></div>
+          <template v-if="selected.image && selected.imageRequestPrice == null">
+            <div v-if="currentPrice(selected).imageInputPrice != null" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片输入 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageInputPrice ?? 0) }}</div></div>
+            <div v-if="currentPrice(selected).imageCacheReadPrice != null" class="rounded-xl bg-gray-50 p-3 dark:bg-dark-800"><div class="text-[11px] text-gray-400">图片缓存 /1M</div><div class="mt-1 text-sm font-bold">{{ formatPrice(currentPrice(selected).imageCacheReadPrice ?? 0) }}</div></div>
           </template>
         </div>
 

@@ -4,7 +4,7 @@ import { sanitizeToolSchemas } from '../toolSchema'
 import { withoutRelayReasoningItems } from '../chatResponsesStream'
 import { chatCompletionsToResponses } from './chat'
 import { CODEX_ORIGINATOR, CODEX_USER_AGENT } from './constants'
-import { isGpt61SolModel } from './models'
+import { isGpt61SolModel, isGpt62Model } from './models'
 import { ProviderRequestError } from '../requestError'
 import { fetchWithConnectTimeout } from '../../http/upstream'
 import { normalizeCodexPageContext } from './pageContext'
@@ -153,24 +153,29 @@ export function normalizeOpenaiResponsesBody(
   declareWebSearchForHistory(out)
   out.stream = true
   out.store = false
-  if (typeof out.model === 'string' && /^gpt-6-astra(?:$|-)/i.test(out.model)) {
+  const isGpt6Astra = typeof out.model === 'string' && /^gpt-6-astra(?:$|-)/i.test(out.model)
+  const isGpt62 = isGpt62Model(out.model)
+  if (isGpt6Astra || isGpt62) {
     for (const field of ['temperature', 'top_p', 'top_logprobs', 'logprobs']) delete out[field]
     if (Array.isArray(out.include)) out.include = out.include.filter(value => value !== 'message.output_text.logprobs')
-    const reasoning = out.reasoning
-    if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)) {
-      const effort = (reasoning as Record<string, unknown>).effort
-      if (effort === 'none' || effort === 'minimal') out.reasoning = { ...reasoning, effort: 'low' }
+    if (isGpt6Astra) {
+      const reasoning = out.reasoning
+      if (reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)) {
+        const effort = (reasoning as Record<string, unknown>).effort
+        if (effort === 'none' || effort === 'minimal') out.reasoning = { ...reasoning, effort: 'low' }
+      }
     }
   }
-  if (isGpt61SolModel(out.model)) {
+  if (isGpt61SolModel(out.model) || isGpt62) {
     // Reject rather than silently raising the effort: a higher effort costs
     // the caller more than the request asked for.
     const reasoning = out.reasoning
     const effort = reasoning && typeof reasoning === 'object' && !Array.isArray(reasoning)
       ? (reasoning as Record<string, unknown>).effort : undefined
     if (effort === 'none' || effort === 'minimal') {
+      const label = isGpt62 ? String(out.model).trim() : 'gpt-6.1-sol'
       throw new ProviderRequestError('unsupported_reasoning_effort',
-        `gpt-6.1-sol does not support reasoning effort "${effort}"; use low, medium, high, xhigh or max`)
+        `${label} does not support reasoning effort "${effort}"; use low, medium, high, xhigh or max`)
     }
   }
   if (out.instructions == null || out.instructions === '') {

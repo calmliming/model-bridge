@@ -10,6 +10,7 @@ import { GRSAI_MODELS } from './grsai/models'
 import { publicModelProvider } from './publicIdentity'
 import { CLAUDE_FABLE_52 } from './claude/models'
 import { KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED } from './kimi/models'
+import { isMiniMaxImageModel, MINIMAX_IMAGE_MODELS } from './minimax/images'
 
 export interface ModelDiscoveryKey {
   allowedProviders: readonly string[] | null
@@ -47,6 +48,8 @@ const CREATED_AT = 1_704_067_200
 const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grsai'>, string[]> = {
   claude: [CLAUDE_FABLE_52, 'claude-opus-5-5', 'claude-fable-5-1', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'claude-fable-5'],
   openai: [
+    'gpt-6.2-astra',
+    'gpt-6.2-sol',
     'gpt-6.1-terra',
     'gpt-6.1-sol',
     'gpt-6-astra',
@@ -83,12 +86,12 @@ const NATIVE_MODELS: Record<Exclude<ProviderId, 'sub2api' | 'antigravity' | 'grs
   // MiMo V2.5 is retired (see isRetiredXiaomiModel); V2.6 replaces it.
   xiaomi: ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed'],
   zhipu: ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx', 'glm-5.2'],
-  qwen: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'qwen3.7-flash'],
+  qwen: ['qwen4-max', 'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus', 'qwen3.7-flash'],
   // Kimi Code exposes the K3 model under short aliases as well as the
   // provider-qualified name. Keep them discoverable so a Composite-style key
   // can route the same identifiers that Sub2API v0.1.183 accepts.
   kimi: [KIMI_K31_PRO, KIMI_K31_PRO_HIGHSPEED, 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6', 'k3', 'k3-256k', 'kimi-code/k3'],
-  minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5'],
+  minimax: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', ...MINIMAX_IMAGE_MODELS],
   grok: ['grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-4.3', 'grok-build-0.1']
 }
 
@@ -97,9 +100,8 @@ const DEFAULT_MODELS: Record<ProviderId, string[]> = {
   grsai: GRSAI_MODELS,
   // Claude API availability does not imply availability in Antigravity.
   antigravity: [...NATIVE_MODELS.gemini, ...NATIVE_MODELS.claude.filter(model => model !== CLAUDE_FABLE_52)],
-  // Sub2API is an aggregator upstream that forwards model names verbatim and
-  // has access to every model, so its discovery list is the union of all
-  // native providers' lists — no separate list to keep in sync.
+  // Use the native provider lists as a fallback for the aggregator. Discovery
+  // filters out MiniMax image models, which have their own Images routes.
   sub2api: [...new Set(Object.values(NATIVE_MODELS).flat())]
 }
 
@@ -232,7 +234,9 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
       ...(key.providerModels?.[provider] ?? DEFAULT_MODELS[provider]),
       ...Object.keys(key.catalogModels?.[provider] ?? {})
     ]) {
-      const targetProvider = inferProvider(mapRequestedModel(model, key.modelMappings))
+      const target = mapRequestedModel(model, key.modelMappings)
+      if (provider === 'sub2api' && isMiniMaxImageModel(target)) continue
+      const targetProvider = inferProvider(target)
       if (provider === 'antigravity' && targetProvider && !['gemini', 'claude'].includes(targetProvider)) continue
       if (provider !== 'sub2api' && provider !== 'antigravity' && provider !== 'grsai' && targetProvider && !providers.includes(targetProvider)) continue
       if (isAllowedModel(model, key.allowedModels) && !ids.includes(model)) ids.push(model)
@@ -243,6 +247,7 @@ export function listModelIdsForKey(key: ModelDiscoveryKey, requested?: ProviderI
   return ids.filter((model) => {
     if (!isGroupModelAllowed(model, key.groupAllowedModels)) return false
     const target = mapRequestedModel(model, key.modelMappings)
+    if (isMiniMaxImageModel(target) && !providers.includes('minimax')) return false
     const aggregator = providers.length === 1 && ['sub2api', 'antigravity'].includes(providers[0]!)
       ? providers[0]
       : undefined
